@@ -25,6 +25,7 @@ const Assets = React.lazy(() => import('./pages/Assets'));
 const GEO = React.lazy(() => import('./pages/GEO'));
 const AIAssistant = React.lazy(() => import('./pages/AIAssistant'));
 const Enablement = React.lazy(() => import('./pages/Enablement'));
+const Tasks = React.lazy(() => import('./pages/Tasks'));
 const CoCreation = React.lazy(() => import('./pages/CoCreation'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Login = React.lazy(() => import('./pages/Login'));
@@ -127,7 +128,7 @@ const App: React.FC = () => {
               )}
             />
           </Route>
-          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.DASHBOARD} />}>
+          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.DASHBOARD, PERMISSION_KEYS.BRAIN_DASHBOARD]} />}>
             <Route
               path={ROUTES.DASHBOARD}
               element={(
@@ -237,15 +238,21 @@ const App: React.FC = () => {
           ]} />}>
             <Route path={ROUTES.GEO} element={<Suspense fallback={<PageLoader />}><GEO /></Suspense>} />
           </Route>
-          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.AI_ASSISTANT} />}>
+          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AI_ASSISTANT, PERMISSION_KEYS.AI_POSITION_ASSISTANT]} />}>
             <Route path={ROUTES.AI_ASSISTANT} element={<Suspense fallback={<PageLoader />}><AIAssistant /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[
             PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE,
             PERMISSION_KEYS.ENABLEMENT_REVIEW,
             PERMISSION_KEYS.ENABLEMENT_PUBLISH,
+            PERMISSION_KEYS.STANDARD_READ,
+            PERMISSION_KEYS.STANDARD_MAINTAIN,
+            PERMISSION_KEYS.STANDARD_PUBLISH,
           ]} />}>
             <Route path={ROUTES.ENABLEMENT} element={<Suspense fallback={<PageLoader />}><Enablement /></Suspense>} />
+          </Route>
+          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.TASK_SELF, PERMISSION_KEYS.TASK_TEAM]} />}>
+            <Route path={ROUTES.TASKS} element={<Suspense fallback={<PageLoader />}><Tasks /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[
             PERMISSION_KEYS.CO_CREATION_SUBMIT,

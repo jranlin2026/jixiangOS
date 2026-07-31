@@ -61,6 +61,7 @@ import { createPrismaSystemSetupRepository } from './services/systemSetupReposit
 import { createSystemSetupService } from './services/systemSetupService';
 import { ensureSystemLifecycleDefaults } from './services/systemConfigMigrationService';
 import { createSettingsService } from './services/settingsService';
+import { createPositionGovernanceService } from './services/positionGovernance';
 import { createOrderTypeConfigCommandService } from './services/orderTypeConfigCommandService';
 import { createStorageService } from './services/storageService';
 import { createBusinessAttachmentService, createPrismaBusinessAttachmentRepository } from './services/businessAttachmentService';
@@ -92,6 +93,15 @@ import { createKnowledgeFileStore } from './services/enablement/knowledgeFileSto
 import { createPrismaKnowledgeRepository } from './services/enablement/prismaKnowledgeRepository';
 import { createKeywordKnowledgeSearchProvider } from './services/enablement/knowledgeSearchProvider';
 import { createEnablementKnowledgeRouter } from './routes/enablementKnowledgeRoutes';
+import { createEnterpriseBrainRouter } from './routes/enterpriseBrainRoutes';
+import { createPositionStandardService } from './services/enterpriseBrain/positionStandardService';
+import { createPrismaPositionStandardRepository } from './services/enterpriseBrain/prismaPositionStandardRepository';
+import { createEnterpriseTaskService } from './services/enterpriseBrain/taskService';
+import { createPrismaEnterpriseTaskRepository } from './services/enterpriseBrain/prismaTaskRepository';
+import { createEnterpriseAiAssistantService } from './services/enterpriseBrain/aiAssistantService';
+import { createPrismaEnterpriseAiRepository } from './services/enterpriseBrain/prismaAiRepository';
+import { createEnterpriseCockpitService } from './services/enterpriseBrain/cockpitService';
+import { createPrismaEnterpriseCockpitRepository } from './services/enterpriseBrain/prismaCockpitRepository';
 import { createCoCreationRouter } from './routes/coCreationRoutes';
 import { createRuntimeStorageGetHandler } from './routes/runtimeStorageRoutes';
 import { createDisabledCrmCustomerImportHandler } from './routes/crmMigrationRoutes';
@@ -212,6 +222,7 @@ const customerTagMigrationService = createCustomerTagMigrationService(prisma as 
 const leadListService = createLeadListService(prisma);
 const businessRecycleBinService = createBusinessRecycleBinService(createPrismaBusinessRecycleBinRepository(prisma));
 const settingsService = createSettingsService(prisma);
+const positionGovernanceService = createPositionGovernanceService(prisma);
 const orderTypeConfigCommandService = createOrderTypeConfigCommandService(prisma);
 const storageService = createStorageService(prisma);
 const businessAttachmentService = createBusinessAttachmentService({
@@ -271,6 +282,32 @@ const knowledgeService = createKnowledgeService({
   repository: knowledgeRepository,
   fileStore: knowledgeFileStore,
   searchProvider: createKeywordKnowledgeSearchProvider(),
+});
+const positionStandardService = createPositionStandardService({
+  repository: createPrismaPositionStandardRepository(prisma as any),
+});
+const enterpriseTaskService = createEnterpriseTaskService({
+  repository: createPrismaEnterpriseTaskRepository(prisma as any),
+  summarizeReview: (input) => aiChatClient.complete([
+    {
+      role: 'system',
+      content: '你是企业复盘分析助手。只根据员工提交的原始复盘，简洁输出：1.新增经验；2.话术或执行建议；3.SOP优化建议；4.待负责人验证的问题。不得编造事实，不得直接修改公司标准。',
+    },
+    { role: 'user', content: JSON.stringify(input) },
+  ], { temperature: 0.1 }),
+});
+const enterpriseAiService = createEnterpriseAiAssistantService({
+  repository: createPrismaEnterpriseAiRepository(prisma as any),
+  searchKnowledge: async (question, actor) => {
+    const result = await knowledgeService.searchCurrent(question, actor);
+    return result.code === 0 ? result.data : [];
+  },
+  complete: (messages) => aiChatClient.complete(messages, { temperature: 0.1 }),
+});
+const enterpriseCockpitService = createEnterpriseCockpitService({
+  repository: createPrismaEnterpriseCockpitRepository(prisma as any),
+  rolloutPositionIds: ['pos-sales-consultant', 'pos-sales-manager', 'pos-sales-director'],
+  rolloutLabel: '销售体系试运行范围',
 });
 const requireOrganizationReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS);
 const requireDashboardAccess = createRequireAuth(authService, PERMISSION_KEYS.DASHBOARD);
@@ -432,6 +469,13 @@ app.use('/api/enablement/knowledge', createEnablementKnowledgeRouter({
   requireRead: requireEnablementRead,
   requireReview: requireEnablementReview,
   requirePublish: requireEnablementPublish,
+}));
+app.use('/api/enterprise-brain', createEnterpriseBrainRouter({
+  requireAuth: requireStorageAccess,
+  standards: positionStandardService,
+  tasks: enterpriseTaskService,
+  ai: enterpriseAiService,
+  cockpit: enterpriseCockpitService,
 }));
 app.use('/api/co-creation', createCoCreationRouter({ service: coCreationService, requireAuth: requireCoCreationAccess }));
 
@@ -1581,8 +1625,8 @@ app.post('/api/settings/users', requireOrganizationWriteAccess, async (req, res)
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/settings/users/:id', requireOrganizationWriteAccess, async (req, res) => {
-  const result = await settingsService.updateUser(routeParam(req.params.id), req.body || {});
+app.put('/api/settings/users/:id', requireOrganizationWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await settingsService.updateUser(routeParam(req.params.id), req.body || {}, req.currentUser!);
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
@@ -1646,6 +1690,68 @@ app.delete('/api/settings/departments/:id', requireOrganizationDeleteAccess, asy
 
 app.get('/api/settings/positions', requireOrganizationReadAccess, async (_req, res) => {
   res.json(await settingsService.listPositions());
+});
+
+app.post('/api/settings/positions', requireOrganizationWriteAccess, async (req, res) => {
+  const result = await settingsService.createPosition(req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.put('/api/settings/positions/:id', requireOrganizationWriteAccess, async (req, res) => {
+  const result = await settingsService.updatePosition(routeParam(req.params.id), req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.delete('/api/settings/positions/:id', requireOrganizationDeleteAccess, async (req, res) => {
+  const result = await settingsService.deletePosition(routeParam(req.params.id));
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.get('/api/settings/position-governance/readiness', requireOrganizationReadAccess, async (req, res) => {
+  const result = await positionGovernanceService.getReadiness({
+    departmentId: typeof req.query.departmentId === 'string' ? req.query.departmentId : undefined,
+    search: typeof req.query.search === 'string' ? req.query.search : undefined,
+    employmentStatus: typeof req.query.employmentStatus === 'string' ? req.query.employmentStatus : undefined,
+    status: typeof req.query.status === 'string' ? req.query.status as any : undefined,
+    warning: req.query.warning === 'ROLE_POSITION_SUSPECTED' ? 'ROLE_POSITION_SUSPECTED' : undefined,
+    page: Number(req.query.page) || 1,
+    pageSize: Number(req.query.pageSize) || 10,
+  });
+  res.json(result);
+});
+
+app.post('/api/settings/position-governance/previews', requireOrganizationWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await positionGovernanceService.createPreview(req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.get('/api/settings/position-governance/batches/:id', requireOrganizationReadAccess, async (req, res) => {
+  res.json(await positionGovernanceService.getBatch(routeParam(req.params.id)));
+});
+
+app.get('/api/settings/position-governance/batches/:id/reconciliation', requireOrganizationReadAccess, async (req, res) => {
+  res.json(await positionGovernanceService.getReconciliation(routeParam(req.params.id), {
+    page: Number(queryParam(req.query.page) || 1),
+    pageSize: Number(queryParam(req.query.pageSize) || 10),
+  }));
+});
+
+app.post('/api/settings/position-governance/batches/:id/apply', requireOrganizationWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await positionGovernanceService.applyBatch(
+    routeParam(req.params.id),
+    Array.isArray(req.body?.selections) ? req.body.selections : [],
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.get('/api/settings/position-history', requireOrganizationReadAccess, async (req, res) => {
+  res.json(await positionGovernanceService.listHistory({
+    employeeId: queryParam(req.query.employeeId),
+    changeType: queryParam(req.query.changeType),
+    page: Number(queryParam(req.query.page) || 1),
+    pageSize: Number(queryParam(req.query.pageSize) || 10),
+  }));
 });
 
 app.get('/api/ai/config', requireAiConfigReadAccess, async (_req, res) => {

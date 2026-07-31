@@ -10,13 +10,13 @@ const appSource = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8');
 const sidebarSource = readFileSync(join(process.cwd(), 'src/layouts/Sidebar.tsx'), 'utf8');
 
 assert.match(constantsSource, /ENABLEMENT:\s*'\/enablement'/);
-assert.match(rolePermissionSource, /label:\s*'赋能中台'/);
+assert.match(rolePermissionSource, /label:\s*'企业标准中心'/);
 assert.match(rolePermissionSource, /PERMISSION_KEYS\.ENABLEMENT_KNOWLEDGE/);
 assert.match(rolePermissionSource, /PERMISSION_KEYS\.ENABLEMENT_REVIEW/);
 assert.match(rolePermissionSource, /PERMISSION_KEYS\.ENABLEMENT_PUBLISH/);
 assert.match(rolePermissionSource, /PERMISSION_KEYS\.ENABLEMENT_SENSITIVE/);
 assert.match(appSource, /ProtectedRoute permissionKeys=\{\[\s*PERMISSION_KEYS\.ENABLEMENT_KNOWLEDGE,\s*PERMISSION_KEYS\.ENABLEMENT_REVIEW,\s*PERMISSION_KEYS\.ENABLEMENT_PUBLISH/);
-assert.match(sidebarSource, /label:\s*'赋能中台'[\s\S]*?permissionKeys:\s*\[\s*PERMISSION_KEYS\.ENABLEMENT_KNOWLEDGE,\s*PERMISSION_KEYS\.ENABLEMENT_REVIEW,\s*PERMISSION_KEYS\.ENABLEMENT_PUBLISH/);
+assert.match(sidebarSource, /label:\s*'企业标准中心'[\s\S]*?permissionKeys:\s*\[\s*PERMISSION_KEYS\.ENABLEMENT_KNOWLEDGE,\s*PERMISSION_KEYS\.ENABLEMENT_REVIEW,\s*PERMISSION_KEYS\.ENABLEMENT_PUBLISH/);
 
 const reader: AuthenticatedUser = {
   id: 'user-reader', name: 'Reader', account: 'reader', email: '', phone: '', role: 'Employee' as any,

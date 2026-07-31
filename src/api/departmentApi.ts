@@ -129,7 +129,7 @@ async function deleteDepartment(id: string): Promise<ApiResponse<boolean>> {
 
   ensureInit();
   await delay(150);
-  const { departments, roles } = ensureOrganizationConfigData();
+  const { departments, positions, roles } = ensureOrganizationConfigData();
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
   const scopedDepartmentIds = [id, ...getDepartmentDescendantIds(departments, id)];
   const hasUsers = users.some((user) => (
@@ -138,6 +138,10 @@ async function deleteDepartment(id: string): Promise<ApiResponse<boolean>> {
     && scopedDepartmentIds.includes(user.departmentId)
   ));
   const hasChildren = departments.some((department) => department.parentId === id);
+  const hasPositions = positions.some((position) => scopedDepartmentIds.includes(position.departmentId || ''));
+  if (hasPositions) {
+    return createErrorResponse('该部门已有岗位引用，不能删除，请先调整岗位或改为停用');
+  }
   if (hasUsers || hasChildren) {
     return createErrorResponse('该部门已有员工或子部门引用，不能删除，请改为停用');
   }

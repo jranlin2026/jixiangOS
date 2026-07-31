@@ -110,7 +110,7 @@ const PERMISSION_TREE: RolePermissionNode[] = [
     ],
   },
   {
-    label: '赋能中台',
+    label: '企业标准中心',
     children: [
       { label: '企业知识', key: PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE },
       { label: '知识审核', key: PERMISSION_KEYS.ENABLEMENT_REVIEW },

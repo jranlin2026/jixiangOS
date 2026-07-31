@@ -129,6 +129,8 @@ bash scripts/mysql/backup-linux.sh
 
 执行前必须先只读确认：目标数据库名、备份目录为仓库外绝对路径、可用空间不少于数据库预计大小的 2 倍、数据库用户拥有一致性导出所需权限。执行后只记录文件路径、字节数、时间和 SHA-256，不展示 SQL 内容。
 
+用于阶段0-C恢复对账的备份，必须先进入经批准的应用写入暂停窗口，再显式设置 `JIXIANG_BACKUP_WRITES_PAUSED=YES`。该标记会写入备份聚合清单；未带 `WRITE_PAUSED` 证据的普通日常备份仍可用于灾备，但不能通过本次员工/岗位数量对账门禁。
+
 现有备份脚本的限制：它会按保留天数删除旧备份。首次迁移备份应设置一个专用、空的迁移备份目录，避免触碰现有备份；或先调整脚本增加 `--no-prune`，经审查后再运行。
 
 ## 8. 下载和本地恢复命令草案
@@ -155,10 +157,11 @@ export JIXIANG_MYSQL_USER=jixiang_os_clone
 read -s -p 'Local clone DB password: ' JIXIANG_MYSQL_PASSWORD; export JIXIANG_MYSQL_PASSWORD; echo
 export JIXIANG_CONFIRM_RESTORE=YES
 bash scripts/mysql/restore-clone.sh /绝对路径/jixiang-migration-staging/jixiang_os-时间.sql.gz
+JIXIANG_VERIFICATION_ACTOR='已授权执行人' npm run clone:restore-verify -- /绝对路径/jixiang-migration-staging/jixiang_os-时间.sql.gz
 unset JIXIANG_MYSQL_PASSWORD JIXIANG_CONFIRM_RESTORE
 ```
 
-`restore-clone.sh` 已强制 loopback、固定库名 `jixiang_os_prod_clone_test`、非 root 最小权限账号、空库、SHA-256、gzip 和明确确认值。通用灾备脚本 `restore-linux.sh` 不承担克隆职责。
+`restore-clone.sh` 已强制 loopback、固定库名 `jixiang_os_prod_clone_test`、非 root 最小权限账号、空库、SHA-256、gzip 和明确确认值。备份同时会生成带校验和的聚合清单；`clone:restore-verify` 会以只读方式对账数据表、员工、岗位和迁移数量，并要求失败及已回滚迁移均为0，输出验证时间与执行人。未通过时不得进入净化和岗位预览。通用灾备脚本 `restore-linux.sh` 不承担克隆职责。
 
 ## 9. 本地数据去凭证与副作用隔离
 

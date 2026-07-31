@@ -13,10 +13,12 @@ const store = readFileSync(join(process.cwd(), 'src/store/useEnablementStore.ts'
 
 assert.match(app, /ROUTES\.ENABLEMENT/);
 assert.match(app, /PERMISSION_KEYS\.ENABLEMENT/);
-assert.match(sidebar, /label:\s*'赋能中台'/);
+assert.match(sidebar, /label:\s*'企业标准中心'/);
 assert.match(page, /企业知识/);
 assert.match(page, /发布管理/);
-assert.match(page, /value:\s*'home',\s*label:\s*'今日行动'/);
+assert.match(page, /value:\s*'home',\s*label:\s*'旧版行动台'/);
+assert.match(page, /我的岗位标准/);
+assert.match(page, /标准管理/);
 assert.match(page, /activeTab === 'home'/);
 assert.match(home, /演示数据/);
 assert.match(home, /继续今天的学习/);

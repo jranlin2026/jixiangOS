@@ -34,6 +34,7 @@
     "finance:backfill": "tsx scripts/backfill-finance-transactions.ts",
     "finance:adjust-order-payment": "tsx scripts/adjust-order-payment-finance.ts",
     "clone:sanitize": "tsx scripts/sanitize-production-clone.ts",
+    "clone:restore-verify": "bash scripts/mysql/verify-clone-restore.sh",
     "clone:attachments-report": "tsx scripts/report-clone-missing-attachments.ts",
     "test-data:reset-business": "tsx scripts/reset-business-test-data.ts"
   },

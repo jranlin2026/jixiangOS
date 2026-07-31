@@ -40,9 +40,20 @@ assert.deepEqual(
 
 const existingUsers = await settingsApi.fetchUsers();
 assert.equal(existingUsers.code, 0);
+const positions = await settingsApi.fetchPositions();
+assert.equal(positions.code, 0);
+assert.ok(positions.data.some((position) => (
+  position.id === 'pos-sales-director'
+  && position.name === '销售总监'
+  && position.departmentScope === 'DEPARTMENT_TREE'
+)));
 for (const user of existingUsers.data) {
   assert.ok(user.roleId, `user must carry roleId: ${user.name}`);
-  assert.equal(user.positionId, undefined, `user must not carry positionId: ${user.name}`);
+  if (user.positionId) {
+    const position = positions.data.find((item) => item.id === user.positionId);
+    assert.ok(position, `user position must resolve: ${user.name}`);
+    assert.equal(user.positionName, position.name, `user position name must be canonical: ${user.name}`);
+  }
 }
 
 const createdUser = await settingsApi.createUser({
@@ -51,15 +62,15 @@ const createdUser = await settingsApi.createUser({
   email: 'org_config_user@company.com',
   phone: '13900009999',
   departmentId: 'dept-sales',
-  positionName: '高级销售顾问',
+  positionId: 'pos-sales-consultant',
   role: '销售顾问',
   roleId: 'role-sales-consultant',
   isActive: true,
   password: DEFAULT_USER_PASSWORD,
 });
 assert.equal(createdUser.code, 0);
-assert.equal(createdUser.data?.positionId, undefined);
-assert.equal(createdUser.data?.positionName, '高级销售顾问');
+assert.equal(createdUser.data?.positionId, 'pos-sales-consultant');
+assert.equal(createdUser.data?.positionName, '销售顾问');
 assert.equal(createdUser.data?.role, '销售顾问');
 assert.equal(createdUser.data?.roleId, 'role-sales-consultant');
 
@@ -84,9 +95,9 @@ const migratedUsers = await settingsApi.fetchUsers();
 const legacyUser = migratedUsers.data.find((user) => user.id === 'user-legacy-sales');
 assert.equal(legacyUser?.role, '销售顾问');
 assert.equal(legacyUser?.roleId, 'role-sales-consultant');
-assert.equal(legacyUser?.positionId, undefined);
-assert.equal(legacyUser?.positionName, undefined);
-assert.equal(legacyUser?.departmentId, undefined);
+assert.equal(legacyUser?.positionId, 'pos-sales-consultant');
+assert.equal(legacyUser?.positionName, '销售顾问');
+assert.equal(legacyUser?.departmentId, 'dept-sales');
 
 const migratedRoles = await roleApi.getRoles({ isActive: true });
 const salesRole = migratedRoles.data.find((role) => role.code === 'sales_consultant');
@@ -96,4 +107,23 @@ const migratedDepartments = await departmentApi.getDepartments();
 assert.ok(migratedDepartments.data.some((department) => department.id === 'dept-custom' && department.name === '自定义部门'));
 
 assert.notEqual((await roleApi.deleteRole('role-sales-consultant')).code, 0);
-assert.equal((await departmentApi.deleteDepartment('dept-sales')).code, 0);
+assert.notEqual((await departmentApi.deleteDepartment('dept-sales')).code, 0);
+
+storage.clear();
+storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+storage.setItem(STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION, '11');
+storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([
+  { id: 'dept-custom-v11', name: 'V11自定义部门', code: 'CUSTOM_V11', memberCount: 1, isActive: true, createdAt: legacyNow, updatedAt: legacyNow },
+]));
+storage.setItem(STORAGE_KEYS.POSITIONS, JSON.stringify([
+  { id: 'pos-custom-v11', name: 'V11自定义岗位', code: 'custom_v11', departmentId: 'dept-custom-v11', departmentScope: 'DEPARTMENT_ONLY', sortOrder: 99, isActive: true, createdAt: legacyNow, updatedAt: legacyNow },
+]));
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([
+  { id: 'user-custom-v11', name: 'V11员工', account: 'v11_user', email: '', phone: '', role: '销售顾问', roleId: 'role-sales-consultant', departmentId: 'dept-custom-v11', positionId: 'pos-custom-v11', positionName: 'V11自定义岗位', isActive: true, employmentStatus: 'active', createdAt: legacyNow, updatedAt: legacyNow },
+]));
+
+const upgradedV12Positions = await settingsApi.fetchPositions();
+assert.ok(upgradedV12Positions.data.some((position) => position.id === 'pos-sales-director'));
+assert.ok(upgradedV12Positions.data.some((position) => position.id === 'pos-custom-v11'));
+const upgradedV12Users = await settingsApi.fetchUsers();
+assert.equal(upgradedV12Users.data.find((user) => user.id === 'user-custom-v11')?.positionId, 'pos-custom-v11');

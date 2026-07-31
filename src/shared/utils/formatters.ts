@@ -161,12 +161,12 @@ type EmployeeNameWithPosition = {
   positionName?: string | null;
 };
 
-/** 员工选择项统一显示为“姓名（职位）”。 */
+/** 员工选择项统一显示为“姓名（岗位）”。 */
 export const formatEmployeeNameWithPosition = (
   employee: EmployeeNameWithPosition,
 ): string => {
   const name = employee.name.trim() || '未命名员工';
-  const positionName = employee.positionName?.trim() || '未设置职位';
+  const positionName = employee.positionName?.trim() || '未设置岗位';
   return `${name}（${positionName}）`;
 };
 

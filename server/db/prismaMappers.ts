@@ -1,6 +1,7 @@
 import type { Permission, Role, RoleDataScopes } from '../../src/types/role';
 import type { Department } from '../../src/types/department';
 import type { Position } from '../../src/types/position';
+import { normalizePositionDepartmentScope } from '../../src/shared/utils/positionApplicability';
 import type { User } from '../../src/types/settings';
 import {
   sanitizeAuditEventForViewer,
@@ -57,6 +58,7 @@ export function mapPrismaPosition(row: {
   name: string;
   code: string;
   departmentId: string | null;
+  departmentScope?: string | null;
   description: string | null;
   sortOrder: number;
   isActive: boolean;
@@ -68,6 +70,7 @@ export function mapPrismaPosition(row: {
     name: row.name,
     code: row.code,
     departmentId: row.departmentId || undefined,
+    departmentScope: normalizePositionDepartmentScope(row.departmentScope),
     description: row.description || undefined,
     sortOrder: row.sortOrder,
     isActive: row.isActive,

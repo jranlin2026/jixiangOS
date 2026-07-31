@@ -43,6 +43,7 @@ import useDepartmentStore from '../../store/useDepartmentStore';
 import { departmentApi, roleApi, settingsApi } from '../../api';
 import type { Department } from '../../types/department';
 import type { Role } from '../../types/role';
+import type { Position } from '../../types/position';
 import type { OrganizationProfile, User, UserRole } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
@@ -53,6 +54,7 @@ import {
 } from '../../shared/utils/organizationConfig';
 import { DEFAULT_USER_ROLE, normalizeUserRoleName } from '../../shared/utils/roles';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
+import { isPositionApplicableToDepartment } from '../../shared/utils/positionApplicability';
 
 type UserForm = {
   name: string;
@@ -60,10 +62,11 @@ type UserForm = {
   email: string;
   phone: string;
   role: UserRole;
-  positionName: string;
+  positionId: string;
   departmentId: string;
   isActive: boolean;
   password: string;
+  changeReason: string;
 };
 
 type DepartmentForm = {
@@ -79,10 +82,11 @@ const emptyUserForm: UserForm = {
   email: '',
   phone: '',
   role: DEFAULT_USER_ROLE,
-  positionName: '',
+  positionId: '',
   departmentId: '',
   isActive: true,
   password: '',
+  changeReason: '',
 };
 
 const emptyDepartmentForm: DepartmentForm = {
@@ -112,6 +116,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const [companyExpanded, setCompanyExpanded] = useState(true);
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState(COMPANY_ROOT);
   const [search, setSearch] = useState('');
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -127,6 +132,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const [companyNameDraft, setCompanyNameDraft] = useState('');
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveDepartmentId, setMoveDepartmentId] = useState('');
+  const [moveReason, setMoveReason] = useState('');
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
   const [leaveTargets, setLeaveTargets] = useState<User[]>([]);
   const [leaveOwnedCustomerCount, setLeaveOwnedCustomerCount] = useState(0);
@@ -144,6 +150,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
     fetchItems();
     loadUsers();
     loadRoles();
+    loadPositions();
     loadOrganizationProfile();
   }, [fetchItems]);
 
@@ -155,6 +162,11 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const loadRoles = async () => {
     const res = await roleApi.getRoles({ isActive: true });
     if (res.code === 0) setRoles(res.data.filter((role) => role.isActive));
+  };
+
+  const loadPositions = async () => {
+    const res = await settingsApi.fetchPositions();
+    if (res.code === 0) setPositions(res.data);
   };
 
   const loadOrganizationProfile = async () => {
@@ -169,6 +181,10 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const departmentByParent = useMemo(() => buildDepartmentTree(activeDepartments), [activeDepartments]);
   const selectedDepartment = activeDepartments.find((department) => department.id === selectedNodeId) || null;
   const roleOptions = roles.length ? roles : [{ id: 'fallback-role', name: DEFAULT_USER_ROLE }] as Role[];
+  const availablePositions = positions.filter((position) => (
+    (position.isActive || position.id === userForm.positionId)
+    && (!userForm.departmentId || isPositionApplicableToDepartment(position, userForm.departmentId, departments))
+  ));
   const selectedScopeIds = useMemo(() => (
     selectedDepartment
       ? [selectedDepartment.id, ...getDepartmentDescendantIds(activeDepartments, selectedDepartment.id)]
@@ -235,7 +251,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   ));
 
   const resolveRoleId = (roleName: string) => roles.find((role) => role.name === roleName)?.id || '';
-  const getPositionName = (user: User) => user.positionName || '-';
+  const getPositionName = (user: User) => positions.find((position) => position.id === user.positionId)?.name || user.positionName || '-';
   const getDepartmentName = (departmentId?: string) => activeDepartments.find((department) => department.id === departmentId)?.name || '-';
   const clearSelection = () => setSelectedUserIds([]);
 
@@ -293,10 +309,11 @@ const EmployeeDepartmentManagement: React.FC = () => {
       email: user.email || '',
       phone: user.phone || '',
       role: normalizeUserRoleName(user.role),
-      positionName: user.positionName || '',
+      positionId: user.positionId || '',
       departmentId: user.departmentId || '',
       isActive: user.isActive,
       password: '',
+      changeReason: '',
     });
     setUserFormOpen(true);
   };
@@ -311,6 +328,14 @@ const EmployeeDepartmentManagement: React.FC = () => {
       await alert('初始密码至少 6 位', dialogTitle);
       return;
     }
+    const organizationChanged = Boolean(editingUser) && (
+      (userForm.positionId || '') !== (editingUser?.positionId || '')
+      || (userForm.departmentId || '') !== (editingUser?.departmentId || '')
+    );
+    if (organizationChanged && !userForm.changeReason.trim()) {
+      await alert('调岗或转部门必须填写变更原因', dialogTitle);
+      return;
+    }
     const payload = {
       name: userForm.name.trim(),
       account: userForm.account.trim(),
@@ -318,10 +343,11 @@ const EmployeeDepartmentManagement: React.FC = () => {
       phone: userForm.phone.trim(),
       role: userForm.role,
       roleId: resolveRoleId(userForm.role),
-      positionName: userForm.positionName.trim() || undefined,
+      positionId: userForm.positionId,
       departmentId: userForm.departmentId || undefined,
       isActive: userForm.isActive,
       password: userForm.password,
+      reason: userForm.changeReason.trim() || undefined,
     };
     const res = editingUser
       ? await settingsApi.updateUser(editingUser.id, payload)
@@ -500,12 +526,41 @@ const EmployeeDepartmentManagement: React.FC = () => {
 
   const handleOpenMove = () => {
     setMoveDepartmentId(selectedDepartment?.id || activeDepartments[0]?.id || '');
+    setMoveReason('');
     setMoveOpen(true);
   };
 
   const handleMoveUsers = async () => {
     if (!moveDepartmentId) return;
-    await Promise.all(selectedUsers.map((user) => settingsApi.updateUser(user.id, { departmentId: moveDepartmentId })));
+    if (!moveReason.trim()) {
+      await alert('请填写本次批量转部门的原因', '批量转部门');
+      return;
+    }
+    const incompatibleUserIds = new Set(selectedUsers.filter((user) => {
+      const position = positions.find((item) => item.id === user.positionId);
+      return Boolean(position && !isPositionApplicableToDepartment(position, moveDepartmentId, departments));
+    }).map((user) => user.id));
+    if (incompatibleUserIds.size > 0 && !await confirm(
+      `有 ${incompatibleUserIds.size} 名员工的原岗位不属于目标部门，转移后将清空这些员工的岗位，是否继续？`,
+      '批量转部门',
+    )) return;
+    const results = await Promise.all(selectedUsers.map((user) => settingsApi.updateUser(user.id, {
+      departmentId: moveDepartmentId,
+      ...(incompatibleUserIds.has(user.id) ? { positionId: '' } : {}),
+      reason: moveReason.trim(),
+    })));
+    const failed = results.map((result, index) => ({ result, user: selectedUsers[index] }))
+      .filter(({ result }) => result.code !== 0);
+    if (failed.length > 0) {
+      await loadUsers();
+      await fetchItems();
+      clearSelection();
+      setMoveOpen(false);
+      const succeededCount = results.length - failed.length;
+      const failedNames = failed.map(({ user }) => user.name).join('、');
+      await alert(`已成功转移 ${succeededCount} 人；失败 ${failed.length} 人：${failedNames}。${failed[0].result.message ? `\n${failed[0].result.message}` : ''}`, '批量转部门结果');
+      return;
+    }
     setMoveOpen(false);
     clearSelection();
     await loadUsers();
@@ -513,9 +568,13 @@ const EmployeeDepartmentManagement: React.FC = () => {
   };
 
   const handleDepartmentChange = (departmentId: string) => {
+    const selectedPosition = positions.find((position) => position.id === userForm.positionId);
     setUserForm({
       ...userForm,
       departmentId,
+      positionId: selectedPosition && !isPositionApplicableToDepartment(selectedPosition, departmentId, departments)
+        ? ''
+        : userForm.positionId,
     });
   };
 
@@ -845,7 +904,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
                       <TableCell>账号</TableCell>
                       <TableCell>手机号</TableCell>
                       <TableCell>角色</TableCell>
-                      <TableCell>职务</TableCell>
+                      <TableCell>岗位</TableCell>
                       <TableCell>部门</TableCell>
                       <TableCell>状态</TableCell>
                       <TableCell align="center">操作</TableCell>
@@ -972,7 +1031,28 @@ const EmployeeDepartmentManagement: React.FC = () => {
               <MenuItem value="">未分配</MenuItem>
               {activeDepartments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
             </TextField>
-            <TextField label="职位" value={userForm.positionName} onChange={(event) => setUserForm({ ...userForm, positionName: event.target.value })} fullWidth />
+            <TextField
+              select
+              label="岗位"
+              value={userForm.positionId}
+              onChange={(event) => setUserForm({ ...userForm, positionId: event.target.value })}
+              helperText={userForm.departmentId ? '只显示当前部门可用岗位' : '请先选择部门'}
+              fullWidth
+            >
+              <MenuItem value="">未指定</MenuItem>
+              {availablePositions.map((position) => (
+                <MenuItem key={position.id} value={position.id}>{position.name}</MenuItem>
+              ))}
+            </TextField>
+            {editingUser && (
+              <TextField
+                label="岗位/部门变更原因"
+                value={userForm.changeReason}
+                onChange={(event) => setUserForm({ ...userForm, changeReason: event.target.value })}
+                placeholder="仅在调岗或转部门时记录"
+                fullWidth
+              />
+            )}
             <TextField select label="角色权限" value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })} fullWidth>
               {roleOptions.map((role) => <MenuItem key={role.id} value={role.name}>{role.name}</MenuItem>)}
             </TextField>
@@ -1029,14 +1109,25 @@ const EmployeeDepartmentManagement: React.FC = () => {
         <DialogCloseTitle onClose={() => setMoveOpen(false)}>移动员工</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
-            已选择 {selectedUserIds.length} 名员工，选择目标部门后会统一更新所属部门。职位是员工资料中的文本字段，不会随部门自动变更。
+            已选择 {selectedUserIds.length} 名员工，选择目标部门后会统一更新所属部门。已绑定岗位仅在适用于目标部门时保留，不适用的岗位将清空。
           </Typography>
           <TextField select label="目标部门" value={moveDepartmentId} onChange={(event) => setMoveDepartmentId(event.target.value)} fullWidth>
             {activeDepartments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
           </TextField>
+          <TextField
+            label="变更原因"
+            value={moveReason}
+            onChange={(event) => setMoveReason(event.target.value)}
+            placeholder="例如：销售团队组织调整"
+            required
+            multiline
+            minRows={2}
+            fullWidth
+            sx={{ mt: 2 }}
+          />
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleMoveUsers} disabled={!moveDepartmentId}>确认移动</Button>
+          <Button variant="contained" onClick={handleMoveUsers} disabled={!moveDepartmentId || !moveReason.trim()}>确认移动</Button>
         </DialogActions>
       </Dialog>
 

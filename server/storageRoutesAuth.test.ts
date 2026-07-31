@@ -30,6 +30,15 @@ for (const [method, route] of [
   ['put', '/api/settings/departments/:id'],
   ['delete', '/api/settings/departments/:id'],
   ['get', '/api/settings/positions'],
+  ['post', '/api/settings/positions'],
+  ['put', '/api/settings/positions/:id'],
+  ['delete', '/api/settings/positions/:id'],
+  ['get', '/api/settings/position-governance/readiness'],
+  ['post', '/api/settings/position-governance/previews'],
+  ['get', '/api/settings/position-governance/batches/:id'],
+  ['get', '/api/settings/position-governance/batches/:id/reconciliation'],
+  ['post', '/api/settings/position-governance/batches/:id/apply'],
+  ['get', '/api/settings/position-history'],
   ['get', '/api/ai/config'],
   ['put', '/api/ai/config'],
   ['post', '/api/ai/config/test'],
@@ -188,6 +197,15 @@ assert.match(source, /app\.post\('\/api\/settings\/departments', requireOrganiza
 assert.match(source, /app\.put\('\/api\/settings\/departments\/:id', requireOrganizationWriteAccess,/);
 assert.match(source, /app\.delete\('\/api\/settings\/departments\/:id', requireOrganizationDeleteAccess,/);
 assert.match(source, /app\.get\('\/api\/settings\/positions', requireOrganizationReadAccess,/);
+assert.match(source, /app\.post\('\/api\/settings\/positions', requireOrganizationWriteAccess,/);
+assert.match(source, /app\.put\('\/api\/settings\/positions\/:id', requireOrganizationWriteAccess,/);
+assert.match(source, /app\.delete\('\/api\/settings\/positions\/:id', requireOrganizationDeleteAccess,/);
+assert.match(source, /app\.get\('\/api\/settings\/position-governance\/readiness', requireOrganizationReadAccess,/);
+assert.match(source, /app\.post\('\/api\/settings\/position-governance\/previews', requireOrganizationWriteAccess,/);
+assert.match(source, /app\.get\('\/api\/settings\/position-governance\/batches\/:id', requireOrganizationReadAccess,/);
+assert.match(source, /app\.get\('\/api\/settings\/position-governance\/batches\/:id\/reconciliation', requireOrganizationReadAccess,/);
+assert.match(source, /app\.post\('\/api\/settings\/position-governance\/batches\/:id\/apply', requireOrganizationWriteAccess,/);
+assert.match(source, /app\.get\('\/api\/settings\/position-history', requireOrganizationReadAccess,/);
 
 assert.match(source, /app\.get\('\/api\/ai\/config', requireAiConfigReadAccess,/);
 assert.match(source, /app\.put\('\/api\/ai\/config', requireAiConfigWriteAccess,/);

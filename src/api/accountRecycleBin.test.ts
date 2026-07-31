@@ -225,9 +225,10 @@ assert.equal(publicPoolCustomers[0].previousOwner, 'Lifecycle Sales');
 assert.equal(publicPoolCustomers[0].originalSalesTransferBy, 'Public Founding Sales');
 assert.match(publicPoolCustomers[0].activityRecords[0].content, /统一释放到公海/);
 const deleteRes = await settingsApi.deleteUser(created.data!.id);
-assert.equal(deleteRes.code, 0);
+assert.notEqual(deleteRes.code, 0);
+assert.match(deleteRes.message || '', /历史业务数据/);
 const allUsersAfterDelete = await settingsApi.fetchUsers({ employmentStatus: 'all' });
-assert.equal(allUsersAfterDelete.data.some((user) => user.id === created.data!.id), false);
+assert.equal(allUsersAfterDelete.data.some((user) => user.id === created.data!.id), true);
 
 const adminLeave = await settingsApi.leaveUser('user-admin');
 assert.notEqual(adminLeave.code, 0);

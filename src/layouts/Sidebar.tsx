@@ -27,6 +27,7 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SchoolIcon from '@mui/icons-material/School';
+import TaskAltIcon from '@mui/icons-material/TaskAlt';
 import TipsAndUpdatesIcon from '@mui/icons-material/TipsAndUpdates';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HomeIcon from '@mui/icons-material/Home';
@@ -76,7 +77,7 @@ interface NavChildItem {
 
 const navItems: NavItem[] = [
   { label: '首页', icon: <HomeIcon />, path: ROUTES.HOME, permissionKey: PERMISSION_KEYS.HOME },
-  { label: '驾驶舱', icon: <DashboardIcon />, path: ROUTES.DASHBOARD, permissionKey: PERMISSION_KEYS.DASHBOARD },
+  { label: '老板驾驶舱', icon: <DashboardIcon />, path: ROUTES.DASHBOARD, permissionKey: PERMISSION_KEYS.DASHBOARD, permissionKeys: [PERMISSION_KEYS.DASHBOARD, PERMISSION_KEYS.BRAIN_DASHBOARD] },
   { label: '线索管理', icon: <PeopleAltIcon />, path: ROUTES.LEADS, permissionKey: PERMISSION_KEYS.LEADS },
   {
     label: '客户管理',
@@ -174,9 +175,9 @@ const navItems: NavItem[] = [
       PERMISSION_KEYS.GEO_ANALYTICS,
     ],
   },
-  { label: 'AI助手', icon: <SmartToyIcon />, path: ROUTES.AI_ASSISTANT, permissionKey: PERMISSION_KEYS.AI_ASSISTANT },
+  { label: 'AI岗位助手', icon: <SmartToyIcon />, path: ROUTES.AI_ASSISTANT, permissionKey: PERMISSION_KEYS.AI_ASSISTANT, permissionKeys: [PERMISSION_KEYS.AI_ASSISTANT, PERMISSION_KEYS.AI_POSITION_ASSISTANT] },
   {
-    label: '赋能中台',
+    label: '企业标准中心',
     icon: <SchoolIcon />,
     path: ROUTES.ENABLEMENT,
     permissionKey: PERMISSION_KEYS.ENABLEMENT,
@@ -184,8 +185,12 @@ const navItems: NavItem[] = [
       PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE,
       PERMISSION_KEYS.ENABLEMENT_REVIEW,
       PERMISSION_KEYS.ENABLEMENT_PUBLISH,
+      PERMISSION_KEYS.STANDARD_READ,
+      PERMISSION_KEYS.STANDARD_MAINTAIN,
+      PERMISSION_KEYS.STANDARD_PUBLISH,
     ],
   },
+  { label: '员工任务中心', icon: <TaskAltIcon />, path: ROUTES.TASKS, permissionKey: PERMISSION_KEYS.TASK_SELF, permissionKeys: [PERMISSION_KEYS.TASK_SELF, PERMISSION_KEYS.TASK_TEAM] },
   {
     label: 'AI共创中心',
     icon: <TipsAndUpdatesIcon />,

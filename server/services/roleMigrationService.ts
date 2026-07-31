@@ -48,7 +48,7 @@ export type CustomerPermissionMigrationManifestAuthenticator =
   & CustomerPermissionMigrationManifestVerifier;
 
 export const ROLE_PERMISSION_ACTION_BASELINE_KEY = 'aaos_role_permission_action_baseline_version';
-export const ROLE_PERMISSION_ACTION_BASELINE_VERSION = 5;
+export const ROLE_PERMISSION_ACTION_BASELINE_VERSION = 8;
 const DEFAULT_ROLE_PERMISSION_BASELINE_VERSION = 4;
 const CORE_PERMISSION_TREE_BASELINE_VERSION = 5;
 
@@ -283,6 +283,31 @@ function mergeDefaultRolePermissionBaseline(role: Role): Role {
       ...seed.permissions,
     ]),
   };
+}
+
+export function mergeEnterpriseBrainRoleBaseline(role: Role): Role {
+  const normalizedCode = String(role.code || '').trim().toLowerCase();
+  const isConsultant = role.id === 'role-sales-consultant' || normalizedCode === 'sales_consultant' || role.name === '销售顾问';
+  const isLeader = role.id === 'role-sales-manager'
+    || normalizedCode === 'sales_manager'
+    || role.name === '销售经理'
+    || role.name === '销售总监';
+  if (!isConsultant && !isLeader) return role;
+  const employeePermissions: Permission[] = [
+    { module: PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE, actions: ['read'] },
+    { module: PERMISSION_KEYS.STANDARD_READ, actions: ['read'] },
+    { module: PERMISSION_KEYS.TASK_SELF, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.REVIEW_SELF, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.AI_POSITION_ASSISTANT, actions: ['read'] },
+  ];
+  const leaderPermissions: Permission[] = isLeader ? [
+    { module: PERMISSION_KEYS.TASK_TEAM, actions: ['read'] },
+    { module: PERMISSION_KEYS.TASK_ASSIGN, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.TASK_CONFIRM, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.REVIEW_TEAM, actions: ['read'] },
+    { module: PERMISSION_KEYS.BRAIN_DASHBOARD, actions: ['read'] },
+  ] : [];
+  return { ...role, permissions: sanitizeRolePermissions([...(role.permissions || []), ...employeePermissions, ...leaderPermissions]) };
 }
 
 function migrateLegacyRecoveryReviewListPermission(role: Role): Role {
@@ -558,7 +583,7 @@ async function migrateRoleRows(store: RoleMigrationStore, baselineVersion: numbe
     const corePermissionMigrated = baselineVersion < CORE_PERMISSION_TREE_BASELINE_VERSION
       ? migrateCorePermissionTreeRole(defaultRoleMigrated)
       : defaultRoleMigrated;
-    const migrated = mergeRoleWithDefaultAccess(corePermissionMigrated);
+    const migrated = mergeRoleWithDefaultAccess(mergeEnterpriseBrainRoleBaseline(corePermissionMigrated));
     const permissionsChanged = permissionsSignature(current.permissions) !== permissionsSignature(migrated.permissions);
     const scopesChanged = dataScopesSignature(current.dataScopes) !== dataScopesSignature(migrated.dataScopes);
 

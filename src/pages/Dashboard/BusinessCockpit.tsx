@@ -46,6 +46,7 @@ import type {
   DashboardRangePreset,
   HomeTaskItem,
 } from '../../types/dashboard';
+import EnterpriseBrainPanel from './EnterpriseBrainPanel';
 
 const palette = {
   page: '#F6F8FB',
@@ -777,7 +778,7 @@ const RiskWorkbench: React.FC<{ risks: CockpitRiskItem[] }> = ({ risks }) => {
   );
 };
 
-const BusinessCockpit: React.FC = () => {
+const LegacyBusinessCockpit: React.FC = () => {
   const [range, setRange] = useState<DashboardDateRange>({ preset: 'month', startDate: monthStart(), endDate: todayString() });
   const [data, setData] = useState<BusinessCockpitData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -933,6 +934,7 @@ const BusinessCockpit: React.FC = () => {
       )}
 
       <Stack spacing={2}>
+        <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} />
         <ExecutiveOverview data={data} mainRisk={mainRisk} />
 
         <Box
@@ -991,6 +993,26 @@ const BusinessCockpit: React.FC = () => {
       </Stack>
     </Box>
   );
+};
+
+const EnterpriseOnlyCockpit: React.FC = () => {
+  const [dateFrom, setDateFrom] = useState(monthStart());
+  const [dateTo, setDateTo] = useState(todayString());
+  const [refreshKey, setRefreshKey] = useState('initial');
+  return (
+    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1320, mx: 'auto', bgcolor: palette.page, minHeight: '100%' }}>
+      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={2} sx={{ mb: 2 }}>
+        <Box><Typography variant="h5" sx={{ fontWeight: 900 }}>老板驾驶舱</Typography><Typography variant="body2" color="text.secondary">查看销售体系标准、任务、复盘和经营结果</Typography></Box>
+        <Stack direction="row" spacing={1}><TextField type="date" size="small" label="开始" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField type="date" size="small" label="结束" value={dateTo} onChange={(event) => setDateTo(event.target.value)} InputLabelProps={{ shrink: true }} /><Button variant="contained" onClick={() => setRefreshKey(`${dateFrom}-${dateTo}-${Date.now()}`)}>应用</Button></Stack>
+      </Stack>
+      <EnterpriseBrainPanel dateFrom={dateFrom} dateTo={dateTo} refreshKey={refreshKey} />
+    </Box>
+  );
+};
+
+const BusinessCockpit: React.FC = () => {
+  const currentUser = useAuthStore((state) => state.currentUser);
+  return hasPermission(currentUser, PERMISSION_KEYS.DASHBOARD) ? <LegacyBusinessCockpit /> : <EnterpriseOnlyCockpit />;
 };
 
 export default BusinessCockpit;

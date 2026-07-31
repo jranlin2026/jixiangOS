@@ -67,6 +67,7 @@ export async function seedSystemBaseline(store: any, options: SystemSeedOptions)
           name: position.name,
           code: position.code,
           departmentId: position.departmentId,
+          departmentScope: position.departmentScope,
           description: position.description,
           sortOrder: position.sortOrder,
           isActive: position.isActive,

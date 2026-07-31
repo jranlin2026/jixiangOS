@@ -16,9 +16,10 @@ import { STORAGE_KEYS } from './constants';
 import { CAPABILITY_KEYS, PERMISSION_KEYS, sanitizeRolePermissions } from './permissions';
 import { normalizeUserRoleName } from './roles';
 import { getStorageData, setStorageData } from '../../api/mock/storage';
+import { normalizePositionDepartmentScope } from './positionApplicability';
 
 const now = '2026-06-01T00:00:00.000Z';
-const ORGANIZATION_SCHEMA_VERSION = 9;
+const ORGANIZATION_SCHEMA_VERSION = 13;
 const NON_CUSTOMER_DATA_SCOPE_DOMAINS: NonCustomerDataScopeDomain[] = [
   'leads',
   'orders',
@@ -45,14 +46,15 @@ export const DEFAULT_DEPARTMENTS: Department[] = [
 ];
 
 export const DEFAULT_POSITIONS: Position[] = [
-  { id: 'pos-general-manager', name: '总经理', code: 'general_manager', departmentId: 'dept-general', description: '公司经营管理', sortOrder: 1, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'pos-market-specialist', name: '市场专员', code: 'market_specialist', departmentId: 'dept-market', description: '获客渠道和线索录入', sortOrder: 2, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'pos-sales-manager', name: '销售经理', code: 'sales_manager', departmentId: 'dept-sales', description: '销售团队管理和线索分配', sortOrder: 3, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'pos-sales-consultant', name: '销售顾问', code: 'sales_consultant', departmentId: 'dept-sales', description: '客户跟进和成交转化', sortOrder: 4, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'pos-customer-success', name: '客户成功', code: 'customer_success', departmentId: 'dept-success', description: '客户运营、续费和复购', sortOrder: 5, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'pos-delivery-engineer', name: '交付工程师', code: 'delivery_engineer', departmentId: 'dept-delivery', description: '项目部署和服务交付', sortOrder: 6, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'pos-finance-specialist', name: '财务专员', code: 'finance_specialist', departmentId: 'dept-finance', description: '收款、退款、结算和分账', sortOrder: 7, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'pos-ops-admin', name: '运营管理员', code: 'ops_admin', departmentId: 'dept-ops', description: '系统运营和业务配置', sortOrder: 8, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'pos-general-manager', name: '总经理', code: 'general_manager', departmentId: 'dept-general', departmentScope: 'DEPARTMENT_ONLY', description: '公司经营管理', sortOrder: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'pos-market-specialist', name: '市场专员', code: 'market_specialist', departmentId: 'dept-market', departmentScope: 'DEPARTMENT_ONLY', description: '获客渠道和线索录入', sortOrder: 2, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'pos-sales-director', name: '销售总监', code: 'sales_director', departmentId: 'dept-sales', departmentScope: 'DEPARTMENT_TREE', description: '销售体系建设、目标管理和团队经营', sortOrder: 3, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'pos-sales-manager', name: '销售经理', code: 'sales_manager', departmentId: 'dept-sales', departmentScope: 'DEPARTMENT_TREE', description: '销售团队管理和线索分配', sortOrder: 4, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'pos-sales-consultant', name: '销售顾问', code: 'sales_consultant', departmentId: 'dept-sales', departmentScope: 'DEPARTMENT_TREE', description: '客户跟进和成交转化', sortOrder: 5, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'pos-customer-success', name: '客户成功', code: 'customer_success', departmentId: 'dept-success', departmentScope: 'DEPARTMENT_ONLY', description: '客户运营、续费和复购', sortOrder: 6, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'pos-delivery-engineer', name: '交付工程师', code: 'delivery_engineer', departmentId: 'dept-delivery', departmentScope: 'DEPARTMENT_ONLY', description: '项目部署和服务交付', sortOrder: 7, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'pos-finance-specialist', name: '财务专员', code: 'finance_specialist', departmentId: 'dept-finance', departmentScope: 'DEPARTMENT_ONLY', description: '收款、退款、结算和分账', sortOrder: 8, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'pos-ops-admin', name: '运营管理员', code: 'ops_admin', departmentId: 'dept-ops', departmentScope: 'DEPARTMENT_ONLY', description: '系统运营和业务配置', sortOrder: 9, isActive: true, createdAt: now, updatedAt: now },
 ];
 
 const ASSET_SELF_SERVICE_PERMISSIONS: Role['permissions'] = [
@@ -107,6 +109,16 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_HISTORY, actions: ['read'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
+      { module: PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE, actions: ['read'] },
+      { module: PERMISSION_KEYS.STANDARD_READ, actions: ['read'] },
+      { module: PERMISSION_KEYS.TASK_SELF, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.TASK_TEAM, actions: ['read'] },
+      { module: PERMISSION_KEYS.TASK_ASSIGN, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.TASK_CONFIRM, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.REVIEW_SELF, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.REVIEW_TEAM, actions: ['read'] },
+      { module: PERMISSION_KEYS.AI_POSITION_ASSISTANT, actions: ['read'] },
+      { module: PERMISSION_KEYS.BRAIN_DASHBOARD, actions: ['read'] },
       CO_CREATION_EMPLOYEE_PERMISSION,
       { module: PERMISSION_KEYS.CO_CREATION_SUPERVISE, actions: ['read', 'write'] },
       ...ASSET_SELF_SERVICE_PERMISSIONS,
@@ -134,6 +146,11 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
+      { module: PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE, actions: ['read'] },
+      { module: PERMISSION_KEYS.STANDARD_READ, actions: ['read'] },
+      { module: PERMISSION_KEYS.TASK_SELF, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.REVIEW_SELF, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.AI_POSITION_ASSISTANT, actions: ['read'] },
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
@@ -562,16 +579,29 @@ function sortPositions(positions: Position[]): Position[] {
 function migrateStoredUsersWithIdMaps(
   users: User[] | null | undefined,
   roles: Role[],
-  idMaps: { roles: Record<string, string> },
+  positions: Position[],
+  departments: Department[],
+  idMaps: {
+    roles: Record<string, string>;
+    positions: Record<string, string>;
+    departments: Record<string, string>;
+  },
 ): User[] | null {
   if (!users?.length) return null;
   return users.map((user) => {
     const roleId = user.roleId ? idMaps.roles[user.roleId] || user.roleId : user.roleId;
+    const positionId = user.positionId ? idMaps.positions[user.positionId] || user.positionId : user.positionId;
+    const departmentId = user.departmentId ? idMaps.departments[user.departmentId] || user.departmentId : user.departmentId;
     const role = resolveRoleForUser({ role: user.role, roleId }, roles);
+    const position = positions.find((item) => item.id === positionId);
+    const department = departments.find((item) => item.id === departmentId);
     return {
       ...user,
       role: role?.name || normalizeUserRoleName(user.role),
       roleId: role?.id || roleId,
+      positionId: position?.id,
+      positionName: position?.name || user.positionName,
+      departmentId: department?.id,
       employmentStatus: user.employmentStatus || 'active',
     };
   });
@@ -652,6 +682,7 @@ export function ensureOrganizationConfigData() {
       code: seed.code,
       name: seed.name,
       departmentId: current.departmentId ? departmentResult.idMap[current.departmentId] || current.departmentId : seed.departmentId,
+      departmentScope: current.departmentScope || seed.departmentScope,
       sortOrder: seed.sortOrder,
       isActive: current.isActive ?? seed.isActive,
       createdAt: current.createdAt || seed.createdAt,
@@ -686,6 +717,7 @@ export function ensureOrganizationConfigData() {
   const positions = sortPositions(positionResult.items.map((position) => ({
     ...position,
     departmentId: position.departmentId ? departmentResult.idMap[position.departmentId] || position.departmentId : position.departmentId,
+    departmentScope: normalizePositionDepartmentScope(position.departmentScope),
   })));
   const roles = rolesResult.items.map((role) => mergeRoleWithDefaultAccess({
     ...role,
@@ -695,7 +727,17 @@ export function ensureOrganizationConfigData() {
     departmentId: role.departmentId ? departmentResult.idMap[role.departmentId] || role.departmentId : role.departmentId,
   }));
   const migratedUsers = storedVersion < ORGANIZATION_SCHEMA_VERSION
-    ? migrateStoredUsersWithIdMaps(getStorageData<User[]>(STORAGE_KEYS.USERS), roles, { roles: rolesResult.idMap })
+    ? migrateStoredUsersWithIdMaps(
+      getStorageData<User[]>(STORAGE_KEYS.USERS),
+      roles,
+      positions,
+      departments,
+      {
+        roles: rolesResult.idMap,
+        positions: positionResult.idMap,
+        departments: departmentResult.idMap,
+      },
+    )
     : null;
 
   // This helper runs during ordinary page reads (for example, the sidebar).
@@ -726,22 +768,24 @@ export function resolveRoleForUser(user: Pick<User, 'role' | 'roleId'>, roles = 
 }
 
 export function migrateUsersWithOrganization(users: User[]): User[] {
-  const { departments, roles, idMaps } = ensureOrganizationConfigData();
+  const { departments, positions, roles, idMaps } = ensureOrganizationConfigData();
   return users.map((user) => {
     const normalizedRole = normalizeUserRoleName(user.role);
     const roleId = user.roleId ? idMaps.roles[user.roleId] || user.roleId : user.roleId;
     const departmentId = user.departmentId ? idMaps.departments[user.departmentId] || user.departmentId : user.departmentId;
+    const positionId = user.positionId ? idMaps.positions[user.positionId] || user.positionId : user.positionId;
     const role = resolveRoleForUser({ role: normalizedRole, roleId }, roles);
+    const position = positions.find((item) => item.id === positionId);
     const hasValidDepartment = Boolean(departmentId && departments.some((department) => department.id === departmentId));
-    const positionName = user.positionId
-      ? undefined
-      : (typeof user.positionName === 'string' ? user.positionName.trim() || undefined : user.positionName);
+    const legacyPositionName = typeof user.positionName === 'string'
+      ? user.positionName.trim() || undefined
+      : user.positionName;
     return {
       ...user,
       role: role?.name || normalizedRole,
       roleId: role?.id || user.roleId,
-      positionId: undefined,
-      positionName,
+      positionId: position?.id,
+      positionName: position?.name || legacyPositionName,
       departmentId: hasValidDepartment ? departmentId : undefined,
       employmentStatus: user.employmentStatus || 'active',
     };

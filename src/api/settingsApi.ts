@@ -6,7 +6,7 @@ import type { Department } from '../types/department';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageCacheData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, COMMISSION_RATES, DEFAULT_ORDER_TYPE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_CUSTOMER_LEVEL_CONFIGS, LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode } from '../shared/utils/constants';
+import { STORAGE_KEYS, CLEAN_INSTALL_EMPTY_STORAGE_KEYS, DEFAULT_PAGE_SIZE, COMMISSION_RATES, DEFAULT_ORDER_TYPE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_CUSTOMER_LEVEL_CONFIGS, LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import type { Order } from '../types/order';
@@ -18,10 +18,27 @@ import { DEFAULT_USER_ROLE } from '../shared/utils/roles';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { assetApi } from './assetApi';
+import { isPositionApplicableToDepartment, normalizePositionDepartmentScope } from '../shared/utils/positionApplicability';
 
 function ensureInit(): void {
   initializeMockData();
   ensureOrganizationConfigData();
+}
+
+function isUserReferenceKey(key: string): boolean {
+  return /(owner|assignee|assignedTo|createdBy|updatedBy|operator|actor|reviewer|sales|releasedBy|previousOwner|leftBy|transferBy|inputBy|employee)/i.test(key);
+}
+
+function containsHistoricalUserReference(value: unknown, userId: string, userName: string, key = ''): boolean {
+  if (typeof value === 'string') return value === userId || (value === userName && isUserReferenceKey(key));
+  if (Array.isArray(value)) return value.some((item) => containsHistoricalUserReference(item, userId, userName, key));
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.field === 'string' && isUserReferenceKey(record.field)) {
+    if (record.oldValue === userName || record.newValue === userName || record.oldValue === userId || record.newValue === userId) return true;
+  }
+  return Object.entries(record)
+    .some(([entryKey, item]) => containsHistoricalUserReference(item, userId, userName, entryKey));
 }
 
 async function fetchBackendStorageValue<T>(key: string): Promise<T | null> {
@@ -61,16 +78,28 @@ async function updateOrganizationProfile(data: Partial<OrganizationProfile>): Pr
 }
 
 function withResolvedUserOrganization<T extends Partial<User>>(data: T): T {
-  const { roles } = ensureOrganizationConfigData();
+  const { positions, roles } = ensureOrganizationConfigData();
   const role = resolveRoleForUser({ role: data.role || DEFAULT_USER_ROLE, roleId: data.roleId }, roles);
-  const positionName = typeof data.positionName === 'string' ? data.positionName.trim() || undefined : data.positionName;
+  const position = data.positionId ? positions.find((item) => item.id === data.positionId) : undefined;
   return {
     ...data,
     role: role?.name || data.role,
     roleId: role?.id || data.roleId,
-    positionId: undefined,
-    positionName,
+    positionId: position?.id,
+    positionName: position?.name,
   };
+}
+
+function validateUserPositionAssignment(positionId?: string, departmentId?: string, requireActive = true): ApiResponse<null> {
+  if (!positionId) return createSuccessResponse(null);
+  const organization = ensureOrganizationConfigData();
+  const position = organization.positions.find((item) => item.id === positionId);
+  if (!position) return createErrorResponse('岗位不存在，请刷新岗位列表后重试');
+  if (requireActive && !position.isActive) return createErrorResponse('该岗位已停用，请选择其他岗位');
+  if (!isPositionApplicableToDepartment(position, departmentId, organization.departments)) {
+    return createErrorResponse('该岗位不属于所选部门');
+  }
+  return createSuccessResponse(null);
 }
 
 function ensureOrderTypeConfigs(): OrderTypeConfig[] {
@@ -451,6 +480,122 @@ async function fetchPositions(filters?: PositionFilters): Promise<ApiResponse<Po
   return createSuccessResponse(positions);
 }
 
+type PositionInput = Omit<Position, 'id' | 'createdAt' | 'updatedAt' | 'departmentScope'> & Pick<Partial<Position>, 'departmentScope'>;
+
+function validatePositionDepartment(departmentId?: string): ApiResponse<null> {
+  if (!departmentId) return createSuccessResponse(null);
+  const department = ensureOrganizationConfigData().departments.find((item) => item.id === departmentId);
+  return department?.isActive
+    ? createSuccessResponse(null)
+    : createErrorResponse('归属部门不存在或已停用');
+}
+
+async function createPosition(data: PositionInput): Promise<ApiResponse<Position | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<Position | null>('/settings/positions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  ensureInit();
+  await delay(120);
+  const name = String(data.name || '').trim();
+  const code = String(data.code || '').trim();
+  if (!name) return createErrorResponse('岗位名称不能为空');
+  if (!code) return createErrorResponse('岗位编码不能为空');
+  const organization = ensureOrganizationConfigData();
+  if (organization.positions.some((item) => item.code.toLowerCase() === code.toLowerCase())) {
+    return createErrorResponse('岗位编码已存在');
+  }
+  const departmentResult = validatePositionDepartment(data.departmentId);
+  if (departmentResult.code !== 0) return createErrorResponse(departmentResult.message || '归属部门不可用');
+  const now = new Date().toISOString();
+  const position: Position = {
+    ...data,
+    id: `position-${uuidv4().slice(0, 8)}`,
+    name,
+    code,
+    departmentScope: normalizePositionDepartmentScope(data.departmentScope),
+    sortOrder: Number(data.sortOrder || organization.positions.length + 1),
+    isActive: data.isActive ?? true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.POSITIONS, [...organization.positions, position].sort((a, b) => a.sortOrder - b.sortOrder));
+  return createSuccessResponse(position);
+}
+
+async function updatePosition(id: string, data: Partial<PositionInput>): Promise<ApiResponse<Position | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<Position | null>(`/settings/positions/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  ensureInit();
+  await delay(120);
+  const organization = ensureOrganizationConfigData();
+  const index = organization.positions.findIndex((item) => item.id === id);
+  if (index < 0) return createSuccessResponse(null);
+  const current = organization.positions[index];
+  const name = data.name !== undefined ? String(data.name).trim() : current.name;
+  const code = data.code !== undefined ? String(data.code).trim() : current.code;
+  if (!name) return createErrorResponse('岗位名称不能为空');
+  if (!code) return createErrorResponse('岗位编码不能为空');
+  if (organization.positions.some((item) => item.id !== id && item.code.toLowerCase() === code.toLowerCase())) {
+    return createErrorResponse('岗位编码已存在');
+  }
+  const departmentId = data.departmentId !== undefined ? data.departmentId || undefined : current.departmentId;
+  const departmentScope = data.departmentScope !== undefined
+    ? normalizePositionDepartmentScope(data.departmentScope)
+    : normalizePositionDepartmentScope(current.departmentScope);
+  const departmentResult = validatePositionDepartment(departmentId);
+  if (departmentResult.code !== 0) return createErrorResponse(departmentResult.message || '归属部门不可用');
+  const boundUsers = ensureUsersWithAuth().filter((user) => user.positionId === id);
+  const nextPositionScope = { departmentId, departmentScope };
+  if (boundUsers.some((user) => !isPositionApplicableToDepartment(nextPositionScope, user.departmentId, organization.departments))) {
+    return createErrorResponse('已有员工使用该岗位，请先调整员工部门或岗位');
+  }
+  const nextPosition: Position = {
+    ...current,
+    ...data,
+    name,
+    code,
+    departmentId,
+    departmentScope,
+    sortOrder: data.sortOrder !== undefined ? Number(data.sortOrder) : current.sortOrder,
+    updatedAt: new Date().toISOString(),
+  };
+  const nextPositions = [...organization.positions];
+  nextPositions[index] = nextPosition;
+  setStorageData(STORAGE_KEYS.POSITIONS, nextPositions.sort((a, b) => a.sortOrder - b.sortOrder));
+  if (name !== current.name) {
+    const users = ensureUsersWithAuth().map((user) => (
+      user.positionId === id ? { ...user, positionName: name, updatedAt: nextPosition.updatedAt } : user
+    ));
+    setStorageData(STORAGE_KEYS.USERS, users);
+  }
+  return createSuccessResponse(nextPosition);
+}
+
+async function deletePosition(id: string): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<boolean>(`/settings/positions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  ensureInit();
+  await delay(120);
+  const organization = ensureOrganizationConfigData();
+  if (!organization.positions.some((item) => item.id === id)) return createSuccessResponse(false);
+  if (ensureUsersWithAuth().some((user) => user.positionId === id)) {
+    return createErrorResponse('已有员工使用该岗位，不能删除，请改为停用');
+  }
+  setStorageData(STORAGE_KEYS.POSITIONS, organization.positions.filter((item) => item.id !== id));
+  return createSuccessResponse(true);
+}
+
 async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'passwordHash' | 'passwordSalt' | 'passwordUpdatedAt'> & { password?: string }): Promise<ApiResponse<User | null>> {
   if (shouldUseBackendApi()) {
     return backendRequest<User | null>('/settings/users', {
@@ -465,6 +610,8 @@ async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'p
   const account = normalizeAccount(data.account || data.email || data.phone);
   if (!account) return createErrorResponse('账号不能为空');
   if (!ensureUniqueAccount(users, account)) return createErrorResponse('账号已存在');
+  const positionResult = validateUserPositionAssignment(data.positionId, data.departmentId);
+  if (positionResult.code !== 0) return createErrorResponse(positionResult.message || '岗位不可用');
   const id = `user-${uuidv4().slice(0, 8)}`;
   const passwordFields = authApi.createUserPasswordFields(id, account, data.password || getDefaultUserPassword());
   const resolvedData = withResolvedUserOrganization(data);
@@ -485,7 +632,7 @@ async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'p
   return createSuccessResponse(newUser);
 }
 
-async function updateUser(id: string, data: Partial<User>): Promise<ApiResponse<User | null>> {
+async function updateUser(id: string, data: Partial<User> & { reason?: string }): Promise<ApiResponse<User | null>> {
   if (shouldUseBackendApi()) {
     return backendRequest<User | null>(`/settings/users/${encodeURIComponent(id)}`, {
       method: 'PUT',
@@ -500,7 +647,18 @@ async function updateUser(id: string, data: Partial<User>): Promise<ApiResponse<
   const nextAccount = data.account !== undefined ? normalizeAccount(data.account) : users[idx].account;
   if (!nextAccount) return createErrorResponse('账号不能为空');
   if (!ensureUniqueAccount(users, nextAccount, id)) return createErrorResponse('账号已存在');
+  if (data.positionId !== undefined || data.departmentId !== undefined) {
+    const nextPositionId = data.positionId !== undefined ? data.positionId : users[idx].positionId;
+    const nextDepartmentId = data.departmentId !== undefined ? data.departmentId : users[idx].departmentId;
+    const positionResult = validateUserPositionAssignment(
+      nextPositionId,
+      nextDepartmentId,
+      data.positionId !== undefined && data.positionId !== users[idx].positionId,
+    );
+    if (positionResult.code !== 0) return createErrorResponse(positionResult.message || '岗位不可用');
+  }
   const safeData = withResolvedUserOrganization({ ...users[idx], ...data, account: nextAccount });
+  if (data.positionId === undefined) safeData.positionName = users[idx].positionName;
   delete safeData.passwordHash;
   delete safeData.passwordSalt;
   delete safeData.passwordUpdatedAt;
@@ -604,6 +762,12 @@ async function deleteUser(id: string): Promise<ApiResponse<boolean>> {
   if (isAdminUser(target)) return createErrorResponse('内置管理员账号不能删除');
   if ((target.employmentStatus || 'active') !== 'left') {
     return createErrorResponse('请先办理离职，再到账号回收站永久删除');
+  }
+  const hasBusinessHistory = CLEAN_INSTALL_EMPTY_STORAGE_KEYS.some((key) => (
+    containsHistoricalUserReference(getStorageData<unknown>(key), target.id, target.name)
+  ));
+  if (hasBusinessHistory) {
+    return createErrorResponse('该员工已被历史业务数据引用，不能永久删除，请保留在账号回收站');
   }
   setStorageData(STORAGE_KEYS.USERS, users.filter((u) => u.id !== id));
   return createSuccessResponse(true);
@@ -1027,6 +1191,9 @@ export const settingsApi = {
   fetchAssignableUsers,
   fetchAssignableDirectory,
   fetchPositions,
+  createPosition,
+  updatePosition,
+  deletePosition,
   createUser,
   updateUser,
   leaveUser,
