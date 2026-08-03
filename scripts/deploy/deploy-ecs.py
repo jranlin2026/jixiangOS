@@ -169,15 +169,18 @@ def build_remote_command(
     node_env: str,
     fresh_install: bool,
     skip_finance_backfill: bool,
+    skip_remote_tests: bool,
 ) -> str:
     reuse_node_modules = "0" if fresh_install else "1"
     skip_finance_backfill_value = "1" if skip_finance_backfill else "0"
+    skip_remote_tests_value = "1" if skip_remote_tests else "0"
     return f"""set -euo pipefail
 APP_DIR="{app_dir}"
 RELEASE_ZIP="{remote_zip}"
 NODE_ENV_VALUE="{node_env}"
 REUSE_NODE_MODULES="{reuse_node_modules}"
 SKIP_FINANCE_BACKFILL="{skip_finance_backfill_value}"
+SKIP_REMOTE_TESTS="{skip_remote_tests_value}"
 TS="$(date +%Y%m%d-%H%M%S)"
 NEW_DIR="${{APP_DIR}}.new-${{TS}}"
 BACKUP_DIR="${{APP_DIR}}.prev-${{TS}}"
@@ -393,7 +396,11 @@ if [ "$SYSTEM_SETUP_STATE" != "ACTIVE" ] && [ "$SYSTEM_SETUP_STATE" != "UNINITIA
   echo "Unrecognized system setup state: $SYSTEM_SETUP_STATE" >&2
   false
 fi
-NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=/api JIXIANG_DEFAULT_ADMIN_PASSWORD= JIXIANG_DEFAULT_USER_PASSWORD= JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION=YES JIXIANG_SKIP_POSITION_GOVERNANCE_INTEGRATION=YES npm test
+if [ "$SKIP_REMOTE_TESTS" = "1" ]; then
+  echo "Skipping duplicate remote full test suite after verified local tests."
+else
+  NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=/api JIXIANG_DEFAULT_ADMIN_PASSWORD= JIXIANG_DEFAULT_USER_PASSWORD= JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION=YES JIXIANG_SKIP_POSITION_GOVERNANCE_INTEGRATION=YES npm test
+fi
 if [ "$SYSTEM_SETUP_STATE" = "ACTIVE" ]; then
   echo "Repairing legacy business records (idempotent)..."
   npm run business-records:repair -- --apply --confirm-production
@@ -503,6 +510,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-public-health", action="store_true", help="Skip public /api/health check.")
     parser.add_argument("--fresh-install", action="store_true", help="Do not reuse server node_modules.")
     parser.add_argument(
+        "--skip-remote-tests",
+        action="store_true",
+        help="Skip the duplicate remote full test suite after the local suite has passed.",
+    )
+    parser.add_argument(
         "--skip-finance-backfill",
         action="store_true",
         help="Deploy code without creating historical finance transaction records.",
@@ -549,6 +561,7 @@ def main() -> int:
                 args.node_env,
                 args.fresh_install,
                 args.skip_finance_backfill,
+                args.skip_remote_tests,
             )
             run_remote(client, command)
         finally:
