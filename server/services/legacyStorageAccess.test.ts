@@ -87,6 +87,34 @@ for (const orderCreatePermission of [
     );
   }
 }
+for (const recoveryPermission of [
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT,
+]) {
+  const recoveryOperator = {
+    ...user,
+    id: `user-recovery-operator-${recoveryPermission}`,
+    permissions: [{ module: recoveryPermission, actions: ['read', 'write'] }],
+  };
+  for (const productCatalogKey of [STORAGE_KEYS.PRODUCTS, STORAGE_KEYS.PRODUCT_LEVELS]) {
+    assert.equal(
+      canAccessLegacyStorageKey(recoveryOperator, productCatalogKey, 'read'),
+      true,
+      `可新增或编辑售后挽回订单的员工必须能读取原购买产品目录: ${recoveryPermission} -> ${productCatalogKey}`,
+    );
+    assert.equal(
+      canAccessLegacyStorageKey(recoveryOperator, productCatalogKey, 'runtime'),
+      true,
+      `售后挽回操作人登录时必须加载原购买产品目录: ${recoveryPermission} -> ${productCatalogKey}`,
+    );
+    assert.equal(
+      canAccessLegacyStorageKey(recoveryOperator, productCatalogKey, 'write'),
+      false,
+      '售后挽回操作人只能选产品，不得修改产品目录',
+    );
+  }
+}
 const commandOnlyWriter = {
   ...user,
   id: 'user-command-only-writer',

@@ -111,6 +111,33 @@ const access = (permissions: Set<string> = new Set([
   assert.equal(directory.actor.id, 'actor-a');
   assert.equal(directory.roles[0].permissions[0].module, PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE);
   assert.equal(directory.access.manageableOwnerIds.has('actor-a'), true);
+  assert.equal(directory.canCascadeDeleteLeads, false, '普通销售不得在批量删除中级联删除线索');
+}
+
+{
+  const rawActor = {
+    id: 'user-admin', name: '系统管理员', account: 'admin', email: '', phone: '', role: '超级管理员', avatar: null,
+    departmentId: null, positionId: null, positionName: null, roleId: 'role-super-admin', passwordHash: null, passwordSalt: null,
+    passwordUpdatedAt: null, mustChangePassword: false, lastLoginAt: null, isActive: true, employmentStatus: 'active',
+    leftAt: null, leftBy: null, createdAt: now, updatedAt: now,
+  };
+  const rawRole = {
+    id: 'role-super-admin', name: '超级管理员', code: 'super_admin', description: null, departmentId: null,
+    permissions: JSON.stringify([{ module: '全部', actions: ['read', 'write', 'delete', 'admin'] }]),
+    dataScopes: JSON.stringify({ leads: 'all', customers: 'all' }), memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
+  };
+  let rawRead = 0;
+  const directory = await lockServerCustomerDirectory({
+    $queryRaw: async () => {
+      rawRead += 1;
+      return rawRead === 1 ? [rawActor] : rawRead === 2 ? [rawRole] : [];
+    },
+  } as any, 'user-admin');
+  assert.equal(
+    directory.canCascadeDeleteLeads,
+    true,
+    '超级管理员且全部线索范围应获得与单条删除一致的级联权限',
+  );
 }
 
 function fixture(options: { useDefaultOperationGuard?: boolean; targetRow?: Record<string, unknown> } = {}) {

@@ -83,6 +83,7 @@ const result = await handler.processItem!({
     access: { actorId: 'u-1' } as any,
     actor: { id: 'u-1', name: '员工甲' },
     roles: [],
+    canCascadeDeleteLeads: true,
   },
 }, lease);
 
@@ -91,6 +92,11 @@ assert.equal(captured.context.tx.marker, 'same-tx');
 assert.equal(captured.context.expectedUpdatedAt, at.toISOString());
 assert.equal(captured.context.idempotencyKey, 'job-1:customer:c-1');
 assert.equal(captured.context.batchJobId, 'job-1');
+assert.equal(
+  captured.context.canCascadeDeleteLeads,
+  true,
+  '批量删除必须把服务端计算出的关联线索级联权限传给单条删除命令',
+);
 assert.equal(result.beforeSnapshot?.name, 'before');
 assert.equal(result.afterSnapshot?.name, 'after');
 assert.match(result.beforeHash || '', /^[a-f0-9]{64}$/);

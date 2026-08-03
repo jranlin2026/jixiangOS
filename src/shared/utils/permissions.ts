@@ -342,11 +342,7 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
     PERMISSION_KEYS.LEADS_CONVERT,
   ],
   [PERMISSION_KEYS.LEADS_LIST]: [
-    PERMISSION_KEYS.LEADS_DETAIL,
-    PERMISSION_KEYS.LEADS_CREATE,
-    PERMISSION_KEYS.LEADS_EDIT,
-    PERMISSION_KEYS.LEADS_FOLLOW,
-    PERMISSION_KEYS.LEADS_FLOW_CONFIG,
+    PERMISSION_KEYS.LEADS_LIST,
   ],
   [PERMISSION_KEYS.LEADS_DETAIL]: [PERMISSION_KEYS.LEADS_DETAIL],
   [PERMISSION_KEYS.LEADS_CREATE]: [PERMISSION_KEYS.LEADS_CREATE],
@@ -980,7 +976,20 @@ function getReadOnlyExpandedModules(permissions: Permission[]): Set<string> {
   });
 
   const expanded = new Set<string>();
-  Object.values(PERMISSION_GRANT_TREE).forEach((grants) => {
+  const readOnlyCompatibilityGroups = [
+    ...Object.values(PERMISSION_GRANT_TREE),
+    // Before the permission tree split, these five leaves were persisted as a
+    // read-only expansion of the old lead-list parent. Preserve those legacy
+    // action levels without making the new "view lead list" leaf a parent.
+    [
+      PERMISSION_KEYS.LEADS_DETAIL,
+      PERMISSION_KEYS.LEADS_CREATE,
+      PERMISSION_KEYS.LEADS_EDIT,
+      PERMISSION_KEYS.LEADS_FOLLOW,
+      PERMISSION_KEYS.LEADS_FLOW_CONFIG,
+    ],
+  ];
+  readOnlyCompatibilityGroups.forEach((grants) => {
     const normalizedGrants = grants.map(normalizePermissionKey);
     if (normalizedGrants.length <= 1) return;
     const isCompleteReadOnlyGroup = normalizedGrants.every((module) => (

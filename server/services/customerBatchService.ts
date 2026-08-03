@@ -7,6 +7,7 @@ import {
 } from '../../src/shared/utils/constants';
 import {
   getCustomerBatchActionPermissions,
+  isSuperAdmin,
   PERMISSION_KEYS,
 } from '../../src/shared/utils/permissions';
 import type {
@@ -55,7 +56,10 @@ import {
 } from './customerLifecyclePolicy';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { toAuthenticatedUser } from '../../src/shared/utils/permissions';
-import { mergeRoleWithDefaultAccess } from '../../src/shared/utils/organizationConfig';
+import {
+  mergeRoleWithDefaultAccess,
+  normalizeRoleDataScopes,
+} from '../../src/shared/utils/organizationConfig';
 import { mapCustomerBusinessRecord, type CustomerBusinessRecordRow } from './customerBusinessRecordRepository';
 import { validateManualTagUpdateSelection } from './customerTagPolicy';
 
@@ -675,10 +679,15 @@ export async function lockServerCustomerDirectory(tx: BatchTx, actorId: string) 
     && (user.employmentStatus || 'active') === 'active'
   ));
   if (!actor) throw new BatchPrecheckAuthorizationError('当前用户不存在或已离职');
+  const authenticatedUser = toAuthenticatedUser(actor, roles.map(mergeRoleWithDefaultAccess));
+  const actorRole = roles.find((role) => role.id === actor.roleId);
   return {
     actor: { id: actor.id, name: actor.name },
-    user: toAuthenticatedUser(actor, roles.map(mergeRoleWithDefaultAccess)),
+    user: authenticatedUser,
     roles,
+    canCascadeDeleteLeads: isSuperAdmin(authenticatedUser)
+      && Boolean(actorRole)
+      && normalizeRoleDataScopes(actorRole!).leads === 'all',
     access: buildCustomerAccessContextFromDirectory(
       currentActor(actorId),
       users,

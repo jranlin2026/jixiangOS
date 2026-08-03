@@ -37,6 +37,8 @@ export type CustomerBatchExecutionContext = {
   actor: { id: string; name: string };
   user?: AuthenticatedUser;
   roles: Role[];
+  /** Server-authoritative capability; absent contexts fail closed. */
+  canCascadeDeleteLeads?: boolean;
   /** Lazily reused by all customer-import items in the same worker transaction. */
   customerTagValidationCatalog?: CustomerTagCatalog;
 };
@@ -200,6 +202,7 @@ export function createCustomerMutationBatchJobHandler(options: {
         idempotencyKey: input.item.idempotencyKey,
         requestId: `${input.job.id}:${input.item.id}`,
         batchJobId: input.job.id,
+        canCascadeDeleteLeads: input.executionContext.canCascadeDeleteLeads === true,
         expectedUpdatedAt: input.item.expectedUpdatedAt
           ? new Date(input.item.expectedUpdatedAt).toISOString()
           : undefined,

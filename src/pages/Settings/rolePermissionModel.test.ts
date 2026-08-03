@@ -187,3 +187,29 @@ assert.deepEqual(
   ['read'],
   '修复列表勾选不得把历史线索只读角色升级为可编辑',
 );
+
+const reloadedRoleAfterRemovingLeadCreateAndEdit = mergeRoleWithDefaultAccess({
+  id: 'role-sales-with-removed-lead-actions',
+  name: '销售专员',
+  code: 'sales_consultant',
+  permissions: [
+    { module: PERMISSION_KEYS.LEADS_LIST, actions: ['read'] },
+    { module: PERMISSION_KEYS.LEADS_DETAIL, actions: ['read'] },
+    { module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.LEADS_FLOW_CONFIG, actions: ['read', 'write'] },
+  ],
+  memberCount: 0,
+  isActive: true,
+  createdAt: '2026-08-03T00:00:00.000Z',
+  updatedAt: '2026-08-03T00:00:00.000Z',
+} satisfies Role);
+assert.equal(
+  reloadedRoleAfterRemovingLeadCreateAndEdit.permissions.some((permission) => permission.module === PERMISSION_KEYS.LEADS_CREATE),
+  false,
+  '保存后重新读取角色时，查看线索列表不得把已取消的新增及批量入库重新勾回',
+);
+assert.equal(
+  reloadedRoleAfterRemovingLeadCreateAndEdit.permissions.some((permission) => permission.module === PERMISSION_KEYS.LEADS_EDIT),
+  false,
+  '保存后重新读取角色时，查看线索列表不得把已取消的编辑线索重新勾回',
+);

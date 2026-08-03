@@ -149,7 +149,13 @@ export function createPrismaCustomerBatchWorkerStore(
   );
   const loadExecutionContext = options.loadExecutionContext || (async (tx: any, actorId: string) => {
     const directory = await lockServerCustomerDirectory(tx, actorId);
-    return { access: directory.access, actor: directory.actor, user: directory.user, roles: directory.roles };
+    return {
+      access: directory.access,
+      actor: directory.actor,
+      user: directory.user,
+      roles: directory.roles,
+      canCascadeDeleteLeads: directory.canCascadeDeleteLeads,
+    };
   });
 
   const lockedLeaseJob = async (tx: any, lease: ClaimedCustomerBatchJob) => {

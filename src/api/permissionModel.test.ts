@@ -140,6 +140,17 @@ const savedSalesRoleWithoutLeadActions = mergeRoleWithDefaultAccess({
 assert.equal(roleHasPermission(savedSalesRoleWithoutLeadActions, PERMISSION_KEYS.LEADS_DETAIL), true);
 assert.equal(roleHasPermission(savedSalesRoleWithoutLeadActions, PERMISSION_KEYS.LEADS_CREATE), false);
 assert.equal(roleHasPermission(savedSalesRoleWithoutLeadActions, PERMISSION_KEYS.LEADS_FLOW_CONFIG), false);
+const leadListOnlyRole = mergeRoleWithDefaultAccess({
+  ...defaultSalesRole,
+  id: 'role-lead-list-only',
+  code: 'lead_list_only',
+  permissions: [{ module: PERMISSION_KEYS.LEADS_LIST, actions: ['read'] }],
+});
+assert.equal(roleHasPermission(leadListOnlyRole, PERMISSION_KEYS.LEADS_LIST), true);
+assert.equal(roleHasPermission(leadListOnlyRole, PERMISSION_KEYS.LEADS_CREATE), false, '只查看线索列表不得获得新增入库权');
+assert.equal(roleHasPermission(leadListOnlyRole, PERMISSION_KEYS.LEADS_EDIT), false, '只查看线索列表不得获得编辑权');
+assert.equal(roleHasPermission(leadListOnlyRole, PERMISSION_KEYS.LEADS_FOLLOW), false, '只查看线索列表不得获得跟进权');
+assert.equal(roleHasPermission(leadListOnlyRole, PERMISSION_KEYS.LEADS_FLOW_CONFIG), false, '只查看线索列表不得获得分配权');
 const authenticatedSales = toAuthenticatedUser({
   id: 'user-sales-assets',
   name: 'Sales Assets',
