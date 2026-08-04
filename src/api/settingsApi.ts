@@ -41,13 +41,17 @@ function containsHistoricalUserReference(value: unknown, userId: string, userNam
     .some(([entryKey, item]) => containsHistoricalUserReference(item, userId, userName, entryKey));
 }
 
-async function fetchBackendStorageValue<T>(key: string): Promise<T | null> {
+async function fetchBackendStorageResponse<T>(key: string): Promise<ApiResponse<T | null>> {
   const response = await backendRequest<T | null>(`/storage/${encodeURIComponent(key)}`);
-  if (response.code !== 0) return null;
   if (response.data !== null && response.data !== undefined && typeof localStorage !== 'undefined') {
     localStorage.setItem(key, JSON.stringify(response.data));
   }
-  return response.data;
+  return response;
+}
+
+async function fetchBackendStorageValue<T>(key: string): Promise<T | null> {
+  const response = await fetchBackendStorageResponse<T>(key);
+  return response.code === 0 ? response.data : null;
 }
 
 function ensureUsersWithAuth(): User[] {
@@ -1058,8 +1062,15 @@ async function deleteCustomerLevelConfig(id: string): Promise<ApiResponse<boolea
 
 async function fetchLeadSourceConfigs(): Promise<ApiResponse<LeadSourceConfig[]>> {
   if (shouldUseBackendApi()) {
-    const stored = await fetchBackendStorageValue<LeadSourceConfig[]>(STORAGE_KEYS.LEAD_SOURCE_CONFIGS);
-    return createSuccessResponse(Array.isArray(stored) ? stored : []);
+    try {
+      const response = await fetchBackendStorageResponse<LeadSourceConfig[]>(STORAGE_KEYS.LEAD_SOURCE_CONFIGS);
+      if (response.code !== 0) {
+        return createErrorResponse(response.message || '线索来源读取失败', response.code);
+      }
+      return createSuccessResponse(Array.isArray(response.data) ? response.data : []);
+    } catch {
+      return createErrorResponse('线索来源读取失败，请检查网络后重试');
+    }
   }
 
   ensureInit();

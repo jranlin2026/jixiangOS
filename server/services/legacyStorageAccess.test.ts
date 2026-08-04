@@ -50,6 +50,42 @@ const publicPoolReader = {
   permissions: [{ module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW, actions: ['read'] }],
 };
 assert.equal(canAccessLegacyStorageKey(publicPoolReader, STORAGE_KEYS.LEAD_SOURCE_CONFIGS, 'runtime'), true);
+const leadCreator = {
+  ...user,
+  id: 'user-lead-creator',
+  permissions: [{ module: PERMISSION_KEYS.LEADS_CREATE, actions: ['read', 'write'] }],
+};
+assert.equal(
+  canAccessLegacyStorageKey(leadCreator, STORAGE_KEYS.LEAD_SOURCE_CONFIGS, 'read'),
+  true,
+  '拥有新增线索权限的账号必须能读取线索来源配置',
+);
+assert.equal(
+  canAccessLegacyStorageKey(leadCreator, STORAGE_KEYS.LEAD_SOURCE_CONFIGS, 'write'),
+  false,
+  '新增线索权限不得修改线索来源配置',
+);
+for (const leadReadPermission of [
+  PERMISSION_KEYS.LEADS_LIST,
+  PERMISSION_KEYS.LEADS_DETAIL,
+  PERMISSION_KEYS.LEADS_EDIT,
+]) {
+  const leadOperator = {
+    ...user,
+    id: `user-lead-operator-${leadReadPermission}`,
+    permissions: [{ module: leadReadPermission, actions: ['read', 'write'] }],
+  };
+  assert.equal(
+    canAccessLegacyStorageKey(leadOperator, STORAGE_KEYS.LEAD_SOURCE_CONFIGS, 'read'),
+    true,
+    `线索列表、资料和编辑账号必须能读取线索来源配置: ${leadReadPermission}`,
+  );
+  assert.equal(
+    canAccessLegacyStorageKey(leadOperator, STORAGE_KEYS.LEAD_SOURCE_CONFIGS, 'write'),
+    false,
+    `线索业务权限不得修改线索来源配置: ${leadReadPermission}`,
+  );
+}
 const leadSourceEditor = {
   ...user,
   id: 'user-lead-source-editor',

@@ -27,6 +27,7 @@ import type { LeadFlowConfig } from '../../types/lead';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 interface LeadFormProps {
   open: boolean;
@@ -38,6 +39,7 @@ interface LeadFormProps {
 const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) => {
   const { create, update } = useLeadStore();
   const currentUser = useAuthStore((state) => state.currentUser);
+  const { alert, dialog: feedbackDialog } = useAppFeedback();
   const mobileFullScreen = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const isEdit = Boolean(lead);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
@@ -96,7 +98,12 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     if (!open) return;
 
     settingsApi.fetchLeadSourceConfigs().then((res) => {
-      if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
+      if (res.code === 0) {
+        setSourceConfigs(res.data.filter((item) => item.isActive));
+        return;
+      }
+      setSourceConfigs([]);
+      void alert(res.message || '线索来源读取失败，请联系系统管理员。', '线索来源读取失败');
     });
     settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
@@ -104,7 +111,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     leadFlowApi.fetchLeadFlowConfig().then((res) => {
       if (res.code === 0) setLeadFlowConfig(res.data);
     });
-  }, [open]);
+  }, [alert, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -205,14 +212,15 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor && !!form.source && !!form.inputBy;
 
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      maxWidth="md"
-      fullWidth
-      fullScreen={mobileFullScreen}
-      PaperProps={{ sx: { maxHeight: { xs: '100dvh', sm: '94vh' }, bgcolor: isEdit ? '#fff' : '#f8fafc' } }}
-    >
+    <>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        maxWidth="md"
+        fullWidth
+        fullScreen={mobileFullScreen}
+        PaperProps={{ sx: { maxHeight: { xs: '100dvh', sm: '94vh' }, bgcolor: isEdit ? '#fff' : '#f8fafc' } }}
+      >
       <DialogCloseTitle onClose={onClose} sx={!isEdit ? { px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' } : undefined}>
         {!isEdit ? (
           <Box sx={{ minWidth: 0 }}>
@@ -399,7 +407,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           {isEdit ? '保存' : '确认入库'}
         </Button>
       </DialogActions>
-    </Dialog>
+      </Dialog>
+      {feedbackDialog}
+    </>
   );
 };
 
