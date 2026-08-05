@@ -79,13 +79,14 @@ const RecoveryOrderDetailContent: React.FC<RecoveryOrderDetailContentProps> = ({
 
       <BusinessDetailSection
         step={2}
-        title="原订单与来源"
+        title="原订单信息"
         columns={2}
         summary={[order.sourcePlatformName || order.sourcePlatform, order.sourceShopName, order.originalProduct].filter(Boolean).join(' / ')}
       >
-        <BusinessDetailField label="第三方平台订单号">{order.thirdPartyOrderNo || '-'}</BusinessDetailField>
         <BusinessDetailField label="来源平台">{order.sourcePlatformName || order.sourcePlatform || '-'}</BusinessDetailField>
         <BusinessDetailField label="来源店铺">{order.sourceShopName || '-'}</BusinessDetailField>
+        <BusinessDetailField label="平台订单号">{order.thirdPartyOrderNo || '-'}</BusinessDetailField>
+        <BusinessDetailField label="原订单付款时间">{order.originalPaymentAt ? formatDate(order.originalPaymentAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</BusinessDetailField>
         <BusinessDetailField label="原产品">{order.originalProduct || '-'}</BusinessDetailField>
         <BusinessDetailField label="原产品等级">
           {productLevel ? <Chip label={productLevel} size="small" sx={getProductLevelTagSx(productLevel)} /> : '-'}
@@ -94,24 +95,14 @@ const RecoveryOrderDetailContent: React.FC<RecoveryOrderDetailContentProps> = ({
       </BusinessDetailSection>
 
       <BusinessDetailSection step={3} title="挽回成交信息" columns={2} summary={`${formatCurrency(order.recoveryAmount)} / ${order.recoveryUserName || '未分配'}`}>
+        <BusinessDetailField label="官方收款渠道">{order.officialPaymentChannel || '-'}</BusinessDetailField>
         <BusinessDetailField label="挽回成交金额" strong>
           <Typography sx={{ fontWeight: 700, color: '#059669' }}>{formatCurrency(order.recoveryAmount)}</Typography>
         </BusinessDetailField>
         <BusinessDetailField label="挽回成交时间">{formatDate(order.recoveryAt || order.createdAt, 'yyyy-MM-dd HH:mm:ss')}</BusinessDetailField>
+        <BusinessDetailField label="挽回付款订单号">{order.paymentOrderNo || '-'}</BusinessDetailField>
         <BusinessDetailField label="挽回人员">{order.recoveryUserName || '-'}</BusinessDetailField>
         <BusinessDetailField label="协助人员">{order.assistUserName || '-'}</BusinessDetailField>
-        <BusinessDetailField label="备注" wide><Typography sx={{ whiteSpace: 'pre-wrap' }}>{order.remark || '-'}</Typography></BusinessDetailField>
-      </BusinessDetailSection>
-
-      <BusinessDetailSection
-        step={4}
-        title="收款与凭证"
-        columns={2}
-        summary={[order.officialPaymentChannel, order.paymentOrderNo, attachments.length ? `${attachments.length} 个凭证` : ''].filter(Boolean).join(' / ') || '暂无收款资料'}
-      >
-        <BusinessDetailField label="官方收款渠道">{order.officialPaymentChannel || '-'}</BusinessDetailField>
-        <BusinessDetailField label="付款订单号">{order.paymentOrderNo || '-'}</BusinessDetailField>
-        <BusinessDetailField label="付款时间">{order.paymentAt ? formatDate(order.paymentAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</BusinessDetailField>
         <BusinessDetailField label="挽回凭证" wide>
           {attachments.length ? (
             <BusinessAttachmentLinks attachments={attachments} />
@@ -126,11 +117,12 @@ const RecoveryOrderDetailContent: React.FC<RecoveryOrderDetailContentProps> = ({
             </Stack>
           ) : '-'}
         </BusinessDetailField>
+        <BusinessDetailField label="备注" wide><Typography sx={{ whiteSpace: 'pre-wrap' }}>{order.remark || '-'}</Typography></BusinessDetailField>
       </BusinessDetailSection>
 
       <Box ref={operationSectionRef} sx={{ scrollMarginTop: 16 }}>
         <BusinessDetailSection
-          step={5}
+          step={4}
           title="审核与系统记录"
           summary={canViewHistory ? `${order.changeHistory?.length || 0} 条记录` : '无查看权限'}
           columns={1}

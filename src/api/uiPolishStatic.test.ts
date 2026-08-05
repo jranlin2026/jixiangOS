@@ -627,8 +627,8 @@ assert.match(
 );
 assert.match(
   recoveryOrderSource,
-  /第三方平台订单号[\s\S]*售后挽回分账|售后挽回分账[\s\S]*第三方平台订单号/,
-  'Recovery order workspace should collect third-party order data and send approved records to recovery settlement.',
+  /平台订单号[\s\S]*售后挽回分账|售后挽回分账[\s\S]*平台订单号/,
+  'Recovery order workspace should collect platform order data and send approved records to recovery settlement.',
 );
 assert.match(
   commissionSource,

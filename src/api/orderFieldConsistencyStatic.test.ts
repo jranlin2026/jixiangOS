@@ -9,7 +9,7 @@ const orderReviewSource = read('src/pages/OrderReview/index.tsx');
 const orderFormSource = read('src/pages/Orders/OrderForm.tsx');
 
 for (const [label, source] of [['订单列表', orderListSource], ['订单审核台', orderReviewSource]] as const) {
-  assert.match(source, /id: 'thirdPartyOrderNo', label: '第三方平台订单'/, `${label}必须提供第三方平台订单列`);
+  assert.match(source, /id: 'thirdPartyOrderNo', label: '平台订单号'/, `${label}必须提供平台订单号列`);
 }
 assert.match(orderListSource, /id: 'settlementStatus', label: '分账状态'/, '订单列表必须显示统一分账状态');
 assert.match(orderListSource, /id: 'status', label: '订单状态'/, '订单列表必须显示订单业务状态');
@@ -38,9 +38,10 @@ const createFormResetSource = orderFormSource.slice(
   orderFormSource.indexOf('if (!order && !application)'),
   orderFormSource.indexOf('const sourceOrder = order || application?.orderData'),
 );
-for (const resetField of ['actualAmount: 0', "thirdPartyOrderNo: ''", "notes: ''", "paymentOrderNo: ''"]) {
+for (const resetField of ['actualAmount: 0', "notes: ''", "paymentOrderNo: ''"]) {
   assert.match(createFormResetSource, new RegExp(resetField.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `新建订单必须重置 ${resetField}`);
 }
+assert.match(createFormResetSource, /thirdPartyOrderNo: customer\?\.platformOrderNo \|\| ''/, '新建订单应继承客户已有的平台订单号，客户无值时保持为空');
 assert.match(
   orderFormSource,
   /if \(correctionMode && !correctionReason\.trim\(\)\)/,
@@ -74,13 +75,13 @@ for (const [label, source] of [
 ] as const) {
   assert.match(source, /资源归属/, `${label}必须显示资源归属`);
   assert.match(source, /线索来源/, `${label}必须显示线索来源`);
-  assert.match(source, /第三方平台订单/, `${label}必须显示第三方平台订单`);
+  assert.match(source, /平台订单号/, `${label}必须显示平台订单号`);
   assert.match(source, /订单创建人/, `${label}必须显示订单创建人`);
 }
 
 assert.match(
   orderReviewSource,
-  /正式订单当前第三方平台订单/,
+  /正式订单当前平台订单号/,
   '审核资料必须在正式订单修改后提示当前值',
 );
 

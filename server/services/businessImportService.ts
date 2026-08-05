@@ -117,7 +117,8 @@ function normalizeRow(type: BusinessImportType, row: BusinessImportRow, index: n
   const input = row as RecoveryImportRow;
   return {
     ...common, originalProduct: text(input.originalProduct), sourcePlatform: text(input.sourcePlatform), sourceShop: text(input.sourceShop),
-    originalAmount: text(input.originalAmount), recoveryAmount: text(input.recoveryAmount), recoveryAt: normalizeDate(input.recoveryAt),
+    originalAmount: text(input.originalAmount), originalPaymentAt: normalizeDate(input.originalPaymentAt),
+    recoveryAmount: text(input.recoveryAmount), recoveryAt: normalizeDate(input.recoveryAt),
     paymentOrderNo: text(input.paymentOrderNo), paymentAt: normalizeDate(input.paymentAt), recoveryUserName: text(input.recoveryUserName),
     assistUserName: text(input.assistUserName), creatorName: text(input.creatorName),
     recoveryEvidenceFileNames: text(input.recoveryEvidenceFileNames),

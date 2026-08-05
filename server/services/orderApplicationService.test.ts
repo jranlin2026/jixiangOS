@@ -894,6 +894,10 @@ const deferredEffects: OrderApprovalEffectState = {
     salesId: salesApplicant.id,
     salesName: salesApplicant.name,
     thirdPartyOrderNo: 'TP-20260724-001',
+    sourcePlatformId: 'platform-douyin',
+    sourcePlatformName: '抖音小店',
+    sourceShopId: 'shop-agent',
+    sourceShopName: '极享智能体店',
   }, superAdmin);
 
   assert.equal(result.code, 0, result.message);
@@ -903,6 +907,10 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(result.data?.orderData.salesName, salesApplicant.name);
   assert.equal(result.data?.orderData.owner, salesApplicant.name);
   assert.equal(result.data?.orderData.thirdPartyOrderNo, 'TP-20260724-001', '审核快照必须保留第三方平台订单');
+  assert.equal(result.data?.orderData.sourcePlatformId, 'platform-douyin');
+  assert.equal(result.data?.orderData.sourcePlatformName, '抖音小店');
+  assert.equal(result.data?.orderData.sourceShopId, 'shop-agent');
+  assert.equal(result.data?.orderData.sourceShopName, '极享智能体店');
   assert.equal(result.data?.orderData.leadSource, '官网', '审核快照必须保留客户线索来源');
   assert.equal((result.data?.orderData as any)?.sourceName, '品牌官网', '审核快照必须保留二级线索来源');
 
@@ -916,6 +924,8 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(approved.data?.order.salesId, salesApplicant.id, '管理员代录不得覆盖所选销售负责人');
   assert.equal(approved.data?.order.salesName, salesApplicant.name);
   assert.equal(approved.data?.order.thirdPartyOrderNo, 'TP-20260724-001', '审核入库必须保留第三方平台订单');
+  assert.equal(approved.data?.order.sourcePlatformName, '抖音小店');
+  assert.equal(approved.data?.order.sourceShopName, '极享智能体店');
   assert.equal(approved.data?.order.leadSource, '官网', '审核入库必须保留线索来源');
   assert.equal((approved.data?.order as any)?.sourceName, '品牌官网', '审核入库必须保留二级线索来源');
 }

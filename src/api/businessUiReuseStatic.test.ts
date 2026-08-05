@@ -15,7 +15,7 @@ assert.match(recoveryCreate, /maxWidth="md"/, '新增售后挽回订单应与订
 for (const label of ['申请人', '部门', '角色', '申请日期']) {
   assert.match(recoveryCreate, new RegExp(`label: '${label}'`), `售后申请信息条缺少${label}`);
 }
-for (const [step, title] of [[1, '客户信息'], [2, '原订单信息'], [3, '挽回成交信息'], [4, '收款与凭证'], [5, '补充信息']] as const) {
+for (const [step, title] of [[1, '客户信息'], [2, '原订单信息'], [3, '挽回成交信息']] as const) {
   assert.match(recoveryCreate, new RegExp(`step=\\{${step}\\}[\\s\\S]{0,100}solidStep[\\s\\S]{0,100}title="${title}"`));
 }
 assert.match(recoveryCreate, /position: 'sticky'[\s\S]*原付款金额[\s\S]*Number\(form\.originalAmount \|\| 0\)/, '售后表单底栏应实时显示原付款金额');
@@ -31,7 +31,7 @@ assert.match(recoveryDetail, /'挽回单号'/, '售后详情摘要缺少挽回�
 for (const label of ['分账状态', '挽回金额', '创建时间']) {
   assert.match(recoveryDetail, new RegExp(`label: '${label}'`), `售后详情摘要缺少${label}`);
 }
-for (const [step, title] of [[1, '客户信息'], [2, '原订单与来源'], [3, '挽回成交信息'], [4, '收款与凭证'], [5, '审核与系统记录']] as const) {
+for (const [step, title] of [[1, '客户信息'], [2, '原订单信息'], [3, '挽回成交信息'], [4, '审核与系统记录']] as const) {
   assert.match(recoveryDetail, new RegExp(`step=\\{${step}\\}[\\s\\S]{0,160}title="${title}"`));
 }
 assert.match(recoveryDetail, /recoveryOperationSectionRef\.current\?\.scrollIntoView/);

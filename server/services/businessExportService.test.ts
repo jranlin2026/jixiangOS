@@ -102,7 +102,7 @@ const standardOrderExport = await service.export({
 assert.deepEqual(
   standardOrderExport.data?.summaryColumns.map((column) => column.id),
   [
-    'orderNo', 'thirdPartyOrderNo', 'customer', 'customerPhone', 'customerWechat',
+    'orderNo', 'sourcePlatformName', 'sourceShopName', 'thirdPartyOrderNo', 'customer', 'customerPhone', 'customerWechat',
     'productName', 'productLevel', 'orderType', 'standardTotalAmount', 'actualAmount',
     'officialPaymentChannel', 'paymentDate', 'paymentOrderNo', 'owner', 'createdByName',
     'leadSourceFull', 'leadInputBy', 'leadContributorName', 'resourceOwnership', 'status',
@@ -310,7 +310,7 @@ assert.deepEqual(
 
 assert.deepEqual(
   (await service.export({ module: 'orders', reason: '字段池检查', columnMode: 'all', filters: { search: 'ORD-001' } }, actor)).data?.summaryColumns.map((column) => column.id),
-  ['orderNo', 'settlementStatus', 'customer', 'productName', 'productLevel', 'orderType', 'actualAmount', 'officialPaymentChannel', 'thirdPartyOrderNo', 'resourceOwnership', 'owner', 'createdByName', 'paymentDate', 'leadInputBy', 'leadContributorName', 'notes', 'createdAt', 'customerPhone', 'customerWechat', 'standardTotalAmount', 'paymentOrderNo', 'status', 'refundStatus', 'refundAmount', 'refundReason', 'leadSourceFull', 'updatedAt'],
+  ['orderNo', 'settlementStatus', 'customer', 'productName', 'productLevel', 'orderType', 'actualAmount', 'officialPaymentChannel', 'sourcePlatformName', 'sourceShopName', 'thirdPartyOrderNo', 'resourceOwnership', 'owner', 'createdByName', 'paymentDate', 'leadInputBy', 'leadContributorName', 'notes', 'createdAt', 'customerPhone', 'customerWechat', 'standardTotalAmount', 'paymentOrderNo', 'status', 'refundStatus', 'refundAmount', 'refundReason', 'leadSourceFull', 'updatedAt'],
   '订单全部字段必须与 ORDER_COLUMNS 完全一致',
 );
 const orderAllFields = await service.export({ module: 'orders', reason: '全部字段值', columnMode: 'all', filters: { search: 'ORD-001' } }, actor);
@@ -323,7 +323,7 @@ assert.equal(
 );
 assert.deepEqual(
   (await service.export({ module: 'order_settlements', reason: '字段池检查', columnMode: 'all', filters: { search: 'ORD-001' } }, actor)).data?.summaryColumns.map((column) => column.id),
-  ['orderNo', 'status', 'customerName', 'thirdPartyOrderNo', 'productName', 'productLevel', 'orderAmount', 'officialPaymentChannel', 'paymentDate', 'salesOwner', 'createdByName', 'splitDetails', 'totalCommissionAmount', 'orderType', 'resourceOwnership', 'leadSourceFull', 'leadInputBy', 'leadContributorName', 'paymentOrderNo', 'notes', 'createdAt', 'updatedAt', 'performanceAmount', 'pendingAssignCount', 'exceptionCount', 'settlementOperator', 'confirmedAt', 'paidAt', 'withdrawReason'],
+  ['orderNo', 'status', 'customerName', 'sourcePlatformName', 'sourceShopName', 'thirdPartyOrderNo', 'productName', 'productLevel', 'orderAmount', 'officialPaymentChannel', 'paymentDate', 'salesOwner', 'createdByName', 'splitDetails', 'totalCommissionAmount', 'orderType', 'resourceOwnership', 'leadSourceFull', 'leadInputBy', 'leadContributorName', 'paymentOrderNo', 'notes', 'createdAt', 'updatedAt', 'performanceAmount', 'pendingAssignCount', 'exceptionCount', 'settlementOperator', 'confirmedAt', 'paidAt', 'withdrawReason'],
   '订单分账全部字段必须与 ORDER_SPLIT_COLUMNS 完全一致',
 );
 assert.equal(recoverySettlement.data?.summaryColumns.every((column) => !/^[A-Za-z]/.test(column.label)), true);

@@ -66,11 +66,11 @@ const emptyForm = {
   originalProductId: '',
   originalProductLevel: '',
   originalAmount: '',
+  originalPaymentAt: '',
   recoveryAmount: '',
   recoveryAt: toDateTimeInputValue(),
   officialPaymentChannel: '',
   paymentOrderNo: '',
-  paymentAt: '',
   recoveryAttachments: [] as BusinessAttachment[],
   recoveryUserId: '',
   assistUserId: '',
@@ -220,11 +220,11 @@ const RecoveryOrderCorrectionDialog: React.FC<RecoveryOrderCorrectionDialogProps
           originalProductId: order.originalProductId || '',
           originalProductLevel: order.originalProductLevel || '',
           originalAmount: String(order.originalAmount || ''),
+          originalPaymentAt: order.originalPaymentAt ? toDateTimeInputValue(order.originalPaymentAt) : '',
           recoveryAmount: String(order.recoveryAmount || ''),
           recoveryAt: toDateTimeInputValue(order.recoveryAt || order.createdAt),
           officialPaymentChannel: order.officialPaymentChannel || '',
           paymentOrderNo: order.paymentOrderNo || '',
-          paymentAt: order.paymentAt ? toDateTimeInputValue(order.paymentAt) : '',
           recoveryAttachments: getRecoveryEvidenceAttachments(order),
           recoveryUserId: order.recoveryUserId || '',
           assistUserId: order.assistUserId || '',
@@ -297,11 +297,12 @@ const RecoveryOrderCorrectionDialog: React.FC<RecoveryOrderCorrectionDialogProps
       originalProductId: form.originalProductId,
       originalProductLevel: form.originalProductLevel,
       originalAmount: Number(form.originalAmount) || 0,
+      originalPaymentAt: form.originalPaymentAt ? new Date(form.originalPaymentAt).toISOString() : undefined,
       recoveryAmount: Number(form.recoveryAmount) || 0,
       recoveryAt: new Date(form.recoveryAt).toISOString(),
       officialPaymentChannel: form.officialPaymentChannel as RecoveryOrderInput['officialPaymentChannel'],
       paymentOrderNo: form.paymentOrderNo,
-      paymentAt: form.paymentAt ? new Date(form.paymentAt).toISOString() : undefined,
+      paymentAt: editingOrder?.paymentAt || new Date(form.recoveryAt).toISOString(),
       recoveryAttachments: form.recoveryAttachments,
       recoveryUserId: recoveryUser.id,
       recoveryUserName: recoveryUser.name,
@@ -478,7 +479,7 @@ const RecoveryOrderCorrectionDialog: React.FC<RecoveryOrderCorrectionDialogProps
               summary={[form.sourcePlatformName || form.sourcePlatform, form.sourceShopName, form.originalProduct, form.thirdPartyOrderNo].filter(Boolean).join(' / ') || '待填写原订单'}
               errorCount={originalOrderErrorCount}
             >
-              <TextField label="第三方平台订单号" value={form.thirdPartyOrderNo} onChange={(event) => setForm({ ...form, thirdPartyOrderNo: event.target.value })} required />
+              <TextField label="平台订单号" value={form.thirdPartyOrderNo} onChange={(event) => setForm({ ...form, thirdPartyOrderNo: event.target.value })} required />
               <TextField select label="来源平台" value={form.sourcePlatformId} onChange={(event) => {
                 const platform = sourceConfigs.find((item) => item.id === event.target.value);
                 setForm({ ...form, sourcePlatformId: platform?.id || '', sourcePlatformName: platform?.name || '', sourcePlatform: platform?.name || '', sourceShopId: '', sourceShopName: '' });
@@ -507,6 +508,7 @@ const RecoveryOrderCorrectionDialog: React.FC<RecoveryOrderCorrectionDialogProps
                 ) : null}
               </TextField>
               <TextField label="原付款金额" type="number" value={form.originalAmount} onChange={(event) => setForm({ ...form, originalAmount: event.target.value })} required inputProps={{ min: 0.01, step: 0.01 }} />
+              <TextField label="原订单付款时间" type="datetime-local" value={form.originalPaymentAt} onChange={(event) => setForm({ ...form, originalPaymentAt: event.target.value })} InputLabelProps={{ shrink: true }} inputProps={{ step: 1, max: toDateTimeInputValue() }} />
             </BusinessFormSection>
 
             <BusinessFormSection
@@ -516,8 +518,13 @@ const RecoveryOrderCorrectionDialog: React.FC<RecoveryOrderCorrectionDialogProps
               summary={Number(form.recoveryAmount) > 0 ? `挽回 ¥${Number(form.recoveryAmount).toLocaleString('zh-CN')} / ${activeUsers.find((user) => user.id === form.recoveryUserId)?.name || '待选择人员'}` : '待填写挽回信息'}
               errorCount={recoveryErrorCount}
             >
+              <TextField select label="官方收款渠道" value={form.officialPaymentChannel} onChange={(event) => setForm({ ...form, officialPaymentChannel: event.target.value })}>
+                <MenuItem value="">未选择</MenuItem>
+                {OFFICIAL_PAYMENT_CHANNELS.map((channel) => <MenuItem key={channel.value} value={channel.value}>{channel.label}</MenuItem>)}
+              </TextField>
               <TextField label="挽回成交金额" type="number" value={form.recoveryAmount} onChange={(event) => setForm({ ...form, recoveryAmount: event.target.value })} required />
               <TextField label="挽回成交时间" type="datetime-local" value={form.recoveryAt} onChange={(event) => setForm({ ...form, recoveryAt: event.target.value })} required InputLabelProps={{ shrink: true }} inputProps={{ step: 1, max: toDateTimeInputValue() }} />
+              <TextField label="挽回付款订单号" value={form.paymentOrderNo} onChange={(event) => setForm({ ...form, paymentOrderNo: event.target.value })} />
               <TextField select label="挽回人员" value={form.recoveryUserId} onChange={(event) => setForm({ ...form, recoveryUserId: event.target.value })} required>
                 {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
               </TextField>
@@ -525,20 +532,6 @@ const RecoveryOrderCorrectionDialog: React.FC<RecoveryOrderCorrectionDialogProps
                 <MenuItem value="">无</MenuItem>
                 {activeUsers.filter((user) => user.id !== form.recoveryUserId).map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
               </TextField>
-            </BusinessFormSection>
-
-            <BusinessFormSection
-              step={4}
-              solidStep
-              title="收款与凭证"
-              summary={[form.officialPaymentChannel, form.paymentOrderNo, form.recoveryAttachments.length ? `${form.recoveryAttachments.length} 个凭证` : ''].filter(Boolean).join(' / ') || '待补充收款资料'}
-            >
-              <TextField select label="官方收款渠道" value={form.officialPaymentChannel} onChange={(event) => setForm({ ...form, officialPaymentChannel: event.target.value })}>
-                <MenuItem value="">未选择</MenuItem>
-                {OFFICIAL_PAYMENT_CHANNELS.map((channel) => <MenuItem key={channel.value} value={channel.value}>{channel.label}</MenuItem>)}
-              </TextField>
-              <TextField label="付款订单号" value={form.paymentOrderNo} onChange={(event) => setForm({ ...form, paymentOrderNo: event.target.value })} />
-              <TextField label="付款时间" type="datetime-local" value={form.paymentAt} onChange={(event) => setForm({ ...form, paymentAt: event.target.value })} InputLabelProps={{ shrink: true }} inputProps={{ step: 1, max: toDateTimeInputValue() }} />
               <Box sx={{ gridColumn: { md: '1 / -1' } }}>
                 <BusinessAttachmentPicker
                   title="挽回凭证"
@@ -550,9 +543,6 @@ const RecoveryOrderCorrectionDialog: React.FC<RecoveryOrderCorrectionDialogProps
                   maxCount={8}
                 />
               </Box>
-            </BusinessFormSection>
-
-            <BusinessFormSection step={5} solidStep title="补充信息" summary={form.remark ? '已填写备注' : '无备注'}>
               <TextField label="备注" value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} multiline minRows={3} sx={{ gridColumn: { md: '1 / -1' } }} />
             </BusinessFormSection>
           </Box>

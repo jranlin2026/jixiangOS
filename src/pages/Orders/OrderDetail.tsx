@@ -271,7 +271,9 @@ const OrderDetail: React.FC<OrderDetailProps> = ({
 
         <BusinessDetailSection step={3} title="订单信息" columns={2}>
           <BusinessDetailField label="订单类型">{order.orderType || '-'}</BusinessDetailField>
-          <BusinessDetailField label="第三方平台订单">{order.thirdPartyOrderNo || '-'}</BusinessDetailField>
+          <BusinessDetailField label="来源平台">{order.sourcePlatformName || '-'}</BusinessDetailField>
+          <BusinessDetailField label="来源店铺">{order.sourceShopName || '-'}</BusinessDetailField>
+          <BusinessDetailField label="平台订单号">{order.thirdPartyOrderNo || '-'}</BusinessDetailField>
           <BusinessDetailField label="备注信息" wide>
             <Typography sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{order.notes || '-'}</Typography>
           </BusinessDetailField>

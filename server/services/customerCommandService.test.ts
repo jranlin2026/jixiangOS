@@ -2209,6 +2209,12 @@ for (const targetType of ['customer', 'lead'] as const) {
     status: '新线索',
     owner: '待分配',
     sourceType: '公司资源',
+    sourcePlatformId: 'platform-douyin',
+    sourcePlatformName: '抖音小店',
+    sourceShopId: 'shop-agent',
+    sourceShopName: '极享智能体店',
+    platformOrderNo: 'DY-0000123',
+    sourcePaymentAt: '2026-07-20T10:30:00.000Z',
     manualTagIds: ['shared', 'lead-only'],
     tags: ['伪造通用名', '伪造线索名'],
   }, leadEditor);
@@ -2220,6 +2226,12 @@ for (const targetType of ['customer', 'lead'] as const) {
   const autoCustomer = next.businessRecords.find((row) => row.domain === STORAGE_KEYS.CUSTOMERS)?.data;
   assert.equal(autoCustomer?.id, result.data?.customerId);
   assert.equal(autoCustomer?.company, '', '线索未填写公司时，客户公司必须保持为空');
+  assert.equal(autoCustomer?.sourcePlatformId, 'platform-douyin');
+  assert.equal(autoCustomer?.sourcePlatformName, '抖音小店');
+  assert.equal(autoCustomer?.sourceShopId, 'shop-agent');
+  assert.equal(autoCustomer?.sourceShopName, '极享智能体店');
+  assert.equal(autoCustomer?.platformOrderNo, 'DY-0000123');
+  assert.equal(autoCustomer?.sourcePaymentAt, '2026-07-20T10:30:00.000Z');
   assert.equal(autoCustomer?.owner, '销售甲');
   assert.equal(autoCustomer?.originalSalesTransferBy, '销售甲');
   assert.deepEqual(autoCustomer?.manualTagIds, []);

@@ -39,8 +39,8 @@ const AfterSalesSourceConfigPage: React.FC = () => {
   };
 
   return <Box>
-    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>来源平台与店铺</Typography>
-    <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>先维护平台，再为平台添加店铺。停用项不会出现在新建挽回订单中，历史订单仍保留原名称。</Typography>
+    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>业务平台与店铺</Typography>
+    <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>先维护平台，再为平台添加店铺。启用项供线索、客户、订单和售后挽回共用，历史业务仍保留原名称。</Typography>
     <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1, mb: 2, maxWidth: 520 }}>
       <TextField size="small" label="新增平台" value={newPlatform} onChange={(event) => setNewPlatform(event.target.value)} fullWidth sx={{ minWidth: 0 }} />
       <Button

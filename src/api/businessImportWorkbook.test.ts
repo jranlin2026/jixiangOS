@@ -54,13 +54,17 @@ const recoverySheet = recoveryWorkbook.getWorksheet('售后挽回订单导入模
 assert.deepEqual(rowValues(recoverySheet.getRow(1)), [...RECOVERY_IMPORT_HEADERS]);
 assert.ok(recoverySheet.getCell('I2').dataValidation.formulae?.[0].includes('字段选项'));
 assert.ok(recoverySheet.getCell('J2').dataValidation.formulae?.[0].includes('字段选项'));
-assert.ok(recoverySheet.getCell('L2').dataValidation.formulae?.[0].includes('字段选项'));
+assert.ok(recoverySheet.getCell('M2').dataValidation.formulae?.[0].includes('字段选项'));
 assert.ok(recoverySheet.getCell('H2').dataValidation.formulae?.[0].includes('字段选项'));
 assert.match(recoverySheet.getCell('F2').numFmt, /0\.00/);
 assert.match(recoverySheet.getCell('G2').numFmt, /yyyy/);
+assert.match(recoverySheet.getCell('L2').numFmt, /yyyy/);
+assert.match(recoverySheet.getCell('O2').numFmt, /yyyy/);
+assert.equal(recoverySheet.getCell('N2').numFmt, '@');
 assert.equal(recoverySheet.getCell('B2').numFmt, '@');
 assert.equal(recoverySheet.getCell('D2').numFmt, '@');
 assert.ok(RECOVERY_IMPORT_HEADERS.includes('原产品付款金额'));
+assert.ok(RECOVERY_IMPORT_HEADERS.includes('原订单付款时间'));
 assert.ok(RECOVERY_IMPORT_HEADERS.includes('挽回凭证文件名'));
 
 const xlsxMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -220,14 +224,14 @@ const parsedRecovery = await parseBusinessImportWorkbook('recovery_orders', awai
   RECOVERY_IMPORT_HEADERS,
   [[
     '客户乙', '', 'wx_0002', '0000789', '旧课程', 800, '2026-07-24', '销售甲',
-    '抖音', '旗舰店', '1200.00', '企业微信转账', '0000999', '2026-07-20 09:00', '销售乙', '', '再次成交', '挽回01.jpg;挽回02.webp',
+    '抖音', '旗舰店', '1200.00', '2026-07-18 08:30', '企业微信转账', '0000999', '2026-07-20 09:00', '销售乙', '', '再次成交', '挽回01.jpg;挽回02.webp',
   ]],
 ));
 assert.deepEqual(parsedRecovery[0], {
   rowNumber: 2,
   customerName: '客户乙', customerPhone: '', customerWechat: 'wx_0002', thirdPartyOrderNo: '0000789',
   originalProduct: '旧课程', recoveryAmount: 800, recoveryAt: '2026-07-24', recoveryUserName: '销售甲',
-  sourcePlatform: '抖音', sourceShop: '旗舰店', originalAmount: '1200.00', paymentChannel: '企业微信转账',
+  sourcePlatform: '抖音', sourceShop: '旗舰店', originalAmount: '1200.00', originalPaymentAt: '2026-07-18 08:30', paymentChannel: '企业微信转账',
   paymentOrderNo: '0000999', paymentAt: '2026-07-20 09:00', assistUserName: '销售乙', creatorName: '', remark: '再次成交',
   recoveryEvidenceFileNames: '挽回01.jpg;挽回02.webp',
 });
@@ -237,7 +241,7 @@ const parsedNumericRecoveryIdentifiers = await parseBusinessImportWorkbook('reco
   RECOVERY_IMPORT_HEADERS,
   [[
     '客户丙', 17791873333, '', 789, '旧课程', 800, '2026-07-24', '销售甲',
-    '', '', 1200, '', '', '', '', '', '', '',
+    '', '', 1200, '', '', '', '', '', '', '', '',
   ]],
 ));
 assert.equal(parsedNumericRecoveryIdentifiers[0]?.customerPhone, '17791873333');
@@ -252,7 +256,7 @@ const parsedLegacyRecovery = await parseBusinessImportWorkbook('recovery_orders'
   legacyRecoveryHeaders,
   [[
     '客户丁', '', 'wx_legacy', 'LEGACY-1', '旧课程', 800, '2026-07-24', '销售甲',
-    '', '', 1200, '', '', '', '', '', '', '',
+    '', '', 1200, '', '', '', '', '', '', '', '',
   ]],
 ));
 assert.equal((parsedLegacyRecovery[0] as RecoveryImportRow).originalAmount, 1200, '旧模板的“原付款金额”表头仍应可导入');
@@ -281,7 +285,7 @@ assert.deepEqual(parsedOrderPackage.images.map((image) => [image.rowNumber, imag
 
 const recoveryPackageWorkbook = await workbookBuffer('售后挽回订单导入模板', RECOVERY_IMPORT_HEADERS, [[
   '客户丁', '', 'wx-4', 'RCV-ZIP', '老产品', 299, '2026-07-24', '销售甲',
-  '', '', '', '', '', '', '', '', '', '凭证1.jpg;凭证2.png',
+  '', '', '', '', '', '', '', '', '', '', '凭证1.jpg;凭证2.png',
 ]]);
 const recoveryZip = new JSZip();
 recoveryZip.file('售后挽回.xlsx', recoveryPackageWorkbook);
@@ -333,8 +337,8 @@ const jobErrorBuffer = await createBusinessImportErrorWorkbook('recovery_orders'
 const jobErrorWorkbook = new ExcelJS.Workbook();
 await jobErrorWorkbook.xlsx.load(jobErrorBuffer);
 const jobErrorSheet = jobErrorWorkbook.getWorksheet('售后挽回订单导入错误报告')!;
-assert.equal(jobErrorSheet.getCell('T2').value, '失败');
-assert.equal(jobErrorSheet.getCell('U2').value, "'=PRIVATE_FAILURE");
+assert.equal(jobErrorSheet.getCell('U2').value, '失败');
+assert.equal(jobErrorSheet.getCell('V2').value, "'=PRIVATE_FAILURE");
 
 const downloadEvents: string[] = [];
 downloadBusinessImportWorkbook('错误报告.xlsx', new Uint8Array([1, 2, 3]).buffer, {

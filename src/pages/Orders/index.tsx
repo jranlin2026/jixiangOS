@@ -104,7 +104,7 @@ const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'orderType', label: '订单类型' },
   { id: 'actualAmount', label: '实付金额' },
   { id: 'officialPaymentChannel', label: '官方收款渠道' },
-  { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
+  { id: 'thirdPartyOrderNo', label: '平台订单号' },
   { id: 'resourceOwnership', label: '资源归属' },
   { id: 'owner', label: '销售负责人' },
   { id: 'createdByName', label: '订单创建人' },

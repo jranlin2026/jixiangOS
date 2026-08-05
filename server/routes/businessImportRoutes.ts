@@ -51,7 +51,7 @@ const ORDER_ROW_KEYS = [
 ] as const;
 const RECOVERY_ROW_KEYS = [
   ...COMMON_ROW_KEYS, 'originalProduct', 'sourcePlatform', 'sourceShop', 'originalAmount', 'recoveryAmount', 'recoveryAt',
-  'paymentAt', 'recoveryUserName', 'assistUserName', 'recoveryEvidenceFileNames', 'recoveryEvidenceAttachmentIds',
+  'originalPaymentAt', 'paymentAt', 'recoveryUserName', 'assistUserName', 'recoveryEvidenceFileNames', 'recoveryEvidenceAttachmentIds',
 ] as const;
 
 function optionalIds(value: unknown): string[] | undefined {
@@ -78,7 +78,8 @@ function rows(type: BusinessImportType, value: unknown): BusinessImportRow[] {
       paymentProofAttachmentIds: optionalIds(input.paymentProofAttachmentIds), dealEvidenceAttachmentIds: optionalIds(input.dealEvidenceAttachmentIds),
     } : {
       ...common, originalProduct: String(input.originalProduct || ''), sourcePlatform: String(input.sourcePlatform || ''), sourceShop: String(input.sourceShop || ''),
-      originalAmount: String(input.originalAmount || ''), recoveryAmount: String(input.recoveryAmount || ''), recoveryAt: String(input.recoveryAt || ''),
+      originalAmount: String(input.originalAmount || ''), originalPaymentAt: String(input.originalPaymentAt || ''),
+      recoveryAmount: String(input.recoveryAmount || ''), recoveryAt: String(input.recoveryAt || ''),
       paymentAt: String(input.paymentAt || ''), recoveryUserName: String(input.recoveryUserName || ''), assistUserName: String(input.assistUserName || ''),
       recoveryEvidenceFileNames: String(input.recoveryEvidenceFileNames || ''), recoveryEvidenceAttachmentIds: optionalIds(input.recoveryEvidenceAttachmentIds),
     } as BusinessImportRow;

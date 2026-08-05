@@ -1645,12 +1645,25 @@ function seedOrderPaymentFlow(prisma: FakePrisma, sourceOrder: Order, paymentId:
 {
   const prisma = new FakePrisma({ commissionStatus: '待确认' });
   const result = await createOrderCommandService(prisma as any, { now: () => new Date(NOW) })
-    .update('order-1', { thirdPartyOrderNo: 'TP-20260723-001', notes: '已核对平台单号' } as any, sales);
+    .update('order-1', {
+      sourcePlatformId: 'platform-douyin',
+      sourcePlatformName: '抖音',
+      sourceShopId: 'shop-01',
+      sourceShopName: '抖音小店01',
+      thirdPartyOrderNo: 'TP-20260723-001',
+      notes: '已核对平台单号',
+    } as any, sales);
 
   assert.equal(result.code, 0, result.message);
   assert.equal((result.data as any)?.thirdPartyOrderNo, 'TP-20260723-001');
+  assert.equal((result.data as any)?.sourcePlatformName, '抖音');
+  assert.equal((result.data as any)?.sourceShopName, '抖音小店01');
   assert.equal(result.data?.notes, '已核对平台单号');
   assert.deepEqual(result.data?.changeHistory?.[0].changes?.map((change) => change.field), [
+    'sourcePlatformId',
+    'sourcePlatformName',
+    'sourceShopId',
+    'sourceShopName',
     'thirdPartyOrderNo',
     'notes',
   ]);

@@ -142,13 +142,17 @@ function recoveryTime(value: unknown, fallback: string, referenceTime = fallback
   return parsed.toISOString();
 }
 
-function optionalPaymentTime(value: unknown, referenceTime = new Date().toISOString()): string | undefined {
+function optionalPaymentTime(
+  value: unknown,
+  referenceTime = new Date().toISOString(),
+  label = '付款时间',
+): string | undefined {
   const text = cleanText(value);
   if (!text) return undefined;
   const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) throw new RecoveryCommandError(400, '付款时间格式无效');
+  if (Number.isNaN(parsed.getTime())) throw new RecoveryCommandError(400, `${label}格式无效`);
   if (parsed.getTime() > new Date(referenceTime).getTime() + 5 * 60_000) {
-    throw new RecoveryCommandError(400, '付款时间不能晚于当前时间');
+    throw new RecoveryCommandError(400, `${label}不能晚于当前时间`);
   }
   return parsed.toISOString();
 }
@@ -301,6 +305,7 @@ function sameCreate(existing: RecoveryOrder, desired: RecoveryOrder, compareReco
     && (existing.originalProductId || '') === (desired.originalProductId || '')
     && (existing.originalProductLevel || '') === (desired.originalProductLevel || '')
     && Number(existing.originalAmount) === Number(desired.originalAmount)
+    && (existing.originalPaymentAt || '') === (desired.originalPaymentAt || '')
     && Number(existing.recoveryAmount) === Number(desired.recoveryAmount)
     && (!compareRecoveryAt || (existing.recoveryAt || existing.createdAt) === (desired.recoveryAt || desired.createdAt))
     && existing.recoveryUserId === desired.recoveryUserId
@@ -655,10 +660,10 @@ async function inspectRecoveryPayoutHistory(
 
 const RECOVERY_CORRECTION_LABELS: Record<keyof RecoveryOrderInput, string> = {
   customerName: '客户姓名', customerPhone: '客户手机号', customerWechat: '客户微信',
-  thirdPartyOrderNo: '第三方平台订单号', sourcePlatform: '来源平台', sourcePlatformId: '来源平台ID',
+  thirdPartyOrderNo: '平台订单号', sourcePlatform: '来源平台', sourcePlatformId: '来源平台ID',
   sourcePlatformName: '来源平台名称', sourceShopId: '来源店铺ID', sourceShopName: '来源店铺',
   originalProduct: '原产品', originalProductId: '原产品ID', originalProductLevel: '原产品等级',
-  originalAmount: '原付款金额', refundStatus: '退款状态', recoveryAmount: '挽回成交金额',
+  originalAmount: '原付款金额', originalPaymentAt: '原订单付款时间', refundStatus: '退款状态', recoveryAmount: '挽回成交金额',
   recoveryAt: '挽回成交时间', officialPaymentChannel: '官方收款渠道', paymentOrderNo: '付款订单号',
   paymentAt: '付款时间', paymentVoucher: '付款凭证', paymentVoucherName: '付款凭证名称',
   paymentVoucherPreview: '付款凭证预览', chatEvidence: '沟通凭证', chatEvidenceName: '沟通凭证名称',
@@ -810,7 +815,7 @@ function validateInput(
   if (contactFieldError) throw new RecoveryCommandError(400, contactFieldError);
   const phoneError = getPhoneNumberError(cleanText(input.customerPhone));
   if (phoneError) throw new RecoveryCommandError(400, phoneError);
-  if (!thirdPartyOrderNo) throw new RecoveryCommandError(400, '请填写第三方平台订单号');
+  if (!thirdPartyOrderNo) throw new RecoveryCommandError(400, '请填写平台订单号');
   if (!originalProduct) throw new RecoveryCommandError(400, '请填写原购买产品');
   if (amount(input.originalAmount) <= 0) throw new RecoveryCommandError(400, '原付款金额必须大于 0');
   if (recoveryAmount <= 0) throw new RecoveryCommandError(400, '挽回成交金额必须大于 0');
@@ -902,6 +907,7 @@ function buildCorrectedRecoveryOrder(
     originalProductId: cleanText(data.originalProductId) || undefined,
     originalProductLevel: cleanText(data.originalProductLevel) || undefined,
     originalAmount: validated.originalAmount,
+    originalPaymentAt: optionalPaymentTime(data.originalPaymentAt, changedAt, '原订单付款时间'),
     recoveryAmount: validated.recoveryAmount,
     recoveryAt: recoveryTime(data.recoveryAt, current.recoveryAt || current.createdAt, changedAt),
     officialPaymentChannel: officialPaymentChannel(data.officialPaymentChannel),
@@ -1117,7 +1123,7 @@ export function createRecoveryOrderCommandService(
       .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
       .find((order) => order.id !== current.id
         && normalizeOrderNo(order.thirdPartyOrderNo) === normalizeOrderNo(validated.thirdPartyOrderNo));
-    if (duplicate) throw new RecoveryCommandError(409, '该第三方平台订单号已经创建过售后挽回订单');
+    if (duplicate) throw new RecoveryCommandError(409, '该平台订单号已经创建过售后挽回订单');
     const changedAt = now().toISOString();
     let next = buildCorrectedRecoveryOrder(
       current,
@@ -1363,7 +1369,7 @@ export function createRecoveryOrderCommandService(
       if (contactFieldError) return failure(contactFieldError, 400);
       const phoneError = getPhoneNumberError(cleanText(input.customerPhone));
       if (phoneError) return failure(phoneError, 400);
-      if (!thirdPartyOrderNo) return failure('请填写第三方平台订单号', 400);
+      if (!thirdPartyOrderNo) return failure('请填写平台订单号', 400);
       if (!originalProduct) return failure('请填写原购买产品', 400);
       if (amount(input.originalAmount) <= 0) return failure('原付款金额必须大于 0', 400);
       if (recoveryAmount <= 0) return failure('挽回成交金额必须大于 0', 400);
@@ -1371,12 +1377,14 @@ export function createRecoveryOrderCommandService(
       let paymentChannel: OfficialPaymentChannel | undefined;
       let recoveryAt: string;
       let paymentAt: string | undefined;
+      let originalPaymentAt: string | undefined;
       const createdAt = now().toISOString();
       try {
         recoveryAttachments = resolveRecoveryAttachments(input);
         paymentChannel = officialPaymentChannel(input.officialPaymentChannel);
         recoveryAt = recoveryTime(input.recoveryAt, createdAt, createdAt);
         paymentAt = optionalPaymentTime(input.paymentAt, createdAt);
+        originalPaymentAt = optionalPaymentTime(input.originalPaymentAt, createdAt, '原订单付款时间');
       } catch (error) {
         if (error instanceof RecoveryCommandError) return failure(error.message, error.responseCode);
         throw error;
@@ -1424,6 +1432,7 @@ export function createRecoveryOrderCommandService(
         originalProductId: cleanText(input.originalProductId) || undefined,
         originalProductLevel: cleanText(input.originalProductLevel) || undefined,
         originalAmount: amount(input.originalAmount),
+        originalPaymentAt,
         recoveryAmount,
         recoveryAt,
         officialPaymentChannel: paymentChannel,
@@ -1474,7 +1483,7 @@ export function createRecoveryOrderCommandService(
             const desired = buildNext(duplicate.id);
             if (sameCreate(duplicate, desired, Boolean(cleanText(input.recoveryAt)))
               && (!imported || sameImportedIdentity(duplicate, imported.metadata))) return duplicate;
-            throw new RecoveryCommandError(409, '该第三方平台订单号已经创建过售后挽回订单');
+            throw new RecoveryCommandError(409, '该平台订单号已经创建过售后挽回订单');
           }
           const occupiedIds = new Set(rows.flatMap((row) => [row.recordId, parseObject<RecoveryOrder>(row.data, '售后挽回订单').id]));
           attemptedId = baseId;
@@ -1518,7 +1527,7 @@ export function createRecoveryOrderCommandService(
             if (sameCreate(existing, attemptedNext, Boolean(cleanText(input.recoveryAt)))
               && (!imported || sameImportedIdentity(existing, imported.metadata))) return success(publicRecoveryOrder(existing, actor));
           }
-          return failure('该第三方平台订单号已经创建过售后挽回订单', 409);
+          return failure('该平台订单号已经创建过售后挽回订单', 409);
         }
         throw error;
       }
@@ -1839,7 +1848,7 @@ export function createRecoveryOrderCommandService(
         const duplicate = rows
           .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
           .find((order) => order.id !== current.id && normalizeOrderNo(order.thirdPartyOrderNo) === normalizeOrderNo(validated.thirdPartyOrderNo));
-        if (duplicate) throw new RecoveryCommandError(409, '该第三方平台订单号已经创建过售后挽回订单');
+        if (duplicate) throw new RecoveryCommandError(409, '该平台订单号已经创建过售后挽回订单');
         const changedAt = now().toISOString();
         const resubmitted = isReturnedForChanges;
         const next: RecoveryOrder = {
@@ -1858,6 +1867,7 @@ export function createRecoveryOrderCommandService(
           originalProductId: cleanText(input.originalProductId) || current.originalProductId,
           originalProductLevel: cleanText(input.originalProductLevel) || current.originalProductLevel,
           originalAmount: validated.originalAmount,
+          originalPaymentAt: optionalPaymentTime(input.originalPaymentAt, changedAt, '原订单付款时间'),
           recoveryAmount: validated.recoveryAmount,
           recoveryAt: recoveryTime(input.recoveryAt, current.recoveryAt || current.createdAt, changedAt),
           officialPaymentChannel: officialPaymentChannel(input.officialPaymentChannel),

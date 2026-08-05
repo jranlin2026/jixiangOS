@@ -14,7 +14,7 @@ import {
 import type { Theme } from '@mui/material/styles';
 import useLeadStore from '../../store/useLeadStore';
 import type { Lead } from '../../types/lead';
-import type { LeadSourceConfig, User } from '../../types/settings';
+import type { AfterSalesSourceConfig, LeadSourceConfig, User } from '../../types/settings';
 import { leadFlowApi, settingsApi } from '../../api';
 import { RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -28,6 +28,7 @@ import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssign
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import BusinessSourceFields from '../../shared/components/BusinessSourceFields';
 
 interface LeadFormProps {
   open: boolean;
@@ -43,6 +44,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   const mobileFullScreen = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const isEdit = Boolean(lead);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
+  const [businessSourceConfigs, setBusinessSourceConfigs] = useState<AfterSalesSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [submitError, setSubmitError] = useState('');
@@ -92,6 +94,12 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     city: '',
     sourceType: '公司资源',
     remark: '',
+    sourcePlatformId: '',
+    sourcePlatformName: '',
+    sourceShopId: '',
+    sourceShopName: '',
+    platformOrderNo: '',
+    sourcePaymentAt: '',
   });
 
   useEffect(() => {
@@ -104,6 +112,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       }
       setSourceConfigs([]);
       void alert(res.message || '线索来源读取失败，请联系系统管理员。', '线索来源读取失败');
+    });
+    settingsApi.fetchAfterSalesSourceConfigs().then((res) => {
+      setBusinessSourceConfigs(res.code === 0 ? res.data : []);
     });
     settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
@@ -135,6 +146,12 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       city: lead?.city || '',
       sourceType: normalizeResourceOwnership(lead?.sourceType),
       remark: lead?.remark || '',
+      sourcePlatformId: lead?.sourcePlatformId || '',
+      sourcePlatformName: lead?.sourcePlatformName || '',
+      sourceShopId: lead?.sourceShopId || '',
+      sourceShopName: lead?.sourceShopName || '',
+      platformOrderNo: lead?.platformOrderNo || '',
+      sourcePaymentAt: lead?.sourcePaymentAt || '',
     });
   }, [open, lead, sourceOptions, users]);
 
@@ -182,6 +199,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       owner: effectiveOwner,
       assignedTo: effectiveOwner === '待分配' ? undefined : effectiveOwner,
       phone: normalizePhoneForStorage(form.phone),
+      sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : undefined,
       sourceType: normalizeResourceOwnership(form.sourceType),
       status: lead?.status || '新线索',
     };
@@ -297,7 +315,13 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
               )}
             </BusinessFormSection>
 
-            <BusinessFormSection step={3} solidStep title="补充信息" summary={form.remark ? '已填写备注' : '无备注'}>
+            <BusinessFormSection step={3} solidStep title="补充信息" summary={[form.sourcePlatformName, form.sourceShopName, form.platformOrderNo, form.remark ? '已填写备注' : ''].filter(Boolean).join(' / ') || '无补充信息'}>
+              <BusinessSourceFields
+                configs={businessSourceConfigs}
+                value={form}
+                includePaymentTime
+                onChange={(value) => setForm((current) => ({ ...current, ...value }))}
+              />
               <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
             </BusinessFormSection>
           </Box>

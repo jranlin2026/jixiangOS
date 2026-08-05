@@ -40,6 +40,7 @@ export type RecoveryImportRow = {
   sourceShop: string;
   paymentChannel: string;
   originalAmount: string | number;
+  originalPaymentAt?: string;
   recoveryAmount: string | number;
   recoveryAt: string;
   paymentOrderNo?: string;

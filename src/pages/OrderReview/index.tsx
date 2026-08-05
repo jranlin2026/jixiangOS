@@ -118,7 +118,7 @@ const REVIEW_COLUMNS: ReviewColumn[] = [
   { id: 'orderType', label: '订单类型' },
   { id: 'amount', label: '实付金额' },
   { id: 'officialPaymentChannel', label: '官方收款渠道' },
-  { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
+  { id: 'thirdPartyOrderNo', label: '平台订单号' },
   { id: 'resourceOwnership', label: '资源归属' },
   { id: 'owner', label: '销售负责人' },
   { id: 'applicantName', label: '订单创建人' },
@@ -1356,7 +1356,9 @@ const OrderReview: React.FC<OrderReviewProps> = ({
 
               <BusinessDetailSection step={3} title="订单信息" columns={2}>
                 <BusinessDetailField label="订单类型">{detailApplication.orderData.orderType || '-'}</BusinessDetailField>
-                <BusinessDetailField label="第三方平台订单">{detailApplication.orderData.thirdPartyOrderNo || '-'}</BusinessDetailField>
+                <BusinessDetailField label="来源平台">{detailApplication.orderData.sourcePlatformName || '-'}</BusinessDetailField>
+                <BusinessDetailField label="来源店铺">{detailApplication.orderData.sourceShopName || '-'}</BusinessDetailField>
+                <BusinessDetailField label="平台订单号">{detailApplication.orderData.thirdPartyOrderNo || '-'}</BusinessDetailField>
                 <BusinessDetailField label="正式订单号">{detailApplication.orderNo || '审核通过后生成'}</BusinessDetailField>
                 <BusinessDetailField label="备注信息" wide>
                   <Typography sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{detailApplication.orderData.notes || '-'}</Typography>
@@ -1364,8 +1366,8 @@ const OrderReview: React.FC<OrderReviewProps> = ({
                 {detailFormalOrder?.applicationId === detailApplication.id
                   && (detailFormalOrder.order.thirdPartyOrderNo || '') !== (detailApplication.orderData.thirdPartyOrderNo || '') ? (
                   <Alert severity="info" sx={{ gridColumn: '1 / -1' }}>
-                    提交审核时的第三方平台订单为“{detailApplication.orderData.thirdPartyOrderNo || '-'}”；
-                    正式订单当前第三方平台订单为“{detailFormalOrder.order.thirdPartyOrderNo || '-'}”。
+                    提交审核时的平台订单号为“{detailApplication.orderData.thirdPartyOrderNo || '-'}”；
+                    正式订单当前平台订单号为“{detailFormalOrder.order.thirdPartyOrderNo || '-'}”。
                   </Alert>
                 ) : null}
               </BusinessDetailSection>

@@ -93,12 +93,13 @@ const Settings: React.FC = () => {
     {
       key: 'leadCustomer',
       label: '客户设置',
-      description: '客户等级、生命周期、人工标签、线索来源和流转规则',
+      description: '客户等级、生命周期、来源归因和流转规则',
       tabs: [
         { label: '客户等级', permissionKey: PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS, component: <CustomerLevelConfigPage /> },
         { label: '客户生命周期', permissionKey: PERMISSION_KEYS.SETTINGS_LIFECYCLE, component: <LifecycleStatusConfigPage /> },
         { label: '客户标签', permissionKey: PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, component: <CustomerTagConfig /> },
         { label: '线索来源', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, component: <LeadSourceConfigPage /> },
+        { label: '业务平台与店铺', permissionKey: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES, component: <AfterSalesSourceConfigPage /> },
         { label: '线索流转', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, component: <LeadFlowConfigTab /> },
       ],
     },
@@ -108,14 +109,6 @@ const Settings: React.FC = () => {
       description: '客户成功自动分配规则',
       tabs: [
         { label: '客户成功分配', permissionKey: PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT, component: <DeliveryAssignmentConfig /> },
-      ],
-    },
-    {
-      key: 'afterSales',
-      label: '售后设置',
-      description: '售后挽回订单来源配置',
-      tabs: [
-        { label: '来源平台与店铺', permissionKey: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES, component: <AfterSalesSourceConfigPage /> },
       ],
     },
     {

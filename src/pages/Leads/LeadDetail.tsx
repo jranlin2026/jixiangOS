@@ -533,6 +533,10 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               {renderInfoRow('微信', 'wechat', canEditLockedContact || canCompleteContactField(currentLead.wechat))}
               {renderInfoRow('资源归属', 'sourceType')}
               {renderSourceRow()}
+              {renderStatusRow('来源平台', currentLead.sourcePlatformName || '-')}
+              {renderStatusRow('来源店铺', currentLead.sourceShopName || '-')}
+              {renderStatusRow('平台订单号', currentLead.platformOrderNo || '-')}
+              {renderStatusRow('付款时间', currentLead.sourcePaymentAt ? formatDate(currentLead.sourcePaymentAt, 'yyyy-MM-dd HH:mm') : '-')}
               {renderInfoRow('行业', 'industry')}
               {renderInfoRow('城市', 'city')}
               {renderInfoRow('线索录入人', 'inputBy', false)}

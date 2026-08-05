@@ -67,6 +67,8 @@ export interface RecoveryOrder extends Partial<BusinessImportMetadata> {
   originalProductId?: ID;
   originalProductLevel?: string;
   originalAmount: number;
+  /** 原订单实际付款时间，与本次挽回成交时间分开记录。 */
+  originalPaymentAt?: Timestamp;
   /** @deprecated 第一版不再做退款流程，保留仅兼容历史数据 */
   refundStatus?: string;
   recoveryAmount: number;
@@ -169,6 +171,8 @@ export interface RecoveryOrderInput {
   originalProductId?: ID;
   originalProductLevel?: string;
   originalAmount: number;
+  /** 原订单实际付款时间，与本次挽回成交时间分开记录。 */
+  originalPaymentAt?: Timestamp;
   /** @deprecated 第一版不再做退款流程，保留仅兼容历史数据 */
   refundStatus?: string;
   recoveryAmount: number;

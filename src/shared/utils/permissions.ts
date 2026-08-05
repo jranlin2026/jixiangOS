@@ -185,6 +185,7 @@ export const PERMISSION_KEYS = {
  */
 export function getPermissionLeafDisplayLabel(key: string): string {
   if (key === PERMISSION_KEYS.CUSTOMER_TRANSFER) return '转让客户';
+  if (key === PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES) return '业务平台与店铺';
   const labels = String(key || '').split('/');
   return labels[labels.length - 1] || key;
 }

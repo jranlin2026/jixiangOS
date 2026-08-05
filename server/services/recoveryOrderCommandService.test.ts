@@ -79,7 +79,8 @@ function input(overrides: Partial<RecoveryOrderInput> = {}): RecoveryOrderInput 
   return {
     customerName: '张三', thirdPartyOrderNo: 'TP-20260712-001', originalProduct: '899课程',
     originalProductId: 'product-899', originalProductLevel: '899',
-    originalAmount: 899, recoveryAmount: 2980, recoveryAt: '2026-07-12T15:30:00.000Z', recoveryUserId: creator.id,
+    originalAmount: 899, originalPaymentAt: '2026-07-10T09:30:00.000Z', recoveryAmount: 2980,
+    recoveryAt: '2026-07-12T15:30:00.000Z', recoveryUserId: creator.id,
     officialPaymentChannel: '对公银行转账', paymentOrderNo: 'PAY-20260712-001', paymentAt: '2026-07-12T15:20:00.000Z',
     recoveryUserName: '伪造姓名', customerWechat: 'zhangsan', createdBy: other.id, createdByName: other.name, ...overrides,
   };
@@ -1011,6 +1012,7 @@ assert.equal(created.data?.recoveryUserName, creator.name, '姓名必须从员�
 assert.equal(created.data?.recoveryAt, '2026-07-12T15:30:00.000Z', '挽回时间必须按提交值保存');
 assert.equal(created.data?.originalProductId, 'product-899');
 assert.equal(created.data?.originalProductLevel, '899', '原产品等级必须作为成交快照保存');
+assert.equal(created.data?.originalPaymentAt, '2026-07-10T09:30:00.000Z', '原订单付款时间必须与挽回时间分别保存');
 assert.equal(created.data?.officialPaymentChannel, '对公银行转账');
 assert.equal(created.data?.paymentOrderNo, 'PAY-20260712-001');
 assert.equal(created.data?.paymentAt, '2026-07-12T15:20:00.000Z');
@@ -1320,6 +1322,11 @@ const futurePaymentTime = await blindMatchService.create(input({
 }), creator);
 assert.equal(futurePaymentTime.code, 400, '付款时间不得晚于当前时间');
 assert.match(futurePaymentTime.message, /付款时间不能晚于当前时间/);
+const futureOriginalPaymentTime = await blindMatchService.create(input({
+  thirdPartyOrderNo: 'TP-FUTURE-ORIGINAL-PAYMENT', originalPaymentAt: '2026-07-12T19:00:00.000Z',
+}), creator);
+assert.equal(futureOriginalPaymentTime.code, 400, '原订单付款时间不得晚于当前时间');
+assert.match(futureOriginalPaymentTime.message, /原订单付款时间不能晚于当前时间/);
 const blindMatchedEdited = await blindMatchService.update(blindMatched.data!.id, input({
   thirdPartyOrderNo: 'TP-BLIND-MATCH', customerName: '售后修正称呼', customerPhone: '13800000001',
 }), reviewer);

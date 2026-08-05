@@ -18,13 +18,14 @@ import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import type { Customer, CustomerManageableUser } from '../../types/customer';
-import type { CustomerLevelConfig, LeadSourceConfig } from '../../types/settings';
+import type { AfterSalesSourceConfig, CustomerLevelConfig, LeadSourceConfig } from '../../types/settings';
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
 import useAuthStore from '../../store/useAuthStore';
+import BusinessSourceFields from '../../shared/components/BusinessSourceFields';
 
 interface CustomerFormProps {
   open: boolean;
@@ -49,6 +50,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   const [users, setUsers] = useState<CustomerManageableUser[]>([]);
   const [contributorUsers, setContributorUsers] = useState<CustomerManageableUser[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
+  const [businessSourceConfigs, setBusinessSourceConfigs] = useState<AfterSalesSourceConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -117,6 +119,12 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     originalSalesTransferBy: '',
     manualTagIds: [] as string[],
     remark: '',
+    sourcePlatformId: '',
+    sourcePlatformName: '',
+    sourceShopId: '',
+    sourceShopName: '',
+    platformOrderNo: '',
+    sourcePaymentAt: '',
   });
 
   useEffect(() => {
@@ -130,6 +138,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
+    });
+    settingsApi.fetchAfterSalesSourceConfigs().then((res) => {
+      setBusinessSourceConfigs(res.code === 0 ? res.data : []);
     });
     settingsApi.fetchCustomerLevelConfigs().then((res) => {
       if (res.code === 0) setCustomerLevelConfigs(res.data);
@@ -161,6 +172,12 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       originalSalesTransferBy: customer?.originalSalesTransferBy || '',
       manualTagIds: customer?.manualTagIds || [],
       remark: customer?.remark || '',
+      sourcePlatformId: customer?.sourcePlatformId || '',
+      sourcePlatformName: customer?.sourcePlatformName || '',
+      sourceShopId: customer?.sourceShopId || '',
+      sourceShopName: customer?.sourceShopName || '',
+      platformOrderNo: customer?.platformOrderNo || '',
+      sourcePaymentAt: customer?.sourcePaymentAt || '',
     });
   }, [open, customer, currentOwnerUser?.id, currentOwnerUser?.name, currentUser?.id, currentUser?.name, defaultOwner, sourceOptions]);
 
@@ -207,6 +224,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     const payload = {
       ...form,
       phone: normalizePhoneForStorage(form.phone),
+      sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : undefined,
       city: completeCityFromPhone(form.city, form.phone),
       manualTagIds: form.manualTagIds,
       sourceType: normalizeResourceOwnership(form.sourceType),
@@ -355,7 +373,13 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
               </TextField>
             </BusinessFormSection>
 
-            <BusinessFormSection step={3} solidStep title="补充信息" summary={form.remark ? '已填写备注' : '无备注'}>
+            <BusinessFormSection step={3} solidStep title="补充信息" summary={[form.sourcePlatformName, form.sourceShopName, form.platformOrderNo, form.remark ? '已填写备注' : ''].filter(Boolean).join(' / ') || '无补充信息'}>
+              <BusinessSourceFields
+                configs={businessSourceConfigs}
+                value={form}
+                includePaymentTime
+                onChange={(value) => setForm((current) => ({ ...current, ...value }))}
+              />
               <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
             </BusinessFormSection>
           </Box>

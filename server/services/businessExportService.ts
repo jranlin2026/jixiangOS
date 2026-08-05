@@ -41,7 +41,8 @@ const col = (id: string, label: string, type: BusinessExportColumn['type'] = 'te
 const ORDER_COLUMNS = [
   col('orderNo', '订单号'), col('settlementStatus', '分账状态'), col('customer', '客户'), col('productName', '产品名称'),
   col('productLevel', '产品等级'), col('orderType', '订单类型'), col('actualAmount', '实付金额', 'currency'),
-  col('officialPaymentChannel', '官方收款渠道'), col('thirdPartyOrderNo', '第三方平台订单'), col('resourceOwnership', '资源归属'),
+  col('officialPaymentChannel', '官方收款渠道'), col('sourcePlatformName', '来源平台'), col('sourceShopName', '来源店铺'),
+  col('thirdPartyOrderNo', '平台订单号'), col('resourceOwnership', '资源归属'),
   col('owner', '销售负责人'), col('createdByName', '订单创建人'), col('paymentDate', '付款时间', 'date'),
   col('leadInputBy', '线索录入人'), col('leadContributorName', '线索贡献人'), col('notes', '备注'), col('createdAt', '创建时间', 'date'),
 ];
@@ -54,14 +55,15 @@ const ORDER_ALL_COLUMNS = [
   col('updatedAt', '更新时间', 'date'),
 ];
 const ORDER_STANDARD_COLUMN_IDS = [
-  'orderNo', 'thirdPartyOrderNo', 'customer', 'customerPhone', 'customerWechat',
+  'orderNo', 'sourcePlatformName', 'sourceShopName', 'thirdPartyOrderNo', 'customer', 'customerPhone', 'customerWechat',
   'productName', 'productLevel', 'orderType', 'standardTotalAmount', 'actualAmount',
   'officialPaymentChannel', 'paymentDate', 'paymentOrderNo', 'owner', 'createdByName',
   'leadSourceFull', 'leadInputBy', 'leadContributorName', 'resourceOwnership', 'status',
   'refundStatus', 'refundAmount', 'refundReason', 'settlementStatus', 'notes', 'createdAt', 'updatedAt',
 ];
 const ORDER_SETTLEMENT_COLUMNS = [
-  col('orderNo', '订单号'), col('status', '分账状态'), col('customerName', '客户'), col('thirdPartyOrderNo', '第三方平台订单'),
+  col('orderNo', '订单号'), col('status', '分账状态'), col('customerName', '客户'), col('sourcePlatformName', '来源平台'),
+  col('sourceShopName', '来源店铺'), col('thirdPartyOrderNo', '平台订单号'),
   col('productName', '产品名称'), col('productLevel', '产品等级'), col('orderAmount', '实付金额', 'currency'),
   col('officialPaymentChannel', '官方收款渠道'), col('paymentDate', '付款时间', 'date'), col('salesOwner', '销售负责人'),
   col('createdByName', '订单创建人'), col('splitDetails', '分账明细'), col('totalCommissionAmount', '分账总额', 'currency'),
@@ -72,10 +74,10 @@ const ORDER_SETTLEMENT_COLUMNS = [
   col('confirmedAt', '确认时间', 'date'), col('paidAt', '发放时间', 'date'), col('withdrawReason', '撤回原因'),
 ];
 const RECOVERY_SETTLEMENT_COLUMNS = [
-  col('recoveryNo', '挽回订单号'), col('status', '分账状态'), col('customerName', '客户'), col('thirdPartyOrderNo', '第三方平台订单'),
+  col('recoveryNo', '挽回订单号'), col('status', '分账状态'), col('customerName', '客户'), col('thirdPartyOrderNo', '平台订单号'),
   col('sourcePlatformShop', '来源平台 / 店铺'), col('originalProduct', '原产品'), col('originalProductLevel', '原产品等级'),
-  col('originalAmount', '原付款金额', 'currency'), col('recoveryAmount', '挽回成交金额', 'currency'), col('officialPaymentChannel', '官方收款渠道'),
-  col('paymentAt', '付款时间', 'date'), col('recoveryUserName', '挽回人员'), col('createdByName', '订单创建人'), col('splitDetails', '分账明细'),
+  col('originalAmount', '原付款金额', 'currency'), col('originalPaymentAt', '原订单付款时间', 'date'), col('recoveryAmount', '挽回成交金额', 'currency'), col('officialPaymentChannel', '官方收款渠道'),
+  col('paymentAt', '历史挽回付款时间', 'date'), col('recoveryUserName', '挽回人员'), col('createdByName', '订单创建人'), col('splitDetails', '分账明细'),
   col('totalCommissionAmount', '分账总额', 'currency'), col('customerPhone', '手机号'), col('customerWechat', '微信'),
   col('customerMatchStatus', '客户匹配状态'), col('sourcePlatform', '来源平台'), col('sourceShop', '来源店铺'), col('paymentOrderNo', '付款订单号'),
   col('recoveryAt', '挽回成交时间', 'date'), col('assistUserName', '协助人员'), col('auditorName', '审核人'), col('auditedAt', '审核时间', 'date'),
@@ -85,8 +87,8 @@ const RECOVERY_SETTLEMENT_COLUMNS = [
 ];
 const RECOVERY_ORDER_COLUMNS = [
   col('recoveryNo', '挽回订单号'), col('status', '分账状态'), col('customerName', '客户'),
-  col('thirdPartyOrderNo', '第三方平台订单'), col('sourcePlatformShop', '来源平台 / 店铺'), col('originalProduct', '原产品'),
-  col('originalProductLevel', '原产品等级'), col('originalAmount', '原付款金额', 'currency'), col('recoveryAmount', '挽回成交金额', 'currency'),
+  col('thirdPartyOrderNo', '平台订单号'), col('sourcePlatformShop', '来源平台 / 店铺'), col('originalProduct', '原产品'),
+  col('originalProductLevel', '原产品等级'), col('originalAmount', '原付款金额', 'currency'), col('originalPaymentAt', '原订单付款时间', 'date'), col('recoveryAmount', '挽回成交金额', 'currency'),
   col('recoveryUserName', '挽回人员'), col('createdByName', '订单创建人'), col('recoveryAt', '挽回成交时间', 'date'),
   col('createdAt', '创建时间', 'date'), col('customerPhone', '手机号'), col('customerWechat', '微信'),
   col('customerMatchStatus', 'CRM识别状态'), col('sourcePlatformName', '来源平台'), col('sourceShopName', '来源店铺'),
@@ -102,7 +104,7 @@ const RECOVERY_ORDER_ALL_COLUMNS = [
 const RECOVERY_ORDER_STANDARD_COLUMN_IDS = [
   'recoveryNo', 'thirdPartyOrderNo', 'customerName', 'customerPhone', 'customerWechat',
   'customerMatchStatus', 'sourcePlatformName', 'sourceShopName', 'originalProduct', 'originalProductLevel',
-  'originalAmount', 'recoveryAmount', 'officialPaymentChannel', 'paymentOrderNo', 'paymentAt', 'recoveryAt',
+  'originalAmount', 'originalPaymentAt', 'recoveryAmount', 'officialPaymentChannel', 'paymentOrderNo', 'paymentAt', 'recoveryAt',
   'recoveryUserName', 'assistUserName', 'createdByName', 'auditStatus', 'auditorName', 'auditedAt',
   'auditReason', 'status', 'remark', 'createdAt', 'updatedAt',
 ];
@@ -407,7 +409,8 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
             customerWechat: canExportSensitiveContacts ? customer?.wechat : maskWechat(customer?.wechat),
             productName: order.productName || order.productLevel, productLevel: order.productLevel, orderType: order.orderType,
             standardTotalAmount: order.standardTotalAmount ?? order.amount, actualAmount: order.actualAmount,
-            officialPaymentChannel: order.officialPaymentChannel, thirdPartyOrderNo: order.thirdPartyOrderNo, resourceOwnership: order.resourceOwnership,
+            officialPaymentChannel: order.officialPaymentChannel, sourcePlatformName: order.sourcePlatformName,
+            sourceShopName: order.sourceShopName, thirdPartyOrderNo: order.thirdPartyOrderNo, resourceOwnership: order.resourceOwnership,
             owner: order.salesName || order.owner, createdByName: order.createdByName, paymentDate: latestPayment?.paidAt || order.createdAt,
             paymentOrderNo: latestPayment?.paymentOrderNo, status: order.status, refundStatus: order.refundStatus,
             refundAmount: order.refundAmount, refundReason: order.refundReason,
@@ -430,6 +433,7 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
               performanceAmount: processing.performanceAmount, pendingAssignCount: splits.filter((item) => item.owner === '待分配' || !item.ownerId).length,
               exceptionCount: processing.withdrawnCount, settlementOperator: processing.settlementOperator, confirmedAt: processing.confirmedAt, paidAt: processing.paidAt,
               withdrawReason: processing.withdrawReason, splitDetails: activeSplits.map((item) => `${item.role}：${item.owner || '-'} ${item.commissionAmount}`).join('；'),
+              sourcePlatformName: order.sourcePlatformName, sourceShopName: order.sourceShopName,
               thirdPartyOrderNo: order.thirdPartyOrderNo, officialPaymentChannel: order.officialPaymentChannel, createdByName: order.createdByName,
               leadSourceFull: formatLeadSourcePath(order), leadInputBy: order.leadInputBy, leadContributorName: order.leadContributorName,
               paymentOrderNo: latestPayment?.paymentOrderNo, notes: order.notes, createdAt: order.createdAt || splits[0]?.createdAt,
@@ -445,7 +449,8 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
               status: recoveryStatus(order),
               settlementStatus: recoveryStatus(order), auditStatus: order.status, customerName: order.customerName, thirdPartyOrderNo: order.thirdPartyOrderNo,
               sourcePlatformShop: [order.sourcePlatformName || order.sourcePlatform, order.sourceShopName].filter(Boolean).join(' / '),
-              originalProduct: order.originalProduct, originalProductLevel: order.originalProductLevel, originalAmount: order.originalAmount, recoveryAmount: order.recoveryAmount,
+              originalProduct: order.originalProduct, originalProductLevel: order.originalProductLevel, originalAmount: order.originalAmount,
+              originalPaymentAt: order.originalPaymentAt, recoveryAmount: order.recoveryAmount,
               officialPaymentChannel: order.officialPaymentChannel, paymentAt: order.paymentAt, recoveryUserName: order.recoveryUserName, createdByName: order.createdByName,
               totalCommissionAmount, performanceAmount,
               settlementHandledBy: order.settlementHandledBy, settlementConfirmedAt: order.settlementConfirmedAt, settlementPaidAt: order.settlementPaidAt,

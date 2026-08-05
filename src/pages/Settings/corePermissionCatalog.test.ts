@@ -14,6 +14,16 @@ function collectLeafKeys(nodes: ReturnType<typeof getCoreRolePermissionTree>): s
 const coreTree = getCoreRolePermissionTree();
 const coreLabels = coreTree.map((node) => node.label);
 const coreLeafKeys = new Set(collectLeafKeys(coreTree));
+const settingsTree = coreTree.find((node) => node.label === '系统设置');
+const customerSettingsTree = settingsTree?.children?.find((node) => node.label === '客户设置');
+const afterSalesSettingsTree = settingsTree?.children?.find((node) => node.label === '售后设置');
+
+assert.equal(
+  collectLeafKeys(customerSettingsTree ? [customerSettingsTree] : []).includes(PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES),
+  true,
+  '业务平台与店铺必须归入客户设置',
+);
+assert.equal(afterSalesSettingsTree, undefined, '来源平台与店铺迁移后不应继续保留空的售后设置分组');
 
 assert.deepEqual(coreLabels, [
   '线索',

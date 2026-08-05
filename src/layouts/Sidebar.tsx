@@ -231,6 +231,7 @@ const navItems: NavItem[] = [
           PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS,
           PERMISSION_KEYS.SETTINGS_LIFECYCLE,
           PERMISSION_KEYS.SETTINGS_LEAD_SOURCES,
+          PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES,
           PERMISSION_KEYS.SETTINGS_LEAD_FLOW,
         ],
       },
@@ -238,11 +239,6 @@ const navItems: NavItem[] = [
         label: '交付设置',
         path: `${ROUTES.SETTINGS}?group=delivery`,
         permissionKeys: [PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT],
-      },
-      {
-        label: '售后设置',
-        path: `${ROUTES.SETTINGS}?group=afterSales`,
-        permissionKeys: [PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES],
       },
       {
         label: '系统维护',

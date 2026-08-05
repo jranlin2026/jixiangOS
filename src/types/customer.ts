@@ -141,6 +141,13 @@ export interface Customer {
   sourceType?: string;
   sourceName?: string;
   sourceAccount?: string;
+  /** 首次来源交易快照；正式订单付款仍以订单资金记录为准。 */
+  sourcePlatformId?: ID;
+  sourcePlatformName?: string;
+  sourceShopId?: ID;
+  sourceShopName?: string;
+  platformOrderNo?: string;
+  sourcePaymentAt?: Timestamp;
   score?: number;
   deletedAt?: Timestamp;
   deletedBy?: string;

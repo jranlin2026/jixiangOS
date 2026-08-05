@@ -44,7 +44,7 @@ import type {
 import type { Customer } from '../../types/customer';
 import type { Order, OrderApplication, OrderCorrectionInput, OrderItemInput } from '../../types/order';
 import type { Product } from '../../types/product';
-import type { OrderTypeConfig, User } from '../../types/settings';
+import type { AfterSalesSourceConfig, OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import BusinessAttachmentPicker from '../../shared/components/BusinessAttachmentPicker';
 import { recognizePaymentProof as recognizePaymentProofFromOcr } from '../../shared/utils/paymentProofRecognition';
@@ -58,6 +58,7 @@ import { canonicalizeOrderItems } from '../../shared/utils/orderItems';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
 import CommissionCorrectionImpactDialog from '../../shared/components/CommissionCorrectionImpactDialog';
+import BusinessSourceFields from '../../shared/components/BusinessSourceFields';
 
 interface OrderFormProps {
   open: boolean;
@@ -204,6 +205,7 @@ const OrderForm: React.FC<OrderFormProps> = ({
   const currentUser = useAuthStore((state) => state.currentUser);
   const [products, setProducts] = useState<Product[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
+  const [businessSourceConfigs, setBusinessSourceConfigs] = useState<AfterSalesSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [applicantDepartmentName, setApplicantDepartmentName] = useState('');
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -249,6 +251,10 @@ const OrderForm: React.FC<OrderFormProps> = ({
     salesId: '',
     owner: '',
     thirdPartyOrderNo: '',
+    sourcePlatformId: '',
+    sourcePlatformName: '',
+    sourceShopId: '',
+    sourceShopName: '',
     notes: '',
     refundStatus: '无' as Order['refundStatus'],
     customerId: '',
@@ -293,7 +299,11 @@ const OrderForm: React.FC<OrderFormProps> = ({
         leadInputBy: customer?.leadInputBy || '',
         leadContributorId: customer?.leadContributorId || '',
         leadContributorName: customer?.leadContributorName || '',
-        thirdPartyOrderNo: '',
+        thirdPartyOrderNo: customer?.platformOrderNo || '',
+        sourcePlatformId: customer?.sourcePlatformId || '',
+        sourcePlatformName: customer?.sourcePlatformName || '',
+        sourceShopId: customer?.sourceShopId || '',
+        sourceShopName: customer?.sourceShopName || '',
         notes: '',
         refundStatus: '无',
         paymentDate: toDateTimeInputValue(new Date()),
@@ -358,6 +368,10 @@ const OrderForm: React.FC<OrderFormProps> = ({
       salesId: sourceOrder.salesId || '',
       owner: sourceOrder.owner,
       thirdPartyOrderNo: sourceOrder.thirdPartyOrderNo || '',
+      sourcePlatformId: sourceOrder.sourcePlatformId || '',
+      sourcePlatformName: sourceOrder.sourcePlatformName || '',
+      sourceShopId: sourceOrder.sourceShopId || '',
+      sourceShopName: sourceOrder.sourceShopName || '',
       notes: sourceOrder.notes || '',
       refundStatus: sourceOrder.refundStatus,
       paymentDate: toDateTimeInputValue(new Date(primaryPayment?.paidAt || order?.createdAt || application?.createdAt || new Date())),
@@ -392,7 +406,8 @@ const OrderForm: React.FC<OrderFormProps> = ({
       orderApi.fetchOwnerCandidates(),
       settingsApi.fetchOrderTypeConfigs(),
       settingsApi.fetchAssignableDirectory(),
-    ]).then(([userRes, orderTypeRes, directoryRes]) => {
+      settingsApi.fetchAfterSalesSourceConfigs(),
+    ]).then(([userRes, orderTypeRes, directoryRes, businessSourceRes]) => {
       if (userRes.code === 0) {
         const visibleUsers = filterUsersByCurrentDataScope(userRes.data, 'orders', currentUser || undefined);
         setUsers(visibleUsers);
@@ -419,6 +434,7 @@ const OrderForm: React.FC<OrderFormProps> = ({
       } else {
         setApplicantDepartmentName('');
       }
+      setBusinessSourceConfigs(businessSourceRes.code === 0 ? businessSourceRes.data : []);
     });
   }, [currentUser, open, order]);
 
@@ -531,6 +547,11 @@ const OrderForm: React.FC<OrderFormProps> = ({
       leadContributorId: selected?.leadContributorId || '',
       leadContributorName: selected?.leadContributorName || '',
       resourceOwnership: resourceOwnershipFromCustomer(selected, form.resourceOwnership),
+      sourcePlatformId: selected?.sourcePlatformId || '',
+      sourcePlatformName: selected?.sourcePlatformName || '',
+      sourceShopId: selected?.sourceShopId || '',
+      sourceShopName: selected?.sourceShopName || '',
+      thirdPartyOrderNo: selected?.platformOrderNo || '',
     });
     if (selected) {
       setCustomerSearch(getCustomerOptionLabel(selected));
@@ -729,6 +750,10 @@ const OrderForm: React.FC<OrderFormProps> = ({
             resourceOwnership: normalizeResourceOwnership(form.resourceOwnership),
             payments,
             thirdPartyOrderNo: form.thirdPartyOrderNo.trim() || undefined,
+            sourcePlatformId: form.sourcePlatformId || undefined,
+            sourcePlatformName: form.sourcePlatformName || undefined,
+            sourceShopId: form.sourceShopId || undefined,
+            sourceShopName: form.sourceShopName || undefined,
             notes: form.notes || undefined,
             dealEvidenceName: dealEvidenceName || undefined,
             dealEvidencePreview: dealEvidencePreview || undefined,
@@ -754,6 +779,10 @@ const OrderForm: React.FC<OrderFormProps> = ({
       } else if (order) {
         await update(order.id, {
           thirdPartyOrderNo: form.thirdPartyOrderNo.trim() || undefined,
+          sourcePlatformId: form.sourcePlatformId || undefined,
+          sourcePlatformName: form.sourcePlatformName || undefined,
+          sourceShopId: form.sourceShopId || undefined,
+          sourceShopName: form.sourceShopName || undefined,
           notes: form.notes || undefined,
           payments,
           dealEvidenceName: dealEvidenceName || undefined,
@@ -872,7 +901,7 @@ const OrderForm: React.FC<OrderFormProps> = ({
         )}
         {order && !correctionMode && (
           <Alert severity="info" sx={{ mb: 2 }}>
-            资料编辑可修改第三方平台订单、付款订单号、付款凭证、成交路径和备注，不会重算提成或交付。金额、产品、客户、销售负责人、收款渠道等请使用“订单更正”。
+            资料编辑可修改来源平台、来源店铺、平台订单号、付款订单号、付款凭证、成交路径和备注，不会重算提成或交付。金额、产品、客户、销售负责人、收款渠道等请使用“订单更正”。
           </Alert>
         )}
         {order && correctionMode && (
@@ -1063,13 +1092,31 @@ const OrderForm: React.FC<OrderFormProps> = ({
           </Box>
         </BusinessFormSection>
 
-        <BusinessFormSection step={3} solidStep title="订单信息" summary={[form.orderType, form.thirdPartyOrderNo].filter(Boolean).join(' / ') || '待填写'} errorCount={orderErrorCount}>
+        <BusinessFormSection step={3} solidStep title="订单信息" summary={[form.orderType, form.sourcePlatformName, form.sourceShopName, form.thirdPartyOrderNo].filter(Boolean).join(' / ') || '待填写'} errorCount={orderErrorCount}>
           <TextField select label="订单类型" value={form.orderType} onChange={handleChange('orderType')} fullWidth disabled={formalFieldLocked} required>
             {orderTypeOptions.map((item) => (
               <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
             ))}
           </TextField>
-          <TextField label="第三方平台订单" value={form.thirdPartyOrderNo} onChange={handleChange('thirdPartyOrderNo')} placeholder="填写第三方平台订单号或订单ID" fullWidth />
+          <BusinessSourceFields
+            configs={businessSourceConfigs}
+            value={{
+              sourcePlatformId: form.sourcePlatformId,
+              sourcePlatformName: form.sourcePlatformName,
+              sourceShopId: form.sourceShopId,
+              sourceShopName: form.sourceShopName,
+              platformOrderNo: form.thirdPartyOrderNo,
+            }}
+            platformOrderLabel="平台订单号"
+            onChange={(value) => setForm((current) => ({
+              ...current,
+              sourcePlatformId: value.sourcePlatformId,
+              sourcePlatformName: value.sourcePlatformName,
+              sourceShopId: value.sourceShopId,
+              sourceShopName: value.sourceShopName,
+              thirdPartyOrderNo: value.platformOrderNo,
+            }))}
+          />
           <TextField label="备注信息" value={form.notes} onChange={handleChange('notes')} placeholder="请输入订单补充说明（选填）" fullWidth multiline minRows={2} sx={{ gridColumn: '1 / -1' }} />
         </BusinessFormSection>
 

@@ -180,6 +180,11 @@ export interface Order extends Partial<BusinessImportMetadata> {
   originalOrderId?: ID;
   /** 外部平台的展示订单号，不参与提成冲销关系 */
   thirdPartyOrderNo?: string;
+  /** 成交来源平台与店铺快照，与正式收款渠道分开。 */
+  sourcePlatformId?: ID;
+  sourcePlatformName?: string;
+  sourceShopId?: ID;
+  sourceShopName?: string;
   /** 业绩核算基数，默认取 actualAmount */
   performanceBaseAmount?: number;
   commissionRuleId?: ID;

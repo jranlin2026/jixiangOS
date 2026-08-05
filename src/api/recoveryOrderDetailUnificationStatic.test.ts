@@ -8,11 +8,11 @@ const sharedDetailSource = read('src/shared/components/RecoveryOrderDetailConten
 const afterSalesSource = read('src/pages/AfterSales/RecoveryOrderTab.tsx');
 const financeSource = read('src/pages/Finance/RecoverySettlement.tsx');
 
-for (const section of ['客户信息', '原订单与来源', '挽回成交信息', '收款与凭证', '审核与系统记录']) {
+for (const section of ['客户信息', '原订单信息', '挽回成交信息', '审核与系统记录']) {
   assert.match(sharedDetailSource, new RegExp(section), `共享售后挽回资料必须包含“${section}”分区`);
 }
 
-for (const section of ['客户信息', '原订单与来源', '挽回成交信息', '收款与凭证', '审核与系统记录']) {
+for (const section of ['客户信息', '原订单信息', '挽回成交信息', '审核与系统记录']) {
   assert.match(afterSalesSource, new RegExp(section), `售后服务新版资料必须保留“${section}”分区`);
 }
 assert.match(financeSource, /<RecoveryOrderDetailContent/, '财务中心必须使用共享售后挽回资料');

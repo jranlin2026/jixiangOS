@@ -1049,6 +1049,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderInfoRow('微信', 'wechat', detailActions.actions.editProfile && (canEditLockedContact || canCompleteContactField(currentCustomer.wechat)))}
               {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
               {renderSourceRow()}
+              {renderStatusRow('来源平台', currentCustomer.sourcePlatformName || '-')}
+              {renderStatusRow('来源店铺', currentCustomer.sourceShopName || '-')}
+              {renderStatusRow('平台订单号', currentCustomer.platformOrderNo || '-')}
+              {renderStatusRow('付款时间', currentCustomer.sourcePaymentAt ? formatDate(currentCustomer.sourcePaymentAt, 'yyyy-MM-dd HH:mm') : '-')}
               {renderInfoRow('资源归属', 'sourceType', detailActions.actions.editAttribution)}
               {renderInfoRow('行业', 'industry', detailActions.actions.editProfile)}
               {renderInfoRow('城市', 'city', detailActions.actions.editProfile)}

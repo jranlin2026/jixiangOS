@@ -23,7 +23,7 @@ export const ORDER_IMPORT_HEADERS = [
 
 export const RECOVERY_IMPORT_HEADERS = [
   '客户姓名', '手机号', '微信', '第三方平台订单号', '原产品', '挽回成交金额', '挽回时间',
-  '挽回人员', '来源平台', '来源店铺', '原产品付款金额', '官方收款渠道', '付款订单号',
+  '挽回人员', '来源平台', '来源店铺', '原产品付款金额', '原订单付款时间', '官方收款渠道', '付款订单号',
   '付款时间', '协助人员', '订单创建人', '备注', '挽回凭证文件名',
 ] as const;
 
@@ -281,7 +281,7 @@ function rowValues(type: BusinessImportType, row?: BusinessImportRow): Array<str
   return [
     input.customerName, input.customerPhone, input.customerWechat, input.thirdPartyOrderNo, input.originalProduct,
     input.recoveryAmount, input.recoveryAt, input.recoveryUserName, input.sourcePlatform, input.sourceShop,
-    input.originalAmount, input.paymentChannel, input.paymentOrderNo, input.paymentAt, input.assistUserName,
+    input.originalAmount, input.originalPaymentAt || '', input.paymentChannel, input.paymentOrderNo, input.paymentAt, input.assistUserName,
     input.creatorName, input.remark, input.recoveryEvidenceFileNames,
   ].map(safeWorkbookValue);
 }
@@ -333,7 +333,8 @@ export async function createBusinessImportErrorWorkbook(
     sheet.getColumn(offset + 6).numFmt = '#,##0.00;[Red]-#,##0.00';
     sheet.getColumn(offset + 7).numFmt = 'yyyy-mm-dd hh:mm:ss';
     sheet.getColumn(offset + 11).numFmt = '#,##0.00;[Red]-#,##0.00';
-    sheet.getColumn(offset + 14).numFmt = 'yyyy-mm-dd hh:mm:ss';
+    sheet.getColumn(offset + 12).numFmt = 'yyyy-mm-dd hh:mm:ss';
+    sheet.getColumn(offset + 15).numFmt = 'yyyy-mm-dd hh:mm:ss';
   }
   return toArrayBuffer(await workbook.xlsx.writeBuffer());
 }
@@ -406,7 +407,7 @@ function isSafeNumericIdentifier(cell: Cell): boolean {
 }
 
 function assertTextCells(row: Row, rowNumber: number, headers: readonly string[], indexes: Map<string, number>): void {
-  const typedHeaders = new Set(['实付金额', '挽回成交金额', '原产品付款金额', '付款时间', '挽回时间']);
+  const typedHeaders = new Set(['实付金额', '挽回成交金额', '原产品付款金额', '原订单付款时间', '付款时间', '挽回时间']);
   for (const header of headers) {
     if (typedHeaders.has(header)) continue;
     const column = indexes.get(header);
@@ -555,6 +556,7 @@ export async function parseBusinessImportWorkbook(
       thirdPartyOrderNo: requireText('第三方平台订单号'), originalProduct: requireText('原产品'),
       recoveryAmount, recoveryAt: date('挽回时间', true), recoveryUserName: requireText('挽回人员'),
       sourcePlatform: read(row, '来源平台'), sourceShop: read(row, '来源店铺'), originalAmount,
+      originalPaymentAt: date('原订单付款时间', false),
       paymentChannel: read(row, '官方收款渠道'), paymentOrderNo: read(row, '付款订单号'), paymentAt: date('付款时间', false),
       assistUserName: read(row, '协助人员'), creatorName: read(row, '订单创建人'), remark: read(row, '备注'),
       recoveryEvidenceFileNames: read(row, '挽回凭证文件名'),
@@ -639,13 +641,14 @@ export async function createBusinessImportTemplateWorkbook(
     applyValidation(sheet, 8, 'D', optionColumns[3].values.length);
     applyValidation(sheet, 9, 'E', optionColumns[4].values.length);
     applyValidation(sheet, 10, 'F', optionColumns[5].values.length);
-    applyValidation(sheet, 12, 'C', optionColumns[2].values.length);
-    applyValidation(sheet, 15, 'D', optionColumns[3].values.length);
+    applyValidation(sheet, 13, 'C', optionColumns[2].values.length);
     applyValidation(sheet, 16, 'D', optionColumns[3].values.length);
+    applyValidation(sheet, 17, 'D', optionColumns[3].values.length);
     sheet.getColumn(6).numFmt = '#,##0.00;[Red]-#,##0.00';
     sheet.getColumn(7).numFmt = 'yyyy-mm-dd hh:mm:ss';
     sheet.getColumn(11).numFmt = '#,##0.00;[Red]-#,##0.00';
-    sheet.getColumn(14).numFmt = 'yyyy-mm-dd hh:mm:ss';
+    sheet.getColumn(12).numFmt = 'yyyy-mm-dd hh:mm:ss';
+    sheet.getColumn(15).numFmt = 'yyyy-mm-dd hh:mm:ss';
   }
 
   instructions.addRows([

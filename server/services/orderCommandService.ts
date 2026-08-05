@@ -118,6 +118,10 @@ const FINANCIAL_FIELDS = new Set([
 ]);
 const DIRECT_EDIT_FIELDS = new Set([
   'notes',
+  'sourcePlatformId',
+  'sourcePlatformName',
+  'sourceShopId',
+  'sourceShopName',
   'thirdPartyOrderNo',
   'payments',
   'dealEvidenceName',
@@ -126,7 +130,11 @@ const DIRECT_EDIT_FIELDS = new Set([
 ]);
 const EDIT_FIELD_LABELS: Record<string, string> = {
   notes: '备注',
-  thirdPartyOrderNo: '第三方平台订单号',
+  sourcePlatformId: '来源平台',
+  sourcePlatformName: '来源平台',
+  sourceShopId: '来源店铺',
+  sourceShopName: '来源店铺',
+  thirdPartyOrderNo: '平台订单号',
   payments: '付款订单号或付款凭证',
   dealEvidenceName: '成交路径附件名称',
   dealEvidencePreview: '成交路径附件',
@@ -142,6 +150,10 @@ const CORRECTION_INPUT_FIELDS = new Set([
   'actualAmount',
   'payments',
   'officialPaymentChannel',
+  'sourcePlatformId',
+  'sourcePlatformName',
+  'sourceShopId',
+  'sourceShopName',
   'thirdPartyOrderNo',
   'notes',
   'resourceOwnership',
@@ -167,7 +179,11 @@ const CORRECTION_FIELD_LABELS: Record<string, string> = {
   payments: '付款记录',
   officialPaymentChannel: '官方收款渠道',
   paymentMethod: '付款方式',
-  thirdPartyOrderNo: '第三方平台订单号',
+  sourcePlatformId: '来源平台',
+  sourcePlatformName: '来源平台',
+  sourceShopId: '来源店铺',
+  sourceShopName: '来源店铺',
+  thirdPartyOrderNo: '平台订单号',
   notes: '备注',
   resourceOwnership: '资源归属',
   leadSource: '线索来源',
@@ -620,6 +636,11 @@ async function buildCorrectedOrder(
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'thirdPartyOrderNo')) {
     next.thirdPartyOrderNo = String(patch.thirdPartyOrderNo || '').trim() || undefined;
+  }
+  for (const field of ['sourcePlatformId', 'sourcePlatformName', 'sourceShopId', 'sourceShopName'] as const) {
+    if (Object.prototype.hasOwnProperty.call(patch, field)) {
+      next[field] = String(patch[field] || '').trim() || undefined;
+    }
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'officialPaymentChannel')) {
     if (!OFFICIAL_PAYMENT_CHANNEL_VALUES.has(patch.officialPaymentChannel as OfficialPaymentChannel)) {
@@ -1643,6 +1664,18 @@ export function createOrderCommandService(
             const next: Order = {
               ...order,
               ...(changed.includes('notes') ? { notes: patch.notes } : {}),
+              ...(changed.includes('sourcePlatformId') ? {
+                sourcePlatformId: String(patch.sourcePlatformId || '').trim() || undefined,
+              } : {}),
+              ...(changed.includes('sourcePlatformName') ? {
+                sourcePlatformName: String(patch.sourcePlatformName || '').trim() || undefined,
+              } : {}),
+              ...(changed.includes('sourceShopId') ? {
+                sourceShopId: String(patch.sourceShopId || '').trim() || undefined,
+              } : {}),
+              ...(changed.includes('sourceShopName') ? {
+                sourceShopName: String(patch.sourceShopName || '').trim() || undefined,
+              } : {}),
               ...(changed.includes('thirdPartyOrderNo') ? {
                 thirdPartyOrderNo: String(patch.thirdPartyOrderNo || '').trim() || undefined,
               } : {}),

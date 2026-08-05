@@ -136,11 +136,11 @@ const emptyForm = {
   originalProductId: '',
   originalProductLevel: '',
   originalAmount: '',
+  originalPaymentAt: '',
   recoveryAmount: '',
   recoveryAt: toDateTimeInputValue(),
   officialPaymentChannel: '',
   paymentOrderNo: '',
-  paymentAt: '',
   recoveryAttachments: [] as BusinessAttachment[],
   recoveryUserId: '',
   assistUserId: '',
@@ -194,6 +194,7 @@ type RecoveryOrderColumnId =
   | 'originalProduct'
   | 'originalProductLevel'
   | 'originalAmount'
+  | 'originalPaymentAt'
   | 'recoveryAmount'
   | 'officialPaymentChannel'
   | 'paymentOrderNo'
@@ -219,11 +220,12 @@ const RECOVERY_ORDER_LIST_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryO
   { id: 'recoveryNo', label: '挽回订单号' },
   { id: 'status', label: '分账状态' },
   { id: 'customerName', label: '客户' },
-  { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
+  { id: 'thirdPartyOrderNo', label: '平台订单号' },
   { id: 'sourcePlatformShop', label: '来源平台 / 店铺' },
   { id: 'originalProduct', label: '原产品' },
   { id: 'originalProductLevel', label: '原产品等级' },
   { id: 'originalAmount', label: '原付款金额' },
+  { id: 'originalPaymentAt', label: '原订单付款时间' },
   { id: 'recoveryAmount', label: '挽回成交金额' },
   { id: 'recoveryUserName', label: '挽回人员' },
   { id: 'createdByName', label: '订单创建人' },
@@ -236,7 +238,7 @@ const RECOVERY_ORDER_LIST_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryO
   { id: 'sourceShopName', label: '来源店铺' },
   { id: 'officialPaymentChannel', label: '官方收款渠道' },
   { id: 'paymentOrderNo', label: '付款订单号' },
-  { id: 'paymentAt', label: '付款时间' },
+  { id: 'paymentAt', label: '挽回付款时间（历史）' },
   { id: 'assistUserName', label: '协助人员' },
   { id: 'remark', label: '备注' },
   { id: 'updatedAt', label: '更新时间' },
@@ -260,9 +262,10 @@ const RECOVERY_ORDER_REVIEW_COLUMNS: Array<TableViewColumnConfig & { id: Recover
   { id: 'auditorName', label: '审核人' },
   { id: 'auditedAt', label: '审核时间' },
   { id: 'auditReason', label: '退回 / 驳回原因' },
-  { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
+  { id: 'thirdPartyOrderNo', label: '平台订单号' },
   { id: 'sourcePlatformShop', label: '来源平台 / 店铺' },
   { id: 'originalAmount', label: '原付款金额' },
+  { id: 'originalPaymentAt', label: '原订单付款时间' },
   { id: 'customerPhone', label: '手机号' },
   { id: 'customerWechat', label: '微信' },
   { id: 'customerMatchStatus', label: 'CRM识别状态' },
@@ -270,7 +273,7 @@ const RECOVERY_ORDER_REVIEW_COLUMNS: Array<TableViewColumnConfig & { id: Recover
   { id: 'sourceShopName', label: '来源店铺' },
   { id: 'officialPaymentChannel', label: '官方收款渠道' },
   { id: 'paymentOrderNo', label: '付款订单号' },
-  { id: 'paymentAt', label: '付款时间' },
+  { id: 'paymentAt', label: '挽回付款时间（历史）' },
   { id: 'assistUserName', label: '协助人员' },
   { id: 'remark', label: '备注' },
   { id: 'updatedAt', label: '更新时间' },
@@ -611,11 +614,11 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
       originalProductId: detail.originalProductId || '',
       originalProductLevel: detail.originalProductLevel || '',
       originalAmount: String(detail.originalAmount || ''),
+      originalPaymentAt: detail.originalPaymentAt ? toDateTimeInputValue(detail.originalPaymentAt) : '',
       recoveryAmount: String(detail.recoveryAmount || ''),
       recoveryAt: toDateTimeInputValue(detail.recoveryAt || detail.createdAt),
       officialPaymentChannel: detail.officialPaymentChannel || '',
       paymentOrderNo: detail.paymentOrderNo || '',
-      paymentAt: detail.paymentAt ? toDateTimeInputValue(detail.paymentAt) : '',
       recoveryAttachments: getRecoveryEvidenceAttachments(detail),
       recoveryUserId: detail.recoveryUserId || '',
       assistUserId: detail.assistUserId || '',
@@ -676,11 +679,12 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
       originalProductId: form.originalProductId,
       originalProductLevel: form.originalProductLevel,
       originalAmount: Number(form.originalAmount) || 0,
+      originalPaymentAt: form.originalPaymentAt ? new Date(form.originalPaymentAt).toISOString() : undefined,
       recoveryAmount: Number(form.recoveryAmount) || 0,
       recoveryAt: form.recoveryAt ? new Date(form.recoveryAt).toISOString() : undefined,
       officialPaymentChannel: form.officialPaymentChannel as RecoveryOrderInput['officialPaymentChannel'],
       paymentOrderNo: form.paymentOrderNo,
-      paymentAt: form.paymentAt ? new Date(form.paymentAt).toISOString() : undefined,
+      paymentAt: editingOrder?.paymentAt || (form.recoveryAt ? new Date(form.recoveryAt).toISOString() : undefined),
       recoveryAttachments: form.recoveryAttachments,
       recoveryUserId: recoveryUser?.id || currentUser.id,
       recoveryUserName: recoveryUser?.name || currentUser.name,
@@ -868,6 +872,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
       }
       case 'originalAmount':
         return formatCurrency(row.originalAmount);
+      case 'originalPaymentAt':
+        return row.originalPaymentAt ? formatDate(row.originalPaymentAt, 'yyyy-MM-dd HH:mm') : '-';
       case 'recoveryAmount':
         return <Typography variant="body2" sx={{ fontWeight: 900, color: shell.green }}>{formatCurrency(row.recoveryAmount)}</Typography>;
       case 'recoveryUserName':
@@ -1334,7 +1340,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
             summary={[form.sourcePlatformName || form.sourcePlatform, form.sourceShopName, form.originalProduct, form.thirdPartyOrderNo].filter(Boolean).join(' / ') || '待填写原订单'}
             errorCount={originalOrderErrorCount}
           >
-            <TextField disabled={metadataOnly} label="第三方平台订单号" value={form.thirdPartyOrderNo} onChange={(event) => setForm({ ...form, thirdPartyOrderNo: event.target.value })} required />
+            <TextField disabled={metadataOnly} label="平台订单号" value={form.thirdPartyOrderNo} onChange={(event) => setForm({ ...form, thirdPartyOrderNo: event.target.value })} required />
             <TextField select label="来源平台" value={form.sourcePlatformId} onChange={(event) => {
               const platform = sourceConfigs.find((item) => item.id === event.target.value);
               setForm({ ...form, sourcePlatformId: platform?.id || '', sourcePlatformName: platform?.name || '', sourcePlatform: platform?.name || '', sourceShopId: '', sourceShopName: '' });
@@ -1363,6 +1369,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
               )}
             </TextField>
             <TextField disabled={metadataOnly} label="原付款金额" type="number" value={form.originalAmount} onChange={(event) => setForm({ ...form, originalAmount: event.target.value })} required inputProps={{ min: 0.01, step: 0.01 }} />
+            <TextField disabled={metadataOnly} label="原订单付款时间" type="datetime-local" value={form.originalPaymentAt} onChange={(event) => setForm({ ...form, originalPaymentAt: event.target.value })} InputLabelProps={{ shrink: true }} inputProps={{ step: 1, max: toDateTimeInputValue() }} />
           </BusinessFormSection>
 
           <BusinessFormSection
@@ -1372,8 +1379,13 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
             summary={Number(form.recoveryAmount) > 0 ? `挽回 ¥${Number(form.recoveryAmount).toLocaleString('zh-CN')} / ${activeUsers.find((user) => user.id === form.recoveryUserId)?.name || '待选择人员'}` : '待填写挽回信息'}
             errorCount={recoveryErrorCount}
           >
+            <TextField disabled={metadataOnly} select label="官方收款渠道" value={form.officialPaymentChannel} onChange={(event) => setForm({ ...form, officialPaymentChannel: event.target.value })}>
+              <MenuItem value="">未选择</MenuItem>
+              {OFFICIAL_PAYMENT_CHANNELS.map((channel) => <MenuItem key={channel.value} value={channel.value}>{channel.label}</MenuItem>)}
+            </TextField>
             <TextField disabled={metadataOnly} label="挽回成交金额" type="number" value={form.recoveryAmount} onChange={(event) => setForm({ ...form, recoveryAmount: event.target.value })} required />
             <TextField disabled={metadataOnly} label="挽回成交时间" type="datetime-local" value={form.recoveryAt} onChange={(event) => setForm({ ...form, recoveryAt: event.target.value })} required InputLabelProps={{ shrink: true }} inputProps={{ step: 1, max: toDateTimeInputValue() }} />
+            <TextField disabled={metadataOnly} label="挽回付款订单号" value={form.paymentOrderNo} onChange={(event) => setForm({ ...form, paymentOrderNo: event.target.value })} />
             <TextField disabled={metadataOnly} select label="挽回人员" value={form.recoveryUserId} onChange={(event) => setForm({ ...form, recoveryUserId: event.target.value })} required>
               {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
             </TextField>
@@ -1381,26 +1393,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
               <MenuItem value="">无</MenuItem>
               {activeUsers.filter((user) => user.id !== form.recoveryUserId).map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
             </TextField>
-          </BusinessFormSection>
-
-          <BusinessFormSection
-            step={4}
-            solidStep
-            title="收款与凭证"
-            summary={[form.officialPaymentChannel, form.paymentOrderNo, form.recoveryAttachments.length ? `${form.recoveryAttachments.length} 个凭证` : ''].filter(Boolean).join(' / ') || '待补充收款资料'}
-          >
-            <TextField disabled={metadataOnly} select label="官方收款渠道" value={form.officialPaymentChannel} onChange={(event) => setForm({ ...form, officialPaymentChannel: event.target.value })}>
-              <MenuItem value="">未选择</MenuItem>
-              {OFFICIAL_PAYMENT_CHANNELS.map((channel) => <MenuItem key={channel.value} value={channel.value}>{channel.label}</MenuItem>)}
-            </TextField>
-            <TextField label="付款订单号" value={form.paymentOrderNo} onChange={(event) => setForm({ ...form, paymentOrderNo: event.target.value })} />
-            <TextField disabled={metadataOnly} label="付款时间" type="datetime-local" value={form.paymentAt} onChange={(event) => setForm({ ...form, paymentAt: event.target.value })} InputLabelProps={{ shrink: true }} inputProps={{ step: 1, max: toDateTimeInputValue() }} />
             <Box sx={{ gridColumn: { md: '1 / -1' } }}>
               <BusinessAttachmentPicker title="挽回凭证" description="用于留存付款事实、成交确认和沟通过程，可多选、拖拽或直接粘贴。最多 8 张。" value={form.recoveryAttachments} onChange={(recoveryAttachments) => setForm((current) => ({ ...current, recoveryAttachments }))} category="recovery-payment-proof" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
             </Box>
-          </BusinessFormSection>
-
-          <BusinessFormSection step={5} solidStep title="补充信息" summary={form.remark ? '已填写备注' : '无备注'}>
             <TextField label="备注" value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} multiline minRows={3} sx={{ gridColumn: { md: '1 / -1' } }} />
           </BusinessFormSection>
           </Box>
@@ -1539,10 +1534,11 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
                 <DetailField label="CRM识别状态">{detailOrder.crmIdentityStatus || detailOrder.customerMatchStatus || '-'}</DetailField>
               </BusinessDetailSection>
 
-              <BusinessDetailSection step={2} title="原订单与来源" columns={2} summary={[detailOrder.sourcePlatformName || detailOrder.sourcePlatform, detailOrder.sourceShopName, detailOrder.originalProduct].filter(Boolean).join(' / ')}>
-                <DetailField label="第三方平台订单号">{detailOrder.thirdPartyOrderNo || '-'}</DetailField>
+              <BusinessDetailSection step={2} title="原订单信息" columns={2} summary={[detailOrder.sourcePlatformName || detailOrder.sourcePlatform, detailOrder.sourceShopName, detailOrder.originalProduct].filter(Boolean).join(' / ')}>
                 <DetailField label="来源平台">{detailOrder.sourcePlatformName || detailOrder.sourcePlatform || '-'}</DetailField>
                 <DetailField label="来源店铺">{detailOrder.sourceShopName || '-'}</DetailField>
+                <DetailField label="平台订单号">{detailOrder.thirdPartyOrderNo || '-'}</DetailField>
+                <DetailField label="原订单付款时间">{detailOrder.originalPaymentAt ? formatDate(detailOrder.originalPaymentAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</DetailField>
                 <DetailField label="原产品">{detailOrder.originalProduct}</DetailField>
                 <DetailField label="原产品等级">{(() => {
                   const level = detailOrder.originalProductLevel || productOptions.find((item) => item.name === detailOrder.originalProduct)?.level;
@@ -1552,17 +1548,12 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
               </BusinessDetailSection>
 
               <BusinessDetailSection step={3} title="挽回成交信息" columns={2} summary={`${formatCurrency(detailOrder.recoveryAmount)} / ${detailOrder.recoveryUserName || '未分配'}`}>
+                <DetailField label="官方收款渠道">{detailOrder.officialPaymentChannel || '-'}</DetailField>
                 <DetailField label="挽回成交金额"><Typography sx={{ fontWeight: 700, color: shell.green }}>{formatCurrency(detailOrder.recoveryAmount)}</Typography></DetailField>
                 <DetailField label="挽回成交时间">{formatDate(detailOrder.recoveryAt || detailOrder.createdAt, 'yyyy-MM-dd HH:mm:ss')}</DetailField>
+                <DetailField label="挽回付款订单号">{detailOrder.paymentOrderNo || '-'}</DetailField>
                 <DetailField label="挽回人员">{detailOrder.recoveryUserName}</DetailField>
                 <DetailField label="协助人员">{detailOrder.assistUserName || '-'}</DetailField>
-                <DetailField label="备注" wide><Typography sx={{ whiteSpace: 'pre-wrap' }}>{detailOrder.remark || '-'}</Typography></DetailField>
-              </BusinessDetailSection>
-
-              <BusinessDetailSection step={4} title="收款与凭证" columns={2} summary={[detailOrder.officialPaymentChannel, detailOrder.paymentOrderNo, getRecoveryEvidenceAttachments(detailOrder).length ? `${getRecoveryEvidenceAttachments(detailOrder).length} 个凭证` : ''].filter(Boolean).join(' / ') || '暂无收款资料'}>
-                <DetailField label="官方收款渠道">{detailOrder.officialPaymentChannel || '-'}</DetailField>
-                <DetailField label="付款订单号">{detailOrder.paymentOrderNo || '-'}</DetailField>
-                <DetailField label="付款时间">{detailOrder.paymentAt ? formatDate(detailOrder.paymentAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</DetailField>
                 <DetailField label="挽回凭证" wide>
                   {(() => {
                     const attachments = getRecoveryEvidenceAttachments(detailOrder);
@@ -1580,11 +1571,12 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
                     );
                   })()}
                 </DetailField>
+                <DetailField label="备注" wide><Typography sx={{ whiteSpace: 'pre-wrap' }}>{detailOrder.remark || '-'}</Typography></DetailField>
               </BusinessDetailSection>
 
               <Box ref={recoveryOperationSectionRef} sx={{ scrollMarginTop: 16 }}>
                 <BusinessDetailSection
-                  step={5}
+                  step={4}
                   title="审核与系统记录"
                   summary={canViewHistory ? `${detailOrder.changeHistory?.length || 0} 条记录` : '无查看权限'}
                   columns={1}

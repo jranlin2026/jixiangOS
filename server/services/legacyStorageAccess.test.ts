@@ -65,6 +65,36 @@ assert.equal(
   false,
   '新增线索权限不得修改线索来源配置',
 );
+for (const businessSourcePermission of [
+  PERMISSION_KEYS.LEADS_CREATE,
+  PERMISSION_KEYS.LEADS_EDIT,
+  PERMISSION_KEYS.CUSTOMER_CREATE,
+  PERMISSION_KEYS.CUSTOMER_EDIT,
+  PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE,
+  PERMISSION_KEYS.ORDER_CREATE,
+  PERMISSION_KEYS.CUSTOMER_CREATE_ORDER,
+  PERMISSION_KEYS.ORDER_EDIT,
+  PERMISSION_KEYS.ORDER_CORRECT,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT,
+]) {
+  const sourceSelector = {
+    ...user,
+    id: `user-business-source-${businessSourcePermission}`,
+    permissions: [{ module: businessSourcePermission, actions: ['read', 'write'] }],
+  };
+  assert.equal(
+    canAccessLegacyStorageKey(sourceSelector, STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS, 'read'),
+    true,
+    `可新建或编辑业务记录的员工必须能读取业务平台与店铺目录: ${businessSourcePermission}`,
+  );
+  assert.equal(
+    canAccessLegacyStorageKey(sourceSelector, STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS, 'write'),
+    false,
+    '业务表单只能选择平台与店铺，不得修改目录',
+  );
+}
 for (const leadReadPermission of [
   PERMISSION_KEYS.LEADS_LIST,
   PERMISSION_KEYS.LEADS_DETAIL,

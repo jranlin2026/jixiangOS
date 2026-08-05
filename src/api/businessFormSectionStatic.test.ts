@@ -19,7 +19,7 @@ assert.match(section, /setExpanded\(true\)/, '校验失败时应自动展开错�
 for (const step of [1, 2, 3, 4]) {
   assert.match(orderForm, new RegExp(`BusinessFormSection[\\s\\S]{0,120}step=\\{${step}\\}`), `订单表单缺少第 ${step} 段`);
 }
-for (const step of [1, 2, 3, 4, 5]) {
+for (const step of [1, 2, 3]) {
   assert.match(recoveryForm, new RegExp(`BusinessFormSection[\\s\\S]{0,120}step=\\{${step}\\}`), `售后挽回表单缺少第 ${step} 段`);
 }
 
@@ -35,10 +35,9 @@ assert.doesNotMatch(recoveryForm, /function RecoveryFormSection/);
 assert.match(recoveryForm, /title="客户信息"/);
 assert.match(recoveryForm, /title="原订单信息"/);
 assert.match(recoveryForm, /title="挽回成交信息"/);
-assert.match(recoveryForm, /title="收款与凭证"/);
-assert.match(recoveryForm, /title="补充信息"/);
+assert.doesNotMatch(recoveryForm, /title="收款与凭证"/);
 assert.match(recoveryForm, /<Dialog[\s\S]{0,100}open=\{open\}[\s\S]{0,180}maxWidth="md"/, '售后挽回表单应与订单申请使用相同宽度');
-assert.match(recoveryForm, /title="收款与凭证"[\s\S]*label="官方收款渠道"[\s\S]*BusinessAttachmentPicker[\s\S]*<\/BusinessFormSection>/);
+assert.match(recoveryForm, /title="挽回成交信息"[\s\S]*label="官方收款渠道"[\s\S]*BusinessAttachmentPicker[\s\S]*<\/BusinessFormSection>/);
 assert.match(recoveryForm, /submitAttempted/);
 
 console.log('business form section static tests passed');
