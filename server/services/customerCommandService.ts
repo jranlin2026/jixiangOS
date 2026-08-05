@@ -1801,7 +1801,7 @@ export function createCustomerCommandService(
           const customer: Customer = {
             id: customerId,
             name: lead.name,
-            company: lead.company || lead.name,
+            company: lead.company || '',
             phone: lead.phone,
             email: lead.email,
             wechat: lead.wechat,
@@ -2522,7 +2522,7 @@ export function createCustomerCommandService(
         const customer: Customer = {
           id: customerId,
           name: lead.name,
-          company: lead.company || lead.name,
+          company: lead.company || '',
           phone: normalizePhoneForStorage(lead.phone),
           email: lead.email,
           wechat: normalizedWechat(lead.wechat) || undefined,

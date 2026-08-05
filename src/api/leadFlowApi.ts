@@ -183,7 +183,7 @@ function upsertCustomerFromLead(
   const base: Customer = {
     id: customerId,
     name: lead.name,
-    company: lead.company || lead.name,
+    company: lead.company || '',
     phone: lead.phone,
     email: lead.email,
     wechat: lead.wechat,
@@ -235,7 +235,7 @@ function upsertCustomerFromLead(
   customers[idx] = {
     ...customers[idx],
     name: lead.name,
-    company: lead.company || lead.name,
+    company: lead.company || '',
     phone: lead.phone,
     email: lead.email,
     wechat: lead.wechat,

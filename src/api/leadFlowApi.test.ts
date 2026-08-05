@@ -443,7 +443,10 @@ storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
   lastAssignedIndex: -1,
   updatedAt: now,
 }));
-const autoClaimedIntake = leadFlowApi.intakeLead(createLeadInput('Auto Claimed Lead', { phone: '13900001007' }));
+const autoClaimedIntake = leadFlowApi.intakeLead(createLeadInput('Auto Claimed Lead', {
+  company: '',
+  phone: '13900001007',
+}));
 assert.equal(autoClaimedIntake.lead?.assignedTo, 'Sales A');
 assert.equal(autoClaimedIntake.lead?.owner, 'Sales A');
 assert.equal(autoClaimedIntake.lead?.lifecycleStatusCode, 'following');
@@ -451,6 +454,7 @@ assert.ok(autoClaimedIntake.lead?.customerId);
 const autoClaimedCustomers = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
 assert.equal(autoClaimedCustomers.length, 1);
 assert.equal(autoClaimedCustomers[0]?.owner, 'Sales A');
+assert.equal(autoClaimedCustomers[0]?.company, '');
 assert.equal(autoClaimedCustomers[0]?.phone, '+8613900001007');
 assert.equal(autoClaimedCustomers[0]?.lifecycleStatusCode, 'following');
 

@@ -2203,7 +2203,7 @@ for (const targetType of ['customer', 'lead'] as const) {
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.createLead({
     name: '自动领取线索',
-    company: '自动领取公司',
+    company: '',
     phone: '13900000033',
     source: '抖音',
     status: '新线索',
@@ -2219,6 +2219,7 @@ for (const targetType of ['customer', 'lead'] as const) {
   const next = fake.getState();
   const autoCustomer = next.businessRecords.find((row) => row.domain === STORAGE_KEYS.CUSTOMERS)?.data;
   assert.equal(autoCustomer?.id, result.data?.customerId);
+  assert.equal(autoCustomer?.company, '', '线索未填写公司时，客户公司必须保持为空');
   assert.equal(autoCustomer?.owner, '销售甲');
   assert.equal(autoCustomer?.originalSalesTransferBy, '销售甲');
   assert.deepEqual(autoCustomer?.manualTagIds, []);
