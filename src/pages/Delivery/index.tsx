@@ -295,10 +295,13 @@ const DeliveryPage: React.FC = () => {
       const [productsRes, levelsRes, usersRes, assignmentRes] = await Promise.all([
         productApi.getAllProducts(),
         productApi.getProductLevelConfigs(),
-        settingsApi.fetchUsers({ isActive: true }),
+        settingsApi.fetchAssignableUsers({ isActive: true }),
         deliveryAssignmentApi.getConfig(),
       ]);
-      if (usersRes.code === 0) {
+      if (usersRes.code !== 0) {
+        setUsers([]);
+        void alert(usersRes.message || '无法读取可分配员工，请检查当前角色权限。', '交付负责人加载失败');
+      } else {
         const activeUsers = usersRes.data.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
         const participantIds = assignmentRes.code === 0 && assignmentRes.data.participants.length
           ? new Set(assignmentRes.data.participants.filter((item) => !item.paused).map((item) => item.userId))
@@ -318,7 +321,7 @@ const DeliveryPage: React.FC = () => {
       setProductTypes(Array.from(productLevelSet));
     };
     loadOptions();
-  }, []);
+  }, [alert]);
 
   useEffect(() => {
     if (!selectedDelivery) {
@@ -571,6 +574,8 @@ const DeliveryPage: React.FC = () => {
       setAssignDelivery(null);
       await loadWorkbench(filters);
       await alert('分配成功');
+    } else {
+      await alert(res.message || '交付负责人保存失败', '分配失败');
     }
   };
 

@@ -6,6 +6,7 @@ import type { ApiResponse } from '../api/response';
 import type { PermissionRequirement } from '../middleware/auth';
 
 export const CUSTOMER_MANAGEABLE_USERS_PERMISSION_REQUIREMENTS: readonly PermissionRequirement[] = [
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_CREATE, action: 'write' },
   { permissionKey: PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, action: 'write' },
   { permissionKey: PERMISSION_KEYS.CUSTOMER_SET_TAGS, action: 'write' },
   { permissionKey: PERMISSION_KEYS.CUSTOMER_SET_TODOS, action: 'write' },
@@ -16,14 +17,27 @@ export const CUSTOMER_MANAGEABLE_USERS_PERMISSION_REQUIREMENTS: readonly Permiss
   { permissionKey: PERMISSION_KEYS.CUSTOMER_DELETE, action: 'delete' },
 ];
 
+export const CUSTOMER_CONTRIBUTOR_USERS_PERMISSION_REQUIREMENTS: readonly PermissionRequirement[] = [
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_CREATE, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION, action: 'write' },
+];
+
 type CustomerManageableUsersReader = {
   list(currentUser: AuthenticatedUser): Promise<ApiResponse<CustomerManageableUser[]>>;
+  listContributors(): Promise<ApiResponse<CustomerManageableUser[]>>;
 };
 
 export function createCustomerManageableUsersHandler(reader: CustomerManageableUsersReader): RequestHandler {
   return async (request, response) => {
     const currentUser = (request as typeof request & { currentUser: AuthenticatedUser }).currentUser;
     const result = await reader.list(currentUser);
+    response.status(result.code === 0 ? 200 : result.code).json(result);
+  };
+}
+
+export function createCustomerContributorUsersHandler(reader: CustomerManageableUsersReader): RequestHandler {
+  return async (_request, response) => {
+    const result = await reader.listContributors();
     response.status(result.code === 0 ? 200 : result.code).json(result);
   };
 }

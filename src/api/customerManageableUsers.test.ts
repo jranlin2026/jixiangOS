@@ -39,9 +39,14 @@ try {
   }) as typeof fetch;
 
   const result = await customerApi.fetchManageableUsers();
+  const contributors = await customerApi.fetchContributorUsers();
   assert.deepEqual(result.data, [{ id: 'user-actor', name: '当前用户', positionName: '销售' }]);
   assert.equal(result.data.some((user) => user.id === 'user-stale'), false, '本地过期人员不得合并进服务端专用目录');
-  assert.deepEqual(requests, ['http://127.0.0.1:3001/api/customers/manageable-users']);
+  assert.deepEqual(contributors.data, [{ id: 'user-actor', name: '当前用户', positionName: '销售' }]);
+  assert.deepEqual(requests, [
+    'http://127.0.0.1:3001/api/customers/manageable-users',
+    'http://127.0.0.1:3001/api/customers/contributor-users',
+  ]);
 } finally {
   clearBackendToken();
   globalThis.fetch = originalFetch;

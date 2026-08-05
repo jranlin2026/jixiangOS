@@ -26,14 +26,13 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import PersonIcon from '@mui/icons-material/Person';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
-import { departmentApi, leadFlowApi, roleApi, settingsApi } from '../../api';
+import { leadFlowApi, settingsApi } from '../../api';
 import type { LeadFlowConfig } from '../../types/lead';
 import type { Department } from '../../types/department';
-import type { Role } from '../../types/role';
 import type { User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
-import { getLeadReceiveEligibleUsers, NO_LEAD_FLOW_PARTICIPANTS_MARKER } from '../../shared/utils/leadAssignment';
+import { NO_LEAD_FLOW_PARTICIPANTS_MARKER } from '../../shared/utils/leadAssignment';
 import OperationFeedbackDialog, { type OperationFeedbackSeverity } from '../../shared/components/OperationFeedbackDialog';
 
 const LEAD_UNIQUE_KEY_MODE = 'phone_or_wechat' as const;
@@ -47,7 +46,6 @@ const LeadFlowConfigTab: React.FC = () => {
   const [config, setConfig] = useState<LeadFlowConfig | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
   const [feedback, setFeedback] = useState<{ severity: OperationFeedbackSeverity; message: string } | null>(null);
   const [participantDialogOpen, setParticipantDialogOpen] = useState(false);
   const [participantSearch, setParticipantSearch] = useState('');
@@ -57,22 +55,15 @@ const LeadFlowConfigTab: React.FC = () => {
     leadFlowApi.fetchLeadFlowConfig().then((res) => {
       if (res.code === 0) setConfig(res.data);
     });
-    Promise.all([
-      settingsApi.fetchUsers({ isActive: true }),
-      roleApi.getRoles({ isActive: true }),
-      departmentApi.getDepartments({ isActive: true }),
-    ]).then(([usersRes, rolesRes, departmentsRes]) => {
-      const activeRoles = rolesRes.code === 0 ? rolesRes.data.filter((role) => role.isActive) : [];
-      if (rolesRes.code === 0) setRoles(activeRoles);
-      if (usersRes.code === 0 && rolesRes.code === 0) {
-        setUsers(sortUsers(getLeadReceiveEligibleUsers(usersRes.data, activeRoles)));
-      } else {
-        setUsers([]);
-      }
-      if (departmentsRes.code === 0) {
-        const sortedDepartments = [...departmentsRes.data].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    settingsApi.fetchLeadFlowDirectory().then((directoryRes) => {
+      if (directoryRes.code === 0) {
+        setUsers(sortUsers(directoryRes.data.users));
+        const sortedDepartments = [...directoryRes.data.departments].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
         setDepartments(sortedDepartments);
         setExpandedDepartmentIds(new Set(sortedDepartments.filter((department) => !department.parentId).map((department) => department.id)));
+      } else {
+        setUsers([]);
+        setDepartments([]);
       }
     });
   }, []);
@@ -101,9 +92,7 @@ const LeadFlowConfigTab: React.FC = () => {
   };
 
   const getParticipantRoleLabel = (user: User) => (
-    roles.find((role) => role.id === user.roleId)?.name
-    || roles.find((role) => role.name === user.role)?.name
-    || user.role
+    user.role
     || user.positionName
     || ''
   );

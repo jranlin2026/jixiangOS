@@ -10,11 +10,77 @@ const commissionPayoutSource = readFileSync(join(projectRoot, 'src/pages/Finance
 const commissionRuleSource = readFileSync(join(projectRoot, 'src/pages/Commission/CommissionRuleConfig.tsx'), 'utf8');
 const recoverySettlementSource = readFileSync(join(projectRoot, 'src/pages/Finance/RecoverySettlement.tsx'), 'utf8');
 const assetsSource = readFileSync(join(projectRoot, 'src/pages/Assets/index.tsx'), 'utf8');
+const leadFlowConfigSource = readFileSync(join(projectRoot, 'src/pages/Leads/LeadFlowConfigTab.tsx'), 'utf8');
+const customerFormSource = readFileSync(join(projectRoot, 'src/pages/Customers/CustomerForm.tsx'), 'utf8');
 
 assert.match(
   deliverySource,
   /const canMutateDelivery\s*=\s*hasPermission\(currentUser,\s*PERMISSION_KEYS\.DELIVERY_MOVE_CARD,\s*'write'\)[\s\S]{0,120}PERMISSION_KEYS\.DELIVERY_STAGE_CONFIG,\s*'write'/,
   'Delivery mutations must require explicit delivery write permission.',
+);
+
+assert.match(
+  deliverySource,
+  /settingsApi\.fetchAssignableUsers\(\{ isActive: true \}\)/,
+  '交付负责人必须使用业务候选目录，不得依赖系统组织架构查看权限。',
+);
+assert.doesNotMatch(
+  deliverySource,
+  /settingsApi\.fetchUsers\(\{ isActive: true \}\)/,
+  '交付中心不得通过组织管理接口加载分配候选人。',
+);
+assert.match(
+  deliverySource,
+  /usersRes\.code !== 0[\s\S]{0,420}alert\([\s\S]{0,160}'交付负责人加载失败'/,
+  '交付候选人接口失败时必须弹窗告知，不得伪装成“只有待分配”。',
+);
+
+assert.match(
+  assetsSource,
+  /settingsApi\.fetchAssignableDirectory\(\)/,
+  '资产负责人与部门选项必须使用业务候选目录。',
+);
+assert.doesNotMatch(
+  assetsSource,
+  /settingsApi\.fetchUsers\(/,
+  '资产业务页不得依赖系统组织架构员工接口。',
+);
+
+assert.match(
+  leadFlowConfigSource,
+  /settingsApi\.fetchLeadFlowDirectory\(\)/,
+  '线索流转配置必须使用自己的业务目录。',
+);
+assert.doesNotMatch(
+  leadFlowConfigSource,
+  /settingsApi\.fetchUsers\(|roleApi\.getRoles\(|departmentApi\.getDepartments\(/,
+  '线索流转权限不得隐式依赖员工、角色或部门管理权限。',
+);
+assert.doesNotMatch(
+  assetsSource,
+  /departmentApi\.getDepartments\(/,
+  '资产业务页不得依赖系统组织架构部门接口。',
+);
+assert.match(
+  assetsSource,
+  /const canEditDevices\s*=\s*hasPermission\(currentUser, PERMISSION_KEYS\.ASSETS_DEVICES, 'write'\)[\s\S]{0,220}const canEditPhones[\s\S]{0,220}const canEditAccounts/,
+  '资产编辑必须校验明确的设备、手机号和账号写权限。',
+);
+assert.doesNotMatch(
+  assetsSource,
+  /const canEditAssets|hasPermission\(currentUser, PERMISSION_KEYS\.ASSETS, 'write'\)/,
+  '资产父权限会展开所有叶子，不能用作编辑门槛。',
+);
+
+assert.match(
+  customerFormSource,
+  /customerApi\.fetchManageableUsers\(\)/,
+  '新增或编辑客户必须使用客户数据范围内的可管理人员目录。',
+);
+assert.doesNotMatch(
+  customerFormSource,
+  /settingsApi\.fetchAssignableUsers|getScopedLeadAssignmentCandidates/,
+  '客户表单不得通过全公司候选目录扩大数据范围。',
 );
 
 [
@@ -219,14 +285,14 @@ assert.match(
 
 assert.match(
   assetsSource,
-  /const canEditAssets\s*=\s*hasPermission\(currentUser,\s*PERMISSION_KEYS\.ASSETS,\s*'write'\)/,
-  'Asset create and edit actions must require explicit asset write permission.',
+  /const canEditAssetType\s*=\s*\(type: AssetFormType\)[\s\S]{0,220}canEditDevices[\s\S]{0,220}canEditPhones[\s\S]{0,220}canEditAccounts/,
+  'Asset create and edit actions must require explicit device, phone, or account write permission.',
 );
 
 assert.match(
   assetsSource,
-  /const canDeleteAssets\s*=\s*canEditAssets\s*\|\|\s*hasPermission\(currentUser,\s*PERMISSION_KEYS\.ASSETS,\s*'delete'\)/,
-  'Asset deletion must require explicit asset write or delete permission.',
+  /const canDeleteAssetType\s*=\s*\(type: AssetFormType\)[\s\S]{0,360}PERMISSION_KEYS\.ASSETS_DEVICES[\s\S]{0,220}ASSETS_PHONES[\s\S]{0,220}ASSETS_ACCOUNTS/,
+  'Asset deletion must require the matching asset type write or delete permission.',
 );
 
 assert.match(
@@ -250,7 +316,7 @@ assert.match(
 ['openCreateForm', 'openEditForm', 'submitForm'].forEach((handlerName) => {
   assert.match(
     assetsSource,
-    new RegExp(`const ${handlerName}[\\s\\S]{0,300}if \\(!canEditAssets\\)`),
+    new RegExp(`const ${handlerName}[\\s\\S]{0,360}if \\(!canEditAssetType\\(`),
     `${handlerName} must fail closed without asset write permission.`,
   );
 });
@@ -258,7 +324,7 @@ assert.match(
 ['openDeleteConfirm', 'submitDelete'].forEach((handlerName) => {
   assert.match(
     assetsSource,
-    new RegExp(`const ${handlerName}[\\s\\S]{0,300}if \\(!canDeleteAssets\\)`),
+    new RegExp(`const ${handlerName}[\\s\\S]{0,360}if \\(!canDeleteAssetType\\(`),
     `${handlerName} must fail closed without asset delete permission.`,
   );
 });

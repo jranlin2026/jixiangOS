@@ -13,20 +13,18 @@ import {
 } from '@mui/material';
 import type { Theme } from '@mui/material/styles';
 import useCustomerStore from '../../store/useCustomerStore';
-import { leadFlowApi, settingsApi } from '../../api';
+import { customerApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
-import type { Customer } from '../../types/customer';
-import type { LeadFlowConfig } from '../../types/lead';
-import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
+import type { Customer, CustomerManageableUser } from '../../types/customer';
+import type { CustomerLevelConfig, LeadSourceConfig } from '../../types/settings';
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
-import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
-import useAuthStore from '../../store/useAuthStore';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
+import useAuthStore from '../../store/useAuthStore';
 
 interface CustomerFormProps {
   open: boolean;
@@ -48,8 +46,8 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   const currentUser = useAuthStore((state) => state.currentUser);
   const mobileFullScreen = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const isEdit = !!customer;
-  const [users, setUsers] = useState<User[]>([]);
-  const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
+  const [users, setUsers] = useState<CustomerManageableUser[]>([]);
+  const [contributorUsers, setContributorUsers] = useState<CustomerManageableUser[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [submitError, setSubmitError] = useState('');
@@ -83,11 +81,12 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     }));
   }), [childSources, parentSources]);
 
-  const defaultOwner = useMemo(() => getCurrentLeadInputName(users[0]?.name || ''), [users]);
-  const assignableUsers = useMemo(
-    () => getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'customers', currentUser),
-    [currentUser, leadFlowConfig, users],
+  const currentOwnerUser = users.find((user) => user.id === currentUser?.id);
+  const defaultOwner = useMemo(
+    () => getCurrentLeadInputName(currentUser?.name || currentOwnerUser?.name || ''),
+    [currentOwnerUser?.name, currentUser?.name],
   );
+  const assignableUsers = users;
   const customerLevelOptions = useMemo(() => {
     const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
     const options = activeConfigs.length
@@ -123,11 +122,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   useEffect(() => {
     if (!open) return;
 
-    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
-      if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
+    customerApi.fetchManageableUsers().then((res) => {
+      setUsers(res.code === 0 ? res.data : []);
     });
-    leadFlowApi.fetchLeadFlowConfig().then((res) => {
-      if (res.code === 0) setLeadFlowConfig(res.data);
+    customerApi.fetchContributorUsers().then((res) => {
+      setContributorUsers(res.code === 0 ? res.data : []);
     });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
@@ -141,8 +140,8 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     if (!open) return;
 
     const defaultSourceOption = sourceOptions[0];
-    const fallbackOwner = customer?.owner || assignableUsers[0]?.name || '';
-    const fallbackOwnerId = customer?.ownerId || assignableUsers.find((user) => user.name === fallbackOwner)?.id || '';
+    const fallbackOwner = customer?.owner || currentOwnerUser?.name || currentUser?.name || '';
+    const fallbackOwnerId = customer?.ownerId || currentOwnerUser?.id || currentUser?.id || '';
     setForm({
       name: customer?.name || '',
       company: customer?.company || '',
@@ -163,7 +162,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       manualTagIds: customer?.manualTagIds || [],
       remark: customer?.remark || '',
     });
-  }, [open, customer, assignableUsers, defaultOwner, sourceOptions]);
+  }, [open, customer, currentOwnerUser?.id, currentOwnerUser?.name, currentUser?.id, currentUser?.name, defaultOwner, sourceOptions]);
 
   const selectedSourceKey = sourceOptions.find((option) => (
     option.parentName === form.leadSource && option.childName === (form.sourceName || '')
@@ -182,7 +181,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   };
 
   const handleContributorSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const user = users.find((item) => item.id === e.target.value);
+    const user = contributorUsers.find((item) => item.id === e.target.value);
     setForm({
       ...form,
       leadContributorId: user?.id || '',
@@ -229,7 +228,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     }
   };
 
-  const userOptions = users.map((user) => (
+  const userOptions = contributorUsers.map((user) => (
     <MenuItem key={user.id} value={user.name}>
       {formatEmployeeNameWithPosition(user)}
     </MenuItem>
@@ -340,7 +339,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
                 fullWidth
               >
                 <MenuItem value="">无</MenuItem>
-                {users.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
+                {contributorUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
               </TextField>
               <TextField
                 select
@@ -349,7 +348,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
                 onChange={handleOwnerSelect}
                 required
                 fullWidth
-                helperText={assignableUsers.length ? '候选人来自线索流转参与成员，并按当前角色的数据范围过滤' : '暂无可选负责人，请检查线索流转配置'}
+                helperText={assignableUsers.length ? '候选人已按当前角色的客户数据范围过滤' : '当前客户数据范围内暂无可选负责人'}
               >
                 {assignableUsers.length === 0 && <MenuItem value="" disabled>当前角色数据范围内暂无可选负责人</MenuItem>}
                 {ownerOptions}
@@ -420,7 +419,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             error={missingContributor}
           >
             <MenuItem value="">无</MenuItem>
-            {users.map((user) => (
+            {contributorUsers.map((user) => (
               <MenuItem key={user.id} value={user.id}>
                 {formatEmployeeNameWithPosition(user)}
               </MenuItem>
@@ -433,7 +432,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             onChange={handleOwnerSelect}
             required
             fullWidth
-            helperText={assignableUsers.length ? '候选人来自线索流转参与成员，并按当前角色的数据范围过滤' : '暂无可选负责人，请检查线索流转参与成员或当前角色的数据范围'}
+            helperText={assignableUsers.length ? '候选人已按当前角色的客户数据范围过滤' : '当前客户数据范围内暂无可选负责人'}
           >
             {shouldShowCurrentOwnerOption && (
               <MenuItem value={form.ownerId}>
@@ -442,7 +441,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             )}
             {assignableUsers.length === 0 && (
               <MenuItem value="" disabled>
-                当前角色数据范围内暂无可选负责人，请检查数据范围或线索流转参与成员配置。
+                当前客户数据范围内暂无可选负责人。
               </MenuItem>
             )}
             {ownerOptions}

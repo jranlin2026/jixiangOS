@@ -21,6 +21,7 @@ import {
   POSITION_DEPARTMENT_SCOPES,
 } from '../../src/shared/utils/positionApplicability';
 import { normalizeRoleNameForComparison } from '../../src/shared/utils/roles';
+import { canReceiveLead } from '../../src/shared/utils/permissions';
 
 type SettingsPrisma = Pick<PrismaClient, 'user' | 'role' | 'department' | 'position' | 'authSession' | 'businessRecord' | 'leadRecord' | 'knowledgeVisibility' | 'employeePositionHistory'>;
 
@@ -278,6 +279,22 @@ export function createSettingsService(prisma: SettingsPrisma) {
         users: users.map(mapPrismaUser),
         departments: departments.map(mapPrismaDepartment),
         positions: positions.map(mapPrismaPosition),
+      });
+    },
+
+    async listLeadFlowDirectory() {
+      const [users, departments, roles] = await Promise.all([
+        prisma.user.findMany({
+          where: { isActive: true, employmentStatus: 'active' },
+          orderBy: { createdAt: 'asc' },
+        }),
+        prisma.department.findMany({ where: { isActive: true }, orderBy: { createdAt: 'asc' } }),
+        prisma.role.findMany({ where: { isActive: true }, orderBy: { createdAt: 'asc' } }),
+      ]);
+      const mappedRoles = roles.map(mapPrismaRole).map(mergeRoleWithDefaultAccess);
+      return success({
+        users: users.map(mapPrismaUser).filter((user) => canReceiveLead(user, mappedRoles)),
+        departments: departments.map(mapPrismaDepartment),
       });
     },
 

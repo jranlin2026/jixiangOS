@@ -102,8 +102,13 @@ assert.match(source, /const requireRoleDeleteAccess = createRequireAuth\(authSer
 assert.match(source, /const requireAiConfigReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_AI_CONFIG\);/);
 assert.match(source, /const requireAiConfigWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_AI_CONFIG, 'write'\);/);
 assert.match(source, /const requireDataMaintenanceDeleteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_DATA_MAINTENANCE, 'delete'\);/);
-assert.match(source, /const requireDeliveryAssignmentReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_DELIVERY_ASSIGNMENT\);/);
+assert.match(
+  source,
+  /const requireDeliveryAssignmentReadAccess = createRequireAnyPermission\(authService, \[\s*PERMISSION_KEYS\.SETTINGS_DELIVERY_ASSIGNMENT,\s*PERMISSION_KEYS\.DELIVERY_MOVE_CARD,\s*PERMISSION_KEYS\.DELIVERY_STAGE_CONFIG,\s*\]\);/,
+  '拥有交付分配操作权限的角色必须能读取交付分配参与人配置。',
+);
 assert.match(source, /const requireDeliveryAssignmentWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_DELIVERY_ASSIGNMENT, 'write'\);/);
+assert.match(source, /const requireLeadFlowDirectoryReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_LEAD_FLOW\);/);
 assert.match(source, /const requireOrderCreateWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_CREATE, 'write'\);/);
 assert.match(source, /const requireOrderReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_MANAGE\);/);
 assert.match(source, /const requireOrderApplicationReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_REVIEW_LIST\);/);
@@ -141,6 +146,7 @@ assert.match(
   '候选人接口必须通过 requireAny 校验用途权限',
 );
 assert.match(source, /app\.get\('\/api\/settings\/assignable-directory', requireAssignableUsersAccess,/);
+assert.match(source, /app\.get\('\/api\/settings\/lead-flow-directory', requireLeadFlowDirectoryReadAccess,/);
 assert.match(
   source,
   /app\.get\('\/api\/settings\/assignable-users', requireAssignableUsersAccess, async \(_req: express\.Request, res: express\.Response\) => \{\s*res\.json\(await settingsService\.listAssignableUsers\(\)\);\s*\}\);/,
@@ -152,10 +158,17 @@ const assignableUsersPermissionSource = source.slice(
 );
 for (const permissionKey of [
   'SETTINGS_DELIVERY_ASSIGNMENT',
+  'DELIVERY_MOVE_CARD',
+  'DELIVERY_STAGE_CONFIG',
   'LEADS_FLOW_CONFIG',
   'CUSTOMER_SET_TODOS',
   'CUSTOMER_TRANSFER',
   'AFTER_SALES_RECOVERY_CREATE',
+  'AFTER_SALES_RECOVERY_EDIT',
+  'AFTER_SALES_RECOVERY_CORRECT',
+  'ASSETS_DEVICES',
+  'ASSETS_PHONES',
+  'ASSETS_ACCOUNTS',
 ] as const) {
   assert.match(
     assignableUsersPermissionSource,
@@ -177,6 +190,14 @@ for (const customerOnlyPermission of [
     `客户专用叶子 ${customerOnlyPermission} 不得扩张共享候选目录的访问面`,
   );
 }
+assert.match(
+  assignableUsersPermissionSource,
+  /\{ permissionKey: PERMISSION_KEYS\.ASSETS_DEVICES, action: 'write' \}/,
+  '资产目录必须校验明确的资产编辑叶子，不得通过 ASSETS 父权限泛化放行。',
+);
+assert.doesNotMatch(assignableUsersPermissionSource, /PERMISSION_KEYS\.ASSETS[,}]/);
+assert.match(source, /const requireCustomerContributorUsersAccess = createRequireAnyPermission\([\s\S]{0,120}CUSTOMER_CONTRIBUTOR_USERS_PERMISSION_REQUIREMENTS/);
+assert.match(source, /app\.get\('\/api\/customers\/contributor-users', requireCustomerContributorUsersAccess,/);
 assert.match(source, /app\.get\('\/api\/settings\/delivery-assignment', requireDeliveryAssignmentReadAccess,/);
 assert.match(source, /app\.put\('\/api\/settings\/delivery-assignment', requireDeliveryAssignmentWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/settings\/users\/leave-customer-count', requireOrganizationReadAccess,/);

@@ -42,7 +42,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { assetApi } from '../../api';
-import { departmentApi, settingsApi } from '../../api';
+import { settingsApi } from '../../api';
 import useAssetStore from '../../store/useAssetStore';
 import {
   ModuleHeader,
@@ -469,8 +469,24 @@ const AssetManagement: React.FC = () => {
   } = useAssetStore();
   const canRevealSensitive = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW, 'read');
   const canImportExport = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write');
-  const canEditAssets = hasPermission(currentUser, PERMISSION_KEYS.ASSETS, 'write');
-  const canDeleteAssets = canEditAssets || hasPermission(currentUser, PERMISSION_KEYS.ASSETS, 'delete');
+  const canEditDevices = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_DEVICES, 'write');
+  const canEditPhones = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_PHONES, 'write');
+  const canEditAccounts = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'write');
+  const canEditAssetType = (type: AssetFormType) => (
+    type === 'device' ? canEditDevices : type === 'phone' ? canEditPhones : canEditAccounts
+  );
+  const canDeleteAssetType = (type: AssetFormType) => (
+    canEditAssetType(type)
+    || hasPermission(
+      currentUser,
+      type === 'device'
+        ? PERMISSION_KEYS.ASSETS_DEVICES
+        : type === 'phone'
+          ? PERMISSION_KEYS.ASSETS_PHONES
+          : PERMISSION_KEYS.ASSETS_ACCOUNTS,
+      'delete',
+    )
+  );
   const canHandleOffboarding = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'write');
   const canManageMatrixPublish = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
   const visibleTabs = useMemo(
@@ -558,11 +574,11 @@ const AssetManagement: React.FC = () => {
     assetApi.fetchInternetAccounts({ pageSize: ASSET_LOOKUP_PAGE_SIZE }).then((res) => {
       if (res.code === 0) setLookupAccounts(res.data.items);
     });
-    settingsApi.fetchUsers({ isActive: true, employmentStatus: 'active' }).then((res) => {
-      if (res.code === 0) setLookupUsers(res.data);
-    });
-    departmentApi.getDepartments({ isActive: true }).then((res) => {
-      if (res.code === 0) setLookupDepartments(res.data);
+    settingsApi.fetchAssignableDirectory().then((res) => {
+      if (res.code === 0) {
+        setLookupUsers(res.data.users);
+        setLookupDepartments(res.data.departments);
+      }
     });
     setPlatformOptions(assetApi.getAccountPlatformOptions());
   }, [fetchDashboard]);
@@ -617,12 +633,11 @@ const AssetManagement: React.FC = () => {
     if (deviceRes.code === 0) setLookupDevices(deviceRes.data.items);
     if (phoneRes.code === 0) setLookupPhones(phoneRes.data.items);
     if (accountRes.code === 0) setLookupAccounts(accountRes.data.items);
-    const [userRes, departmentRes] = await Promise.all([
-      settingsApi.fetchUsers({ isActive: true, employmentStatus: 'active' }),
-      departmentApi.getDepartments({ isActive: true }),
-    ]);
-    if (userRes.code === 0) setLookupUsers(userRes.data);
-    if (departmentRes.code === 0) setLookupDepartments(departmentRes.data);
+    const directoryRes = await settingsApi.fetchAssignableDirectory();
+    if (directoryRes.code === 0) {
+      setLookupUsers(directoryRes.data.users);
+      setLookupDepartments(directoryRes.data.departments);
+    }
     setPlatformOptions(assetApi.getAccountPlatformOptions());
   };
 
@@ -847,7 +862,7 @@ const AssetManagement: React.FC = () => {
   };
 
   const openCreateForm = (type: AssetFormType = defaultCreateType()) => {
-    if (!canEditAssets) {
+    if (!canEditAssetType(type)) {
       showFeedback('当前账号没有编辑资产权限');
       return;
     }
@@ -896,7 +911,7 @@ const AssetManagement: React.FC = () => {
   };
 
   const openEditForm = (type: AssetFormType, item: AssetDevice | AssetPhoneNumber | AssetInternetAccount) => {
-    if (!canEditAssets) {
+    if (!canEditAssetType(type)) {
       showFeedback('当前账号没有编辑资产权限');
       return;
     }
@@ -910,7 +925,7 @@ const AssetManagement: React.FC = () => {
   const closeForm = () => setFormState(emptyForm);
 
   const submitForm = async () => {
-    if (!canEditAssets) {
+    if (!canEditAssetType(formState.type)) {
       showFeedback('当前账号没有编辑资产权限');
       return;
     }
@@ -946,7 +961,7 @@ const AssetManagement: React.FC = () => {
   };
 
   const openDeleteConfirm = (type: AssetFormType, id: string, label: string) => {
-    if (!canDeleteAssets) {
+    if (!canDeleteAssetType(type)) {
       showFeedback('当前账号没有删除资产权限');
       return;
     }
@@ -957,7 +972,7 @@ const AssetManagement: React.FC = () => {
 
   const submitDelete = async () => {
     if (!deleteTarget) return;
-    if (!canDeleteAssets) {
+    if (!canDeleteAssetType(deleteTarget.type)) {
       showFeedback('当前账号没有删除资产权限');
       closeDeleteConfirm();
       return;
@@ -1524,14 +1539,14 @@ const AssetManagement: React.FC = () => {
               <TableCell align="center" sx={assetActionCellSx}>
                 <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
                 <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                {canEditAssets ? (
+                {canEditDevices ? (
                   <Tooltip title="编辑资料">
                     <IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('device', device); }}>
                       <EditIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
                 ) : null}
-                {canDeleteAssets ? (
+                {canDeleteAssetType('device') ? (
                   <Tooltip title="删除">
                     <IconButton
                       size="small"
@@ -1582,14 +1597,14 @@ const AssetManagement: React.FC = () => {
                 <TableCell align="center" sx={assetActionCellSx}>
                   <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
                   <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                  {canEditAssets ? (
+                  {canEditPhones ? (
                     <Tooltip title="编辑资料">
                       <IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('phone', phone); }}>
                         <EditIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
                   ) : null}
-                  {canDeleteAssets ? (
+                  {canDeleteAssetType('phone') ? (
                     <Tooltip title="删除">
                       <IconButton
                         size="small"
@@ -1640,8 +1655,8 @@ const AssetManagement: React.FC = () => {
                 <TableCell align="center" sx={assetActionCellSx}>
                   <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
                   <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                  {canEditAssets ? <Tooltip title="编辑资料"><IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('account', account); }}><EditIcon fontSize="small" /></IconButton></Tooltip> : null}
-                  {canDeleteAssets ? (
+                  {canEditAccounts ? <Tooltip title="编辑资料"><IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('account', account); }}><EditIcon fontSize="small" /></IconButton></Tooltip> : null}
+                  {canDeleteAssetType('account') ? (
                     <Tooltip title="删除">
                       <IconButton
                         size="small"
@@ -2201,7 +2216,7 @@ const AssetManagement: React.FC = () => {
           <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between" sx={{ px: 2.25, py: 1.5, borderBottom: `1px solid ${shell.softLine}` }}>
             <Typography sx={{ color: shell.ink, fontSize: 20, fontWeight: 950 }}>{detail ? detailTitleMap[detail.type] : '查看资产资料'}</Typography>
             <Stack direction="row" spacing={1} alignItems="center">
-              {canEditAssets && detail ? (
+              {detail && canEditAssetType(detail.type) ? (
                 <Button
                   size="small"
                   variant="contained"
@@ -2663,7 +2678,7 @@ const AssetManagement: React.FC = () => {
     };
     const title = formState.mode === 'edit' ? `编辑${formTypeLabel[formState.type]}` : `新增${formTypeLabel[formState.type]}`;
     return (
-      <Dialog open={formState.open && canEditAssets} onClose={closeForm} maxWidth="md" fullWidth>
+      <Dialog open={formState.open && canEditAssetType(formState.type)} onClose={closeForm} maxWidth="md" fullWidth>
         <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>
           {title}
         </DialogTitle>
@@ -2688,7 +2703,7 @@ const AssetManagement: React.FC = () => {
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 1.5 }}>
           <Button onClick={closeForm}>取消</Button>
-          {canEditAssets ? <Button variant="contained" onClick={submitForm}>保存</Button> : null}
+          {canEditAssetType(formState.type) ? <Button variant="contained" onClick={submitForm}>保存</Button> : null}
         </DialogActions>
       </Dialog>
     );
@@ -2742,7 +2757,7 @@ const AssetManagement: React.FC = () => {
                 创建发布任务
               </Button>
             ) : null}
-            {canEditAssets && isConfigurableAssetTab(activeTab) ? (
+            {isConfigurableAssetTab(activeTab) && canEditAssetType(ASSET_CREATE_TYPES[activeTab]) ? (
               <Button variant="contained" startIcon={<AddIcon />} onClick={() => openCreateForm(ASSET_CREATE_TYPES[activeTab])}>
                 {ASSET_CREATE_LABELS[activeTab]}
               </Button>
@@ -2760,7 +2775,7 @@ const AssetManagement: React.FC = () => {
       {renderMatrixPublishDialog()}
       {renderFormDialog()}
       {renderViewSettingsDialog()}
-      <Dialog open={Boolean(deleteTarget) && canDeleteAssets} onClose={closeDeleteConfirm} maxWidth="xs" fullWidth>
+      <Dialog open={Boolean(deleteTarget) && Boolean(deleteTarget && canDeleteAssetType(deleteTarget.type))} onClose={closeDeleteConfirm} maxWidth="xs" fullWidth>
         <DialogTitle>删除资产</DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 900, mb: 1 }}>
@@ -2772,7 +2787,7 @@ const AssetManagement: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={closeDeleteConfirm}>取消</Button>
-          {canDeleteAssets ? <Button color="error" variant="contained" onClick={submitDelete}>确认删除</Button> : null}
+          {deleteTarget && canDeleteAssetType(deleteTarget.type) ? <Button color="error" variant="contained" onClick={submitDelete}>确认删除</Button> : null}
         </DialogActions>
       </Dialog>
       {feedbackDialog}

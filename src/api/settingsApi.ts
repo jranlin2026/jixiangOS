@@ -19,6 +19,7 @@ import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { assetApi } from './assetApi';
 import { isPositionApplicableToDepartment, normalizePositionDepartmentScope } from '../shared/utils/positionApplicability';
+import { getLeadReceiveEligibleUsers } from '../shared/utils/leadAssignment';
 
 function ensureInit(): void {
   initializeMockData();
@@ -447,6 +448,20 @@ async function fetchAssignableDirectory(): Promise<ApiResponse<{ users: User[]; 
     users: ensureUsersWithAuth().filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active'),
     departments: organization.departments.filter((department) => department.isActive),
     positions: organization.positions.filter((position) => position.isActive),
+  });
+}
+
+async function fetchLeadFlowDirectory(): Promise<ApiResponse<{ users: User[]; departments: Department[] }>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest('/settings/lead-flow-directory');
+  }
+  const organization = ensureOrganizationConfigData();
+  return createSuccessResponse({
+    users: getLeadReceiveEligibleUsers(
+      ensureUsersWithAuth().filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active'),
+      organization.roles.filter((role) => role.isActive),
+    ),
+    departments: organization.departments.filter((department) => department.isActive),
   });
 }
 
@@ -1201,6 +1216,7 @@ export const settingsApi = {
   fetchUsers,
   fetchAssignableUsers,
   fetchAssignableDirectory,
+  fetchLeadFlowDirectory,
   fetchPositions,
   createPosition,
   updatePosition,

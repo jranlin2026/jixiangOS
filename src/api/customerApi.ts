@@ -376,6 +376,20 @@ async function fetchManageableUsers(): Promise<ApiResponse<CustomerManageableUse
   }]);
 }
 
+async function fetchContributorUsers(): Promise<ApiResponse<CustomerManageableUser[]>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<CustomerManageableUser[]>('/customers/contributor-users');
+  }
+  ensureInit();
+  return createSuccessResponse((getStorageData<any[]>(STORAGE_KEYS.USERS) || [])
+    .filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active')
+    .map((user) => ({
+      id: user.id,
+      name: user.name,
+      ...(user.positionName ? { positionName: user.positionName } : {}),
+    })));
+}
+
 async function fetchPublicPoolPreviousOwnerUsers(): Promise<ApiResponse<CustomerManageableUser[]>> {
   if (shouldUseBackendApi()) {
     const response = await backendRequest<string[]>('/customers/public-pool-previous-owners');
@@ -971,6 +985,7 @@ async function fetchAIPortrait(customerId: string): Promise<ApiResponse<AICustom
 
 export const customerApi = {
   fetchManageableUsers,
+  fetchContributorUsers,
   fetchPublicPoolPreviousOwnerUsers,
   fetchCustomerLeadSourceFacets,
   fetchCustomerTagFacets,

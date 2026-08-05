@@ -35,8 +35,9 @@ assert.doesNotMatch(flowConfigSource, /exemptionEnabled|orderMatchCustomerEnable
 assert.match(flowConfigSource, /participantDialogOpen/);
 assert.match(flowConfigSource, /添加成员/);
 assert.match(flowConfigSource, /选择成员/);
-assert.match(flowConfigSource, /departmentApi/);
-assert.match(flowConfigSource, /getLeadReceiveEligibleUsers/);
+assert.match(flowConfigSource, /settingsApi\.fetchLeadFlowDirectory\(\)/);
+assert.doesNotMatch(flowConfigSource, /departmentApi|roleApi\.getRoles|settingsApi\.fetchUsers/);
+assert.doesNotMatch(flowConfigSource, /getLeadReceiveEligibleUsers/);
 assert.match(flowConfigSource, /默认全体有领取权限的在职员工/);
 assert.match(flowConfigSource, /默认全公司在职、启用且拥有领取线索权限的员工参与分配/);
 assert.doesNotMatch(flowConfigSource, /默认全公司在职员工都可以参与分配/);

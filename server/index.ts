@@ -107,7 +107,9 @@ import { createRuntimeStorageGetHandler } from './routes/runtimeStorageRoutes';
 import { createDisabledCrmCustomerImportHandler } from './routes/crmMigrationRoutes';
 import { createCustomerFollowUpHandler } from './routes/customerFollowUpRoutes';
 import {
+  CUSTOMER_CONTRIBUTOR_USERS_PERMISSION_REQUIREMENTS,
   CUSTOMER_MANAGEABLE_USERS_PERMISSION_REQUIREMENTS,
+  createCustomerContributorUsersHandler,
   createCustomerManageableUsersHandler,
 } from './routes/customerManageableUsersRoutes';
 import { createCustomerBatchRouter } from './routes/customerBatchRoutes';
@@ -322,8 +324,13 @@ const requireAiConfigWriteAccess = createRequireAuth(authService, PERMISSION_KEY
 const requireDataMaintenanceDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'delete');
 const requireDataMaintenanceWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'write');
 const requireDataMaintenanceReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'read');
-const requireDeliveryAssignmentReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT);
+const requireDeliveryAssignmentReadAccess = createRequireAnyPermission(authService, [
+  PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT,
+  PERMISSION_KEYS.DELIVERY_MOVE_CARD,
+  PERMISSION_KEYS.DELIVERY_STAGE_CONFIG,
+]);
 const requireDeliveryAssignmentWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT, 'write');
+const requireLeadFlowDirectoryReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_LEAD_FLOW);
 const requireStorageAccess = createRequireAuth(authService);
 const requireCoCreationAccess = createRequireAuth(authService);
 const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
@@ -350,6 +357,10 @@ const requireCustomerDeleteAccess = createRequireAuth(authService, PERMISSION_KE
 const requireCustomerManageableUsersAccess = createRequireAnyPermission(
   authService,
   CUSTOMER_MANAGEABLE_USERS_PERMISSION_REQUIREMENTS,
+);
+const requireCustomerContributorUsersAccess = createRequireAnyPermission(
+  authService,
+  CUSTOMER_CONTRIBUTOR_USERS_PERMISSION_REQUIREMENTS,
 );
 const requireCustomerBatchManageAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE, 'write');
 const requireCustomerBatchReadAccess = createRequireAnyPermission(authService, [
@@ -395,6 +406,8 @@ const requireEnablementReview = createRequireAuth(authService, PERMISSION_KEYS.E
 const requireEnablementPublish = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_PUBLISH, 'write');
 const assignableUsersPermissions = [
   PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT,
+  PERMISSION_KEYS.DELIVERY_MOVE_CARD,
+  PERMISSION_KEYS.DELIVERY_STAGE_CONFIG,
   PERMISSION_KEYS.LEADS_FLOW_CONFIG,
   PERMISSION_KEYS.CUSTOMER_TRANSFER,
   PERMISSION_KEYS.CUSTOMER_SET_TODOS,
@@ -404,8 +417,13 @@ const assignableUsersPermissions = [
   PERMISSION_KEYS.FINANCE_RULES,
   PERMISSION_KEYS.AFTER_SALES_RECOVERY,
   PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT,
   PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST,
   PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+  { permissionKey: PERMISSION_KEYS.ASSETS_DEVICES, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.ASSETS_PHONES, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.ASSETS_ACCOUNTS, action: 'write' },
 ];
 const runtimeStorageKeys = [
   STORAGE_KEYS.DELIVERY_ASSIGNMENT_CONFIG,
@@ -705,6 +723,7 @@ app.use('/api/business-recycle-bin', createBusinessRecycleBinRouter({
 }));
 
 app.get('/api/customers/manageable-users', requireCustomerManageableUsersAccess, createCustomerManageableUsersHandler(customerManageableUsersService));
+app.get('/api/customers/contributor-users', requireCustomerContributorUsersAccess, createCustomerContributorUsersHandler(customerManageableUsersService));
 
 app.put('/api/customers/:id', requireCustomerUpdateAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerCommandService.updateCustomer(
@@ -1599,6 +1618,10 @@ app.get('/api/settings/assignable-users', requireAssignableUsersAccess, async (_
 
 app.get('/api/settings/assignable-directory', requireAssignableUsersAccess, async (_req: express.Request, res: express.Response) => {
   res.json(await settingsService.listAssignableDirectory());
+});
+
+app.get('/api/settings/lead-flow-directory', requireLeadFlowDirectoryReadAccess, async (_req: express.Request, res: express.Response) => {
+  res.json(await settingsService.listLeadFlowDirectory());
 });
 
 app.get('/api/settings/delivery-assignment', requireDeliveryAssignmentReadAccess, async (_req, res) => {

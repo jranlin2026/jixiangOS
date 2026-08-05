@@ -29,6 +29,7 @@ const userRow = (id: string, departmentId: string) => ({
 });
 
 let customerScope: 'self' | 'department' = 'self';
+let canTransfer = false;
 const directory = {
   user: { findMany: async () => [
     userRow('user-actor', 'dept-sales'),
@@ -43,7 +44,10 @@ const directory = {
     code: 'customer_profile',
     description: null,
     departmentId: null,
-    permissions: [{ module: PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, actions: ['write'] }],
+    permissions: [
+      { module: PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, actions: ['write'] },
+      ...(canTransfer ? [{ module: PERMISSION_KEYS.CUSTOMER_TRANSFER, actions: ['write'] }] : []),
+    ],
     dataScopes: { customers: customerScope },
     memberCount: 2,
     isActive: true,
@@ -85,11 +89,27 @@ assert.deepEqual(
 );
 
 customerScope = 'department';
+const createOnlyDepartmentResult = await createCustomerManageableUsersService(directory as any).list(actor);
+assert.deepEqual(
+  createOnlyDepartmentResult.data?.map((user) => user.id),
+  ['user-actor'],
+  '没有客户转移权限时，即使数据范围为本部门也只能把新客户分配给本人',
+);
+
+canTransfer = true;
 const departmentResult = await createCustomerManageableUsersService(directory as any).list(actor);
 assert.deepEqual(
   departmentResult.data?.map((user) => user.id),
   ['user-actor', 'user-peer', 'user-child'],
   '上级部门员工的本部门范围必须包含下级部门在职成员，且不受请求旧 departmentId 影响',
 );
+
+const contributorResult = await createCustomerManageableUsersService(directory as any).listContributors();
+assert.deepEqual(
+  contributorResult.data?.map((user) => user.id),
+  ['user-actor', 'user-peer', 'user-child', 'user-other-dept'],
+  '线索贡献人使用独立的在职人员最小目录，不应被客户负责人数据范围误缩小',
+);
+assert.deepEqual(Object.keys(contributorResult.data?.[0] || {}).sort(), ['id', 'name', 'positionName']);
 
 console.log('customer manageable users service tests passed');

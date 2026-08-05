@@ -3,6 +3,12 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const source = readFileSync(path.resolve('src/pages/Customers/index.tsx'), 'utf8');
+const formSource = readFileSync(path.resolve('src/pages/Customers/CustomerForm.tsx'), 'utf8');
+
+assert.match(formSource, /customerApi\.fetchManageableUsers\(\)/);
+assert.match(formSource, /customerApi\.fetchContributorUsers\(\)/);
+assert.doesNotMatch(formSource, /settingsApi\.fetchAssignableUsers|getScopedLeadAssignmentCandidates/);
+assert.match(formSource, /users\.find\(\(user\) => user\.id === currentUser\?\.id\)/);
 
 assert.match(
   source,

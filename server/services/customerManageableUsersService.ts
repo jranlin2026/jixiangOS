@@ -1,5 +1,6 @@
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { CustomerManageableUser } from '../../src/types/customer';
+import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import { success } from '../api/response';
 import { mapPrismaUser } from '../db/prismaMappers';
 import { loadCustomerAccessContext } from './customerAccessPolicy';
@@ -20,13 +21,34 @@ export function createCustomerManageableUsersService(directory: CustomerManageab
       });
       const users: CustomerManageableUser[] = rows
         .map(mapPrismaUser)
-        .filter((user) => customerAccess.manageableOwnerIds.has(user.id))
+        .filter((user) => (
+          user.id === currentUser.id
+          || (
+            customerAccess.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_TRANSFER)
+            && customerAccess.manageableOwnerIds.has(user.id)
+          )
+        ))
         .map((user) => ({
           id: user.id,
           name: user.name,
           ...(user.positionName ? { positionName: user.positionName } : {}),
         }));
       return success(users);
+    },
+
+    async listContributors() {
+      const rows = await directory.user.findMany({
+        where: { isActive: true, employmentStatus: 'active' },
+        orderBy: { createdAt: 'asc' },
+      });
+      return success<CustomerManageableUser[]>(rows
+        .map(mapPrismaUser)
+        .filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active')
+        .map((user) => ({
+          id: user.id,
+          name: user.name,
+          ...(user.positionName ? { positionName: user.positionName } : {}),
+        })));
     },
   };
 }

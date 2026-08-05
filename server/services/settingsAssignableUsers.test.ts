@@ -32,12 +32,25 @@ const users = [
   userRow('user-other-dept'),
   userRow('user-left', 'left'),
 ];
+const leadReceiverRole = {
+  id: 'role-lead-receiver',
+  name: '候选人',
+  code: 'lead_receiver',
+  description: null,
+  departmentId: null,
+  permissions: [{ module: 'leads.receive', actions: ['read'] }],
+  dataScopes: {},
+  memberCount: users.length,
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+};
 const directory = {
   user: { findMany: async ({ where }: any = {}) => users.filter((user) => (
     (where?.isActive === undefined || user.isActive === where.isActive)
     && (where?.employmentStatus === undefined || user.employmentStatus === where.employmentStatus)
   )) },
-  role: { findMany: async () => [] },
+  role: { findMany: async () => [leadReceiverRole] },
   department: { findMany: async () => [] },
   position: { findMany: async () => [] },
   authSession: { deleteMany: async () => ({ count: 0 }) },
@@ -62,5 +75,13 @@ assert.deepEqual(
   ['user-actor', 'user-peer', 'user-other-dept'],
   '共享 assignable-directory 同样不得被 customer scope 缩小',
 );
+
+const leadFlowDirectory = await service.listLeadFlowDirectory();
+assert.deepEqual(
+  leadFlowDirectory.data?.users.map((user) => user.id),
+  ['user-actor', 'user-peer', 'user-other-dept'],
+  '线索流转专用目录必须返回在职候选员工',
+);
+assert.deepEqual(leadFlowDirectory.data?.departments, []);
 
 console.log('shared assignable users tests passed');
