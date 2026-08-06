@@ -210,6 +210,11 @@ function isCurrentSessionSuperAdmin(): boolean {
   return isSuperAdminUser(user, getStorageData<Role[]>(STORAGE_KEYS.ROLES) || []);
 }
 
+function canCurrentSessionAssignRecoveryParticipants(): boolean {
+  return isCurrentSessionSuperAdmin()
+    || canUseDirectRecoveryPermission(PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
+}
+
 function canViewRecoveryOrder(order: RecoveryOrder, scopeDomain: NonNullable<RecoveryOrderFilters['scopeDomain']> = 'recoveryOrders'): boolean {
   const scope = getCurrentDataVisibilityScope(scopeDomain);
   if (scope.unrestricted) return true;
@@ -490,6 +495,14 @@ async function createRecoveryOrder(data: RecoveryOrderInput): Promise<ApiRespons
 
   const now = nowIso();
   const creator = getCurrentSessionUser();
+  const canAssignParticipants = canCurrentSessionAssignRecoveryParticipants();
+  const recoveryUser = canAssignParticipants
+    ? getUsers().find((item) => item.id === data.recoveryUserId && item.isActive)
+    : creator;
+  if (!recoveryUser) return createErrorResponse('挽回人员不存在或已停用');
+  const assistUser = canAssignParticipants && data.assistUserId
+    ? getUsers().find((item) => item.id === data.assistUserId && item.isActive)
+    : undefined;
   const next: RecoveryOrder = {
     ...data,
     createdBy: creator?.id || '',
@@ -516,6 +529,10 @@ async function createRecoveryOrder(data: RecoveryOrderInput): Promise<ApiRespons
     chatEvidence: data.chatEvidence,
     chatEvidenceName: data.chatEvidenceName,
     chatEvidencePreview: data.chatEvidencePreview,
+    recoveryUserId: recoveryUser.id,
+    recoveryUserName: recoveryUser.name,
+    assistUserId: assistUser?.id,
+    assistUserName: assistUser?.name || data.assistUserName?.trim() || undefined,
     status: '待审核',
     settlementStatus: '未分账',
     commissionIds: [],
@@ -573,8 +590,13 @@ async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promis
   }
 
   const now = nowIso();
-  const recoveryUser = getUsers().find((item) => item.id === data.recoveryUserId);
-  const assistUser = data.assistUserId ? getUsers().find((item) => item.id === data.assistUserId) : undefined;
+  const canAssignParticipants = canCurrentSessionAssignRecoveryParticipants();
+  const recoveryUser = canAssignParticipants
+    ? getUsers().find((item) => item.id === data.recoveryUserId)
+    : getUsers().find((item) => item.id === current.recoveryUserId);
+  const assistUser = canAssignParticipants && data.assistUserId
+    ? getUsers().find((item) => item.id === data.assistUserId)
+    : undefined;
   const nextStatus: RecoveryOrder['status'] = current.status === '退回修改'
     ? '待审核'
     : current.status;
@@ -604,10 +626,10 @@ async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promis
     recoveryAttachments: data.recoveryAttachments ?? current.recoveryAttachments,
     paymentAttachments: data.recoveryAttachments !== undefined ? undefined : (data.paymentAttachments ?? current.paymentAttachments),
     chatAttachments: data.recoveryAttachments !== undefined ? undefined : (data.chatAttachments ?? current.chatAttachments),
-    recoveryUserId: data.recoveryUserId,
-    recoveryUserName: recoveryUser?.name || data.recoveryUserName,
-    assistUserId: data.assistUserId,
-    assistUserName: assistUser?.name || data.assistUserName,
+    recoveryUserId: recoveryUser?.id || current.recoveryUserId,
+    recoveryUserName: recoveryUser?.name || current.recoveryUserName,
+    assistUserId: assistUser?.id,
+    assistUserName: assistUser?.name || data.assistUserName?.trim() || undefined,
     remark: data.remark,
     status: nextStatus,
     settlementStatus: nextStatus === '待审核' ? '未分账' : current.settlementStatus,

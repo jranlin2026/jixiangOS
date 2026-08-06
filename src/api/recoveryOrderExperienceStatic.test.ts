@@ -51,9 +51,6 @@ assert.match(createDialogSource, /title="挽回凭证"[\s\S]*?maxCount=\{8\}/);
 for (const section of ['客户信息', '原订单信息', '挽回成交信息']) {
   assert.match(createDialogSource, new RegExp(`title="${section}"`), `新建售后挽回单应包含“${section}”填写分区。`);
 }
-assert.match(createDialogSource, /只在后台按手机号和微信进行身份识别/);
-assert.match(createDialogSource, /不会向售后展示客户库资料/);
-assert.match(createDialogSource, /自动进入 CRM 待分配线索/);
 
 const detailDialogSource = recoveryOrderSource.slice(
   recoveryOrderSource.indexOf('<Dialog\n        open={Boolean(detailOrder)}'),

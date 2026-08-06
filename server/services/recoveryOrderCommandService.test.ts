@@ -399,7 +399,7 @@ for (const payout of [paidPayoutRecord(paidCommission), paidPayoutRecord(laterPa
 }
 const paidService = createRecoveryOrderCommandService(paidPrisma as any, { now: () => new Date(NOW) });
 const reviewerPaidPrecheck = await paidService.precheckCorrection(paidOrder.id, reviewer);
-assert.equal(reviewerPaidPrecheck.data?.allowed, false, '非超级管理员不得更正已发放售后挽回订单');
+assert.equal(reviewerPaidPrecheck.code, 403, '非超级管理员不得进入售后挽回订单更正');
 const adminPaidPrecheck = await paidService.precheckCorrection(paidOrder.id, superAdmin);
 assert.equal(adminPaidPrecheck.data?.allowed, true, adminPaidPrecheck.message);
 assert.equal(adminPaidPrecheck.data?.requiresImpactPreview, true, '已发放更正必须先做影响预览');
@@ -1366,8 +1366,19 @@ assert.equal(legacyReplayed.data?.id, legacyFirst.data?.id);
 const forgedAssignment = await service.create(input({
   thirdPartyOrderNo: 'TP-20260712-002', recoveryUserId: other.id, recoveryUserName: other.name,
 }), creator);
-assert.equal(forgedAssignment.code, 403, 'self scope 不得为其他人创建挪回单');
-assert.equal(prisma.records().length, 3);
+assert.equal(forgedAssignment.code, 0, forgedAssignment.message);
+assert.equal(forgedAssignment.data?.recoveryUserId, creator.id, '普通员工提交时必须由服务端锁定本人为挽回人员');
+assert.equal(forgedAssignment.data?.recoveryUserName, creator.name);
+
+const manualAssistant = await service.create(input({
+  thirdPartyOrderNo: 'TP-20260712-003',
+  assistUserId: other.id,
+  assistUserName: '外部协助人',
+}), creator);
+assert.equal(manualAssistant.code, 0, manualAssistant.message);
+assert.equal(manualAssistant.data?.assistUserId, undefined, '普通员工填写协助人员时不得关联或浏览公司员工目录');
+assert.equal(manualAssistant.data?.assistUserName, '外部协助人');
+assert.equal(prisma.records().length, 5);
 
 const updated = await service.update(created.data!.id, input({
   customerName: '张三（已核对）',
@@ -1424,9 +1435,19 @@ prisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, correctionCommissionId), {
   },
 });
 const correctionPrecheck = await service.precheckCorrection(created.data!.id, reviewer);
-assert.equal(correctionPrecheck.code, 0, correctionPrecheck.message);
-assert.equal(correctionPrecheck.data?.allowed, true);
-assert.equal(correctionPrecheck.data?.commissionCount, 1);
+assert.equal(correctionPrecheck.code, 403, '只有超级管理员可以进入售后挽回订单更正');
+const adminCorrectionPrecheck = await service.precheckCorrection(created.data!.id, superAdmin);
+assert.equal(adminCorrectionPrecheck.code, 0, adminCorrectionPrecheck.message);
+assert.equal(adminCorrectionPrecheck.data?.allowed, true);
+assert.equal(adminCorrectionPrecheck.data?.commissionCount, 1);
+const reviewerCorrection = await service.correct(created.data!.id, {
+  reason: '修正挽回成交金额',
+  data: input({
+    thirdPartyOrderNo: metadataEdited.data!.thirdPartyOrderNo,
+    recoveryAmount: 3180,
+  }),
+}, reviewer);
+assert.equal(reviewerCorrection.code, 403, '非超级管理员不得提交售后挽回订单更正');
 const corrected = await service.correct(created.data!.id, {
   reason: '修正挽回成交金额',
   data: input({
@@ -1442,7 +1463,7 @@ const corrected = await service.correct(created.data!.id, {
     recoveryUserId: metadataEdited.data!.recoveryUserId,
     paymentOrderNo: metadataEdited.data!.paymentOrderNo,
   }),
-}, reviewer);
+}, superAdmin);
 assert.equal(corrected.code, 0, corrected.message);
 assert.equal(corrected.data?.recoveryAmount, 3180);
 assert.equal(corrected.data?.settlementStatus, '待处理');
@@ -1486,8 +1507,9 @@ prisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, 'commission-source-linked-paid'), 
   },
 });
 const sourceLinkedPaidPrecheck = await service.precheckCorrection(sourceLinkedPaidSource.data!.id, reviewer);
-assert.equal(sourceLinkedPaidPrecheck.data?.allowed, false, '历史 sourceRecoveryOrderId 关联的已发放提成必须阻止更正');
-assert.equal(sourceLinkedPaidPrecheck.data?.reasonCode, 'payout_started');
+assert.equal(sourceLinkedPaidPrecheck.code, 403, '历史已发提成场景同样只允许超级管理员进入更正');
+const adminSourceLinkedPaidPrecheck = await service.precheckCorrection(sourceLinkedPaidSource.data!.id, superAdmin);
+assert.equal(adminSourceLinkedPaidPrecheck.data?.allowed, true, adminSourceLinkedPaidPrecheck.message);
 
 const paidSource = await service.create(input({ thirdPartyOrderNo: 'TP-PAID-CORRECTION-BLOCK' }), creator);
 assert.equal((await service.approve(paidSource.data!.id, reviewer)).code, 0);
@@ -1496,9 +1518,7 @@ const paidRow = prisma.rows.get(paidRowKey)!;
 paidRow.status = '已分账';
 paidRow.data = { ...paidRow.data, status: '已分账', settlementStatus: '已发放' };
 const paidPrecheck = await service.precheckCorrection(paidSource.data!.id, reviewer);
-assert.equal(paidPrecheck.code, 0);
-assert.equal(paidPrecheck.data?.allowed, false, '已发放售后分账必须阻止直接更正');
-assert.equal(paidPrecheck.data?.reasonCode, 'payout_started');
+assert.equal(paidPrecheck.code, 403, '已发放售后分账不得向非超级管理员开放更正');
 
 assert.equal(
   (await service.approve(oldRecord.id, staleReviewer)).code,

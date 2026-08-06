@@ -479,7 +479,6 @@ const RecoveryOrderCorrectionDialog: React.FC<RecoveryOrderCorrectionDialogProps
               summary={[form.sourcePlatformName || form.sourcePlatform, form.sourceShopName, form.originalProduct, form.thirdPartyOrderNo].filter(Boolean).join(' / ') || '待填写原订单'}
               errorCount={originalOrderErrorCount}
             >
-              <TextField label="平台订单号" value={form.thirdPartyOrderNo} onChange={(event) => setForm({ ...form, thirdPartyOrderNo: event.target.value })} required />
               <TextField select label="来源平台" value={form.sourcePlatformId} onChange={(event) => {
                 const platform = sourceConfigs.find((item) => item.id === event.target.value);
                 setForm({ ...form, sourcePlatformId: platform?.id || '', sourcePlatformName: platform?.name || '', sourcePlatform: platform?.name || '', sourceShopId: '', sourceShopName: '' });
@@ -494,6 +493,7 @@ const RecoveryOrderCorrectionDialog: React.FC<RecoveryOrderCorrectionDialogProps
                 <MenuItem value="">未选择</MenuItem>
                 {shopOptions.map((shop) => <MenuItem key={shop.id} value={shop.id}>{shop.name}{shop.isActive ? '' : '（已停用）'}</MenuItem>)}
               </TextField>
+              <TextField label="平台订单号" value={form.thirdPartyOrderNo} onChange={(event) => setForm({ ...form, thirdPartyOrderNo: event.target.value })} required />
               <TextField select label="原购买产品" value={form.originalProduct} onChange={(event) => handleProductChange(event.target.value)} required>
                 {productOptions.map((product) => (
                   <MenuItem key={product.id} value={product.name}>

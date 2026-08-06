@@ -113,6 +113,36 @@ function cleanText(value: unknown): string {
   return String(value || '').trim();
 }
 
+function canAssignRecoveryParticipants(actor: AuthenticatedUser): boolean {
+  return isSuperAdmin(actor)
+    || hasPermission(actor, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
+}
+
+function resolveRecoveryParticipants(
+  input: RecoveryOrderInput,
+  actor: AuthenticatedUser,
+  directory: Directory,
+  scope: DataVisibilityScope,
+  lockedRecoveryUserId?: string,
+): { recoveryUser: User; assistUser?: User; assistUserName?: string } {
+  const canAssign = canAssignRecoveryParticipants(actor);
+  const recoveryUserId = canAssign ? input.recoveryUserId : (lockedRecoveryUserId || actor.id);
+  const recoveryUser = directory.users.find((user) => user.id === recoveryUserId && activeUser(user));
+  if (!recoveryUser) throw new RecoveryCommandError(400, '挽回人员不存在或已停用');
+  if (!canAssign && !scope.unrestricted && !scope.visibleUserIds.includes(recoveryUser.id)) {
+    throw new RecoveryCommandError(403, '无权为该员工维护售后挽回订单');
+  }
+
+  const assistUser = canAssign && input.assistUserId
+    ? directory.users.find((user) => user.id === input.assistUserId && activeUser(user))
+    : undefined;
+  if (canAssign && input.assistUserId && !assistUser) {
+    throw new RecoveryCommandError(400, '协助人员不存在或已停用');
+  }
+  const assistUserName = assistUser?.name || cleanText(input.assistUserName) || undefined;
+  return { recoveryUser, assistUser, assistUserName };
+}
+
 function recoveryContactFieldError(input: Pick<RecoveryOrderInput, 'customerName' | 'customerPhone' | 'customerWechat'>): string {
   if (cleanText(input.customerName).length > 120) return '客户姓名不能超过120个字符';
   if (cleanText(input.customerPhone).length > 50) return '客户手机号不能超过50个字符';
@@ -791,6 +821,7 @@ function validateInput(
   actor: AuthenticatedUser,
   directory: Directory,
   scope: DataVisibilityScope,
+  lockedRecoveryUserId?: string,
 ): {
   customerName: string;
   thirdPartyOrderNo: string;
@@ -799,6 +830,7 @@ function validateInput(
   recoveryAmount: number;
   recoveryUser: User;
   assistUser?: User;
+  assistUserName?: string;
 } {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new RecoveryCommandError(400, '售后挽回订单数据无效');
@@ -819,19 +851,13 @@ function validateInput(
   if (!originalProduct) throw new RecoveryCommandError(400, '请填写原购买产品');
   if (amount(input.originalAmount) <= 0) throw new RecoveryCommandError(400, '原付款金额必须大于 0');
   if (recoveryAmount <= 0) throw new RecoveryCommandError(400, '挽回成交金额必须大于 0');
-  const recoveryUser = directory.users.find((user) => user.id === input.recoveryUserId && activeUser(user));
-  if (!recoveryUser) throw new RecoveryCommandError(400, '挽回人员不存在或已停用');
-  if (!scope.unrestricted && !scope.visibleUserIds.includes(recoveryUser.id)) {
-    throw new RecoveryCommandError(403, '无权为该员工维护售后挽回订单');
-  }
-  const assistUser = input.assistUserId
-    ? directory.users.find((user) => user.id === input.assistUserId && activeUser(user))
-    : undefined;
-  if (input.assistUserId && !assistUser) throw new RecoveryCommandError(400, '协助人员不存在或已停用');
-  if (assistUser && !scope.unrestricted && !scope.visibleUserIds.includes(assistUser.id)) {
-    throw new RecoveryCommandError(403, '无权指定该协助人员');
-  }
-  void actor;
+  const { recoveryUser, assistUser, assistUserName } = resolveRecoveryParticipants(
+    input,
+    actor,
+    directory,
+    scope,
+    lockedRecoveryUserId,
+  );
   return {
     customerName,
     thirdPartyOrderNo,
@@ -840,6 +866,7 @@ function validateInput(
     recoveryAmount,
     recoveryUser,
     assistUser,
+    assistUserName,
   };
 }
 
@@ -919,7 +946,7 @@ function buildCorrectedRecoveryOrder(
     recoveryUserId: validated.recoveryUser.id,
     recoveryUserName: validated.recoveryUser.name,
     assistUserId: validated.assistUser?.id,
-    assistUserName: validated.assistUser?.name,
+    assistUserName: validated.assistUserName,
     remark: cleanText(data.remark) || undefined,
     status: '审核通过',
     settlementStatus: postPayoutCorrection ? payoutState.settlementStatus : '待处理',
@@ -1398,18 +1425,14 @@ export function createRecoveryOrderCommandService(
         directory.departments,
         'recoveryOrderApplications',
       );
-      const recoveryUser = directory.users.find((user) => user.id === input.recoveryUserId && activeUser(user));
-      if (!recoveryUser) return failure('挽回人员不存在或已停用', 400);
-      if (!scope.unrestricted && !scope.visibleUserIds.includes(recoveryUser.id)) {
-        return failure('无权为该员工创建售后挽回订单', 403);
+      let participants: ReturnType<typeof resolveRecoveryParticipants>;
+      try {
+        participants = resolveRecoveryParticipants(input, actor, directory, scope);
+      } catch (error) {
+        if (error instanceof RecoveryCommandError) return failure(error.message, error.responseCode);
+        throw error;
       }
-      const assistUser = input.assistUserId
-        ? directory.users.find((user) => user.id === input.assistUserId && activeUser(user))
-        : undefined;
-      if (input.assistUserId && !assistUser) return failure('协助人员不存在或已停用', 400);
-      if (assistUser && !scope.unrestricted && !scope.visibleUserIds.includes(assistUser.id)) {
-        return failure('无权指定该协助人员', 403);
-      }
+      const { recoveryUser, assistUser, assistUserName } = participants;
 
       const normalizedNo = normalizeOrderNo(thirdPartyOrderNo);
       const baseId = `recovery-${hash(normalizedNo)}`;
@@ -1448,7 +1471,7 @@ export function createRecoveryOrderCommandService(
         recoveryUserId: recoveryUser.id,
         recoveryUserName: recoveryUser.name,
         assistUserId: assistUser?.id,
-        assistUserName: assistUser?.name,
+        assistUserName,
         remark: cleanText(input.remark) || undefined,
         status: '待审核',
         settlementStatus: '未分账',
@@ -1549,6 +1572,9 @@ export function createRecoveryOrderCommandService(
     ): Promise<ApiResponse<RecoveryOrderCorrectionPrecheck | null>> {
       if (!hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT, 'write')) {
         return failure<RecoveryOrderCorrectionPrecheck>('无售后挽回订单更正权限', 403);
+      }
+      if (!isSuperAdmin(actor)) {
+        return failure<RecoveryOrderCorrectionPrecheck>('只有超级管理员可以更正售后挽回订单', 403);
       }
       const id = cleanText(orderId);
       if (!id) return failure<RecoveryOrderCorrectionPrecheck>('售后挽回订单ID不能为空', 400);
@@ -1687,6 +1713,9 @@ export function createRecoveryOrderCommandService(
     ): Promise<ApiResponse<RecoveryOrder | null>> {
       if (!hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT, 'write')) {
         return failure<RecoveryOrder>('无售后挽回订单更正权限', 403);
+      }
+      if (!isSuperAdmin(actor)) {
+        return failure<RecoveryOrder>('只有超级管理员可以更正售后挽回订单', 403);
       }
       const reason = cleanText(input?.reason);
       if (!reason) return failure<RecoveryOrder>('请填写更正原因', 400);
@@ -1842,7 +1871,7 @@ export function createRecoveryOrderCommandService(
         if (!['待审核', '退回修改'].includes(current.status)) {
           throw new RecoveryCommandError(409, '审核通过后的记录请使用“编辑资料”或“挽回单更正”');
         }
-        const validated = validateInput(input, actor, directory, scope);
+        const validated = validateInput(input, actor, directory, scope, current.recoveryUserId);
         const recoveryAttachments = resolveRecoveryAttachments(input);
         const rows = await transaction.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } });
         const duplicate = rows
@@ -1885,7 +1914,7 @@ export function createRecoveryOrderCommandService(
           recoveryUserId: validated.recoveryUser.id,
           recoveryUserName: validated.recoveryUser.name,
           assistUserId: validated.assistUser?.id,
-          assistUserName: validated.assistUser?.name,
+          assistUserName: validated.assistUserName,
           remark: cleanText(input.remark) || undefined,
           status: resubmitted ? '待审核' : current.status,
           settlementStatus: resubmitted ? '未分账' : current.settlementStatus,

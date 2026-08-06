@@ -143,7 +143,7 @@ const emptyForm = {
   paymentOrderNo: '',
   recoveryAttachments: [] as BusinessAttachment[],
   recoveryUserId: '',
-  assistUserId: '',
+  assistUserName: '',
   remark: '',
 };
 
@@ -322,10 +322,13 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   const canCreate = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'write');
   const canReviewAction = canReviewRecoveryOrders(currentUser);
   const canEdit = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT);
-  const canCorrect = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT, 'write');
+  const canCorrect = isSuperAdmin(currentUser)
+    && hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT, 'write');
   const canDelete = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, 'delete');
   const canViewHistory = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY);
   const canCleanupReview = isSuperAdmin(currentUser);
+  const canAssignRecoveryUser = isSuperAdmin(currentUser)
+    || hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
   const [rows, setRows] = useState<RecoveryOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -620,8 +623,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
       officialPaymentChannel: detail.officialPaymentChannel || '',
       paymentOrderNo: detail.paymentOrderNo || '',
       recoveryAttachments: getRecoveryEvidenceAttachments(detail),
-      recoveryUserId: detail.recoveryUserId || '',
-      assistUserId: detail.assistUserId || '',
+      recoveryUserId: canAssignRecoveryUser ? (detail.recoveryUserId || '') : (currentUser?.id || ''),
+      assistUserName: detail.assistUserName || '',
       remark: detail.remark || '',
     });
     setOpen(true);
@@ -664,7 +667,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
         return;
       }
     }
-    const recoveryUser = activeUsers.find((user) => user.id === form.recoveryUserId);
+    const recoveryUser = activeUsers.find((user) => (
+      user.id === (canAssignRecoveryUser ? form.recoveryUserId : currentUser.id)
+    ));
     const input: RecoveryOrderInput = {
       customerName: form.customerName,
       customerPhone: form.customerPhone,
@@ -688,7 +693,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
       recoveryAttachments: form.recoveryAttachments,
       recoveryUserId: recoveryUser?.id || currentUser.id,
       recoveryUserName: recoveryUser?.name || currentUser.name,
-      assistUserId: form.assistUserId || undefined,
+      assistUserName: form.assistUserName.trim() || undefined,
       remark: form.remark,
       createdBy: currentUser.id,
       createdByName: currentUser.name,
@@ -1325,9 +1330,6 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
             summary={`${form.customerName || '待填写客户'} / ${form.customerPhone || form.customerWechat || '待填写联系方式'}`}
             errorCount={customerErrorCount}
           >
-            <Alert severity="info" sx={{ gridColumn: '1 / -1' }}>
-              请仅填写已掌握的客户信息。系统只在后台按手机号和微信进行身份识别，不会向售后展示客户库资料；未识别记录在审核通过后会自动进入 CRM 待分配线索。
-            </Alert>
             <TextField disabled={metadataOnly} label="客户姓名" value={form.customerName} onChange={(event) => setForm({ ...form, customerName: event.target.value })} required />
             <TextField disabled={metadataOnly} label="客户手机号" value={form.customerPhone} onChange={(event) => setForm({ ...form, customerPhone: event.target.value })} />
             <TextField disabled={metadataOnly} label="客户微信" value={form.customerWechat} onChange={(event) => setForm({ ...form, customerWechat: event.target.value })} />
@@ -1340,7 +1342,6 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
             summary={[form.sourcePlatformName || form.sourcePlatform, form.sourceShopName, form.originalProduct, form.thirdPartyOrderNo].filter(Boolean).join(' / ') || '待填写原订单'}
             errorCount={originalOrderErrorCount}
           >
-            <TextField disabled={metadataOnly} label="平台订单号" value={form.thirdPartyOrderNo} onChange={(event) => setForm({ ...form, thirdPartyOrderNo: event.target.value })} required />
             <TextField select label="来源平台" value={form.sourcePlatformId} onChange={(event) => {
               const platform = sourceConfigs.find((item) => item.id === event.target.value);
               setForm({ ...form, sourcePlatformId: platform?.id || '', sourcePlatformName: platform?.name || '', sourcePlatform: platform?.name || '', sourceShopId: '', sourceShopName: '' });
@@ -1355,6 +1356,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
               <MenuItem value="">未选择</MenuItem>
               {shopOptions.map((shop) => <MenuItem key={shop.id} value={shop.id}>{shop.name}{shop.isActive ? '' : '（已停用）'}</MenuItem>)}
             </TextField>
+            <TextField disabled={metadataOnly} label="平台订单号" value={form.thirdPartyOrderNo} onChange={(event) => setForm({ ...form, thirdPartyOrderNo: event.target.value })} required />
             <TextField disabled={metadataOnly} select label="原购买产品" value={form.originalProduct} onChange={(event) => handleProductChange(event.target.value)} required>
               {productOptions.map((product) => (
                 <MenuItem key={product.id} value={product.name}>
@@ -1386,13 +1388,14 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
             <TextField disabled={metadataOnly} label="挽回成交金额" type="number" value={form.recoveryAmount} onChange={(event) => setForm({ ...form, recoveryAmount: event.target.value })} required />
             <TextField disabled={metadataOnly} label="挽回成交时间" type="datetime-local" value={form.recoveryAt} onChange={(event) => setForm({ ...form, recoveryAt: event.target.value })} required InputLabelProps={{ shrink: true }} inputProps={{ step: 1, max: toDateTimeInputValue() }} />
             <TextField disabled={metadataOnly} label="挽回付款订单号" value={form.paymentOrderNo} onChange={(event) => setForm({ ...form, paymentOrderNo: event.target.value })} />
-            <TextField disabled={metadataOnly} select label="挽回人员" value={form.recoveryUserId} onChange={(event) => setForm({ ...form, recoveryUserId: event.target.value })} required>
-              {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
-            </TextField>
-            <TextField disabled={metadataOnly} select label="协助人员（选填）" value={form.assistUserId} onChange={(event) => setForm({ ...form, assistUserId: event.target.value })}>
-              <MenuItem value="">无</MenuItem>
-              {activeUsers.filter((user) => user.id !== form.recoveryUserId).map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
-            </TextField>
+            {canAssignRecoveryUser ? (
+              <TextField disabled={metadataOnly} select label="挽回人员" value={form.recoveryUserId} onChange={(event) => setForm({ ...form, recoveryUserId: event.target.value })} required>
+                {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
+              </TextField>
+            ) : (
+              <TextField disabled label="挽回人员" value={currentUser?.name || ''} required />
+            )}
+            <TextField disabled={metadataOnly} label="协助人员（选填）" value={form.assistUserName} onChange={(event) => setForm({ ...form, assistUserName: event.target.value })} inputProps={{ maxLength: 120 }} />
             <Box sx={{ gridColumn: { md: '1 / -1' } }}>
               <BusinessAttachmentPicker title="挽回凭证" description="用于留存付款事实、成交确认和沟通过程，可多选、拖拽或直接粘贴。最多 8 张。" value={form.recoveryAttachments} onChange={(recoveryAttachments) => setForm((current) => ({ ...current, recoveryAttachments }))} category="recovery-payment-proof" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
             </Box>
