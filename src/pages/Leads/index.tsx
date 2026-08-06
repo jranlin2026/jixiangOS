@@ -38,7 +38,7 @@ import { getLifecycleConfigByCode, getLifecycleStatusTagSx, normalizeLifecycleSt
 import { formatCurrency, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';
-import { formatPhoneForDisplay } from '../../shared/utils/phoneNumber';
+import { formatContactPhoneSummary } from '../../shared/utils/contactPhones';
 import LeadBulkImportDialog from './LeadBulkImportDialog';
 import LeadIntakeTab from './LeadIntakeTab';
 import type { Lead, LeadFlowConfig } from '../../types/lead';
@@ -100,7 +100,7 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
   return [
     { id: 'name', label: '姓名', render: (lead) => lead.name || '-' },
     { id: 'company', label: '公司', render: (lead) => lead.company || '-' },
-    { id: 'phone', label: '手机号', render: (lead) => formatPhoneForDisplay(lead.phone) || '-' },
+    { id: 'phone', label: '手机号', render: (lead) => formatContactPhoneSummary(lead.phone, lead.phones) || '-' },
     { id: 'wechat', label: '微信', render: (lead) => lead.wechat || '-' },
     { id: 'sourceType', label: '资源归属', render: (lead) => normalizeResourceOwnership(lead.sourceType) },
     { id: 'source', label: '线索来源', render: (lead) => [lead.source, lead.sourceName].filter(Boolean).join('-') || '-' },

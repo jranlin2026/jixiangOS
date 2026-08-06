@@ -16,12 +16,16 @@ import useCustomerStore from '../../store/useCustomerStore';
 import { customerApi, productApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
-import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
+import ContactPhoneFields from '../../shared/components/ContactPhoneFields';
 import type { Customer, CustomerManageableUser } from '../../types/customer';
 import type { Product } from '../../types/product';
 import type { AfterSalesSourceConfig, CustomerLevelConfig, LeadSourceConfig } from '../../types/settings';
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
-import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import {
+  alternateContactPhone,
+  contactPhonesFromValues,
+  getContactPhoneValuesError,
+} from '../../shared/utils/contactPhones';
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
@@ -106,6 +110,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     name: '',
     company: '',
     phone: '',
+    alternatePhone: '',
     wechat: '',
     sourceType: '公司资源',
     leadSource: '',
@@ -165,6 +170,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       name: customer?.name || '',
       company: customer?.company || '',
       phone: customer?.phone || '',
+      alternatePhone: alternateContactPhone(customer?.phone, customer?.phones),
       wechat: customer?.wechat || '',
       sourceType: normalizeResourceOwnership(customer?.sourceType),
       leadSource: customer?.leadSource || defaultSourceOption?.parentName || '',
@@ -232,9 +238,12 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   };
 
   const handleSubmit = async () => {
+    const phones = contactPhonesFromValues(form.phone, form.alternatePhone);
     const payload = {
       ...form,
-      phone: normalizePhoneForStorage(form.phone),
+      alternatePhone: undefined,
+      phone: phones[0]?.number || '',
+      phones,
       sourcePaymentAmount: form.sourcePaymentAmount === '' ? (isEdit ? null : undefined) : Number(form.sourcePaymentAmount),
       sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : (isEdit ? null : undefined),
       city: completeCityFromPhone(form.city, form.phone),
@@ -269,8 +278,8 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     </MenuItem>
   ));
   const shouldShowCurrentOwnerOption = form.owner && !assignableUsers.some((user) => user.id === form.ownerId);
-  const missingContact = !form.phone.trim() && !form.wechat.trim();
-  const phoneError = getPhoneNumberError(form.phone);
+  const missingContact = !form.phone.trim() && !form.alternatePhone.trim() && !form.wechat.trim();
+  const phoneError = getContactPhoneValuesError(form.phone, form.alternatePhone);
   const missingContributor = normalizeResourceOwnership(form.sourceType) === '个人资源' && !form.leadContributorName;
   const sourcePaymentAmountError = form.sourcePaymentAmount !== ''
     && (!Number.isFinite(Number(form.sourcePaymentAmount)) || Number(form.sourcePaymentAmount) < 0);
@@ -307,13 +316,13 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             >
               <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
               <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
-              <PhoneNumberInput
-                label="手机号"
-                value={form.phone}
-                onChange={handlePhoneChange}
-                error={showContactError}
-                helperText={showContactError ? '手机号或微信至少填写一项' : ''}
-                fullWidth
+              <ContactPhoneFields
+                primaryPhone={form.phone}
+                alternatePhone={form.alternatePhone}
+                onPrimaryChange={handlePhoneChange}
+                onAlternateChange={(value) => setForm((current) => ({ ...current, alternatePhone: value }))}
+                error={Boolean(showContactError || phoneError)}
+                helperText={phoneError || (showContactError ? '手机号或微信至少填写一项' : '')}
                 size="small"
               />
               <TextField
@@ -404,13 +413,13 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mt: 1 }}>
           <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
           <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
-          <PhoneNumberInput
-            label="手机号"
-            value={form.phone}
-            onChange={handlePhoneChange}
-            error={showContactError}
-            helperText={showContactError ? '手机号或微信至少填写一项' : ''}
-            fullWidth
+          <ContactPhoneFields
+            primaryPhone={form.phone}
+            alternatePhone={form.alternatePhone}
+            onPrimaryChange={handlePhoneChange}
+            onAlternateChange={(value) => setForm((current) => ({ ...current, alternatePhone: value }))}
+            error={Boolean(showContactError || phoneError)}
+            helperText={phoneError || (showContactError ? '手机号或微信至少填写一项' : '')}
             size="small"
           />
           <TextField

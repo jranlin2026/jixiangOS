@@ -1,7 +1,9 @@
 import { isPhoneNumberValid } from './phoneNumber';
+import type { ContactPhone } from '../../types/contact';
 
 type ContactLike = {
   phone?: string | null;
+  phones?: ContactPhone[] | null;
   wechat?: string | null;
 };
 
@@ -24,6 +26,10 @@ export function applyContactEditLock<T extends ContactLike>(
   options: { canEditLockedContact?: boolean } = {},
 ): Partial<T> {
   const next = { ...patch };
+  if (Object.prototype.hasOwnProperty.call(patch, 'phones') && !options.canEditLockedContact) {
+    const canComplete = canCompletePhoneField(existing.phone);
+    (next as ContactLike).phones = canComplete ? patch.phones : existing.phones;
+  }
   (['phone', 'wechat'] as const).forEach((field) => {
     if (!Object.prototype.hasOwnProperty.call(patch, field)) return;
     const currentValue = existing[field];

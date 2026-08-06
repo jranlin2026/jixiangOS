@@ -1,5 +1,6 @@
 import type { ID, Timestamp } from './common';
 import type { LifecycleStatusCode } from './settings';
+import type { ContactPhone } from './contact';
 
 /** 线索来源，由系统设置维护 */
 export type LeadSource = string;
@@ -56,6 +57,8 @@ export interface Lead {
   name: string;
   company?: string;
   phone: string;
+  /** 主手机号及备用手机号；phone 始终镜像主手机号。 */
+  phones?: ContactPhone[];
   email?: string;
   source: LeadSource;
   status: LeadStatus;

@@ -1,6 +1,7 @@
 import type { ID, Timestamp, ProductLevel, CustomerLevel } from './common';
 import type { LifecycleStatusCode, LifecycleStatusConfig } from './settings';
 import type { CustomerTagFilterMode } from './tag';
+import type { ContactPhone } from './contact';
 
 /** 成长里程碑 */
 export interface GrowthMilestone {
@@ -88,6 +89,8 @@ export interface Customer {
   name: string;
   company: string;
   phone: string;
+  /** 主手机号及备用手机号；phone 始终镜像主手机号。 */
+  phones?: ContactPhone[];
   email?: string;
   /** 最新成交产品分类，由订单同步；客户新增时不手动维护 */
   productLevel?: ProductLevel;

@@ -73,7 +73,7 @@ function leadSourceOptions(configs: LeadSourceConfig[]) {
   });
 }
 
-function storedCustomerContactKeys(row: { phone: string | null; wechat: string | null }): string[] {
+function storedCustomerContactKeys(row: { phone: string | null; phones?: unknown; wechat: string | null }): string[] {
   const rawPhone = cleanText(row.phone);
   const digits = rawPhone.replace(/\D/g, '');
   const mainland = digits.slice(-11);
@@ -83,7 +83,20 @@ function storedCustomerContactKeys(row: { phone: string | null; wechat: string |
     ? `phone:+86${mainland}`
     : customerContactKeys({ phone: row.phone || '', wechat: '' })[0] || '';
   const wechat = cleanText(row.wechat).toLocaleLowerCase('zh-CN');
-  return [phoneKey, wechat ? `wechat:${wechat}` : ''].filter(Boolean);
+  let parsedPhones: unknown = row.phones;
+  if (typeof parsedPhones === 'string') {
+    try { parsedPhones = JSON.parse(parsedPhones); } catch { parsedPhones = []; }
+  }
+  const phoneItems = Array.isArray(parsedPhones) ? parsedPhones : [];
+  const alternatePhones = phoneItems
+    .map((item) => cleanText((item as { number?: unknown })?.number))
+    .filter((value) => value && value !== rawPhone)
+    .join('；');
+  return Array.from(new Set([
+    phoneKey,
+    ...customerContactKeys({ phone: row.phone || '', alternatePhones, wechat: '' }).filter((key) => key !== phoneKey),
+    wechat ? `wechat:${wechat}` : '',
+  ].filter(Boolean)));
 }
 
 export async function loadExistingCustomerImportFacts(
@@ -103,11 +116,13 @@ export async function loadExistingCustomerImportFacts(
     const found = await prisma.$queryRaw<Array<{
       recordId: string;
       phone: string | null;
+      phones: unknown;
       wechat: string | null;
       name: string | null;
     }>>(Prisma.sql`
       SELECT recordId,
              JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')) AS phone,
+             JSON_EXTRACT(data, '$.phones') AS phones,
              JSON_UNQUOTE(JSON_EXTRACT(data, '$.wechat')) AS wechat,
              JSON_UNQUOTE(JSON_EXTRACT(data, '$.name')) AS name
       FROM business_records

@@ -13,7 +13,11 @@ import { getCurrentOperatorName, getCurrentOperatorUser, SYSTEM_OPERATOR } from 
 import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { hydrateLeadLifecycle } from './lifecycleSync';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
-import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
+import { normalizePhoneForComparison } from '../shared/utils/phoneNumber';
+import {
+  canonicalizeContactPhones,
+  getContactPhoneError,
+} from '../shared/utils/contactPhones';
 import { getLeadAssignmentCandidates, getLeadReceiveEligibleUsers, isActiveLeadAssignableUser } from '../shared/utils/leadAssignment';
 import { canReceiveLead } from '../shared/utils/permissions';
 import { canViewLead } from '../shared/utils/dataVisibility';
@@ -95,15 +99,17 @@ function getConfiguredParticipants(config: LeadFlowConfig): User[] {
 }
 
 function findCollision(data: Partial<Lead>, excludeLeadId?: string) {
-  const phone = normalizePhoneForComparison(data.phone);
+  const phones = canonicalizeContactPhones(data.phone, data.phones).map((item) => normalizePhoneForComparison(item.number));
   const wechat = normalizeText(data.wechat);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const leads = (getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || []).filter((lead) => lead.id !== excludeLeadId);
 
-  if (phone) {
-    const customer = customers.find((item) => normalizePhoneForComparison(item.phone) === phone);
+  if (phones.length) {
+    const customer = customers.find((item) => canonicalizeContactPhones(item.phone, item.phones)
+      .some((candidate) => phones.includes(normalizePhoneForComparison(candidate.number))));
     if (customer) return { type: '客户' as const, id: customer.id, name: customer.name, field: '手机号' };
-    const lead = leads.find((item) => item.intakeStatus !== '入库失败' && normalizePhoneForComparison(item.phone) === phone);
+    const lead = leads.find((item) => item.intakeStatus !== '入库失败' && canonicalizeContactPhones(item.phone, item.phones)
+      .some((candidate) => phones.includes(normalizePhoneForComparison(candidate.number))));
     if (lead) return { type: '线索' as const, id: lead.id, name: lead.name, field: '手机号' };
   }
 
@@ -121,7 +127,7 @@ function validateUniqueInput(data: Partial<Lead>): string | null {
   const hasPhone = Boolean(normalizeText(data.phone));
   const hasWechat = Boolean(normalizeText(data.wechat));
   if (!hasPhone && !hasWechat) return '手机号和微信至少填写一项';
-  if (hasPhone) return getPhoneNumberError(data.phone) || null;
+  if (hasPhone) return getContactPhoneError(data.phone, data.phones) || null;
   return null;
 }
 
@@ -185,6 +191,7 @@ function upsertCustomerFromLead(
     name: lead.name,
     company: lead.company || '',
     phone: lead.phone,
+    phones: lead.phones,
     email: lead.email,
     wechat: lead.wechat,
     industry: lead.industry,
@@ -246,6 +253,7 @@ function upsertCustomerFromLead(
     name: lead.name,
     company: lead.company || '',
     phone: lead.phone,
+    phones: lead.phones,
     email: lead.email,
     wechat: lead.wechat,
     industry: lead.industry,
@@ -367,7 +375,8 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
   const config = ensureLeadFlowConfig();
   const now = new Date().toISOString();
   const ruleName = '手机号和微信二选一';
-  const normalizedData = { ...data, phone: normalizePhoneForStorage(data.phone) };
+  const phones = canonicalizeContactPhones(data.phone, data.phones);
+  const normalizedData = { ...data, phone: phones[0]?.number || '', phones };
   const validationError = validateAttribution(normalizedData) || validateUniqueInput(normalizedData);
 
   if (validationError) {

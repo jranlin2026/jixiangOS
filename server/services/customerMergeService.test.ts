@@ -68,6 +68,16 @@ assert.equal(mergedSourceCustomer.leadSource, '直播部');
 assert.equal(mergedSourceCustomer.sourceName, '抖音01', '选择线索来源时应同步来源明细');
 assert.equal(mergedSourceCustomer.sourceAccount, 'legacy-secondary', '选择线索来源时应同步内部来源上下文');
 assert.equal(mergedSourceCustomer.email, undefined, '合并时应清理历史客户邮箱字段');
+const mergedPhoneCustomer = mergedCustomerValue(
+  { ...selectedCustomers[0], phones: [{ number: '13800138000', isPrimary: true, label: '主手机号' }] } as any,
+  [
+    { ...selectedCustomers[0], phones: [{ number: '13800138000', isPrimary: true, label: '主手机号' }] },
+    { ...selectedCustomers[1], phone: '13900139000', phones: [{ number: '13900139000', isPrimary: true, label: '主手机号' }] },
+  ] as any,
+  { mainCustomerId: 'c1', secondaryCustomerIds: ['c2'], ...commonDecision },
+  '2026-07-19T00:00:00Z',
+);
+assert.deepEqual(mergedPhoneCustomer.phones?.map((item) => item.number), ['+8613800138000', '+8613900139000']);
 const precheckRows: any[] = [];
 const duplicateGroups: any[] = [];
 const mergePrisma = {

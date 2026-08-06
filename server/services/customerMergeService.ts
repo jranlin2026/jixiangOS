@@ -39,6 +39,7 @@ import {
   type CustomerMergeSnapshotKeyring,
 } from './customerMergeSnapshotCrypto';
 import { migrateCustomerAssociations, restoreCustomerAssociations, type CustomerAssociationMergeEntry } from './customerAssociationMergeService';
+import { canonicalizeContactPhones } from '../../src/shared/utils/contactPhones';
 
 export function validateMergeSelection(mainCustomerId: string, secondaryCustomerIds: string[]): void {
   const ids = [String(mainCustomerId || '').trim(), ...secondaryCustomerIds.map((id) => String(id || '').trim())];
@@ -212,6 +213,11 @@ export function mergedCustomerValue(
     }
   }
   delete result.email;
+  result.phones = canonicalizeContactPhones(
+    result.phone,
+    customers.flatMap((customer) => canonicalizeContactPhones(customer.phone, customer.phones)),
+  );
+  result.phone = result.phones[0]?.number || '';
   result.manualTagIds = [...input.tagDecision.selectedTagIds];
   result.tags = Array.from(new Set(customers.flatMap((customer) => customer.tags || [])));
   result.activityRecords = uniqueSubrecords(customers.map((customer) => customer.activityRecords || [])) as Customer['activityRecords'];

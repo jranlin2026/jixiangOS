@@ -4,6 +4,7 @@ import { normalizeResourceOwnership } from '../../shared/utils/constants';
 import { canCompleteContactField, canCompletePhoneField } from '../../shared/utils/contactEditLock';
 import { normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
+import { canonicalizeContactPhones } from '../../shared/utils/contactPhones';
 
 type BuildCustomerDetailPatchInput = {
   current: Customer;
@@ -132,6 +133,11 @@ export function buildCustomerDetailPatch({
       ? normalizePhoneForStorage(draftPhone)
       : current.phone;
     addChanged(patch, current, 'phone', phone);
+    const currentPhones = canonicalizeContactPhones(current.phone, current.phones);
+    const requestedPhones = canonicalizeContactPhones(phone, draftValue(current, draft, 'phones'));
+    if (phoneEditAllowed && JSON.stringify(currentPhones) !== JSON.stringify(requestedPhones)) {
+      patch.phones = requestedPhones;
+    }
 
     const draftWechat = String(draftValue(current, draft, 'wechat') || '');
     const wechatInputWasEdited = comparable(draftWechat) !== comparable(current.wechat);

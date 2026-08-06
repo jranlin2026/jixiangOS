@@ -46,6 +46,7 @@ function parseRows(value: unknown): CustomerImportRow[] {
       rowNumber: Number(row.rowNumber || index + 2),
       name: String(row.name || ''),
       phone: String(row.phone || ''),
+      alternatePhones: String(row.alternatePhones || ''),
       wechat: String(row.wechat || ''),
       company: String(row.company || ''),
       ownerName: String(row.ownerName || ''),

@@ -29,6 +29,11 @@ import {
   normalizePhoneForComparison,
   normalizePhoneForStorage,
 } from '../../src/shared/utils/phoneNumber';
+import {
+  canonicalizeContactPhones,
+  contactPhoneNumbers,
+  getContactPhoneError,
+} from '../../src/shared/utils/contactPhones';
 import { applyContactEditLock } from '../../src/shared/utils/contactEditLock';
 import { resolveFirstSalesOwner } from '../../src/shared/utils/customerOwnership';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
@@ -74,6 +79,7 @@ import {
 } from './contactIdentityService';
 
 type CustomerCommandPrisma = Pick<PrismaClient, '$transaction' | 'leadRecord'>;
+type CustomerContact = Pick<Lead, 'phone' | 'phones' | 'wechat'>;
 export type CustomerCommandTx = Pick<
   Prisma.TransactionClient,
   'appStorage' | 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerTodo' | 'customerAuditEvent'
@@ -303,6 +309,49 @@ function phoneIdentityCandidates(value: unknown): string[] {
   return Array.from(candidates);
 }
 
+function contactPhoneValues(contact: Pick<CustomerContact, 'phone' | 'phones'>): string[] {
+  return contactPhoneNumbers(canonicalizeContactPhones(contact.phone, contact.phones));
+}
+
+function phoneCollisionConditions(
+  contact: Pick<CustomerContact, 'phone' | 'phones'>,
+  scalarColumn: 'phone' | 'customer_json',
+): Prisma.Sql[] {
+  return contactPhoneValues(contact).flatMap((number) => {
+    const candidates = phoneIdentityCandidates(number);
+    const normalized = normalizePhoneForComparison(number);
+    const exactScalar = scalarColumn === 'phone'
+      ? Prisma.sql`phone IN (${Prisma.join(candidates)})`
+      : Prisma.sql`JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')) IN (${Prisma.join(candidates)})`;
+    const exactCollection = Prisma.sql`
+      EXISTS (
+        SELECT 1 FROM JSON_TABLE(
+          COALESCE(JSON_EXTRACT(data, '$.phones'), JSON_ARRAY()),
+          '$[*]' COLUMNS(number VARCHAR(50) PATH '$.number')
+        ) AS stored_phone
+        WHERE stored_phone.number IN (${Prisma.join(candidates)})
+      )
+    `;
+    const conditions = [exactScalar, exactCollection];
+    if (normalized.startsWith('+86') && normalized.length === 14) {
+      const mainland = normalized.slice(3);
+      conditions.push(scalarColumn === 'phone'
+        ? Prisma.sql`RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', ''), 11) = ${mainland}`
+        : Prisma.sql`RIGHT(REGEXP_REPLACE(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')), ''), '[^0-9]', ''), 11) = ${mainland}`);
+      conditions.push(Prisma.sql`
+        EXISTS (
+          SELECT 1 FROM JSON_TABLE(
+            COALESCE(JSON_EXTRACT(data, '$.phones'), JSON_ARRAY()),
+            '$[*]' COLUMNS(number VARCHAR(50) PATH '$.number')
+          ) AS normalized_phone
+          WHERE RIGHT(REGEXP_REPLACE(COALESCE(normalized_phone.number, ''), '[^0-9]', ''), 11) = ${mainland}
+        )
+      `);
+    }
+    return conditions;
+  });
+}
+
 function normalizedWechat(value: unknown): string {
   return cleanText(value).toLowerCase();
 }
@@ -416,24 +465,11 @@ async function lockLead(tx: CustomerCommandTx, leadId: string): Promise<LockedLe
 
 async function findCustomerContactCollision(
   tx: CustomerCommandTx,
-  contact: Pick<Lead, 'phone' | 'wechat'>,
+  contact: CustomerContact,
   excludeCustomerId?: string,
 ): Promise<LockedBusinessRecord | null> {
-  const conditions: Prisma.Sql[] = [];
-  const phoneCandidates = phoneIdentityCandidates(contact.phone);
-  const normalizedPhone = normalizePhoneForComparison(contact.phone);
+  const conditions: Prisma.Sql[] = phoneCollisionConditions(contact, 'customer_json');
   const wechat = normalizedWechat(contact.wechat);
-  if (phoneCandidates.length) {
-    conditions.push(Prisma.sql`JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')) IN (${Prisma.join(phoneCandidates)})`);
-  }
-  if (normalizedPhone.startsWith('+86') && normalizedPhone.length === 14) {
-    conditions.push(Prisma.sql`
-      RIGHT(
-        REGEXP_REPLACE(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')), ''), '[^0-9]', ''),
-        11
-      ) = ${normalizedPhone.slice(3)}
-    `);
-  }
   if (wechat) {
     conditions.push(Prisma.sql`LOWER(TRIM(JSON_UNQUOTE(JSON_EXTRACT(data, '$.wechat')))) = ${wechat}`);
   }
@@ -455,12 +491,12 @@ async function findCustomerContactCollision(
 }
 
 function contactLockKeys(
-  contact: Pick<Lead, 'phone' | 'wechat'>,
+  contact: CustomerContact,
   cryptoInput?: ContactIdentityCrypto,
 ): string[] {
   const crypto = cryptoInput || createContactIdentityCryptoFromEnv();
   const identities = [
-    ['phone', normalizeContactIdentity('phone', String(contact.phone || ''))],
+    ...contactPhoneValues(contact).map((number) => ['phone', normalizeContactIdentity('phone', number)]),
     ['wechat', normalizeContactIdentity('wechat', String(contact.wechat || ''))],
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
   return identities
@@ -474,7 +510,7 @@ function contactLockKeys(
 async function lockCustomerContacts(
   tx: CustomerCommandTx,
   crypto: ContactIdentityCrypto | undefined,
-  ...contacts: Array<Pick<Lead, 'phone' | 'wechat'>>
+  ...contacts: CustomerContact[]
 ): Promise<void> {
   const keys = Array.from(new Set(contacts.flatMap((contact) => contactLockKeys(contact, crypto)))).sort();
   for (const key of keys) {
@@ -532,9 +568,8 @@ async function lockCustomerTransferDirectory(tx: CustomerCommandTx): Promise<voi
 
 function isLinkedLead(lead: Lead, customer: Customer): boolean {
   if (lead.customerId === customer.id) return true;
-  if (lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone)) {
-    return true;
-  }
+  const customerPhones = new Set(contactPhoneValues(customer).map(normalizePhoneForComparison));
+  if (contactPhoneValues(lead).some((number) => customerPhones.has(normalizePhoneForComparison(number)))) return true;
   return Boolean(
     lead.wechat
     && customer.wechat
@@ -546,16 +581,7 @@ async function linkedLeadRows(tx: CustomerCommandTx, customer: Customer) {
   const conditions: Prisma.Sql[] = [
     Prisma.sql`JSON_UNQUOTE(JSON_EXTRACT(data, '$.customerId')) = ${customer.id}`,
   ];
-  const phoneCandidates = phoneIdentityCandidates(customer.phone);
-  if (phoneCandidates.length) {
-    conditions.push(Prisma.sql`phone IN (${Prisma.join(phoneCandidates)})`);
-  }
-  const normalizedPhone = normalizePhoneForComparison(customer.phone);
-  if (normalizedPhone.startsWith('+86') && normalizedPhone.length === 14) {
-    conditions.push(Prisma.sql`
-      RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', ''), 11) = ${normalizedPhone.slice(3)}
-    `);
-  }
+  conditions.push(...phoneCollisionConditions(customer, 'phone'));
   const wechat = normalizedWechat(customer.wechat);
   if (wechat) conditions.push(Prisma.sql`LOWER(TRIM(wechat)) = ${wechat}`);
 
@@ -679,6 +705,7 @@ const CUSTOMER_EDIT_FIELDS: Array<{ field: keyof Customer; label: string }> = [
   { field: 'name', label: '姓名' },
   { field: 'company', label: '公司' },
   { field: 'phone', label: '电话' },
+  { field: 'phones', label: '备用手机号' },
   { field: 'wechat', label: '微信' },
   { field: 'customerLevel', label: '客户等级' },
   { field: 'lifecycleStatusCode', label: '客户进展' },
@@ -746,6 +773,7 @@ function syncLeadFromCustomer(lead: Lead, customer: Customer, atIso: string, ope
     name: customer.name,
     company: customer.company,
     phone: customer.phone,
+    phones: customer.phones,
     wechat: customer.wechat,
     industry: customer.industry,
     city: customer.city,
@@ -802,6 +830,7 @@ const LEAD_EDIT_FIELDS: Array<{ field: keyof Lead; label: string }> = [
   { field: 'name', label: '姓名' },
   { field: 'company', label: '公司' },
   { field: 'phone', label: '手机号' },
+  { field: 'phones', label: '备用手机号' },
   { field: 'wechat', label: '微信' },
   { field: 'source', label: '线索来源' },
   { field: 'sourceName', label: '来源明细' },
@@ -855,19 +884,11 @@ function buildLeadEditChanges(lead: Lead, patch: Partial<Lead>) {
 
 async function findLeadContactCollision(
   tx: CustomerCommandTx,
-  contact: Pick<Lead, 'phone' | 'wechat'>,
+  contact: CustomerContact,
   excludeLeadId: string,
 ): Promise<LockedLeadRecord | null> {
-  const conditions: Prisma.Sql[] = [];
-  const phoneCandidates = phoneIdentityCandidates(contact.phone);
-  const normalizedPhone = normalizePhoneForComparison(contact.phone);
+  const conditions: Prisma.Sql[] = phoneCollisionConditions(contact, 'phone');
   const wechat = normalizedWechat(contact.wechat);
-  if (phoneCandidates.length) conditions.push(Prisma.sql`phone IN (${Prisma.join(phoneCandidates)})`);
-  if (normalizedPhone.startsWith('+86') && normalizedPhone.length === 14) {
-    conditions.push(Prisma.sql`
-      RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', ''), 11) = ${normalizedPhone.slice(3)}
-    `);
-  }
   if (wechat) conditions.push(Prisma.sql`LOWER(TRIM(wechat)) = ${wechat}`);
   if (!conditions.length) return null;
   const rows = await tx.$queryRaw<LockedLeadRecord[]>(Prisma.sql`
@@ -1506,8 +1527,17 @@ export function createCustomerCommandService(
         patch = applyContactEditLock(customer, patch, {
           canEditLockedContact: context.customerAccess.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_DELETE),
         });
-        if (Object.prototype.hasOwnProperty.call(patch, 'phone')) {
-          patch.phone = normalizePhoneForStorage(patch.phone);
+        if (
+          Object.prototype.hasOwnProperty.call(patch, 'phone')
+          || Object.prototype.hasOwnProperty.call(patch, 'phones')
+        ) {
+          const submittedPhone = Object.prototype.hasOwnProperty.call(patch, 'phone') ? patch.phone : customer.phone;
+          const submittedPhones = Object.prototype.hasOwnProperty.call(patch, 'phones') ? patch.phones : customer.phones;
+          const submittedPhoneError = getContactPhoneError(submittedPhone, submittedPhones);
+          if (submittedPhoneError) return failure<Customer>(submittedPhoneError, 400);
+          const canonicalPhones = canonicalizeContactPhones(submittedPhone, submittedPhones);
+          patch.phone = canonicalPhones[0]?.number || '';
+          patch.phones = canonicalPhones;
         }
         if (Object.prototype.hasOwnProperty.call(patch, 'wechat')) {
           patch.wechat = normalizedWechat(patch.wechat) || undefined;
@@ -1528,7 +1558,7 @@ export function createCustomerCommandService(
         ) {
           return failure<Customer>('个人资源必须填写线索贡献人', 400);
         }
-        const phoneError = getPhoneNumberError(merged.phone);
+        const phoneError = getContactPhoneError(merged.phone, merged.phones);
         if (phoneError) return failure<Customer>(phoneError, 400);
 
         const changes = buildCustomerEditChanges(customer, patch);
@@ -1559,6 +1589,7 @@ export function createCustomerCommandService(
         await upsertCustomerContactIdentities(tx, {
           customerId: customer.id,
           phone: updated.phone,
+          phones: updated.phones,
           wechat: updated.wechat,
           source: 'customer_profile_update',
           crypto: options.contactIdentityCrypto,
@@ -1577,6 +1608,7 @@ export function createCustomerCommandService(
               leadId: leadRow.id,
               customerId: customer.id,
               phone: nextLead.phone,
+              phones: nextLead.phones,
               wechat: nextLead.wechat,
               source: 'customer_profile_sync',
               crypto: options.contactIdentityCrypto,
@@ -1677,7 +1709,10 @@ export function createCustomerCommandService(
         const intakeRecords = Array.isArray(storedIntakeRecords) ? storedIntakeRecords : [];
         const name = cleanText(input.name);
         const source = cleanText(input.source);
-        const phone = normalizePhoneForStorage(input.phone);
+        const submittedPhoneError = getContactPhoneError(input.phone, input.phones);
+        if (submittedPhoneError) return failure<Lead>(submittedPhoneError, 400);
+        const phones = canonicalizeContactPhones(input.phone, input.phones);
+        const phone = phones[0]?.number || '';
         const wechat = normalizedWechat(input.wechat) || undefined;
         const sourceType = normalizeResourceOwnership(input.sourceType);
         const at = now();
@@ -1710,7 +1745,7 @@ export function createCustomerCommandService(
         if (!name) return rejectIntake('线索姓名不能为空');
         if (!source) return rejectIntake('请选择线索来源');
         if (!phone && !wechat) return rejectIntake('手机号和微信至少填写一项');
-        const phoneError = getPhoneNumberError(phone);
+        const phoneError = getContactPhoneError(phone, phones);
         if (phoneError) return rejectIntake(phoneError);
         if (
           sourceType === '个人资源'
@@ -1794,6 +1829,7 @@ export function createCustomerCommandService(
           name,
           source,
           phone,
+          phones,
           wechat,
           sourceType,
           status: input.status || '新线索',
@@ -1846,6 +1882,7 @@ export function createCustomerCommandService(
             name: lead.name,
             company: lead.company || '',
             phone: lead.phone,
+            phones: lead.phones,
             email: lead.email,
             wechat: lead.wechat,
             industry: lead.industry,
@@ -1900,6 +1937,7 @@ export function createCustomerCommandService(
             leadId: id,
             customerId,
             phone: customer.phone,
+            phones: customer.phones,
             wechat: customer.wechat,
             source: 'lead_auto_claim',
             crypto: options.contactIdentityCrypto,
@@ -2017,7 +2055,18 @@ export function createCustomerCommandService(
         patch = applyContactEditLock(lead, patch, {
           canEditLockedContact: isSuperAdmin(currentUser),
         });
-        if (Object.prototype.hasOwnProperty.call(patch, 'phone')) patch.phone = normalizePhoneForStorage(patch.phone);
+        if (
+          Object.prototype.hasOwnProperty.call(patch, 'phone')
+          || Object.prototype.hasOwnProperty.call(patch, 'phones')
+        ) {
+          const submittedPhone = Object.prototype.hasOwnProperty.call(patch, 'phone') ? patch.phone : lead.phone;
+          const submittedPhones = Object.prototype.hasOwnProperty.call(patch, 'phones') ? patch.phones : lead.phones;
+          const submittedPhoneError = getContactPhoneError(submittedPhone, submittedPhones);
+          if (submittedPhoneError) return failure<Lead>(submittedPhoneError, 400);
+          const canonicalPhones = canonicalizeContactPhones(submittedPhone, submittedPhones);
+          patch.phone = canonicalPhones[0]?.number || '';
+          patch.phones = canonicalPhones;
+        }
         if (Object.prototype.hasOwnProperty.call(patch, 'wechat')) patch.wechat = normalizedWechat(patch.wechat) || undefined;
         if (Object.prototype.hasOwnProperty.call(patch, 'sourceType')) {
           patch.sourceType = normalizeResourceOwnership(patch.sourceType);
@@ -2035,7 +2084,7 @@ export function createCustomerCommandService(
         ) {
           return failure<Lead>('个人资源必须填写线索贡献人', 400);
         }
-        const phoneError = getPhoneNumberError(merged.phone);
+        const phoneError = getContactPhoneError(merged.phone, merged.phones);
         if (phoneError) return failure<Lead>(phoneError, 400);
         const changes = buildLeadEditChanges(lead, patch);
         if (!changes.length) return success(lead);
@@ -2062,6 +2111,7 @@ export function createCustomerCommandService(
           // embedded in JSON must never create an orphaned identity link.
           leadId: row.id,
           phone: updated.phone,
+          phones: updated.phones,
           wechat: updated.wechat,
           source: 'lead_profile_update',
           crypto: options.contactIdentityCrypto,
@@ -2584,6 +2634,7 @@ export function createCustomerCommandService(
           name: lead.name,
           company: lead.company || '',
           phone: normalizePhoneForStorage(lead.phone),
+          phones: canonicalizeContactPhones(lead.phone, lead.phones),
           email: lead.email,
           wechat: normalizedWechat(lead.wechat) || undefined,
           industry: lead.industry,
@@ -2637,6 +2688,7 @@ export function createCustomerCommandService(
           leadId: leadRow.id,
           customerId,
           phone: customer.phone,
+          phones: customer.phones,
           wechat: customer.wechat,
           source: 'lead_conversion',
           crypto: options.contactIdentityCrypto,

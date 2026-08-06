@@ -14,7 +14,11 @@ import { hydrateLeadLifecycle, setCustomerLifecycle } from './lifecycleSync';
 import { filterVisibleLeads } from '../shared/utils/dataVisibility';
 import { applyContactEditLock } from '../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
-import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
+import { normalizePhoneForComparison } from '../shared/utils/phoneNumber';
+import {
+  canonicalizeContactPhones,
+  getContactPhoneError,
+} from '../shared/utils/contactPhones';
 import type { User } from '../types/settings';
 
 function ensureInit(): void {
@@ -29,7 +33,7 @@ function validateLeadAttribution(data: Partial<Lead>): string | null {
   if (isPersonalResource(data.sourceType) && !data.leadContributorName && !data.leadContributorId) {
     return '个人资源必须填写线索贡献人';
   }
-  const phoneError = getPhoneNumberError(data.phone);
+  const phoneError = getContactPhoneError(data.phone, data.phones);
   if (phoneError) return phoneError;
   return null;
 }
@@ -84,18 +88,24 @@ function findLinkedCustomer(lead: Lead): Customer | undefined {
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   return customers.find((customer) => (
     (lead.customerId && customer.id === lead.customerId)
-    || (lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone))
+    || canonicalizeContactPhones(lead.phone, lead.phones).some((leadPhone) => (
+      canonicalizeContactPhones(customer.phone, customer.phones).some((customerPhone) => (
+        normalizePhoneForComparison(leadPhone.number) === normalizePhoneForComparison(customerPhone.number)
+      ))
+    ))
     || (lead.wechat && customer.wechat && lead.wechat === customer.wechat)
   ));
 }
 
 function normalizeLead(lead: Lead): Lead {
   const linkedCustomer = findLinkedCustomer(lead);
+  const phones = canonicalizeContactPhones(lead.phone, lead.phones);
   const customerLifecycleCode = linkedCustomer?.lifecycleStatusCode;
   const customerLifecycleUpdatedAt = linkedCustomer?.lifecycleStatusUpdatedAt;
   return hydrateLeadLifecycle({
     ...lead,
-    phone: normalizePhoneForStorage(lead.phone),
+    phone: phones[0]?.number || '',
+    phones,
     ...(customerLifecycleCode ? {
       customerId: lead.customerId || linkedCustomer?.id,
       lifecycleStatusCode: customerLifecycleCode,
@@ -176,7 +186,7 @@ async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedR
       (lead) =>
         lead.name.toLowerCase().includes(q)
         || lead.company?.toLowerCase().includes(q)
-        || lead.phone.includes(q)
+        || canonicalizeContactPhones(lead.phone, lead.phones).some((item) => item.number.toLowerCase().includes(q))
         || (lead.wechat || '').toLowerCase().includes(q)
         || (lead.industry || '').toLowerCase().includes(q)
         || (lead.city || '').toLowerCase().includes(q),
@@ -254,7 +264,9 @@ async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<
     canEditLockedContact: isSuperAdminRoleName(getCurrentOperatorUser()?.role),
   });
   if (Object.prototype.hasOwnProperty.call(safeData, 'phone')) {
-    safeData.phone = normalizePhoneForStorage(safeData.phone);
+    const phones = canonicalizeContactPhones(safeData.phone, safeData.phones || existing.phones);
+    safeData.phone = phones[0]?.number || '';
+    safeData.phones = phones;
   }
   const merged = {
     ...existing,

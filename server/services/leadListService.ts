@@ -46,6 +46,14 @@ function buildLeadWhere(filters: LeadFilters): Prisma.Sql {
       LOWER(COALESCE(name, '')) LIKE ${q}
       OR LOWER(COALESCE(company, '')) LIKE ${q}
       OR LOWER(COALESCE(phone, '')) LIKE ${q}
+      OR EXISTS (
+        SELECT 1
+        FROM JSON_TABLE(
+          COALESCE(JSON_EXTRACT(data, '$.phones'), JSON_ARRAY()),
+          '$[*]' COLUMNS (number VARCHAR(64) PATH '$.number')
+        ) AS stored_phone
+        WHERE LOWER(COALESCE(stored_phone.number, '')) LIKE ${q}
+      )
       OR LOWER(COALESCE(wechat, '')) LIKE ${q}
       OR ${buildTextLikeCondition('$.industry', q)}
       OR ${buildTextLikeCondition('$.city', q)}

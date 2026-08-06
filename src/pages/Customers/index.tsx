@@ -49,7 +49,7 @@ import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPagin
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
 import CustomerForm from './CustomerForm';
-import { formatPhoneForDisplay } from '../../shared/utils/phoneNumber';
+import { formatContactPhoneSummary } from '../../shared/utils/contactPhones';
 import OrderForm from '../Orders/OrderForm';
 import type { Customer, CustomerFilters, CustomerManageableUser } from '../../types/customer';
 import type { Order, OrderApplication } from '../../types/order';
@@ -129,7 +129,7 @@ export const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], 
   return [
   { id: 'name', label: '姓名', render: (customer) => customer.name || '-' },
   { id: 'company', label: '公司', render: (customer) => customer.company || '-' },
-  { id: 'phone', label: '手机号', render: (customer) => formatPhoneForDisplay(customer.phone) || '-' },
+  { id: 'phone', label: '手机号', render: (customer) => formatContactPhoneSummary(customer.phone, customer.phones) || '-' },
   { id: 'wechat', label: '微信', render: (customer) => customer.wechat || '-' },
   {
     id: 'lifecycleStatus',

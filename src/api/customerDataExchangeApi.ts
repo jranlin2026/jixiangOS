@@ -30,6 +30,7 @@ const OPTIONAL_IMPORT_HEADERS = new Set<string>([
   '首个销售负责人',
   '线索录入人',
   '线索贡献人',
+  '备用手机号',
 ]);
 let browserExcelJsPromise: Promise<ExcelJsNamespace> | null = null;
 
@@ -126,7 +127,7 @@ export async function createCustomerImportTemplateWorkbook(
   sheet.addRow([...CUSTOMER_IMPORT_HEADERS]);
   styleHeader(sheet.getRow(1));
   sheet.autoFilter = { from: 'A1', to: sheet.getRow(1).getCell(CUSTOMER_IMPORT_HEADERS.length).address };
-  sheet.columns = [18, 18, 20, 24, 18, 20, 20, 18, 18, 18, 16, 26, 18, 18, 28, 42, 36].map((width) => ({ width }));
+  sheet.columns = [18, 18, 18, 20, 24, 18, 20, 20, 18, 18, 18, 16, 26, 18, 18, 28, 42, 36].map((width) => ({ width }));
 
   const ownerNames = destination === 'public_pool' ? [] : options.ownerNames;
   const lifecycleStatuses = destination === 'public_pool'
@@ -145,12 +146,12 @@ export async function createCustomerImportTemplateWorkbook(
   for (let index = 0; index < maxOptions; index += 1) optionSheet.addRow(optionColumns.map((item) => item.values[index] || ''));
   optionSheet.columns = optionColumns.map(() => ({ width: 28 }));
   optionSheet.state = 'hidden';
-  applyValidation(sheet, 5, 'A', ownerNames.length);
-  applyValidation(sheet, 8, 'B', options.userNames.length);
+  applyValidation(sheet, 6, 'A', ownerNames.length);
   applyValidation(sheet, 9, 'B', options.userNames.length);
-  applyValidation(sheet, 10, 'C', lifecycleStatuses.length);
-  applyValidation(sheet, 11, 'D', options.customerLevels.length);
-  applyValidation(sheet, 12, 'E', options.leadSources.length);
+  applyValidation(sheet, 10, 'B', options.userNames.length);
+  applyValidation(sheet, 11, 'C', lifecycleStatuses.length);
+  applyValidation(sheet, 12, 'D', options.customerLevels.length);
+  applyValidation(sheet, 13, 'E', options.leadSources.length);
 
   instructions.addRows([
     ['极享OS 客户批量导入说明'],
@@ -168,7 +169,8 @@ export async function createCustomerImportTemplateWorkbook(
     ['线索来源', '只填写“线索来源”一个字段，并从模板下拉选项选择。'],
     ['客户标签', '多个标签使用中文逗号、英文逗号或顿号分隔；标签必须已经存在。'],
     ['最后跟进记录', '可选；导入后会作为客户的一条历史跟进记录保存。'],
-    ['重复校验', '系统按手机号或微信检查系统存量和当前文件重复；重复行不会导入。'],
+    ['备用手机号', '可选；多个备用号使用分号分隔，不能与主手机号重复。'],
+    ['重复校验', '系统按主手机号、备用手机号或微信检查系统存量和当前文件重复；重复行不会导入。'],
     ['导入流程', '上传文件后先预检。只有“可导入”的行会在确认后写入客户库，错误行可下载报告。'],
     ['文件限制', `仅支持 .xlsx；请勿修改表头；单次最多 ${CUSTOMER_IMPORT_MAX_ROWS} 条。`],
   ]);
@@ -209,6 +211,7 @@ export async function parseCustomerImportWorkbook(buffer: ArrayBuffer | ArrayBuf
       rowNumber,
       name: cell(row, '客户姓名*'),
       phone: cell(row, '手机号'),
+      alternatePhones: cell(row, '备用手机号'),
       wechat: cell(row, '微信'),
       company: cell(row, '公司名称'),
       ownerName: cell(row, '销售负责人'),
@@ -256,6 +259,7 @@ export async function createCustomerImportErrorWorkbook(
     return {
       '客户姓名*': row?.name || result.name,
       手机号: row?.phone || '',
+      备用手机号: row?.alternatePhones || '',
       微信: row?.wechat || '',
       公司名称: row?.company || '',
       销售负责人: row?.ownerName || '',

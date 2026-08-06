@@ -19,9 +19,9 @@ import type {
 import type { ApiResponse, PaginatedResponse } from '../../src/api/types';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import {
-  getPhoneNumberError,
-  normalizePhoneForStorage,
-} from '../../src/shared/utils/phoneNumber';
+  canonicalizeContactPhones,
+  getContactPhoneError,
+} from '../../src/shared/utils/contactPhones';
 import { PERMISSION_KEYS, hasExplicitPermission, hasPermission } from '../../src/shared/utils/permissions';
 import { loadCustomerTagCatalog, loadCustomerTagValidationCatalog } from './customerTagService';
 import { validateManualTagSelection } from './customerTagPolicy';
@@ -196,6 +196,14 @@ export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerT
       ${buildTextLikeCondition('$.name', q)}
       OR ${buildTextLikeCondition('$.company', q)}
       OR ${buildTextLikeCondition('$.phone', q)}
+      OR EXISTS (
+        SELECT 1
+        FROM JSON_TABLE(
+          COALESCE(JSON_EXTRACT(data, '$.phones'), JSON_ARRAY()),
+          '$[*]' COLUMNS (number VARCHAR(64) PATH '$.number')
+        ) AS stored_phone
+        WHERE LOWER(COALESCE(stored_phone.number, '')) LIKE ${q}
+      )
       OR ${buildTextLikeCondition('$.wechat', q)}
     )`);
   }
@@ -334,7 +342,10 @@ export function createCustomerListService(
       const name = cleanText(input.name);
       if (!name) return failure<Customer>('客户姓名不能为空', 400);
       if (name.length > 100) return failure<Customer>('客户姓名不能超过100个字符', 400);
-      const phone = normalizePhoneForStorage(input.phone);
+      const phoneError = getContactPhoneError(input.phone, input.phones);
+      if (phoneError) return failure<Customer>(phoneError, 400);
+      const phones = canonicalizeContactPhones(input.phone, input.phones);
+      const phone = phones[0]?.number || '';
       const wechat = cleanText(input.wechat);
       if (!phone && !wechat) return failure<Customer>('客户手机号或微信至少填写一项', 400);
       const sourceType = normalizeResourceOwnership(input.sourceType);
@@ -378,9 +389,6 @@ export function createCustomerListService(
         || (targetOwner.employmentStatus || 'active') !== 'active'
       )) return failure<Customer>('请选择有效的销售负责人', 400);
 
-      const phoneError = phone ? getPhoneNumberError(phone) : '';
-      if (phoneError) return failure<Customer>(phoneError, 400);
-
       const operation = async (tx: Pick<Prisma.TransactionClient,
         'businessRecord' | 'leadRecord' | 'customerAuditEvent' | 'contactIdentity' | 'contactIdentityLink'
         | 'user' | 'role' | 'department' | 'appStorage' | '$queryRaw'
@@ -407,6 +415,7 @@ export function createCustomerListService(
         name,
         id,
         phone,
+        phones,
         wechat: wechat || undefined,
         sourceType,
         owner: importToPublicPool ? '公海' : targetOwner!.name,
@@ -475,6 +484,7 @@ export function createCustomerListService(
       await upsertCustomerContactIdentities(tx, {
         customerId: customer.id,
         phone: customer.phone,
+        phones: customer.phones,
         wechat: customer.wechat,
         source: 'customer_create',
         crypto: options.contactIdentityCrypto,
@@ -497,6 +507,7 @@ export function createCustomerListService(
           name,
           company: cleanText(input.company),
           phone,
+          phones,
           wechat: wechat || null,
           ownerId: targetOwner?.id || null,
           previousOwner: cleanText(input.previousOwner) || null,

@@ -231,6 +231,25 @@ function createStore(
   assert.equal(new Set(state.identities.map((identity) => identity.id)).size, 2);
 }
 
+// Every stored mobile number participates in the same identity boundary.
+{
+  const phones = [
+    { number: '+8613800138000', isPrimary: true, label: '主手机号' as const },
+    { number: '+8613900139000', isPrimary: false, label: '备用手机号' as const },
+  ];
+  const { store, state } = createStore({
+    customers: [{
+      id: 'aaos_customers:c-multi-phone', domain: 'aaos_customers', recordId: 'c-multi-phone',
+      data: { id: 'c-multi-phone', name: '双号码客户', phone: phones[0].number, phones },
+    }],
+  });
+  const identities = await upsertCustomerContactIdentities(store, {
+    customerId: 'c-multi-phone', phone: phones[0].number, phones, crypto,
+  });
+  assert.equal(identities.filter((identity) => identity.type === 'phone').length, 2);
+  assert.equal(state.links.filter((link) => link.linkStatus === 'active').length, 2);
+}
+
 // Existing pre-fix rows retain their legacy primary key. A subsequent
 // backfill safely keeps that row and creates the missing other contact type
 // under the new type-qualified key; no schema/data ID rewrite is required.

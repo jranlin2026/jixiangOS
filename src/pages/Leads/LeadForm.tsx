@@ -19,10 +19,14 @@ import type { AfterSalesSourceConfig, LeadSourceConfig, User } from '../../types
 import { leadFlowApi, productApi, settingsApi } from '../../api';
 import { RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
-import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
+import ContactPhoneFields from '../../shared/components/ContactPhoneFields';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
-import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import {
+  alternateContactPhone,
+  contactPhonesFromValues,
+  getContactPhoneValuesError,
+} from '../../shared/utils/contactPhones';
 import useAuthStore from '../../store/useAuthStore';
 import type { LeadFlowConfig } from '../../types/lead';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
@@ -85,6 +89,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     name: '',
     company: '',
     phone: '',
+    alternatePhone: '',
     wechat: '',
     source: '',
     sourceName: '',
@@ -143,6 +148,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       name: lead?.name || '',
       company: lead?.company || '',
       phone: lead?.phone || '',
+      alternatePhone: alternateContactPhone(lead?.phone, lead?.phones),
       wechat: lead?.wechat || '',
       source: defaultSource,
       sourceName: defaultSourceName,
@@ -200,6 +206,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   };
 
   const handleSubmit = async () => {
+    const phones = contactPhonesFromValues(form.phone, form.alternatePhone);
     const effectiveOwner = canAssignLeads
       ? form.owner
       : isEdit
@@ -207,9 +214,11 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
         : '待分配';
     const payload = {
       ...form,
+      alternatePhone: undefined,
       owner: effectiveOwner,
       assignedTo: effectiveOwner === '待分配' ? undefined : effectiveOwner,
-      phone: normalizePhoneForStorage(form.phone),
+      phone: phones[0]?.number || '',
+      phones,
       sourcePaymentAmount: form.sourcePaymentAmount === '' ? (isEdit ? null : undefined) : Number(form.sourcePaymentAmount),
       sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : (isEdit ? null : undefined),
       sourceType: normalizeResourceOwnership(form.sourceType),
@@ -235,8 +244,8 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     onClose();
   };
 
-  const missingContact = !form.phone.trim() && !form.wechat.trim();
-  const phoneError = getPhoneNumberError(form.phone);
+  const missingContact = !form.phone.trim() && !form.alternatePhone.trim() && !form.wechat.trim();
+  const phoneError = getContactPhoneValuesError(form.phone, form.alternatePhone);
   const missingContributor = normalizeResourceOwnership(form.sourceType) === '个人资源' && !form.leadContributorName;
   const sourcePaymentAmountError = form.sourcePaymentAmount !== ''
     && (!Number.isFinite(Number(form.sourcePaymentAmount)) || Number(form.sourcePaymentAmount) < 0);
@@ -274,13 +283,13 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
             >
               <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
               <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
-              <PhoneNumberInput
-                label="手机号"
-                value={form.phone}
-                onChange={(value) => setForm({ ...form, phone: value })}
-                error={showContactError}
-                helperText={showContactError ? '手机号或微信至少填写一项' : ''}
-                fullWidth
+              <ContactPhoneFields
+                primaryPhone={form.phone}
+                alternatePhone={form.alternatePhone}
+                onPrimaryChange={(value) => setForm((current) => ({ ...current, phone: value }))}
+                onAlternateChange={(value) => setForm((current) => ({ ...current, alternatePhone: value }))}
+                error={Boolean(showContactError || phoneError)}
+                helperText={phoneError || (showContactError ? '手机号或微信至少填写一项' : '')}
                 size="small"
               />
               <TextField label="微信" value={form.wechat} onChange={handleChange('wechat')} error={showContactError} helperText={showContactError ? '手机号或微信至少填写一项' : '用于查重和客户同步'} fullWidth />
@@ -351,14 +360,14 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           )}
           <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
           <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
-          <PhoneNumberInput
-            label="手机号"
-            value={form.phone}
-            onChange={(value) => setForm({ ...form, phone: value })}
-            error={showContactError}
-            fullWidth
+          <ContactPhoneFields
+            primaryPhone={form.phone}
+            alternatePhone={form.alternatePhone}
+            onPrimaryChange={(value) => setForm((current) => ({ ...current, phone: value }))}
+            onAlternateChange={(value) => setForm((current) => ({ ...current, alternatePhone: value }))}
+            error={Boolean(showContactError || phoneError)}
             size="small"
-            helperText={isEdit ? '唯一识别字段，入库后不可修改' : showContactError ? '手机号或微信至少填写一项' : ''}
+            helperText={phoneError || (isEdit ? '唯一识别字段，入库后不可修改' : showContactError ? '手机号或微信至少填写一项' : '')}
             readOnly={isEdit}
           />
           <TextField

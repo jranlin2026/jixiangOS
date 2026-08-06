@@ -7,7 +7,11 @@ import type {
   CustomerImportRowResult,
 } from '../../src/types/customerDataExchange';
 import { LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode } from '../../src/shared/utils/constants';
-import { getPhoneNumberError, normalizePhoneForStorage } from '../../src/shared/utils/phoneNumber';
+import { normalizePhoneForStorage } from '../../src/shared/utils/phoneNumber';
+import {
+  canonicalizeContactPhones,
+  getContactPhoneError,
+} from '../../src/shared/utils/contactPhones';
 import { getLatestCustomerFollowUp } from '../../src/shared/utils/customerFollowUp';
 
 export type NormalizedCustomerImportRow = Omit<CustomerImportRow, 'tagNames' | 'previousOwnerName' | 'firstOwnerName' | 'leadInputByName' | 'leadContributorName'> & {
@@ -54,10 +58,18 @@ function splitTagNames(value: unknown): string[] {
   return Array.from(new Set(source.map(cleanText).filter(Boolean)));
 }
 
-export function customerContactKeys(input: Pick<CustomerImportRow, 'phone' | 'wechat'>): string[] {
-  const phone = normalizePhoneForStorage(input.phone);
+function splitAlternatePhones(value: unknown): string[] {
+  return Array.from(new Set(cleanText(value).split(/[;；,，\n]/).map(cleanText).filter(Boolean)));
+}
+
+export function customerContactKeys(input: Pick<CustomerImportRow, 'phone' | 'alternatePhones' | 'wechat'>): string[] {
+  const phones = canonicalizeContactPhones(input.phone, splitAlternatePhones(input.alternatePhones).map((number) => ({
+    number,
+    isPrimary: false,
+    label: '备用手机号' as const,
+  })));
   const wechat = normalizedLookup(input.wechat);
-  return [phone ? `phone:${phone}` : '', wechat ? `wechat:${wechat}` : ''].filter(Boolean);
+  return [...phones.map((item) => `phone:${item.number}`), wechat ? `wechat:${wechat}` : ''].filter(Boolean);
 }
 
 export function normalizeCustomerImportRows(rows: CustomerImportRow[]): NormalizedCustomerImportRow[] {
@@ -65,6 +77,10 @@ export function normalizeCustomerImportRows(rows: CustomerImportRow[]): Normaliz
     rowNumber: Number.isFinite(Number(row.rowNumber)) ? Math.max(2, Math.floor(Number(row.rowNumber))) : index + 2,
     name: cleanText(row.name),
     phone: normalizePhoneForStorage(row.phone),
+    alternatePhones: splitAlternatePhones(row.alternatePhones)
+      .map((value) => normalizePhoneForStorage(value))
+      .filter(Boolean)
+      .join('；'),
     wechat: cleanText(row.wechat),
     company: cleanText(row.company),
     ownerName: cleanText(row.ownerName),
@@ -155,7 +171,12 @@ export function validateCustomerImportRows(
       warnings.push('客户名称与系统或本次文件中已有客户相同，请核对联系方式（仅提醒，不阻止导入）');
     }
     if (!row.phone && !row.wechat) errors.push('手机号或微信至少填写一项');
-    const phoneError = row.phone ? getPhoneNumberError(row.phone) : '';
+    const alternatePhoneEntries = splitAlternatePhones(row.alternatePhones).map((number) => ({
+      number,
+      isPrimary: false,
+      label: '备用手机号' as const,
+    }));
+    const phoneError = getContactPhoneError(row.phone, alternatePhoneEntries);
     if (phoneError) errors.push(phoneError);
 
     const contactKeys = customerContactKeys(row);
@@ -235,6 +256,7 @@ export function validateCustomerImportRows(
     const input: CustomerCreateInput = {
       name: row.name,
       phone: row.phone,
+      phones: canonicalizeContactPhones(row.phone, alternatePhoneEntries),
       wechat: row.wechat || undefined,
       company: row.company,
       owner: importingToPublicPool ? '公海' : owner?.name || requestedOwnerName,
@@ -302,6 +324,10 @@ export function projectCustomerExportRows(customers: Customer[], includeSensitiv
     };
     if (includeSensitive) {
       row.手机号 = customer.phone || '';
+      row.备用手机号 = canonicalizeContactPhones(customer.phone, customer.phones)
+        .filter((item) => !item.isPrimary)
+        .map((item) => item.number)
+        .join('；');
       row.微信 = customer.wechat || '';
     }
     return row;

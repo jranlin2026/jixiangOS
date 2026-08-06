@@ -28,7 +28,8 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { canCompleteContactField } from '../../shared/utils/contactEditLock';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
-import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import { formatContactPhoneLines } from '../../shared/utils/contactPhones';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 interface LeadDetailProps {
@@ -379,13 +380,13 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       : field === 'assignedTo'
           ? followerName
           : field === 'phone'
-            ? formatPhoneForDisplay(currentLead.phone)
+            ? formatContactPhoneLines(currentLead.phone, currentLead.phones)
           : (currentLead[field as keyof Lead] as string | undefined);
 
     return (
       <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
         <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>{label}</Box>
-        <Box sx={{ px: 1.5, py: editing && editable ? 0.5 : 1, fontSize: 13 }}>
+        <Box sx={{ px: 1.5, py: editing && editable ? 0.5 : 1, fontSize: 13, whiteSpace: 'pre-line' }}>
           {editing && editable ? (
             isResourceField ? (
               <TextField select value={normalizeResourceOwnership(currentValue)} onChange={handleDraftChange(field)} size="small" fullWidth>

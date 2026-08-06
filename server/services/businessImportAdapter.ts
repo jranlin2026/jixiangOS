@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer } from '../../src/types/customer';
+import { canonicalizeContactPhones } from '../../src/shared/utils/contactPhones';
 import type { Product } from '../../src/types/product';
 import type { AfterSalesSourceConfig, OrderTypeConfig } from '../../src/types/settings';
 import type { BusinessImportConfirmMode, BusinessImportRow, BusinessImportType, OrderImportRow, RecoveryImportRow } from '../../src/types/businessImport';
@@ -154,12 +155,14 @@ function readValue<T>(value: unknown, fallback: T): T {
   return value as T;
 }
 
-export function businessImportContactKeys(customer: Pick<Customer, 'phone' | 'wechat'>): string[] {
-  const phone = clean(customer.phone);
-  const normalizedPhone = phone.replace(/\D/g, '');
-  const mainland = normalizedPhone.slice(-11);
-  const phoneKey = /^1[3-9]\d{9}$/.test(mainland) ? `phone:+86${mainland}` : phone ? `phone:${phone}` : '';
-  return [phoneKey, customer.wechat ? `wechat:${lower(customer.wechat)}` : ''].filter(Boolean);
+export function businessImportContactKeys(customer: Pick<Customer, 'phone' | 'phones' | 'wechat'>): string[] {
+  const phoneKeys = canonicalizeContactPhones(customer.phone, customer.phones).map((item) => {
+    const value = clean(item.number);
+    const normalizedPhone = value.replace(/\D/g, '');
+    const mainland = normalizedPhone.slice(-11);
+    return /^1[3-9]\d{9}$/.test(mainland) ? `phone:+86${mainland}` : value ? `phone:${value}` : '';
+  });
+  return [...phoneKeys, customer.wechat ? `wechat:${lower(customer.wechat)}` : ''].filter(Boolean);
 }
 
 function thirdPartyNumber(record: { data: unknown }): string {

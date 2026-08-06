@@ -5,6 +5,8 @@ import { normalizePhoneForComparison } from '../../src/shared/utils/phoneNumber'
 import type { Customer } from '../../src/types/customer';
 import type { Lead, LeadIntakeRecord } from '../../src/types/lead';
 import type { RecoveryCrmIdentityStatus, RecoveryOrder } from '../../src/types/recoveryOrder';
+import type { ContactPhone } from '../../src/types/contact';
+import { canonicalizeContactPhones } from '../../src/shared/utils/contactPhones';
 import {
   createContactIdentityCryptoFromEnv,
   hashContactIdentity,
@@ -18,6 +20,7 @@ type ContactEntity = {
   id: string;
   name?: string;
   phone?: string;
+  phones?: ContactPhone[];
   wechat?: string;
   customerId?: string;
   deletedAt?: string;
@@ -38,7 +41,9 @@ function wechat(value: unknown): string {
 }
 
 function matchesContact(entity: ContactEntity, targetPhone: string, targetWechat: string): boolean {
-  return Boolean((targetPhone && phone(entity.phone) === targetPhone) || (targetWechat && wechat(entity.wechat) === targetWechat));
+  const phoneMatch = targetPhone && canonicalizeContactPhones(entity.phone, entity.phones)
+    .some((item) => phone(item.number) === targetPhone);
+  return Boolean(phoneMatch || (targetWechat && wechat(entity.wechat) === targetWechat));
 }
 
 export function resolveRecoveryCrmIdentity(input: {
@@ -143,9 +148,41 @@ export function createRecoveryCrmBridge(options: { contactIdentityCrypto?: Conta
         if (/^1[3-9]\d{9}$/.test(targetPhone)) {
           customerConditions.push(Prisma.sql`RIGHT(${customerDigits}, 11) = ${targetPhone}`);
           leadConditions.push(Prisma.sql`RIGHT(${leadDigits}, 11) = ${targetPhone}`);
+          customerConditions.push(Prisma.sql`EXISTS (
+            SELECT 1
+            FROM JSON_TABLE(
+              COALESCE(JSON_EXTRACT(data, '$.phones'), JSON_ARRAY()),
+              '$[*]' COLUMNS(number VARCHAR(64) PATH '$.number')
+            ) AS stored_phone
+            WHERE RIGHT(REGEXP_REPLACE(COALESCE(stored_phone.number, ''), '[^0-9]', ''), 11) = ${targetPhone}
+          )`);
+          leadConditions.push(Prisma.sql`EXISTS (
+            SELECT 1
+            FROM JSON_TABLE(
+              COALESCE(JSON_EXTRACT(data, '$.phones'), JSON_ARRAY()),
+              '$[*]' COLUMNS(number VARCHAR(64) PATH '$.number')
+            ) AS stored_phone
+            WHERE RIGHT(REGEXP_REPLACE(COALESCE(stored_phone.number, ''), '[^0-9]', ''), 11) = ${targetPhone}
+          )`);
         } else {
           customerConditions.push(Prisma.sql`${customerDigits} = ${targetDigits}`);
           leadConditions.push(Prisma.sql`${leadDigits} = ${targetDigits}`);
+          customerConditions.push(Prisma.sql`EXISTS (
+            SELECT 1
+            FROM JSON_TABLE(
+              COALESCE(JSON_EXTRACT(data, '$.phones'), JSON_ARRAY()),
+              '$[*]' COLUMNS(number VARCHAR(64) PATH '$.number')
+            ) AS stored_phone
+            WHERE REGEXP_REPLACE(COALESCE(stored_phone.number, ''), '[^0-9]', '') = ${targetDigits}
+          )`);
+          leadConditions.push(Prisma.sql`EXISTS (
+            SELECT 1
+            FROM JSON_TABLE(
+              COALESCE(JSON_EXTRACT(data, '$.phones'), JSON_ARRAY()),
+              '$[*]' COLUMNS(number VARCHAR(64) PATH '$.number')
+            ) AS stored_phone
+            WHERE REGEXP_REPLACE(COALESCE(stored_phone.number, ''), '[^0-9]', '') = ${targetDigits}
+          )`);
         }
       }
       if (targetWechat) {

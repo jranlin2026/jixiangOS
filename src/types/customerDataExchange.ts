@@ -8,6 +8,7 @@ export type CustomerImportDestination = 'assigned' | 'public_pool';
 export const CUSTOMER_IMPORT_HEADERS = [
   '客户姓名*',
   '手机号',
+  '备用手机号',
   '微信',
   '公司名称',
   '销售负责人',
@@ -29,6 +30,7 @@ export type CustomerImportRow = {
   rowNumber: number;
   name: string;
   phone: string;
+  alternatePhones?: string;
   wechat: string;
   company: string;
   ownerName: string;

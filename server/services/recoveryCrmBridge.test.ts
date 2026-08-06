@@ -17,6 +17,22 @@ assert.deepEqual(
   '手机号唯一命中时只返回内部客户 ID，不返回客户名称',
 );
 assert.deepEqual(
+  resolveRecoveryCrmIdentity({
+    customers: [{
+      id: 'customer-with-backup',
+      phone: '13800000010',
+      phones: [
+        { number: '13800000010', isPrimary: true, label: '主手机号' },
+        { number: '13900000010', isPrimary: false, label: '备用手机号' },
+      ],
+    }],
+    leads: [],
+    phone: '13900000010',
+  }),
+  { status: '已匹配客户', customerId: 'customer-with-backup' },
+  '售后身份识别必须能通过备用手机号命中客户',
+);
+assert.deepEqual(
   resolveRecoveryCrmIdentity({ customers: [{ id: 'hk-customer', phone: '+852 9123.4567' }], leads: [], phone: '+85291234567' }),
   { status: '已匹配客户', customerId: 'hk-customer' },
   '国际手机号必须按完整纯数字匹配，不能截断为大陆手机号规则',

@@ -8,6 +8,8 @@ import {
 } from 'node:crypto';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { Customer } from '../../src/types/customer';
+import type { ContactPhone } from '../../src/types/contact';
+import { canonicalizeContactPhones, contactPhoneNumbers } from '../../src/shared/utils/contactPhones';
 import { getPhoneNumberError, normalizePhoneForComparison } from '../../src/shared/utils/phoneNumber';
 import { createOrReloadCustomerDuplicateGroup } from './customerAuditService';
 
@@ -87,6 +89,7 @@ type ConflictViewer = {
 
 type ContactInput = {
   phone?: string | null;
+  phones?: ContactPhone[] | null;
   wechat?: string | null;
   crypto?: ContactIdentityCrypto;
 };
@@ -256,7 +259,7 @@ function encryptNormalizedValue(
 
 function candidatesFromContact(input: ContactInput, crypto: ContactIdentityCrypto): IdentityCandidate[] {
   const values: Array<[ContactIdentityType, string]> = [
-    ['phone', String(input.phone || '')],
+    ...canonicalizeContactPhones(input.phone, input.phones).map((item): [ContactIdentityType, string] => ['phone', item.number]),
     ['wechat', String(input.wechat || '')],
   ];
   return values
@@ -539,6 +542,10 @@ async function activeEntityLinksForUpdate(
 
 function customerMatchesCandidate(customer: Customer, candidate: IdentityCandidate): boolean {
   if (customer.deletedAt) return false;
+  if (candidate.type === 'phone') {
+    return contactPhoneNumbers(canonicalizeContactPhones(customer.phone, customer.phones))
+      .some((number) => normalizeContactIdentity('phone', number) === candidate.normalized);
+  }
   return normalizeContactIdentity(candidate.type, String(customer[candidate.type] || '')) === candidate.normalized;
 }
 
@@ -551,14 +558,27 @@ function legacyCustomerCondition(candidate: IdentityCandidate): Prisma.Sql {
   const digits = candidate.normalized.replace(/\D/g, '');
   if (/^1[3-9]\d{9}$/.test(candidate.normalized)) {
     return Prisma.sql`
-      RIGHT(
-        REGEXP_REPLACE(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')), ''), '[^0-9]', ''),
-        11
-      ) = ${candidate.normalized}
+      RIGHT(REGEXP_REPLACE(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')), ''), '[^0-9]', ''), 11) = ${candidate.normalized}
+      OR EXISTS (
+        SELECT 1
+        FROM JSON_TABLE(
+          COALESCE(JSON_EXTRACT(data, '$.phones'), JSON_ARRAY()),
+          '$[*]' COLUMNS(number VARCHAR(50) PATH '$.number')
+        ) AS stored_phone
+        WHERE RIGHT(REGEXP_REPLACE(COALESCE(stored_phone.number, ''), '[^0-9]', ''), 11) = ${candidate.normalized}
+      )
     `;
   }
   return Prisma.sql`
     REGEXP_REPLACE(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')), ''), '[^0-9]', '') = ${digits}
+    OR EXISTS (
+      SELECT 1
+      FROM JSON_TABLE(
+        COALESCE(JSON_EXTRACT(data, '$.phones'), JSON_ARRAY()),
+        '$[*]' COLUMNS(number VARCHAR(50) PATH '$.number')
+      ) AS stored_phone
+      WHERE REGEXP_REPLACE(COALESCE(stored_phone.number, ''), '[^0-9]', '') = ${digits}
+    )
   `;
 }
 
@@ -812,8 +832,13 @@ function buildBackfillPlan(
     customerIds.add(customerId);
     if (!customer || customer.deletedAt) continue;
     const phone = String(customer.phone || '').trim();
-    if (phone && getPhoneNumberError(phone)) invalidValues += 1;
-    const validContact = { phone: phone && !getPhoneNumberError(phone) ? phone : '', wechat: customer.wechat };
+    const phones = canonicalizeContactPhones(phone, customer.phones);
+    invalidValues += phones.filter((item) => getPhoneNumberError(item.number)).length;
+    const validContact = {
+      phone: phone && !getPhoneNumberError(phone) ? phone : '',
+      phones: phones.filter((item) => !getPhoneNumberError(item.number)),
+      wechat: customer.wechat,
+    };
     for (const candidate of candidatesFromContact(validContact, crypto)) {
       addPlannedReference(plans, candidate, 'customer', customerId);
     }
@@ -826,9 +851,11 @@ function buildBackfillPlan(
     leadIds.add(leadId);
     if (!lead || lead.deletedAt) continue;
     const phone = String(lead.phone ?? row.phone ?? '').trim();
-    if (phone && getPhoneNumberError(phone)) invalidValues += 1;
+    const phones = canonicalizeContactPhones(phone, lead.phones);
+    invalidValues += phones.filter((item) => getPhoneNumberError(item.number)).length;
     const validContact = {
       phone: phone && !getPhoneNumberError(phone) ? phone : '',
+      phones: phones.filter((item) => !getPhoneNumberError(item.number)),
       wechat: lead.wechat ?? row.wechat,
     };
     for (const candidate of candidatesFromContact(validContact, crypto)) {

@@ -10,6 +10,7 @@ const rows = normalizeCustomerImportRows([
     rowNumber: 2,
     name: ' 张三 ',
     phone: '138 0000 0000',
+    alternatePhones: '139 0000 0000',
     wechat: '',
     company: '示例公司',
     ownerName: '销售甲',
@@ -32,6 +33,7 @@ const attributionUsers = [
 
 assert.equal(rows[0].name, '张三');
 assert.equal(rows[0].phone, '+8613800000000');
+assert.equal(rows[0].alternatePhones, '+8613900000000');
 assert.deepEqual(rows[0].tagNames, ['高意向', '复购']);
 
 const precheck = validateCustomerImportRows(rows, {
@@ -60,6 +62,7 @@ assert.equal(precheck[0].input.customerLevel, 'L2');
 assert.equal(precheck[0].input.leadSource, '市场品牌部');
 assert.equal(precheck[0].input.sourceName, '官网');
 assert.deepEqual(precheck[0].input.manualTagIds, ['t1', 't2']);
+assert.deepEqual(precheck[0].input.phones?.map((item) => item.number), ['+8613800000000', '+8613900000000']);
 
 const slashSourceReady = validateCustomerImportRows([{ ...rows[0], leadSource: '市场品牌部/官网' }], {
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
@@ -94,8 +97,8 @@ assert.match(blocked[1].reason, /无权覆盖销售负责人/);
 assert.match(blocked[2].reason, /手机号或微信至少填写一项/);
 
 const sameNameInFile = validateCustomerImportRows([
-  { ...rows[0], phone: '', wechat: 'wx-first' },
-  { ...rows[0], rowNumber: 3, phone: '', wechat: 'wx-second' },
+  { ...rows[0], phone: '', alternatePhones: '', wechat: 'wx-first' },
+  { ...rows[0], rowNumber: 3, phone: '', alternatePhones: '', wechat: 'wx-second' },
 ], {
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
   attributionUsers,
@@ -249,5 +252,18 @@ assert.equal(exportRows[0]['线索来源'], '市场品牌部-官网');
 assert.equal(exportRows[0]['最后跟进记录'], '客户已确认报价');
 assert.equal(Object.prototype.hasOwnProperty.call(exportRows[0], '手机号'), false);
 assert.equal(Object.prototype.hasOwnProperty.call(exportRows[0], '微信'), false);
+
+const sensitiveExport = projectCustomerExportRows([{
+  ...(exportRows[0] as any),
+  id: 'c2', name: '李四', company: '', owner: '销售甲', customerLevel: 'L1',
+  phone: '+8613800000001',
+  phones: [
+    { number: '+8613800000001', isPrimary: true, label: '主手机号' },
+    { number: '+8613900000001', isPrimary: false, label: '备用手机号' },
+  ],
+  manualTagIds: [], tags: [], totalSpent: 0, orderCount: 0, growthPath: [], growthRecords: [],
+  createdAt: '2026-07-01T00:00:00.000Z', updatedAt: '2026-07-01T00:00:00.000Z',
+} as any], true);
+assert.equal(sensitiveExport[0]['备用手机号'], '+8613900000001');
 
 console.log('customer data exchange policy: ok');

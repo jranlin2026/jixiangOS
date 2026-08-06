@@ -21,7 +21,9 @@ import { getCurrentOperatorName, getCurrentOperatorUser, SYSTEM_OPERATOR } from 
 import { claimFromPublicPool, hydrateCustomerLifecycle, releaseToPublicPool, setLeadLifecycle } from './lifecycleSync';
 import { filterVisibleCustomers } from '../shared/utils/dataVisibility';
 import { applyContactEditLock } from '../shared/utils/contactEditLock';
-import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
+import { normalizePhoneForComparison } from '../shared/utils/phoneNumber';
+import { canonicalizeContactPhones, getContactPhoneError } from '../shared/utils/contactPhones';
+import type { ContactPhone } from '../types/contact';
 import type { CustomerTag, CustomerTagCatalog } from '../types/tag';
 import type { Role } from '../types/role';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../shared/utils/customerTagPolicy';
@@ -47,11 +49,23 @@ function isPersonalResource(value?: string): boolean {
   return normalizeResourceOwnership(value) === '个人资源';
 }
 
+type PhoneBearingContact = { phone?: string; phones?: ContactPhone[] };
+
+function contactsSharePhone(left: PhoneBearingContact, right: PhoneBearingContact): boolean {
+  const rightNumbers = new Set(
+    canonicalizeContactPhones(right.phone, right.phones)
+      .map((item) => normalizePhoneForComparison(item.number))
+      .filter(Boolean),
+  );
+  return canonicalizeContactPhones(left.phone, left.phones)
+    .some((item) => rightNumbers.has(normalizePhoneForComparison(item.number)));
+}
+
 function validateCustomerAttribution(data: Partial<Customer>): string | null {
   if (isPersonalResource(data.sourceType) && !data.leadContributorName && !data.leadContributorId) {
     return '个人资源必须填写线索贡献人';
   }
-  const phoneError = getPhoneNumberError(data.phone);
+  const phoneError = getContactPhoneError(data.phone, data.phones);
   if (phoneError) return phoneError;
   return null;
 }
@@ -62,9 +76,11 @@ function normalizeCustomer(customer: Customer): Customer {
   const legacyLeadSource = legacySourceType && legacySourceType !== '公司资源' && legacySourceType !== '个人资源' && legacySourceType !== '自拓'
     ? legacySourceType
     : undefined;
+  const phones = canonicalizeContactPhones(customer.phone, customer.phones);
   const normalized = hydrateCustomerFirstSalesOwner(hydrateCustomerLifecycle({
     ...customer,
-    phone: normalizePhoneForStorage(customer.phone),
+    phone: phones[0]?.number || '',
+    phones,
     leadSource: customer.leadSource || legacyLeadSource,
     sourceType: normalizedSourceType,
   }));
@@ -101,7 +117,7 @@ function cacheBackendCustomerReleaseInLeads(customer: Customer): void {
   let changed = false;
   const nextLeads = leads.map((lead) => {
     const matches = lead.customerId === customer.id
-      || Boolean(lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone))
+      || contactsSharePhone(lead, customer)
       || Boolean(lead.wechat && customer.wechat && lead.wechat === customer.wechat);
     if (!matches) return lead;
     changed = true;
@@ -124,7 +140,7 @@ function cacheBackendCustomerOwnerInLeads(customer: Customer): void {
   let changed = false;
   const nextLeads = leads.map((lead) => {
     const matches = lead.customerId === customer.id
-      || Boolean(lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone))
+      || contactsSharePhone(lead, customer)
       || Boolean(lead.wechat && customer.wechat && lead.wechat === customer.wechat);
     if (!matches) return lead;
     changed = true;
@@ -134,6 +150,7 @@ function cacheBackendCustomerOwnerInLeads(customer: Customer): void {
       name: customer.name,
       company: customer.company,
       phone: customer.phone,
+      phones: customer.phones,
       wechat: customer.wechat,
       industry: customer.industry,
       city: customer.city,
@@ -174,6 +191,7 @@ const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = 
   { field: 'name', label: '姓名' },
   { field: 'company', label: '公司' },
   { field: 'phone', label: '电话' },
+  { field: 'phones', label: '联系电话' },
   { field: 'wechat', label: '微信' },
   { field: 'customerLevel', label: '客户等级' },
   { field: 'owner', label: '销售负责人' },
@@ -203,7 +221,8 @@ const CUSTOMER_TO_LEAD_FIELDS: Array<{
   leadField: keyof Lead;
   label: string;
 }> = [
-  { customerField: 'phone', leadField: 'phone', label: '鎵嬫満鍙?' },
+  { customerField: 'phone', leadField: 'phone', label: '手机号' },
+  { customerField: 'phones', leadField: 'phones', label: '联系电话' },
   { customerField: 'wechat', leadField: 'wechat', label: '寰俊' },
   { customerField: 'name', leadField: 'name', label: '姓名' },
   { customerField: 'company', leadField: 'company', label: '公司' },
@@ -231,7 +250,13 @@ const CUSTOMER_TO_LEAD_FIELDS: Array<{
 ];
 
 function formatActivityValue(value: unknown): string | number | boolean | null {
-  if (Array.isArray(value)) return value.join('、');
+  if (Array.isArray(value)) {
+    return value.map((item) => (
+      item && typeof item === 'object' && 'number' in item
+        ? String((item as { number?: unknown }).number || '')
+        : String(item)
+    )).filter(Boolean).join('、');
+  }
   if (value === undefined || value === '') return null;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
   return String(value);
@@ -253,7 +278,7 @@ function syncLeadsByCustomer(customer: Customer, now: string, operator = SYSTEM_
   let changed = false;
   const nextLeads = leads.map((lead) => {
     const matchedById = Boolean(lead.customerId && lead.customerId === customer.id);
-    const matchedByPhone = Boolean(customer.phone && lead.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone));
+    const matchedByPhone = contactsSharePhone(customer, lead);
     const matchedByWechat = Boolean(customer.wechat && lead.wechat && lead.wechat === customer.wechat);
     if (!matchedById && !matchedByPhone && !matchedByWechat) return lead;
 
@@ -502,7 +527,7 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
     filtered = filtered.filter(
       (c) => c.name.toLowerCase().includes(q)
         || c.company.toLowerCase().includes(q)
-        || c.phone.includes(q)
+        || canonicalizeContactPhones(c.phone, c.phones).some((item) => item.number.toLowerCase().includes(q))
         || (c.wechat || '').toLowerCase().includes(q),
     );
   }
@@ -613,7 +638,8 @@ async function createCustomer(data: CustomerCreateInput): Promise<ApiResponse<Cu
 
   ensureInit();
   await delay(200);
-  const normalizedData = { ...data, phone: normalizePhoneForStorage(data.phone) };
+  const phones = canonicalizeContactPhones(data.phone, data.phones);
+  const normalizedData = { ...data, phone: phones[0]?.number || '', phones };
   const validationError = validateCustomerAttribution(normalizedData);
   if (validationError) return createErrorResponse(validationError);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
@@ -668,8 +694,16 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
     // Mock mode still requires a stable role ID and the explicit high-risk leaf.
     canEditLockedContact: canEditLockedCustomerContact(),
   });
-  if (Object.prototype.hasOwnProperty.call(safeData, 'phone')) {
-    safeData.phone = normalizePhoneForStorage(safeData.phone);
+  if (
+    Object.prototype.hasOwnProperty.call(safeData, 'phone')
+    || Object.prototype.hasOwnProperty.call(safeData, 'phones')
+  ) {
+    const phones = canonicalizeContactPhones(
+      Object.prototype.hasOwnProperty.call(safeData, 'phone') ? safeData.phone : existing.phone,
+      Object.prototype.hasOwnProperty.call(safeData, 'phones') ? safeData.phones : existing.phones,
+    );
+    safeData.phone = phones[0]?.number || '';
+    safeData.phones = phones;
   }
   let tagNamesById: Map<string, string> | null = null;
   if (Object.prototype.hasOwnProperty.call(safeData, 'manualTagIds')) {
@@ -772,7 +806,7 @@ function findLeadIdByCustomer(customer: Customer): string | undefined {
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
   return leads.find((lead) => (
     lead.customerId === customer.id
-    || (lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone))
+    || contactsSharePhone(lead, customer)
     || (lead.wechat && customer.wechat && lead.wechat === customer.wechat)
   ))?.id;
 }

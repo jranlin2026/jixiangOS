@@ -30,10 +30,15 @@ import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
 import useAuthStore from '../../store/useAuthStore';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
-import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
+import ContactPhoneFields from '../../shared/components/ContactPhoneFields';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { canCompleteContactField, canCompletePhoneField } from '../../shared/utils/contactEditLock';
-import { formatPhoneForDisplay, getPhoneNumberError } from '../../shared/utils/phoneNumber';
+import {
+  alternateContactPhone,
+  contactPhonesFromValues,
+  formatContactPhoneLines,
+  getContactPhoneError,
+} from '../../shared/utils/contactPhones';
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { hasExplicitPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
@@ -289,7 +294,15 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     setDraft((prev) => ({
       ...prev,
       phone: value,
+      phones: contactPhonesFromValues(value, alternateContactPhone(prev.phone, prev.phones)),
       city: completeCityFromPhone(String(prev.city || ''), value),
+    }));
+  };
+
+  const handleAlternatePhoneChange = (value: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      phones: contactPhonesFromValues(String(prev.phone || ''), value),
     }));
   };
 
@@ -389,7 +402,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       canEditAttribution: detailActions.actions.editAttribution,
       canEditLockedContact,
     });
-    const phoneError = getPhoneNumberError(String(payload.phone ?? currentCustomer.phone));
+    const phoneError = getContactPhoneError(
+      String(payload.phone ?? currentCustomer.phone),
+      payload.phones ?? currentCustomer.phones,
+    );
     if (phoneError) {
       alert(phoneError);
       return;
@@ -504,13 +520,13 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     const displayValue = field === 'createdAt' && currentCustomer.createdAt
       ? formatDate(currentCustomer.createdAt, 'yyyy-MM-dd HH:mm:ss')
       : field === 'phone'
-        ? formatPhoneForDisplay(currentCustomer.phone)
+        ? formatContactPhoneLines(currentCustomer.phone, currentCustomer.phones)
       : emptyText(currentCustomer[field] as string | number);
 
     return (
       <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
         <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>{label}</Box>
-        <Box sx={{ px: 1.5, py: editing && editable ? 0.5 : 1, fontSize: 13 }}>
+        <Box sx={{ px: 1.5, py: editing && editable ? 0.5 : 1, fontSize: 13, whiteSpace: 'pre-line' }}>
           {editing && editable ? (
             isResourceField ? (
               <TextField
@@ -585,11 +601,12 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 ))}
               </TextField>
             ) : field === 'phone' ? (
-              <PhoneNumberInput
-                value={currentValue}
-                onChange={handlePhoneChange}
+              <ContactPhoneFields
+                primaryPhone={currentValue}
+                alternatePhone={alternateContactPhone(currentValue, draft.phones)}
+                onPrimaryChange={handlePhoneChange}
+                onAlternateChange={handleAlternatePhoneChange}
                 size="small"
-                fullWidth
               />
             ) : (
               <TextField
