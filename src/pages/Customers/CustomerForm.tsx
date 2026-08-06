@@ -13,11 +13,12 @@ import {
 } from '@mui/material';
 import type { Theme } from '@mui/material/styles';
 import useCustomerStore from '../../store/useCustomerStore';
-import { customerApi, settingsApi } from '../../api';
+import { customerApi, productApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import type { Customer, CustomerManageableUser } from '../../types/customer';
+import type { Product } from '../../types/product';
 import type { AfterSalesSourceConfig, CustomerLevelConfig, LeadSourceConfig } from '../../types/settings';
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
@@ -51,6 +52,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   const [contributorUsers, setContributorUsers] = useState<CustomerManageableUser[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [businessSourceConfigs, setBusinessSourceConfigs] = useState<AfterSalesSourceConfig[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -124,6 +126,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     sourceShopId: '',
     sourceShopName: '',
     platformOrderNo: '',
+    sourceProductId: '',
+    sourceProductName: '',
+    sourcePaymentAmount: '',
     sourcePaymentAt: '',
   });
 
@@ -141,6 +146,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     });
     settingsApi.fetchAfterSalesSourceConfigs().then((res) => {
       setBusinessSourceConfigs(res.code === 0 ? res.data : []);
+    });
+    productApi.getProducts().then((res) => {
+      setProducts(res.code === 0 ? res.data : []);
     });
     settingsApi.fetchCustomerLevelConfigs().then((res) => {
       if (res.code === 0) setCustomerLevelConfigs(res.data);
@@ -177,6 +185,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       sourceShopId: customer?.sourceShopId || '',
       sourceShopName: customer?.sourceShopName || '',
       platformOrderNo: customer?.platformOrderNo || '',
+      sourceProductId: customer?.sourceProductId || '',
+      sourceProductName: customer?.sourceProductName || '',
+      sourcePaymentAmount: customer?.sourcePaymentAmount == null ? '' : String(customer.sourcePaymentAmount),
       sourcePaymentAt: customer?.sourcePaymentAt || '',
     });
   }, [open, customer, currentOwnerUser?.id, currentOwnerUser?.name, currentUser?.id, currentUser?.name, defaultOwner, sourceOptions]);
@@ -224,7 +235,8 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     const payload = {
       ...form,
       phone: normalizePhoneForStorage(form.phone),
-      sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : undefined,
+      sourcePaymentAmount: form.sourcePaymentAmount === '' ? (isEdit ? null : undefined) : Number(form.sourcePaymentAmount),
+      sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : (isEdit ? null : undefined),
       city: completeCityFromPhone(form.city, form.phone),
       manualTagIds: form.manualTagIds,
       sourceType: normalizeResourceOwnership(form.sourceType),
@@ -260,8 +272,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   const missingContact = !form.phone.trim() && !form.wechat.trim();
   const phoneError = getPhoneNumberError(form.phone);
   const missingContributor = normalizeResourceOwnership(form.sourceType) === '个人资源' && !form.leadContributorName;
+  const sourcePaymentAmountError = form.sourcePaymentAmount !== ''
+    && (!Number.isFinite(Number(form.sourcePaymentAmount)) || Number(form.sourcePaymentAmount) < 0);
   const showContactError = !!form.name.trim() && missingContact;
-  const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor && !!form.ownerId && !!form.leadInputBy && !!form.leadSource;
+  const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor
+    && !sourcePaymentAmountError && !!form.ownerId && !!form.leadInputBy && !!form.leadSource;
 
   return (
     <Dialog
@@ -373,11 +388,13 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
               </TextField>
             </BusinessFormSection>
 
-            <BusinessFormSection step={3} solidStep title="补充信息" summary={[form.sourcePlatformName, form.sourceShopName, form.platformOrderNo, form.remark ? '已填写备注' : ''].filter(Boolean).join(' / ') || '无补充信息'}>
+            <BusinessFormSection step={3} solidStep title="补充信息" summary={[form.sourcePlatformName, form.sourceShopName, form.sourceProductName, form.sourcePaymentAmount ? `¥${form.sourcePaymentAmount}` : '', form.remark ? '已填写备注' : ''].filter(Boolean).join(' / ') || '无补充信息'}>
               <BusinessSourceFields
                 configs={businessSourceConfigs}
+                products={products}
                 value={form}
                 includePaymentTime
+                includePurchaseSnapshot
                 onChange={(value) => setForm((current) => ({ ...current, ...value }))}
               />
               <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
@@ -427,6 +444,14 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
           </TextField>
           <TextField label="行业" value={form.industry} onChange={handleChange('industry')} fullWidth />
           <TextField label="城市" value={form.city} onChange={handleChange('city')} fullWidth />
+          <BusinessSourceFields
+            configs={businessSourceConfigs}
+            products={products}
+            value={form}
+            includePaymentTime
+            includePurchaseSnapshot
+            onChange={(value) => setForm((current) => ({ ...current, ...value }))}
+          />
           {isEdit && (
             <TextField select label="线索录入人" value={form.leadInputBy} onChange={handleChange('leadInputBy')} required fullWidth helperText="默认当前登录人员">
               {userOptions}

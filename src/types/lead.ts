@@ -96,8 +96,14 @@ export interface Lead {
   sourceShopName?: string;
   /** 首次来源交易的外部平台订单号。 */
   platformOrderNo?: string;
+  /** 首次来源交易购买的系统产品 ID。 */
+  sourceProductId?: ID;
+  /** 首次来源交易购买的产品名称快照。 */
+  sourceProductName?: string;
+  /** 首次来源交易的付款金额，不作为正式资金流水。 */
+  sourcePaymentAmount?: number | null;
   /** 首次来源交易的付款时间，不作为正式资金流水。 */
-  sourcePaymentAt?: Timestamp;
+  sourcePaymentAt?: Timestamp | null;
   remark?: string;
   score?: number;
   wechat?: string;

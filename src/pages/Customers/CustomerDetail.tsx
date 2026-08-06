@@ -1052,7 +1052,9 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderStatusRow('来源平台', currentCustomer.sourcePlatformName || '-')}
               {renderStatusRow('来源店铺', currentCustomer.sourceShopName || '-')}
               {renderStatusRow('平台订单号', currentCustomer.platformOrderNo || '-')}
-              {renderStatusRow('付款时间', currentCustomer.sourcePaymentAt ? formatDate(currentCustomer.sourcePaymentAt, 'yyyy-MM-dd HH:mm') : '-')}
+              {renderStatusRow('平台购买产品', currentCustomer.sourceProductName || '-')}
+              {renderStatusRow('平台付款金额', currentCustomer.sourcePaymentAmount == null ? '-' : formatCurrency(currentCustomer.sourcePaymentAmount))}
+              {renderStatusRow('平台付款时间', currentCustomer.sourcePaymentAt ? formatDate(currentCustomer.sourcePaymentAt, 'yyyy-MM-dd HH:mm') : '-')}
               {renderInfoRow('资源归属', 'sourceType', detailActions.actions.editAttribution)}
               {renderInfoRow('行业', 'industry', detailActions.actions.editProfile)}
               {renderInfoRow('城市', 'city', detailActions.actions.editProfile)}

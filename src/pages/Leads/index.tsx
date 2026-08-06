@@ -35,7 +35,7 @@ import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import useLeadStore from '../../store/useLeadStore';
 import { getLifecycleConfigByCode, getLifecycleStatusTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
-import { formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
+import { formatCurrency, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';
 import { formatPhoneForDisplay } from '../../shared/utils/phoneNumber';
@@ -75,9 +75,9 @@ type LeadViewConfig = {
   schemaVersion: number;
 };
 
-const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_view_v9';
-const LEAD_VIEW_SCHEMA_VERSION = 9;
-const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v4';
+const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_view_v10';
+const LEAD_VIEW_SCHEMA_VERSION = 10;
+const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v5';
 const LEAD_ACTION_COLUMN_WIDTH = 180;
 
 const getAssignedSalesName = (lead: Lead) => {
@@ -104,6 +104,8 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
     { id: 'wechat', label: '微信', render: (lead) => lead.wechat || '-' },
     { id: 'sourceType', label: '资源归属', render: (lead) => normalizeResourceOwnership(lead.sourceType) },
     { id: 'source', label: '线索来源', render: (lead) => [lead.source, lead.sourceName].filter(Boolean).join('-') || '-' },
+    { id: 'sourceProductName', label: '平台购买产品', render: (lead) => lead.sourceProductName || '-' },
+    { id: 'sourcePaymentAmount', label: '平台付款金额', render: (lead) => lead.sourcePaymentAmount == null ? '-' : formatCurrency(lead.sourcePaymentAmount) },
     { id: 'industry', label: '行业', render: (lead) => lead.industry || '-' },
     { id: 'city', label: '城市', render: (lead) => lead.city || '-' },
     { id: 'inputBy', label: '线索录入人', render: (lead) => lead.inputBy || '-' },
@@ -153,6 +155,8 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'wechat',
   'sourceType',
   'source',
+  'sourceProductName',
+  'sourcePaymentAmount',
   'industry',
   'city',
   'inputBy',
@@ -171,6 +175,8 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   wechat: 150,
   sourceType: 140,
   source: 180,
+  sourceProductName: 180,
+  sourcePaymentAmount: 140,
   industry: 140,
   city: 120,
   inputBy: 140,

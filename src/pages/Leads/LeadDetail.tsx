@@ -20,7 +20,7 @@ import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import type { Lead, LeadFlowConfig } from '../../types/lead';
 import type { LeadSourceConfig, User } from '../../types/settings';
 import { leadApi, leadFlowApi, settingsApi } from '../../api';
-import { formatDate, formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getLifecycleStatusTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import useAuthStore from '../../store/useAuthStore';
 import { canEditLeadProfile } from './leadDetailRules';
@@ -536,7 +536,9 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               {renderStatusRow('来源平台', currentLead.sourcePlatformName || '-')}
               {renderStatusRow('来源店铺', currentLead.sourceShopName || '-')}
               {renderStatusRow('平台订单号', currentLead.platformOrderNo || '-')}
-              {renderStatusRow('付款时间', currentLead.sourcePaymentAt ? formatDate(currentLead.sourcePaymentAt, 'yyyy-MM-dd HH:mm') : '-')}
+              {renderStatusRow('平台购买产品', currentLead.sourceProductName || '-')}
+              {renderStatusRow('平台付款金额', currentLead.sourcePaymentAmount == null ? '-' : formatCurrency(currentLead.sourcePaymentAmount))}
+              {renderStatusRow('平台付款时间', currentLead.sourcePaymentAt ? formatDate(currentLead.sourcePaymentAt, 'yyyy-MM-dd HH:mm') : '-')}
               {renderInfoRow('行业', 'industry')}
               {renderInfoRow('城市', 'city')}
               {renderInfoRow('线索录入人', 'inputBy', false)}

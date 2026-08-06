@@ -114,9 +114,9 @@ type CustomerViewConfig = {
   schemaVersion: number;
 };
 
-const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v8';
-const CUSTOMER_VIEW_SCHEMA_VERSION = 8;
-const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v2';
+const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v9';
+const CUSTOMER_VIEW_SCHEMA_VERSION = 9;
+const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v3';
 const CUSTOMER_ACTION_COLUMN_WIDTH = 190;
 const CUSTOMER_SELECTION_COLUMN_WIDTH = 52;
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
@@ -156,6 +156,8 @@ export const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], 
     render: (customer) => <ManualTagDisplay ids={customer.manualTagIds} legacyNames={customer.tags} />,
   },
   { id: 'leadSource', label: '线索来源', render: (customer) => formatCustomerSource(customer) },
+  { id: 'sourceProductName', label: '平台购买产品', render: (customer) => customer.sourceProductName || '-' },
+  { id: 'sourcePaymentAmount', label: '平台付款金额', render: (customer) => customer.sourcePaymentAmount == null ? '-' : formatCurrency(customer.sourcePaymentAmount) },
   { id: 'sourceType', label: '资源归属', render: (customer) => normalizeResourceOwnership(customer.sourceType) },
   { id: 'leadInputBy', label: '线索录入人', render: (customer) => customer.leadInputBy || '-' },
   { id: 'leadContributorName', label: '线索贡献人', render: (customer) => customer.leadContributorName || '-' },
@@ -183,6 +185,8 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'customerLevel',
   'tags',
   'leadSource',
+  'sourceProductName',
+  'sourcePaymentAmount',
   'sourceType',
   'leadInputBy',
   'leadContributorName',
@@ -204,6 +208,8 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   customerLevel: 130,
   tags: 180,
   leadSource: 160,
+  sourceProductName: 180,
+  sourcePaymentAmount: 140,
   sourceType: 140,
   leadInputBy: 140,
   leadContributorName: 140,

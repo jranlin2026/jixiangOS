@@ -147,7 +147,13 @@ export interface Customer {
   sourceShopId?: ID;
   sourceShopName?: string;
   platformOrderNo?: string;
-  sourcePaymentAt?: Timestamp;
+  /** 首次来源交易购买的系统产品 ID。 */
+  sourceProductId?: ID;
+  /** 首次来源交易购买的产品名称快照。 */
+  sourceProductName?: string;
+  /** 首次来源交易的付款金额，不作为正式资金流水。 */
+  sourcePaymentAmount?: number | null;
+  sourcePaymentAt?: Timestamp | null;
   score?: number;
   deletedAt?: Timestamp;
   deletedBy?: string;

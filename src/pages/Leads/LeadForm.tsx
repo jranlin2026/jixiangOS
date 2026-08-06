@@ -14,8 +14,9 @@ import {
 import type { Theme } from '@mui/material/styles';
 import useLeadStore from '../../store/useLeadStore';
 import type { Lead } from '../../types/lead';
+import type { Product } from '../../types/product';
 import type { AfterSalesSourceConfig, LeadSourceConfig, User } from '../../types/settings';
-import { leadFlowApi, settingsApi } from '../../api';
+import { leadFlowApi, productApi, settingsApi } from '../../api';
 import { RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
@@ -45,6 +46,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   const isEdit = Boolean(lead);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [businessSourceConfigs, setBusinessSourceConfigs] = useState<AfterSalesSourceConfig[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [submitError, setSubmitError] = useState('');
@@ -99,6 +101,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     sourceShopId: '',
     sourceShopName: '',
     platformOrderNo: '',
+    sourceProductId: '',
+    sourceProductName: '',
+    sourcePaymentAmount: '',
     sourcePaymentAt: '',
   });
 
@@ -115,6 +120,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     });
     settingsApi.fetchAfterSalesSourceConfigs().then((res) => {
       setBusinessSourceConfigs(res.code === 0 ? res.data : []);
+    });
+    productApi.getProducts().then((res) => {
+      setProducts(res.code === 0 ? res.data : []);
     });
     settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
@@ -151,6 +159,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       sourceShopId: lead?.sourceShopId || '',
       sourceShopName: lead?.sourceShopName || '',
       platformOrderNo: lead?.platformOrderNo || '',
+      sourceProductId: lead?.sourceProductId || '',
+      sourceProductName: lead?.sourceProductName || '',
+      sourcePaymentAmount: lead?.sourcePaymentAmount == null ? '' : String(lead.sourcePaymentAmount),
       sourcePaymentAt: lead?.sourcePaymentAt || '',
     });
   }, [open, lead, sourceOptions, users]);
@@ -199,7 +210,8 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       owner: effectiveOwner,
       assignedTo: effectiveOwner === '待分配' ? undefined : effectiveOwner,
       phone: normalizePhoneForStorage(form.phone),
-      sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : undefined,
+      sourcePaymentAmount: form.sourcePaymentAmount === '' ? (isEdit ? null : undefined) : Number(form.sourcePaymentAmount),
+      sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : (isEdit ? null : undefined),
       sourceType: normalizeResourceOwnership(form.sourceType),
       status: lead?.status || '新线索',
     };
@@ -226,8 +238,11 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   const missingContact = !form.phone.trim() && !form.wechat.trim();
   const phoneError = getPhoneNumberError(form.phone);
   const missingContributor = normalizeResourceOwnership(form.sourceType) === '个人资源' && !form.leadContributorName;
+  const sourcePaymentAmountError = form.sourcePaymentAmount !== ''
+    && (!Number.isFinite(Number(form.sourcePaymentAmount)) || Number(form.sourcePaymentAmount) < 0);
   const showContactError = !isEdit && !!form.name.trim() && missingContact;
-  const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor && !!form.source && !!form.inputBy;
+  const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor
+    && !sourcePaymentAmountError && !!form.source && !!form.inputBy;
 
   return (
     <>
@@ -315,11 +330,13 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
               )}
             </BusinessFormSection>
 
-            <BusinessFormSection step={3} solidStep title="补充信息" summary={[form.sourcePlatformName, form.sourceShopName, form.platformOrderNo, form.remark ? '已填写备注' : ''].filter(Boolean).join(' / ') || '无补充信息'}>
+            <BusinessFormSection step={3} solidStep title="补充信息" summary={[form.sourcePlatformName, form.sourceShopName, form.sourceProductName, form.sourcePaymentAmount ? `¥${form.sourcePaymentAmount}` : '', form.remark ? '已填写备注' : ''].filter(Boolean).join(' / ') || '无补充信息'}>
               <BusinessSourceFields
                 configs={businessSourceConfigs}
+                products={products}
                 value={form}
                 includePaymentTime
+                includePurchaseSnapshot
                 onChange={(value) => setForm((current) => ({ ...current, ...value }))}
               />
               <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
@@ -376,6 +393,14 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           </TextField>
           <TextField label="行业" value={form.industry} onChange={handleChange('industry')} fullWidth />
           <TextField label="城市" value={form.city} onChange={handleChange('city')} fullWidth />
+          <BusinessSourceFields
+            configs={businessSourceConfigs}
+            products={products}
+            value={form}
+            includePaymentTime
+            includePurchaseSnapshot
+            onChange={(value) => setForm((current) => ({ ...current, ...value }))}
+          />
           {isEdit && (
             <TextField select label="线索录入人" value={form.inputBy} onChange={handleChange('inputBy')} fullWidth helperText="默认当前登录人员">
               {users.map((user) => (

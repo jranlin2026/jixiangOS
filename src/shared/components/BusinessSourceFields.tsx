@@ -1,6 +1,8 @@
 import React, { useMemo } from 'react';
-import { MenuItem, TextField } from '@mui/material';
+import { Box, MenuItem, TextField } from '@mui/material';
 import type { AfterSalesSourceConfig } from '../../types/settings';
+import type { Product } from '../../types/product';
+import { getProductLevelColor } from '../utils/constants';
 
 export type BusinessSourceValue = {
   sourcePlatformId: string;
@@ -8,14 +10,19 @@ export type BusinessSourceValue = {
   sourceShopId: string;
   sourceShopName: string;
   platformOrderNo: string;
+  sourceProductId?: string;
+  sourceProductName?: string;
+  sourcePaymentAmount?: string;
   sourcePaymentAt?: string;
 };
 
 type BusinessSourceFieldsProps = {
   configs: AfterSalesSourceConfig[];
+  products?: Product[];
   value: BusinessSourceValue;
   onChange: (value: BusinessSourceValue) => void;
   includePaymentTime?: boolean;
+  includePurchaseSnapshot?: boolean;
   paymentTimeLabel?: string;
   platformOrderLabel?: string;
   disabled?: boolean;
@@ -35,10 +42,12 @@ function nowDateTimeLocal(): string {
 
 const BusinessSourceFields: React.FC<BusinessSourceFieldsProps> = ({
   configs,
+  products = [],
   value,
   onChange,
   includePaymentTime = false,
-  paymentTimeLabel = '付款时间',
+  includePurchaseSnapshot = false,
+  paymentTimeLabel = '平台付款时间',
   platformOrderLabel = '平台订单号',
   disabled = false,
 }) => {
@@ -48,6 +57,14 @@ const BusinessSourceFields: React.FC<BusinessSourceFieldsProps> = ({
   const shops = useMemo(() => configs
     .filter((item) => item.parentId === value.sourcePlatformId && (item.isActive || item.id === value.sourceShopId))
     .sort((left, right) => left.sortOrder - right.sortOrder), [configs, value.sourcePlatformId, value.sourceShopId]);
+  const productOptions = useMemo(() => [...products].sort((left, right) => left.sortOrder - right.sortOrder), [products]);
+  const selectedProductIsAvailable = productOptions.some((product) => product.id === value.sourceProductId);
+  const selectedProductValue = selectedProductIsAvailable
+    ? value.sourceProductId || ''
+    : value.sourceProductName ? `legacy:${value.sourceProductName}` : '';
+  const paymentAmount = Number(value.sourcePaymentAmount);
+  const paymentAmountError = Boolean(value.sourcePaymentAmount)
+    && (!Number.isFinite(paymentAmount) || paymentAmount < 0);
 
   return (
     <>
@@ -93,6 +110,51 @@ const BusinessSourceFields: React.FC<BusinessSourceFieldsProps> = ({
         placeholder="可选，保留字母、数字和前导零"
         fullWidth
       />
+      {includePurchaseSnapshot && (
+        <TextField
+          select
+          label="平台购买产品"
+          value={selectedProductValue}
+          disabled={disabled}
+          onChange={(event) => {
+            const product = productOptions.find((item) => item.id === event.target.value);
+            onChange({
+              ...value,
+              sourceProductId: product?.id || '',
+              sourceProductName: product?.name || '',
+              sourcePaymentAmount: product ? String(product.price) : '',
+            });
+          }}
+          fullWidth
+        >
+          <MenuItem value="">未选择</MenuItem>
+          {productOptions.map((product) => (
+            <MenuItem key={product.id} value={product.id}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: getProductLevelColor(product.level) }} />
+                {product.name}
+              </Box>
+            </MenuItem>
+          ))}
+          {value.sourceProductName && !selectedProductIsAvailable ? (
+            <MenuItem value={`legacy:${value.sourceProductName}`} disabled>{value.sourceProductName}（历史产品）</MenuItem>
+          ) : null}
+        </TextField>
+      )}
+      {includePurchaseSnapshot && (
+        <TextField
+          label="平台付款金额"
+          type="number"
+          value={value.sourcePaymentAmount || ''}
+          disabled={disabled}
+          onChange={(event) => onChange({ ...value, sourcePaymentAmount: event.target.value })}
+          inputProps={{ min: 0, step: 0.01 }}
+          placeholder="可选"
+          error={paymentAmountError}
+          helperText={paymentAmountError ? '平台付款金额不能小于 0' : '仅作客户来源快照，不计入正式资金流水'}
+          fullWidth
+        />
+      )}
       {includePaymentTime && (
         <TextField
           label={paymentTimeLabel}

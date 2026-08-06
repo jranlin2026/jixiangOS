@@ -859,6 +859,18 @@ function tagCatalogRows(): BusinessRow[] {
   ];
 }
 
+function purchaseProductRow(): BusinessRow {
+  return {
+    id: `${STORAGE_KEYS.PRODUCTS}:product-ip-avatar`,
+    domain: STORAGE_KEYS.PRODUCTS,
+    recordId: 'product-ip-avatar',
+    data: {
+      id: 'product-ip-avatar', name: 'IP口播智能体', price: 899, level: 'AI产品', isActive: true,
+      description: '', features: [], deliveryStages: [], sortOrder: 1, createdAt: FIXED_NOW, updatedAt: FIXED_NOW,
+    },
+  };
+}
+
 function lead(id: string, owner = salesA.name, customerId?: string): LeadRow {
   const data = {
     id,
@@ -2109,7 +2121,10 @@ for (const targetType of ['customer', 'lead'] as const) {
 // RED: 新建线索必须由服务端生成 ID/录入人，查重并逐记录写入。
 {
   const fake = createFakePrisma({
-    businessRecords: tagCatalogRows(),
+    businessRecords: [
+      ...tagCatalogRows(),
+      purchaseProductRow(),
+    ],
     leads: [],
     appStorage: [{
       key: STORAGE_KEYS.LEAD_FLOW_CONFIG,
@@ -2184,7 +2199,7 @@ for (const targetType of ['customer', 'lead'] as const) {
 // RED: 开启“分配后自动领取”时，线索和客户必须在同一事务中创建。
 {
   const fake = createFakePrisma({
-    businessRecords: tagCatalogRows(),
+    businessRecords: [...tagCatalogRows(), purchaseProductRow()],
     leads: [],
     appStorage: [
       {
@@ -2214,6 +2229,9 @@ for (const targetType of ['customer', 'lead'] as const) {
     sourceShopId: 'shop-agent',
     sourceShopName: '极享智能体店',
     platformOrderNo: 'DY-0000123',
+    sourceProductId: 'product-ip-avatar',
+    sourceProductName: 'IP口播智能体',
+    sourcePaymentAmount: 899,
     sourcePaymentAt: '2026-07-20T10:30:00.000Z',
     manualTagIds: ['shared', 'lead-only'],
     tags: ['伪造通用名', '伪造线索名'],
@@ -2231,6 +2249,9 @@ for (const targetType of ['customer', 'lead'] as const) {
   assert.equal(autoCustomer?.sourceShopId, 'shop-agent');
   assert.equal(autoCustomer?.sourceShopName, '极享智能体店');
   assert.equal(autoCustomer?.platformOrderNo, 'DY-0000123');
+  assert.equal(autoCustomer?.sourceProductId, 'product-ip-avatar');
+  assert.equal(autoCustomer?.sourceProductName, 'IP口播智能体');
+  assert.equal(autoCustomer?.sourcePaymentAmount, 899);
   assert.equal(autoCustomer?.sourcePaymentAt, '2026-07-20T10:30:00.000Z');
   assert.equal(autoCustomer?.owner, '销售甲');
   assert.equal(autoCustomer?.originalSalesTransferBy, '销售甲');

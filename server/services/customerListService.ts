@@ -41,6 +41,7 @@ import {
 } from './customerBusinessRecordRepository';
 import { customerWriteConflictResponse } from './customerWriteConflict';
 import { appendCustomerAuditEvent } from './customerAuditService';
+import { canonicalizePurchaseSnapshot } from './customerPurchaseSnapshotPolicy';
 import {
   ContactIdentityConflictError,
   lockContactIdentityMutationGate,
@@ -389,11 +390,18 @@ export function createCustomerListService(
       const tagValidation = validateManualTagSelection(catalog, 'customer', input.manualTagIds || []);
       if (!tagValidation.ok) return failure<Customer>(tagValidation.message, 400);
       const tagNames = tagValidation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
+      let purchaseSnapshot: Partial<Customer> = {};
+      try {
+        purchaseSnapshot = await canonicalizePurchaseSnapshot(tx, input);
+      } catch (error) {
+        return failure<Customer>(error instanceof Error ? error.message : '平台购买信息校验失败', 400);
+      }
 
       const now = new Date().toISOString();
       const id = `cust-${randomUUID()}`;
       const customer: Customer = {
         ...input,
+        ...purchaseSnapshot,
         manualTagIds: tagValidation.tagIds,
         tags: tagNames,
         name,

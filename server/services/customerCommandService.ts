@@ -40,6 +40,7 @@ import {
   assertLifecycleTransition,
 } from './customerLifecyclePolicy';
 import { assertCustomerCanBeSoftDeleted } from './customerDeletePolicy';
+import { canonicalizePurchaseSnapshot } from './customerPurchaseSnapshotPolicy';
 import { lockCustomerAssociationScope } from './customerAssociationRegistry';
 import {
   assertCanManageCustomer,
@@ -696,7 +697,10 @@ const CUSTOMER_EDIT_FIELDS: Array<{ field: keyof Customer; label: string }> = [
   { field: 'sourceShopId', label: '来源店铺' },
   { field: 'sourceShopName', label: '来源店铺' },
   { field: 'platformOrderNo', label: '平台订单号' },
-  { field: 'sourcePaymentAt', label: '付款时间' },
+  { field: 'sourceProductId', label: '平台购买产品' },
+  { field: 'sourceProductName', label: '平台购买产品' },
+  { field: 'sourcePaymentAmount', label: '平台付款金额' },
+  { field: 'sourcePaymentAt', label: '平台付款时间' },
   { field: 'originalSalesTransferBy', label: '首个销售负责人' },
   { field: 'score', label: '线索评分' },
 ];
@@ -761,6 +765,9 @@ function syncLeadFromCustomer(lead: Lead, customer: Customer, atIso: string, ope
     sourceShopId: customer.sourceShopId,
     sourceShopName: customer.sourceShopName,
     platformOrderNo: customer.platformOrderNo,
+    sourceProductId: customer.sourceProductId,
+    sourceProductName: customer.sourceProductName,
+    sourcePaymentAmount: customer.sourcePaymentAmount,
     sourcePaymentAt: customer.sourcePaymentAt,
     tags: customer.tags,
     remark: customer.remark,
@@ -804,7 +811,10 @@ const LEAD_EDIT_FIELDS: Array<{ field: keyof Lead; label: string }> = [
   { field: 'sourceShopId', label: '来源店铺' },
   { field: 'sourceShopName', label: '来源店铺' },
   { field: 'platformOrderNo', label: '平台订单号' },
-  { field: 'sourcePaymentAt', label: '付款时间' },
+  { field: 'sourceProductId', label: '平台购买产品' },
+  { field: 'sourceProductName', label: '平台购买产品' },
+  { field: 'sourcePaymentAmount', label: '平台付款金额' },
+  { field: 'sourcePaymentAt', label: '平台付款时间' },
   { field: 'industry', label: '行业' },
   { field: 'city', label: '城市' },
   { field: 'leadContributorId', label: '线索贡献人' },
@@ -1437,6 +1447,14 @@ export function createCustomerCommandService(
         if (accessError) return failure<Customer>(accessError, 403);
 
         let patch = submittedPatch;
+        try {
+          patch = {
+            ...patch,
+            ...await canonicalizePurchaseSnapshot(tx, patch, { existingProductId: customer.sourceProductId }),
+          };
+        } catch (error) {
+          return failure<Customer>(error instanceof Error ? error.message : '平台购买信息校验失败', 400);
+        }
         const hasSubmittedLifecycleCode = Object.prototype.hasOwnProperty.call(patch, 'lifecycleStatusCode');
         const submittedLifecycleInput = hasSubmittedLifecycleCode
           ? cleanText(patch.lifecycleStatusCode)
@@ -1701,6 +1719,12 @@ export function createCustomerCommandService(
         ) {
           return rejectIntake('个人资源必须填写线索贡献人');
         }
+        let purchaseSnapshot: Partial<Lead> = {};
+        try {
+          purchaseSnapshot = await canonicalizePurchaseSnapshot(tx, cleanInput);
+        } catch (error) {
+          return rejectIntake(error instanceof Error ? error.message : '平台购买信息校验失败');
+        }
 
         const requestedOwner = cleanText(input.assignedTo || input.owner);
         let owner = '待分配';
@@ -1765,6 +1789,7 @@ export function createCustomerCommandService(
         const id = newId('lead');
         let lead: Lead = {
           ...cleanInput,
+          ...purchaseSnapshot,
           id,
           name,
           source,
@@ -1861,6 +1886,9 @@ export function createCustomerCommandService(
             sourceShopId: lead.sourceShopId,
             sourceShopName: lead.sourceShopName,
             platformOrderNo: lead.platformOrderNo,
+            sourceProductId: lead.sourceProductId,
+            sourceProductName: lead.sourceProductName,
+            sourcePaymentAmount: lead.sourcePaymentAmount,
             sourcePaymentAt: lead.sourcePaymentAt,
             score: lead.score,
             createdAt: atIso,
@@ -1978,6 +2006,14 @@ export function createCustomerCommandService(
         if (!canEditLeadProfileOnServer(lead)) return failure<Lead>('仅待跟进且未转客户的线索可编辑', 409);
 
         let patch = editableLeadPatch(stripLeadTags(input));
+        try {
+          patch = {
+            ...patch,
+            ...await canonicalizePurchaseSnapshot(tx, patch, { existingProductId: lead.sourceProductId }),
+          };
+        } catch (error) {
+          return failure<Lead>(error instanceof Error ? error.message : '平台购买信息校验失败', 400);
+        }
         patch = applyContactEditLock(lead, patch, {
           canEditLockedContact: isSuperAdmin(currentUser),
         });
@@ -2588,6 +2624,9 @@ export function createCustomerCommandService(
           sourceShopId: lead.sourceShopId,
           sourceShopName: lead.sourceShopName,
           platformOrderNo: lead.platformOrderNo,
+          sourceProductId: lead.sourceProductId,
+          sourceProductName: lead.sourceProductName,
+          sourcePaymentAmount: lead.sourcePaymentAmount,
           sourcePaymentAt: lead.sourcePaymentAt,
           score: lead.score,
           createdAt: atIso,
