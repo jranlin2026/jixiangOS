@@ -475,6 +475,149 @@ model CustomerTodo {
   @@map("customer_todos")
 }
 
+enum NotificationSeverity {
+  S0
+  S1
+  S2
+  S3
+}
+
+enum NotificationChannel {
+  FEISHU
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum ReminderScheduleStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  CANCELED
+  FAILED
+}
+
+model Notification {
+  id             String               @id @db.VarChar(64)
+  eventType      String               @db.VarChar(80)
+  businessType   String               @db.VarChar(40)
+  businessId     String               @db.VarChar(80)
+  recipientId    String               @db.VarChar(64)
+  recipientName  String               @db.VarChar(100)
+  title          String               @db.VarChar(200)
+  content        String?              @db.Text
+  severity       NotificationSeverity @default(S2)
+  actionUrl      String               @db.VarChar(500)
+  requiresAck    Boolean              @default(false)
+  dedupeKey      String               @unique @db.VarChar(191)
+  metadata       Json?
+  readAt         DateTime?
+  ackAt          DateTime?
+  resolvedAt     DateTime?
+  resolvedReason String?              @db.VarChar(500)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  deliveries NotificationDelivery[]
+
+  @@index([recipientId, resolvedAt, createdAt])
+  @@index([recipientId, readAt, createdAt])
+  @@index([businessType, businessId, resolvedAt])
+  @@map("notifications")
+}
+
+model NotificationDelivery {
+  id             String                     @id @db.VarChar(64)
+  notificationId String                     @db.VarChar(64)
+  channel        NotificationChannel
+  status         NotificationDeliveryStatus @default(PENDING)
+  attemptCount   Int                        @default(0)
+  nextAttemptAt  DateTime?
+  sentAt         DateTime?
+  lastError      String?                    @db.VarChar(500)
+  leaseOwner     String?                    @db.VarChar(100)
+  leaseExpiresAt DateTime?
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, channel])
+  @@index([status, nextAttemptAt])
+  @@index([leaseOwner, leaseExpiresAt])
+  @@map("notification_deliveries")
+}
+
+model ReminderSchedule {
+  id              String                 @id @db.VarChar(64)
+  eventType       String                 @db.VarChar(80)
+  businessType    String                 @db.VarChar(40)
+  businessId      String                 @db.VarChar(80)
+  recipientId     String                 @db.VarChar(64)
+  recipientName   String                 @db.VarChar(100)
+  title           String                 @db.VarChar(200)
+  content         String?                @db.Text
+  severity        NotificationSeverity   @default(S2)
+  actionUrl       String                 @db.VarChar(500)
+  requiresAck     Boolean                @default(false)
+  dedupeKey       String                 @unique @db.VarChar(191)
+  channels        Json
+  metadata        Json?
+  scheduledAt     DateTime
+  escalationLevel Int                    @default(0)
+  status          ReminderScheduleStatus @default(PENDING)
+  leaseOwner      String?                @db.VarChar(100)
+  leaseExpiresAt  DateTime?
+  attemptCount    Int                    @default(0)
+  completedAt     DateTime?
+  canceledAt      DateTime?
+  cancelReason    String?                @db.VarChar(500)
+  lastError       String?                @db.VarChar(500)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  @@index([status, scheduledAt])
+  @@index([businessType, businessId, status])
+  @@index([leaseOwner, leaseExpiresAt])
+  @@map("reminder_schedules")
+}
+
+model NotificationRule {
+  id            String   @id @db.VarChar(64)
+  eventType     String   @unique @db.VarChar(80)
+  enabled       Boolean  @default(true)
+  channels      Json
+  config        Json
+  updatedById   String?  @db.VarChar(64)
+  updatedByName String?  @db.VarChar(100)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("notification_rules")
+}
+
+model UserChannelBinding {
+  id             String              @id @db.VarChar(64)
+  userId         String              @db.VarChar(64)
+  channel        NotificationChannel
+  externalUserId String              @db.VarChar(191)
+  active         Boolean             @default(true)
+  verifiedAt     DateTime?
+  lastError      String?             @db.VarChar(500)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@unique([userId, channel])
+  @@unique([channel, externalUserId])
+  @@index([active, channel])
+  @@map("user_channel_bindings")
+}
+
 model KnowledgeDocument {
   id                String   @id @db.VarChar(64)
   slug              String   @unique @db.VarChar(160)

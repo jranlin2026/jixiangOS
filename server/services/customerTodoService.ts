@@ -18,6 +18,7 @@ import {
 import { customerWriteConflictResponse } from './customerWriteConflict';
 import { lockCustomerAssociationScope } from './customerAssociationRegistry';
 import { appendCustomerAuditEvent } from './customerAuditService';
+import type { NotificationWorkflow } from './notificationWorkflow';
 
 type CustomerTodoPrisma = Pick<
   PrismaClient,
@@ -27,6 +28,7 @@ type CustomerTodoPrisma = Pick<
 type CustomerTodoServiceOptions = {
   now?: () => Date;
   createId?: () => string;
+  notificationWorkflow?: NotificationWorkflow;
 };
 
 type LoadedCustomer =
@@ -98,6 +100,7 @@ export function createCustomerTodoService(
 ) {
   const now = () => options.now?.() || new Date();
   const createId = () => options.createId?.() || `todo-${randomUUID()}`;
+  const notificationWorkflow = options.notificationWorkflow;
   const runMutation = async <T>(
     operation: (tx: Prisma.TransactionClient) => Promise<ApiResponse<T | null>>,
   ): Promise<ApiResponse<T | null>> => {
@@ -167,6 +170,23 @@ export function createCustomerTodoService(
     return updated;
   };
 
+  const notificationRecipients = async (tx: Prisma.TransactionClient, assigneeId: string) => {
+    const assignee = await tx.user.findUnique({ where: { id: assigneeId } });
+    if (!assignee) return { assignee: null, manager: null };
+    const department = assignee.departmentId
+      ? await tx.department.findUnique({ where: { id: assignee.departmentId } })
+      : null;
+    const manager = department?.managerId
+      ? await tx.user.findUnique({ where: { id: department.managerId } })
+      : null;
+    return {
+      assignee: { id: assignee.id, name: assignee.name },
+      manager: manager && manager.isActive && manager.employmentStatus === 'active'
+        ? { id: manager.id, name: manager.name }
+        : null,
+    };
+  };
+
   return {
     async listMine(user: AuthenticatedUser) {
       const rows = await prisma.customerTodo.findMany({
@@ -222,6 +242,7 @@ export function createCustomerTodoService(
           dueAt: new Date(input.dueAt), executionMethod: input.executionMethod || 'none',
           assigneeId: assignee.id, assigneeName: assignee.name,
           createdById: user.id, createdByName: actorName,
+          createdAt: at, updatedAt: at,
         } });
         const afterSnapshot = await appendActivity(
           tx,
@@ -245,6 +266,21 @@ export function createCustomerTodoService(
             executionMethod: input.executionMethod || 'none', assigneeId: assignee.id,
           },
         });
+        if (notificationWorkflow) {
+          const recipients = await notificationRecipients(tx, created.assigneeId);
+          if (recipients.assignee) {
+            await notificationWorkflow.scheduleTodo(tx as any, {
+              todoId: created.id,
+              customerId,
+              customerName: created.customerName,
+              title: created.title,
+              dueAt: created.dueAt,
+              createdAt: created.updatedAt,
+              assignee: recipients.assignee,
+              manager: recipients.manager,
+            });
+          }
+        }
         return success(mapTodo(created));
       });
     },
@@ -269,6 +305,7 @@ export function createCustomerTodoService(
         const updated = await tx.customerTodo.update({ where: { id: todoId }, data: {
           title: clean(input.title), content: clean(input.content) || null, dueAt: new Date(input.dueAt),
           executionMethod: input.executionMethod || 'none', assigneeId: assignee.id, assigneeName: assignee.name,
+          updatedAt: at,
         } });
         const afterSnapshot = await appendActivity(
           tx,
@@ -292,6 +329,22 @@ export function createCustomerTodoService(
             executionMethod: input.executionMethod || 'none', assigneeId: assignee.id,
           },
         });
+        if (notificationWorkflow) {
+          await notificationWorkflow.resolveTodo(tx as any, todoId, '待办信息、时间或执行人已更新');
+          const recipients = await notificationRecipients(tx, updated.assigneeId);
+          if (recipients.assignee) {
+            await notificationWorkflow.scheduleTodo(tx as any, {
+              todoId: updated.id,
+              customerId,
+              customerName: updated.customerName,
+              title: updated.title,
+              dueAt: updated.dueAt,
+              createdAt: updated.updatedAt,
+              assignee: recipients.assignee,
+              manager: recipients.manager,
+            });
+          }
+        }
         return success(mapTodo(updated));
       });
     },
@@ -330,6 +383,9 @@ export function createCustomerTodoService(
           afterSnapshot,
           canonicalInput: { operation: 'complete_todo', customerId, todoId },
         });
+        if (notificationWorkflow) {
+          await notificationWorkflow.resolveTodo(tx as any, todoId, '客户待办已完成');
+        }
         return success(mapTodo(updated));
       });
     },
@@ -347,7 +403,7 @@ export function createCustomerTodoService(
         const actorName = user.name || user.account;
         const updated = await tx.customerTodo.update({
           where: { id: todoId },
-          data: { status: 'PENDING', completedAt: null, completedById: null, completedByName: null },
+          data: { status: 'PENDING', completedAt: null, completedById: null, completedByName: null, updatedAt: at },
         });
         const afterSnapshot = await appendActivity(tx, customer.snapshot, todoId, '重新打开了客户待办', updated.title, actorName, at);
         await appendCustomerAuditEvent(tx, {
@@ -359,6 +415,22 @@ export function createCustomerTodoService(
           afterSnapshot,
           canonicalInput: { operation: 'reopen_todo', customerId, todoId },
         });
+        if (notificationWorkflow) {
+          await notificationWorkflow.resolveTodo(tx as any, todoId, '客户待办已重新打开');
+          const recipients = await notificationRecipients(tx, updated.assigneeId);
+          if (recipients.assignee) {
+            await notificationWorkflow.scheduleTodo(tx as any, {
+              todoId: updated.id,
+              customerId,
+              customerName: updated.customerName,
+              title: updated.title,
+              dueAt: updated.dueAt,
+              createdAt: updated.updatedAt,
+              assignee: recipients.assignee,
+              manager: recipients.manager,
+            });
+          }
+        }
         return success(mapTodo(updated));
       });
     },
@@ -402,6 +474,9 @@ export function createCustomerTodoService(
           afterSnapshot,
           canonicalInput: { operation: 'cancel_todo', customerId, todoId, reason: clean(reason) },
         });
+        if (notificationWorkflow) {
+          await notificationWorkflow.resolveTodo(tx as any, todoId, '客户待办已取消');
+        }
         return success(mapTodo(updated));
       });
     },

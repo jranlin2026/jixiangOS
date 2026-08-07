@@ -21,7 +21,7 @@ import { createRequireAnyPermission, createRequireAuth, bearerToken, type Authen
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
 import { createSystemInstallationGate } from './middleware/systemInstallationGate';
 import { createAuthService } from './services/authService';
-import { success } from './api/response';
+import { failure, success } from './api/response';
 import { createAiConfigService } from './services/aiConfigService';
 import { createAiChatClient, type AiChatMessage } from './services/aiChatClient';
 import { createCustomerListService } from './services/customerListService';
@@ -33,6 +33,14 @@ import {
 import { createPrismaCustomerAuditAppender } from './services/customerAuditService';
 import { createContactIdentityCryptoFromEnv } from './services/contactIdentityService';
 import { createCustomerTodoService } from './services/customerTodoService';
+import { createNotificationPublisher } from './services/notificationService';
+import { createNotificationWorkflow } from './services/notificationWorkflow';
+import { createNotificationInboxService, type NotificationListStatus } from './services/notificationInboxService';
+import { createNotificationManagementService } from './services/notificationManagementService';
+import { createNotificationWorker } from './services/notificationWorker';
+import { createNotificationBootstrapService } from './services/notificationBootstrapService';
+import { createPrismaNotificationWorkerStore } from './services/prismaNotificationWorkerStore';
+import { createFeishuNotificationAdapter } from './services/feishuNotificationAdapter';
 import { createCustomerManageableUsersService } from './services/customerManageableUsersService';
 import { createCustomerBatchService } from './services/customerBatchService';
 import {
@@ -186,18 +194,38 @@ const systemSetupService = createSystemSetupService({
 const aiConfigService = createAiConfigService(prisma as any);
 const aiChatClient = createAiChatClient({ configReader: aiConfigService });
 const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
+const notificationPublisher = createNotificationPublisher();
+const notificationWorkflow = createNotificationWorkflow(notificationPublisher);
+const notificationInboxService = createNotificationInboxService(prisma);
+const notificationManagementService = createNotificationManagementService(prisma);
+const notificationWorker = createNotificationWorker({
+  store: createPrismaNotificationWorkerStore(prisma, notificationPublisher),
+  adapters: {
+    FEISHU: createFeishuNotificationAdapter({
+      prisma,
+      appId: process.env.FEISHU_APP_ID,
+      appSecret: process.env.FEISHU_APP_SECRET,
+      publicAppUrl: process.env.PUBLIC_APP_URL,
+    }),
+  },
+  workerId: `notification-${process.pid}-${randomUUID()}`,
+  onError: (error) => console.error('Notification worker failed:', String((error as Error)?.message || 'WORKER_ERROR')),
+});
+const notificationBootstrapService = createNotificationBootstrapService(prisma, notificationWorkflow);
 const customerListService = createCustomerListService(prisma, { contactIdentityCrypto });
-const customerCommandService = createCustomerCommandService(prisma, { contactIdentityCrypto });
+const customerCommandService = createCustomerCommandService(prisma, { contactIdentityCrypto, notificationWorkflow });
 // Transfer/release/delete use the shared atomic command engine. Profile,
 // todo, claim, creation, and follow-up services retain their dedicated
 // request contracts, but each appends its audit event in the same transaction.
 const customerAtomicCommandEngine = createCustomerAtomicCommandService({
   auditAppender: createPrismaCustomerAuditAppender(),
+  notificationWorkflow,
 });
 const customerAtomicCommandService = createAuditedCustomerAtomicCommandService(prisma, {
   auditAppender: createPrismaCustomerAuditAppender(),
+  notificationWorkflow,
 });
-const customerTodoService = createCustomerTodoService(prisma);
+const customerTodoService = createCustomerTodoService(prisma, { notificationWorkflow });
 const customerManageableUsersService = createCustomerManageableUsersService(prisma);
 const customerBatchService = createCustomerBatchService(prisma);
 const customerMergeService = createCustomerMergeService(prisma);
@@ -311,6 +339,7 @@ const enterpriseCockpitService = createEnterpriseCockpitService({
   rolloutPositionIds: ['pos-sales-consultant', 'pos-sales-manager', 'pos-sales-director'],
   rolloutLabel: '销售体系试运行范围',
 });
+const requireAuthenticated = createRequireAuth(authService);
 const requireOrganizationReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS);
 const requireDashboardAccess = createRequireAuth(authService, PERMISSION_KEYS.DASHBOARD);
 const requireOrganizationWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS, 'write');
@@ -586,6 +615,58 @@ app.get('/api/ready', async (_req, res) => {
   const payload = await healthPayload();
   res.status(payload.database ? 200 : 503).json(payload);
 });
+
+app.get('/api/notifications', requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+  const result = await notificationInboxService.list(req.currentUser!, {
+    page: Number(queryParam(req.query.page)),
+    pageSize: Number(queryParam(req.query.pageSize)),
+    status: (queryParam(req.query.status) || 'all') as NotificationListStatus,
+    eventType: queryParam(req.query.eventType),
+    severity: queryParam(req.query.severity),
+  });
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.get('/api/notifications/unread-count', requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+  res.json(await notificationInboxService.unreadCount(req.currentUser!));
+});
+
+app.post('/api/notifications/read-all', requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+  res.json(await notificationInboxService.markAllRead(req.currentUser!));
+});
+
+app.post('/api/notifications/:id/read', requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+  const result = await notificationInboxService.markRead(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.post('/api/notifications/:id/acknowledge', requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+  const result = await notificationInboxService.acknowledge(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.get('/api/notification-settings/rules', requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+  const result = await notificationManagementService.listRules(req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.put('/api/notification-settings/rules/:eventType', requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+  const result = await notificationManagementService.updateRule(routeParam(req.params.eventType), req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.get('/api/notification-settings/deliveries', requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+  const result = await notificationManagementService.listDeliveries(req.currentUser!, {
+    page: Number(queryParam(req.query.page)),
+    pageSize: Number(queryParam(req.query.pageSize)),
+  });
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.get('/api/notification-settings/channel-status', requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+  res.json(await notificationManagementService.channelStatus(req.currentUser!));
+});
+
 app.use('/api/dashboard', createBusinessCockpitRouter({
   service: businessCockpitService,
   requireAuth: requireDashboardAccess,
@@ -838,6 +919,13 @@ app.get('/api/leads', requireLeadListAccess, async (req: AuthenticatedRequest, r
     pageSize: Number(queryParam(req.query.pageSize)),
   }, req.currentUser);
   res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.get('/api/leads/:id', requireLeadListAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await leadListService.getById(routeParam(req.params.id), req.currentUser);
+  res.status(result.code === 0 && result.data ? 200 : result.code === 0 ? 404 : 400).json(
+    result.code === 0 && !result.data ? failure('线索不存在或无权查看', 404) : result,
+  );
 });
 
 app.post('/api/leads', requireLeadCreateAccess, async (req: AuthenticatedRequest, res) => {
@@ -2137,6 +2225,7 @@ async function startServer() {
     console.log(
       `Customer permission/scope baseline v${customerPermissionMigration.version}: ${customerPermissionMigration.migratedRoleIds.length} roles migrated.`,
     );
+    await notificationBootstrapService.run();
   } else {
     console.log('Awaiting first-time system setup. Legacy production migrations were skipped.');
   }
@@ -2145,12 +2234,14 @@ async function startServer() {
   });
   customerBatchWorker.start();
   businessImportWorker.start();
+  notificationWorker.start();
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
     await customerBatchWorker.stop();
     await businessImportWorker.stop();
+    await notificationWorker.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await prisma.$disconnect();
   };

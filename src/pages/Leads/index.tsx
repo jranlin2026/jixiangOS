@@ -1,4 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -238,6 +239,7 @@ const readLeadViewConfig = (columns: LeadColumn[]) => {
 };
 
 const Leads: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { items, filters, pagination, fetchItems, setFilters, resetListFilters } = useLeadStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const [activeTab, setActiveTab] = useState(0);
@@ -297,6 +299,21 @@ const Leads: React.FC = () => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive && !item.parentId));
     });
   }, [currentUser?.id, fetchItems]);
+
+  useEffect(() => {
+    const leadId = searchParams.get('leadId');
+    if (!leadId) return;
+    let active = true;
+    void leadApi.fetchLeadById(leadId).then((response) => {
+      if (!active || response.code !== 0 || !response.data) return;
+      setSelectedLead(response.data);
+      setDetailOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('leadId');
+      setSearchParams(next, { replace: true });
+    });
+    return () => { active = false; };
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     localStorage.setItem(LEAD_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));

@@ -212,6 +212,7 @@ async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedR
 }
 
 async function fetchLeadById(id: string): Promise<ApiResponse<Lead | null>> {
+  if (shouldUseBackendApi()) return backendRequest<Lead | null>(`/leads/${encodeURIComponent(id)}`);
   ensureInit();
   await delay(150);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];

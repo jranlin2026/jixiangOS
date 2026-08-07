@@ -105,6 +105,18 @@ async function buildVisibilityWhere(
 
 export function createLeadListService(prisma: LeadListPrisma) {
   return {
+    async getById(leadId: string, currentUser?: AuthenticatedUser | null) {
+      const visibilityWhere = await buildVisibilityWhere(prisma, currentUser);
+      const rows = await prisma.$queryRaw<LeadRow[]>`
+        SELECT data
+        FROM lead_records
+        WHERE id = ${leadId}
+          AND JSON_EXTRACT(data, '$.deletedAt') IS NULL
+          AND ${visibilityWhere}
+        LIMIT 1
+      `;
+      return success<Lead | null>(rows[0] ? leadFromRow(rows[0]) : null);
+    },
     async list(filters: LeadFilters = {}, currentUser?: AuthenticatedUser | null) {
       const page = toPositiveInt(filters.page, 1);
       const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);

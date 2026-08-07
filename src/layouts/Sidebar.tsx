@@ -38,8 +38,10 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { ROUTES } from '../shared/utils/constants';
 import { hasPermission, PERMISSION_KEYS } from '../shared/utils/permissions';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
+import { isSuperAdminRoleName } from '../shared/utils/roles';
 import useAuthStore from '../store/useAuthStore';
 import ChangePasswordDialog from '../shared/components/ChangePasswordDialog';
+import NotificationBell from '../shared/components/NotificationBell';
 
 interface SidebarProps {
   width: number;
@@ -73,6 +75,7 @@ interface NavChildItem {
   label: string;
   path: string;
   permissionKeys: string[];
+  superAdminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -241,6 +244,12 @@ const navItems: NavItem[] = [
         permissionKeys: [PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT],
       },
       {
+        label: '消息与提醒',
+        path: `${ROUTES.SETTINGS}?group=notifications`,
+        permissionKeys: [PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE],
+        superAdminOnly: true,
+      },
+      {
         label: '系统维护',
         path: `${ROUTES.SETTINGS}?group=maintenance`,
         permissionKeys: [PERMISSION_KEYS.SETTINGS_AI_CONFIG, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE],
@@ -264,7 +273,8 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
   const visibleNavItems = useMemo(() => navItems.map((item) => ({
     ...item,
     children: item.children?.filter((child) => (
-      child.permissionKeys.some((permissionKey) => hasPermission(currentUser, permissionKey))
+      (!child.superAdminOnly || isSuperAdminRoleName(currentUser?.role))
+      && child.permissionKeys.some((permissionKey) => hasPermission(currentUser, permissionKey))
     )),
   })).filter((item) => (
     (item.permissionKeys || [item.permissionKey]).some((permissionKey) => hasPermission(currentUser, permissionKey))
@@ -440,6 +450,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
                 {currentUserMeta}
               </Typography>
             </Box>
+            <NotificationBell />
             <Tooltip title="退出登录">
               <IconButton size="small" onClick={handleLogout}>
                 <LogoutIcon fontSize="small" />

@@ -78,13 +78,15 @@ import {
   upsertCustomerContactIdentities,
   type ContactIdentityCrypto,
 } from './contactIdentityService';
+import type { NotificationWorkflow } from './notificationWorkflow';
 
 type CustomerCommandPrisma = Pick<PrismaClient, '$transaction' | 'leadRecord'>;
 type CustomerContact = Pick<Lead, 'phone' | 'phones' | 'wechat'>;
 export type CustomerCommandTx = Pick<
   Prisma.TransactionClient,
   'appStorage' | 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerTodo' | 'customerAuditEvent'
-  | 'contactIdentity' | 'contactIdentityLink' | '$queryRaw'
+  | 'contactIdentity' | 'contactIdentityLink' | 'notification' | 'notificationDelivery' | 'reminderSchedule'
+  | 'notificationRule' | '$queryRaw'
 >;
 
 export type CustomerAtomicCommand =
@@ -184,6 +186,7 @@ type CommandOptions = {
   now?: () => Date;
   createId?: () => string;
   contactIdentityCrypto?: ContactIdentityCrypto;
+  notificationWorkflow?: NotificationWorkflow;
 };
 
 type CommandContext = {
@@ -950,6 +953,7 @@ export function createCustomerAtomicCommandService(options: {
   auditAppender: CustomerAuditAppender;
   now?: () => Date;
   createId?: () => string;
+  notificationWorkflow?: NotificationWorkflow;
 }) {
   if (!options.auditAppender || typeof options.auditAppender.append !== 'function') {
     throw new Error('CustomerAuditAppender 为必填依赖');
@@ -1030,6 +1034,9 @@ export function createCustomerAtomicCommandService(options: {
       let reassignedTodoCount = 0;
       let createdTodoId: string | undefined;
       const todos = (tx as any).customerTodo;
+      const pendingTodosForNotification = options.notificationWorkflow && (command.action === 'transfer' || command.action === 'release_to_pool')
+        ? await todos.findMany({ where: { customerId: customer.id, status: 'PENDING' } })
+        : [];
 
       if (command.action === 'transfer') {
         const target = await (tx as any).user.findUnique({ where: { id: command.targetOwnerId } });
@@ -1053,9 +1060,22 @@ export function createCustomerAtomicCommandService(options: {
         };
         const result = await todos.updateMany({
           where: { customerId: customer.id, status: 'PENDING' },
-          data: { assigneeId: target.id, assigneeName: target.name },
+          data: { assigneeId: target.id, assigneeName: target.name, updatedAt: at },
         });
         reassignedTodoCount = result.count;
+        if (options.notificationWorkflow) {
+          const department = target.departmentId ? await (tx as any).department.findUnique({ where: { id: target.departmentId } }) : null;
+          const manager = department?.managerId ? await (tx as any).user.findUnique({ where: { id: department.managerId } }) : null;
+          for (const todo of pendingTodosForNotification) {
+            await options.notificationWorkflow.resolveTodo(tx as any, todo.id, '客户已转让，待办执行人已变更');
+            await options.notificationWorkflow.scheduleTodo(tx as any, {
+              todoId: todo.id, customerId: customer.id, customerName: customer.name, title: todo.title,
+              dueAt: todo.dueAt, createdAt: at, assignee: { id: target.id, name: target.name },
+              manager: manager && manager.isActive && (manager.employmentStatus || 'active') === 'active'
+                ? { id: manager.id, name: manager.name } : null,
+            });
+          }
+        }
       } else if (command.action === 'release_to_pool') {
         next = {
           ...next,
@@ -1070,6 +1090,11 @@ export function createCustomerAtomicCommandService(options: {
           data: { status: 'CANCELED', canceledAt: at, canceledById: actor.id, canceledByName: actor.name, cancelReason: reason },
         });
         cancelledTodoCount = result.count;
+        if (options.notificationWorkflow) {
+          for (const todo of pendingTodosForNotification) {
+            await options.notificationWorkflow.resolveTodo(tx as any, todo.id, '客户已释放至公海，待办已取消');
+          }
+        }
       } else if (command.action === 'set_progress') {
         const stored = await lockStorageValue(tx, STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
         const lifecycleConfig = normalizeCustomerLifecycleConfig(stored);
@@ -1112,9 +1137,20 @@ export function createCustomerAtomicCommandService(options: {
             dueAt: new Date(command.dueAt), executionMethod: command.executionMethod || 'none',
             assigneeId: actor.id, assigneeName: actor.name,
             createdById: actor.id, createdByName: actor.name,
+            createdAt: at, updatedAt: at,
           },
         });
         createdTodoId = todo.id;
+        if (options.notificationWorkflow) {
+          const department = liveActor.departmentId ? await (tx as any).department.findUnique({ where: { id: liveActor.departmentId } }) : null;
+          const manager = department?.managerId ? await (tx as any).user.findUnique({ where: { id: department.managerId } }) : null;
+          await options.notificationWorkflow.scheduleTodo(tx as any, {
+            todoId: todo.id, customerId: customer.id, customerName: customer.name, title: todo.title,
+            dueAt: todo.dueAt, createdAt: todo.updatedAt, assignee: { id: actor.id, name: actor.name },
+            manager: manager && manager.isActive && (manager.employmentStatus || 'active') === 'active'
+              ? { id: manager.id, name: manager.name } : null,
+          });
+        }
       } else if (command.action === 'soft_delete') {
         if (command.confirmed !== true) throw new Error('删除客户需要明确确认');
         await assertCustomerCanBeSoftDeleted(tx, customer.id, { cascadeLinkedLeads: true });
@@ -1281,6 +1317,7 @@ export function createAuditedCustomerAtomicCommandService(
     auditAppender: CustomerAuditAppender;
     now?: () => Date;
     createId?: () => string;
+    notificationWorkflow?: NotificationWorkflow;
   },
 ) {
   const atomic = createCustomerAtomicCommandService(options);
@@ -1331,6 +1368,7 @@ export function createCustomerCommandService(
 ) {
   const now = () => options.now?.() || new Date();
   const newId = (prefix: string) => `${prefix}-${options.createId?.() || randomUUID().slice(0, 8)}`;
+  const notificationWorkflow = options.notificationWorkflow;
   const runTransaction = async <T>(operation: (tx: CustomerCommandTx) => Promise<T>): Promise<T> => {
     let lastError: unknown;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -1354,6 +1392,25 @@ export function createCustomerCommandService(
       }
     }
     throw lastError;
+  };
+
+  const leadNotificationRecipients = async (tx: CustomerCommandTx, assigneeId: string) => {
+    const assignee = await tx.user.findUnique({ where: { id: assigneeId } });
+    if (!assignee || !assignee.isActive || assignee.employmentStatus !== 'active') {
+      return { assignee: null, manager: null };
+    }
+    const department = assignee.departmentId
+      ? await tx.department.findUnique({ where: { id: assignee.departmentId } })
+      : null;
+    const manager = department?.managerId
+      ? await tx.user.findUnique({ where: { id: department.managerId } })
+      : null;
+    return {
+      assignee: { id: assignee.id, name: assignee.name },
+      manager: manager && manager.isActive && manager.employmentStatus === 'active'
+        ? { id: manager.id, name: manager.name }
+        : null,
+    };
   };
 
   const transitionCustomer = async (
@@ -1393,11 +1450,26 @@ export function createCustomerCommandService(
     if (!result.customer || !result.lead) return success(customer);
 
     await persistCustomer(tx, snapshot, result.customer, at);
+    const pendingTodosForNotification = notificationWorkflow && (authorization === 'transfer' || authorization === 'release_to_pool')
+      ? await tx.customerTodo.findMany({ where: { customerId: customer.id, status: 'PENDING' } })
+      : [];
     if (authorization === 'transfer') {
       await tx.customerTodo.updateMany({
         where: { customerId: customer.id, status: 'PENDING' },
-        data: { assigneeId: result.customer.ownerId, assigneeName: result.customer.owner },
+        data: { assigneeId: result.customer.ownerId, assigneeName: result.customer.owner, updatedAt: at },
       });
+      if (notificationWorkflow && result.customer.ownerId) {
+        const recipients = await leadNotificationRecipients(tx, result.customer.ownerId);
+        if (recipients.assignee) {
+          for (const todo of pendingTodosForNotification) {
+            await notificationWorkflow.resolveTodo(tx as any, todo.id, '客户已转让，待办执行人已变更');
+            await notificationWorkflow.scheduleTodo(tx as any, {
+              todoId: todo.id, customerId: customer.id, customerName: customer.name, title: todo.title,
+              dueAt: todo.dueAt, createdAt: at, assignee: recipients.assignee, manager: recipients.manager,
+            });
+          }
+        }
+      }
     } else if (authorization === 'release_to_pool') {
       await tx.customerTodo.updateMany({
         where: { customerId: customer.id, status: 'PENDING' },
@@ -1409,6 +1481,11 @@ export function createCustomerCommandService(
           cancelReason: result.customer.releaseReason || '客户释放至公海',
         },
       });
+      if (notificationWorkflow) {
+        for (const todo of pendingTodosForNotification) {
+          await notificationWorkflow.resolveTodo(tx as any, todo.id, '客户已释放至公海，待办已取消');
+        }
+      }
     }
     const leadRows = authorization === 'transfer' || authorization === 'release_to_pool'
       ? await lockedLeadRowsByStableCustomerId(tx, customer.id)
@@ -2029,6 +2106,18 @@ export function createCustomerCommandService(
           status: lead.intakeStatus || '待分配',
           matchedRule: assignmentReason,
         });
+        if (notificationWorkflow && assignedToId) {
+          const recipients = await leadNotificationRecipients(tx, assignedToId);
+          if (recipients.assignee) {
+            await notificationWorkflow.assignLead(tx as any, {
+              leadId: id,
+              leadName: lead.name,
+              assignedAt: at,
+              assignee: recipients.assignee,
+              manager: recipients.manager,
+            });
+          }
+        }
         return success(lead);
       });
     },
@@ -2200,6 +2289,9 @@ export function createCustomerCommandService(
             },
           });
         }
+        if (notificationWorkflow) {
+          await notificationWorkflow.resolveLead(tx as any, leadId, '线索已产生首次跟进');
+        }
         return success(record);
       });
     },
@@ -2229,14 +2321,18 @@ export function createCustomerCommandService(
         if (!context.scope.unrestricted && !context.scope.visibleUserIds.includes(targets[0].id)) {
           return failure<Lead>('无权跨数据范围分配线索', 403);
         }
-        if (lead.owner === owner && lead.assignedTo === owner) return success(lead);
+        if (lead.owner === owner && lead.assignedTo === owner && lead.assignedToId === targets[0].id) return success(lead);
         const at = now();
         const atIso = at.toISOString();
         const operator = commandActor(context, currentUser);
+        if (notificationWorkflow) {
+          await notificationWorkflow.resolveLead(tx as any, leadId, '线索已重新分配');
+        }
         const updated: Lead = {
           ...lead,
           owner,
           assignedTo: owner,
+          assignedToId: targets[0].id,
           assignedAt: atIso,
           intakeStatus: '入库成功',
           lifecycleStatusCode: lead.lifecycleStatusCode || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
@@ -2254,6 +2350,18 @@ export function createCustomerCommandService(
           updatedAt: atIso,
         };
         await persistLead(tx, row.id, updated, at);
+        if (notificationWorkflow) {
+          const recipients = await leadNotificationRecipients(tx, targets[0].id);
+          if (recipients.assignee) {
+            await notificationWorkflow.assignLead(tx as any, {
+              leadId: row.id,
+              leadName: updated.name,
+              assignedAt: at,
+              assignee: recipients.assignee,
+              manager: recipients.manager,
+            });
+          }
+        }
         return success(updated);
       });
     },
@@ -2295,13 +2403,18 @@ export function createCustomerCommandService(
             } catch (error) {
               return failure<boolean>(error instanceof Error ? error.message : '客户存在关联业务，不能删除', 409);
             }
-            await softDeleteCustomerAndStableLinkedLeads(
+            const deletedCustomer = await softDeleteCustomerAndStableLinkedLeads(
               tx,
               snapshot,
               at,
               { id: customerContext.actor.id, name: customerContext.actor.name },
               reason,
             );
+            if (notificationWorkflow) {
+              for (const deletedLeadId of deletedCustomer.cascadeDeletedLeadIds || []) {
+                await notificationWorkflow.resolveLead(tx as any, deletedLeadId, '线索已删除');
+              }
+            }
             return success(true);
           }
           if (!snapshot) return failure<boolean>('关联客户不存在，请先修复数据后重试', 409);
@@ -2345,6 +2458,11 @@ export function createCustomerCommandService(
                 reason,
               },
             });
+            if (notificationWorkflow) {
+              for (const deletedLeadId of deletedLeadIds) {
+                await notificationWorkflow.resolveLead(tx as any, deletedLeadId, '线索已删除');
+              }
+            }
           }
           return success(true);
         }
@@ -2361,6 +2479,9 @@ export function createCustomerCommandService(
         };
         await persistLead(tx, row.id, deleted, at);
         await endLeadContactIdentityLinks(tx, row.id);
+        if (notificationWorkflow) {
+          await notificationWorkflow.resolveLead(tx as any, row.id, '线索已删除');
+        }
         return success(true);
       });
     },
@@ -2761,6 +2882,9 @@ export function createCustomerCommandService(
           updatedAt: atIso,
         };
         await persistLead(tx, leadRow.id, updatedLead, at);
+        if (notificationWorkflow) {
+          await notificationWorkflow.resolveLead(tx as any, leadRow.id, '线索已转为客户');
+        }
         return success(updatedLead);
       });
     },

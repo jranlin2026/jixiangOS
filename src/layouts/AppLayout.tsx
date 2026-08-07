@@ -13,6 +13,7 @@ import {
 import GlobalTableColumnResizer from '../shared/components/GlobalTableColumnResizer';
 import ChangePasswordDialog from '../shared/components/ChangePasswordDialog';
 import useAuthStore from '../store/useAuthStore';
+import NotificationBell from '../shared/components/NotificationBell';
 
 const AppLayout: React.FC = () => {
   const theme = useTheme();
@@ -79,6 +80,7 @@ const AppLayout: React.FC = () => {
           <Typography variant="subtitle1" sx={{ color: '#101828', fontSize: '0.9375rem', fontWeight: 800 }}>
             极享OS
           </Typography>
+          <Box sx={{ ml: 'auto' }}><NotificationBell /></Box>
         </Box>}
         <Outlet />
       </Box>
