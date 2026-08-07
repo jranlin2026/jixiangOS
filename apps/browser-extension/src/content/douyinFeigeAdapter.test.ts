@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
+import { createDouyinFeigeAdapter } from './douyinFeigeAdapter';
+
+const dom = new JSDOM(`<!doctype html><html><body>
+  <section data-jx-feige-conversation>
+    <div data-jx-customer-name>张先生</div>
+    <div data-jx-order-no>DY-20260808-001</div>
+    <div data-jx-product-name>AI口播智能体</div>
+    <div data-jx-message data-direction="OUTBOUND">老师您好，请留下联系方式。</div>
+    <div data-jx-message data-direction="INBOUND">我姓张，13800138000</div>
+    <textarea data-jx-reply-input></textarea>
+    <textarea data-jx-order-remark></textarea>
+    <button data-jx-order-remark-save>保存备注</button>
+  </section>
+</body></html>`, { url: 'https://im.jinritemai.com/chat' });
+
+const adapter = createDouyinFeigeAdapter(dom.window.document, dom.window.location.href);
+const context = adapter.readContext();
+assert.equal(context.supported, true);
+assert.equal(context.customerDisplayName, '张先生');
+assert.equal(context.platformOrderNo, 'DY-20260808-001');
+assert.equal(context.productName, 'AI口播智能体');
+assert.deepEqual(context.messages.map((message) => message.direction), ['OUTBOUND', 'INBOUND']);
+
+assert.deepEqual(adapter.fillReply('已收到，我们尽快联系您。'), { ok: true });
+assert.equal((dom.window.document.querySelector('[data-jx-reply-input]') as HTMLTextAreaElement).value, '已收到，我们尽快联系您。');
+
+let remarkSaved = false;
+dom.window.document.querySelector('[data-jx-order-remark-save]')?.addEventListener('click', () => { remarkSaved = true; });
+assert.deepEqual(adapter.fillOrderRemark('【极享OS已录入】张先生 138****8000'), { ok: true });
+assert.equal((dom.window.document.querySelector('[data-jx-order-remark]') as HTMLTextAreaElement).value, '【极享OS已录入】张先生 138****8000');
+assert.equal(remarkSaved, true, '订单备注只有点击保存后才能报告成功');
+
+console.log('douyin feige page adapter: ok');

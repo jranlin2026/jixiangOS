@@ -1,0 +1,26 @@
+{
+  "name": "@jixiang-os/browser-employee",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx src/domain/contactDetection.test.ts && tsx src/content/douyinFeigeAdapter.test.ts"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.317",
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.1.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.4.0"
+  }
+}

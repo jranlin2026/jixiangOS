@@ -209,6 +209,38 @@ model AiProviderConfig {
   @@map("ai_provider_configs")
 }
 
+model BrowserLeadSync {
+  id                String    @id @db.VarChar(64)
+  platform          String    @db.VarChar(40)
+  shopKey           String    @db.VarChar(120)
+  platformOrderNo   String    @db.VarChar(160)
+  operatorId        String    @db.VarChar(64)
+  operatorName      String    @db.VarChar(100)
+  contactSource     String    @db.VarChar(24)
+  status            String    @default("PENDING") @db.VarChar(24)
+  leadId            String?   @db.VarChar(64)
+  leadName          String?   @db.VarChar(200)
+  assignedTo        String?   @db.VarChar(100)
+  assignedToId      String?   @db.VarChar(64)
+  intakeStatus      String?   @db.VarChar(40)
+  orderRemarkStatus String    @default("NOT_ATTEMPTED") @db.VarChar(24)
+  orderRemarkError  String?   @db.VarChar(1000)
+  remarkOperatorId  String?   @db.VarChar(64)
+  remarkOperatorName String?  @db.VarChar(100)
+  attemptCount      Int       @default(1)
+  lastError         String?   @db.VarChar(1000)
+  completedAt       DateTime?
+  orderRemarkedAt   DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([platform, shopKey, platformOrderNo])
+  @@index([operatorId, createdAt])
+  @@index([status, updatedAt])
+  @@index([leadId])
+  @@map("browser_lead_syncs")
+}
+
 enum SystemInstallationState {
   UNINITIALIZED
   INITIALIZING

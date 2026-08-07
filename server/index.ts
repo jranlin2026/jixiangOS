@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   getAllowedCorsOrigins,
+  isCorsOriginAllowed,
   getApiJsonBodyLimit,
   getApiListenHost,
   getEnablementPrivateStorageDir,
@@ -103,6 +104,9 @@ import { createPrismaEnterpriseAiRepository } from './services/enterpriseBrain/p
 import { createEnterpriseCockpitService } from './services/enterpriseBrain/cockpitService';
 import { createPrismaEnterpriseCockpitRepository } from './services/enterpriseBrain/prismaCockpitRepository';
 import { createCoCreationRouter } from './routes/coCreationRoutes';
+import { createBrowserAgentRouter } from './routes/browserAgentRoutes';
+import { createBrowserLeadIntakeService } from './services/browserAgent/browserLeadIntakeService';
+import { createPrismaBrowserLeadSyncRepository } from './services/browserAgent/prismaBrowserLeadSyncRepository';
 import { createRuntimeStorageGetHandler } from './routes/runtimeStorageRoutes';
 import { createDisabledCrmCustomerImportHandler } from './routes/crmMigrationRoutes';
 import { createCustomerFollowUpHandler } from './routes/customerFollowUpRoutes';
@@ -188,6 +192,10 @@ const aiChatClient = createAiChatClient({ configReader: aiConfigService });
 const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
 const customerListService = createCustomerListService(prisma, { contactIdentityCrypto });
 const customerCommandService = createCustomerCommandService(prisma, { contactIdentityCrypto });
+const browserLeadIntakeService = createBrowserLeadIntakeService({
+  repository: createPrismaBrowserLeadSyncRepository(prisma),
+  createLead: (input, actor) => customerCommandService.createLead(input, actor),
+});
 // Transfer/release/delete use the shared atomic command engine. Profile,
 // todo, claim, creation, and follow-up services retain their dedicated
 // request contracts, but each appends its audit event in the same transaction.
@@ -466,7 +474,7 @@ app.use((_req, res, next) => {
 });
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedCorsOrigins.includes(origin)) {
+    if (isCorsOriginAllowed(origin, allowedCorsOrigins)) {
       callback(null, true);
       return;
     }
@@ -496,6 +504,10 @@ app.use('/api/enterprise-brain', createEnterpriseBrainRouter({
   cockpit: enterpriseCockpitService,
 }));
 app.use('/api/co-creation', createCoCreationRouter({ service: coCreationService, requireAuth: requireCoCreationAccess }));
+app.use('/api/browser-agent', createBrowserAgentRouter({
+  service: browserLeadIntakeService,
+  requireLeadCreate: requireLeadCreateAccess,
+}));
 
 function routeParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || '' : value || '';

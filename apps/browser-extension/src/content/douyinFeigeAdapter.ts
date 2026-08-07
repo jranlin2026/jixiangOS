@@ -1,0 +1,117 @@
+import type { BrowserChatMessage } from '../domain/contactDetection';
+
+export type FeigePageContext = {
+  supported: boolean;
+  pageUrl: string;
+  customerDisplayName: string;
+  platformOrderNo: string;
+  productName: string;
+  messages: BrowserChatMessage[];
+  diagnostics: string[];
+};
+
+export type PageWriteResult = { ok: true } | { ok: false; code: string; message: string };
+
+const selectors = {
+  root: ['[data-jx-feige-conversation]', '[data-testid="conversation-panel"]', '[class*="conversation"]'],
+  customer: ['[data-jx-customer-name]', '[data-testid="conversation-customer-name"]', '[class*="customer-name"]'],
+  orderNo: ['[data-jx-order-no]', '[data-testid="order-no"]', '[data-order-no]'],
+  product: ['[data-jx-product-name]', '[data-testid="product-name"]', '[class*="product-name"]'],
+  message: ['[data-jx-message]', '[data-testid="message-item"]', '[data-message-direction]'],
+  reply: ['[data-jx-reply-input]', 'textarea[placeholder*="消息"]', '[contenteditable="true"][role="textbox"]'],
+  orderRemark: ['[data-jx-order-remark]', '[data-testid="order-remark-input"]', 'textarea[placeholder*="订单备注"]'],
+  orderRemarkSave: ['[data-jx-order-remark-save]', '[data-testid="order-remark-save"]', 'button[aria-label*="保存备注"]'],
+};
+
+function first(root: ParentNode, candidates: string[]): HTMLElement | null {
+  for (const selector of candidates) {
+    const element = root.querySelector<HTMLElement>(selector);
+    if (element) return element;
+  }
+  return null;
+}
+
+function all(root: ParentNode, candidates: string[]): HTMLElement[] {
+  for (const selector of candidates) {
+    const elements = [...root.querySelectorAll<HTMLElement>(selector)];
+    if (elements.length) return elements;
+  }
+  return [];
+}
+
+function text(root: ParentNode, candidates: string[]) {
+  return first(root, candidates)?.textContent?.trim() || '';
+}
+
+function direction(element: HTMLElement): BrowserChatMessage['direction'] {
+  const explicit = String(element.dataset.direction || element.dataset.messageDirection || '').toUpperCase();
+  if (explicit === 'INBOUND' || explicit === 'OUTBOUND' || explicit === 'SYSTEM') return explicit;
+  const classes = element.className.toString().toLowerCase();
+  if (/(self|outbound|seller|service)/.test(classes)) return 'OUTBOUND';
+  if (/(customer|buyer|inbound)/.test(classes)) return 'INBOUND';
+  return 'SYSTEM';
+}
+
+function setEditableValue(element: HTMLElement, value: string): PageWriteResult {
+  if (element instanceof element.ownerDocument.defaultView!.HTMLTextAreaElement
+    || element instanceof element.ownerDocument.defaultView!.HTMLInputElement) {
+    element.value = value;
+  } else if (element.isContentEditable || element.getAttribute('contenteditable') === 'true') {
+    element.textContent = value;
+  } else {
+    return { ok: false, code: 'UNSUPPORTED_EDITOR', message: '页面输入框类型暂不支持' };
+  }
+  const EventConstructor = element.ownerDocument.defaultView?.Event || Event;
+  element.dispatchEvent(new EventConstructor('input', { bubbles: true }));
+  element.dispatchEvent(new EventConstructor('change', { bubbles: true }));
+  return { ok: true };
+}
+
+export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
+  return {
+    readContext(): FeigePageContext {
+      const root = first(document, selectors.root);
+      const diagnostics: string[] = [];
+      if (!root) diagnostics.push('未找到飞鸽会话区域');
+      const scope: ParentNode = root || document;
+      const customerDisplayName = text(scope, selectors.customer);
+      const platformOrderNo = text(scope, selectors.orderNo);
+      const productName = text(scope, selectors.product);
+      const messages = all(scope, selectors.message)
+        .map((element) => ({ direction: direction(element), text: element.textContent?.trim() || '' }))
+        .filter((message) => message.text);
+      if (!customerDisplayName) diagnostics.push('未识别客户昵称');
+      if (!platformOrderNo) diagnostics.push('未识别平台订单号');
+      if (!messages.length) diagnostics.push('未识别会话消息');
+      return {
+        supported: Boolean(root),
+        pageUrl,
+        customerDisplayName,
+        platformOrderNo,
+        productName,
+        messages,
+        diagnostics,
+      };
+    },
+
+    fillReply(value: string): PageWriteResult {
+      const editor = first(document, selectors.reply);
+      return editor
+        ? setEditableValue(editor, value)
+        : { ok: false, code: 'REPLY_EDITOR_NOT_FOUND', message: '未找到飞鸽回复输入框' };
+    },
+
+    fillOrderRemark(value: string): PageWriteResult {
+      const editor = first(document, selectors.orderRemark);
+      if (!editor) return { ok: false, code: 'ORDER_REMARK_NOT_FOUND', message: '当前页面未找到订单备注输入框' };
+      const filled = setEditableValue(editor, value);
+      if (!filled.ok) return filled;
+      const save = first(document, selectors.orderRemarkSave);
+      if (!save) return { ok: false, code: 'ORDER_REMARK_SAVE_NOT_FOUND', message: '备注已填入，但未找到保存按钮，请人工确认' };
+      save.click();
+      return { ok: true };
+    },
+  };
+}
+
+export type DouyinFeigeAdapter = ReturnType<typeof createDouyinFeigeAdapter>;

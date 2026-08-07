@@ -1,0 +1,40 @@
+import express from 'express';
+import type { AuthenticatedRequest } from '../middleware/auth';
+import type { BrowserLeadIntakeService } from '../services/browserAgent/browserLeadIntakeService';
+
+function statusFor(code: number, successStatus = 200) {
+  if (code === 0) return successStatus;
+  return code >= 400 && code < 500 ? code : 500;
+}
+
+function routeParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] || '' : value || '';
+}
+
+export function createBrowserAgentRouter(deps: {
+  service: BrowserLeadIntakeService;
+  requireLeadCreate: express.RequestHandler;
+}) {
+  const router = express.Router();
+
+  router.post('/lead-intakes', deps.requireLeadCreate, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.intake(req.body || {}, req.currentUser!);
+    const successStatus = result.data?.outcome === 'CREATED' ? 201 : 200;
+    res.status(statusFor(result.code, successStatus)).json(result);
+  });
+
+  router.post(
+    '/lead-intakes/:syncId/order-remark',
+    deps.requireLeadCreate,
+    async (req: AuthenticatedRequest, res) => {
+      const result = await deps.service.reportOrderRemark(
+        routeParam(req.params.syncId),
+        req.body || {},
+        req.currentUser!,
+      );
+      res.status(statusFor(result.code)).json(result);
+    },
+  );
+
+  return router;
+}

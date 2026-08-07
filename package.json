@@ -36,7 +36,10 @@
     "clone:sanitize": "tsx scripts/sanitize-production-clone.ts",
     "clone:restore-verify": "bash scripts/mysql/verify-clone-restore.sh",
     "clone:attachments-report": "tsx scripts/report-clone-missing-attachments.ts",
-    "test-data:reset-business": "tsx scripts/reset-business-test-data.ts"
+    "test-data:reset-business": "tsx scripts/reset-business-test-data.ts",
+    "browser-employee:build": "npm --prefix apps/browser-extension run build",
+    "browser-employee:test": "npm --prefix apps/browser-extension test",
+    "browser-employee:typecheck": "npm --prefix apps/browser-extension run typecheck"
   },
   "overrides": {
     "effect": "3.21.0"
