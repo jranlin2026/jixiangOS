@@ -31,6 +31,12 @@ import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
 import useAuthStore from '../../store/useAuthStore';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import ContactPhoneFields from '../../shared/components/ContactPhoneFields';
+import {
+  CRM_DETAIL_CONTENT_SX,
+  CRM_DETAIL_DIALOG_PAPER_SX,
+  CRM_DETAIL_FIELD_COLUMNS,
+  CRM_DETAIL_GRID_COLUMNS,
+} from '../../shared/components/crmDetailLayout';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { canCompleteContactField, canCompletePhoneField } from '../../shared/utils/contactEditLock';
 import {
@@ -524,7 +530,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       : emptyText(currentCustomer[field] as string | number);
 
     return (
-      <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: CRM_DETAIL_FIELD_COLUMNS, borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
         <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>{label}</Box>
         <Box sx={{ px: 1.5, py: editing && editable ? 0.5 : 1, fontSize: 13, whiteSpace: 'pre-line' }}>
           {editing && editable ? (
@@ -625,7 +631,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const renderSourceRow = () => (
-    <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: CRM_DETAIL_FIELD_COLUMNS, borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
       <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>来源</Box>
       <Box sx={{ px: 1.5, py: editing && detailActions.actions.editAttribution ? 0.5 : 1, fontSize: 13 }}>
         {editing && detailActions.actions.editAttribution ? (
@@ -655,14 +661,14 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   );
 
   const renderStatusRow = (label: string, value: React.ReactNode) => (
-    <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: CRM_DETAIL_FIELD_COLUMNS, borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
       <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>{label}</Box>
       <Box sx={{ px: 1.5, py: 1, fontSize: 13 }}>{value}</Box>
     </Box>
   );
 
   const renderRemarkRow = () => (
-    <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', minHeight: 72 }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: CRM_DETAIL_FIELD_COLUMNS, minHeight: 72 }}>
       <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>客户备注</Box>
       <Box sx={{ px: 1.5, py: editing && detailActions.actions.editProfile ? 0.75 : 1, fontSize: 13 }}>
         {editing && detailActions.actions.editProfile ? (
@@ -948,14 +954,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       onClose={onClose}
       maxWidth={false}
       PaperProps={{
-        sx: {
-          width: { xs: 'calc(100vw - 24px)', md: 'calc(100vw - 64px)' },
-          maxWidth: 1320,
-          height: { xs: 'calc(100dvh - 24px)', lg: 'min(820px, calc(100dvh - 64px))' },
-          maxHeight: 'calc(100dvh - 24px)',
-          borderRadius: 2,
-          overflow: 'hidden',
-        },
+        sx: CRM_DETAIL_DIALOG_PAPER_SX,
       }}
     >
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', minHeight: 86, px: { xs: 2, sm: 2.5 }, py: 1.75, pr: 7 }}>
@@ -987,16 +986,11 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       </DialogTitle>
       <DialogContent
         dividers
-        sx={{
-          bgcolor: '#f8fafc',
-          p: { xs: 1.5, sm: 2 },
-          overflow: { xs: 'auto', lg: 'hidden' },
-          '&.MuiDialogContent-dividers': { borderBottom: 0 },
-        }}
+        sx={CRM_DETAIL_CONTENT_SX}
       >
         <Box sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', lg: '380px minmax(0, 1fr)', xl: '410px minmax(0, 1fr)' },
+          gridTemplateColumns: CRM_DETAIL_GRID_COLUMNS,
           gap: 2,
           height: { lg: '100%' },
           minHeight: 0,

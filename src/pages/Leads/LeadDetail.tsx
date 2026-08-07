@@ -28,6 +28,12 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { canCompleteContactField } from '../../shared/utils/contactEditLock';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
+import {
+  CRM_DETAIL_CONTENT_SX,
+  CRM_DETAIL_DIALOG_PAPER_SX,
+  CRM_DETAIL_FIELD_COLUMNS,
+  CRM_DETAIL_GRID_COLUMNS,
+} from '../../shared/components/crmDetailLayout';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 import { formatContactPhoneLines } from '../../shared/utils/contactPhones';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
@@ -359,7 +365,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   }, [currentLead, followerName, lifecycleConfig.name]);
 
   const renderReadOnlyRow = (label: string, value?: string | number) => (
-    <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: CRM_DETAIL_FIELD_COLUMNS, borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
       <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>{label}</Box>
       <Box sx={{ px: 1.5, py: 1, fontSize: 13 }}>{emptyText(value)}</Box>
     </Box>
@@ -384,7 +390,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
           : (currentLead[field as keyof Lead] as string | undefined);
 
     return (
-      <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: CRM_DETAIL_FIELD_COLUMNS, borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
         <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>{label}</Box>
         <Box sx={{ px: 1.5, py: editing && editable ? 0.5 : 1, fontSize: 13, whiteSpace: 'pre-line' }}>
           {editing && editable ? (
@@ -435,7 +441,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   };
 
   const renderSourceRow = () => (
-    <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: CRM_DETAIL_FIELD_COLUMNS, borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
       <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>线索来源</Box>
       <Box sx={{ px: 1.5, py: editing ? 0.5 : 1, fontSize: 13 }}>
         {editing ? (
@@ -465,14 +471,14 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   );
 
   const renderStatusRow = (label: string, value: React.ReactNode) => (
-    <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: CRM_DETAIL_FIELD_COLUMNS, borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
       <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>{label}</Box>
       <Box sx={{ px: 1.5, py: 1, fontSize: 13 }}>{value}</Box>
     </Box>
   );
 
   const renderRemarkRow = () => (
-    <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', minHeight: 72 }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: CRM_DETAIL_FIELD_COLUMNS, minHeight: 72 }}>
       <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>备注</Box>
       <Box sx={{ px: 1.5, py: editing ? 0.75 : 1, fontSize: 13 }}>
         {editing ? (
@@ -486,7 +492,12 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
 
   return (
     <>
-    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth={false}
+      PaperProps={{ sx: CRM_DETAIL_DIALOG_PAPER_SX }}
+    >
       <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, pr: 6 }}>
         <Box sx={{ minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
@@ -501,9 +512,9 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
           <CloseIcon fontSize="small" />
         </IconButton>
       </DialogTitle>
-      <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '0.82fr 1.18fr' }, gap: 2, minHeight: '72vh' }}>
-          <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', alignSelf: 'start' }}>
+      <DialogContent dividers sx={CRM_DETAIL_CONTENT_SX}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: CRM_DETAIL_GRID_COLUMNS, gap: 2, height: { lg: '100%' }, minHeight: 0 }}>
+          <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1.5, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <Box sx={{ p: 2, borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Typography variant="subtitle2" sx={{ color: '#2196F3', fontWeight: 700 }}>资料</Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
@@ -527,7 +538,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                 ) : null}
               </Box>
             </Box>
-            <Box>
+            <Box sx={{ minHeight: 0, overflowY: { lg: 'auto' } }}>
               {renderInfoRow('姓名', 'name')}
               {renderInfoRow('公司', 'company')}
               {renderInfoRow('手机号', 'phone', canEditLockedContact || canCompleteContactField(currentLead.phone))}
@@ -559,11 +570,11 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
             </Box>
           </Paper>
 
-          <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minWidth: 0 }}>
+          <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1.5, overflow: 'hidden', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ px: 2, borderBottom: '1px solid #eef2f7' }}>
               <Tab icon={<HistoryIcon fontSize="small" />} iconPosition="start" label="历史修改记录" />
             </Tabs>
-            <Box sx={{ p: 2, maxHeight: '68vh', overflowY: 'auto' }}>
+            <Box sx={{ p: 2, flex: 1, minHeight: 0, overflowY: 'auto' }}>
               {activeTab === 0 && <HistoryList items={historyItems} />}
             </Box>
           </Paper>
