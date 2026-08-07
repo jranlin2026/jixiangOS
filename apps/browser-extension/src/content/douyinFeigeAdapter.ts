@@ -13,12 +13,12 @@ export type FeigePageContext = {
 export type PageWriteResult = { ok: true } | { ok: false; code: string; message: string };
 
 const selectors = {
-  root: ['[data-jx-feige-conversation]', '[data-testid="conversation-panel"]', '[class*="conversation"]'],
-  customer: ['[data-jx-customer-name]', '[data-testid="conversation-customer-name"]', '[class*="customer-name"]'],
+  root: ['[data-jx-feige-conversation]', '#workspace-chat', '[data-testid="conversation-panel"]', '[class*="conversation"]'],
+  customer: ['[data-jx-customer-name]', '#topbar-left-info span', '[data-testid="conversation-customer-name"]', '[class*="customer-name"]'],
   orderNo: ['[data-jx-order-no]', '[data-testid="order-no"]', '[data-order-no]'],
   product: ['[data-jx-product-name]', '[data-testid="product-name"]', '[class*="product-name"]'],
-  message: ['[data-jx-message]', '[data-testid="message-item"]', '[data-message-direction]'],
-  reply: ['[data-jx-reply-input]', 'textarea[placeholder*="消息"]', '[contenteditable="true"][role="textbox"]'],
+  message: ['[data-jx-message]', '.leaveMessage', '[data-testid="message-item"]', '[data-message-direction]'],
+  reply: ['[data-jx-reply-input]', '[data-qa-id="qa-send-message-textarea"]', 'textarea[placeholder*="消息"]', '[contenteditable="true"][role="textbox"]'],
   orderRemark: ['[data-jx-order-remark]', '[data-testid="order-remark-input"]', 'textarea[placeholder*="订单备注"]'],
   orderRemarkSave: ['[data-jx-order-remark-save]', '[data-testid="order-remark-save"]', 'button[aria-label*="保存备注"]'],
 };
@@ -47,9 +47,28 @@ function direction(element: HTMLElement): BrowserChatMessage['direction'] {
   const explicit = String(element.dataset.direction || element.dataset.messageDirection || '').toUpperCase();
   if (explicit === 'INBOUND' || explicit === 'OUTBOUND' || explicit === 'SYSTEM') return explicit;
   const classes = element.className.toString().toLowerCase();
+  if (classes.includes('messageisme')) return 'OUTBOUND';
+  if (classes.includes('messagenotme')) return 'INBOUND';
   if (/(self|outbound|seller|service)/.test(classes)) return 'OUTBOUND';
   if (/(customer|buyer|inbound)/.test(classes)) return 'INBOUND';
   return 'SYSTEM';
+}
+
+function consultationProductName(document: Document) {
+  const explicit = text(document, selectors.product);
+  if (explicit) return explicit;
+  const inviteButton = [...document.querySelectorAll<HTMLElement>('button')]
+    .find((element) => element.textContent?.trim() === '邀请下单');
+  if (!inviteButton) return '';
+  let panel: HTMLElement | null = inviteButton.parentElement;
+  while (panel && !/￥\s*\d/.test(panel.textContent || '')) panel = panel.parentElement;
+  if (!panel) return '';
+  const candidates = [...panel.querySelectorAll<HTMLElement>('div,span')]
+    .map((element) => element.textContent?.trim() || '')
+    .filter((value) => value.length >= 2 && value.length <= 80)
+    .filter((value) => !/[￥¥]/.test(value))
+    .filter((value) => !/^(详情|已售\d*|邀请下单|规格属性|商品视频|商品评价)$/.test(value));
+  return candidates.sort((left, right) => left.length - right.length)[0] || '';
 }
 
 function setEditableValue(element: HTMLElement, value: string): PageWriteResult {
@@ -75,8 +94,8 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       if (!root) diagnostics.push('未找到飞鸽会话区域');
       const scope: ParentNode = root || document;
       const customerDisplayName = text(scope, selectors.customer);
-      const platformOrderNo = text(scope, selectors.orderNo);
-      const productName = text(scope, selectors.product);
+      const platformOrderNo = text(document, selectors.orderNo);
+      const productName = consultationProductName(document);
       const messages = all(scope, selectors.message)
         .map((element) => ({ direction: direction(element), text: element.textContent?.trim() || '' }))
         .filter((message) => message.text);

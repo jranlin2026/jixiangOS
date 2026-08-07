@@ -32,4 +32,32 @@ assert.deepEqual(adapter.fillOrderRemark('【极享OS已录入】张先生 138**
 assert.equal((dom.window.document.querySelector('[data-jx-order-remark]') as HTMLTextAreaElement).value, '【极享OS已录入】张先生 138****8000');
 assert.equal(remarkSaved, true, '订单备注只有点击保存后才能报告成功');
 
+const realFeigeDom = new JSDOM(`<!doctype html><html><body>
+  <main id="workspace-chat">
+    <div id="topbar-left-info"><span>TK小学生</span><span>添加备注</span></div>
+    <div data-id="message-in"><div class="leaveMessage messageNotMe"><pre><span>1117</span></pre></div></div>
+    <div data-id="message-out"><div class="leaveMessage messageIsMe"><pre><span>1</span></pre></div></div>
+    <textarea data-qa-id="qa-send-message-textarea" placeholder="发送给 TK小学生，使用Enter 发送消息"></textarea>
+  </main>
+  <section role="tabpanel">
+    <div><div><div>N哥IP口播智能体</div></div><div>￥1299.00</div></div>
+    <button>邀请下单</button>
+  </section>
+</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+
+const realAdapter = createDouyinFeigeAdapter(realFeigeDom.window.document, realFeigeDom.window.location.href);
+const realContext = realAdapter.readContext();
+assert.equal(realContext.supported, true);
+assert.equal(realContext.customerDisplayName, 'TK小学生');
+assert.equal(realContext.productName, 'N哥IP口播智能体');
+assert.deepEqual(realContext.messages, [
+  { direction: 'INBOUND', text: '1117' },
+  { direction: 'OUTBOUND', text: '1' },
+]);
+assert.deepEqual(realAdapter.fillReply('测试话术'), { ok: true });
+assert.equal(
+  (realFeigeDom.window.document.querySelector('[data-qa-id="qa-send-message-textarea"]') as HTMLTextAreaElement).value,
+  '测试话术',
+);
+
 console.log('douyin feige page adapter: ok');
