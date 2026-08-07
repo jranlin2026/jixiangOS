@@ -21,12 +21,14 @@ export type BrowserLeadSyncRecord = {
   platform: string;
   shopKey: string;
   platformOrderNo: string;
+  sourceProductName?: string | null;
   operatorId: string;
   operatorName: string;
   contactSource: 'CHAT' | 'OFF_PLATFORM';
   status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
-  orderRemarkStatus: 'NOT_ATTEMPTED' | 'SUCCEEDED' | 'FAILED';
+  orderRemarkStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
   attemptCount: number;
+  updatedAt?: Date;
   leadId?: string | null;
   leadName?: string | null;
   assignedTo?: string | null;
@@ -40,6 +42,7 @@ type BrowserLeadSyncRepository = {
     platform: string;
     shopKey: string;
     platformOrderNo: string;
+    sourceProductName?: string;
     operatorId: string;
     operatorName: string;
     contactSource: 'CHAT' | 'OFF_PLATFORM';
@@ -55,7 +58,7 @@ type BrowserLeadSyncRepository = {
   reportOrderRemark(
     id: string,
     operator: { id: string; name: string },
-    input: { status: 'SUCCEEDED' | 'FAILED'; errorMessage?: string },
+    input: { status: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED'; errorMessage?: string },
   ): Promise<BrowserLeadSyncRecord | null>;
 };
 
@@ -108,10 +111,21 @@ export function createBrowserLeadIntakeService(deps: {
       if (!String(input.contactPhone || '').trim() && !String(input.contactWechat || '').trim()) {
         return failure<BrowserLeadIntakeResult>('手机号或微信至少填写一项', 400);
       }
+      const normalized = {
+        ...input,
+        shopKey: input.shopKey.trim(),
+        platformOrderNo: input.platformOrderNo.trim(),
+        contactName: input.contactName.trim(),
+        contactPhone: input.contactPhone?.trim() || undefined,
+        contactWechat: input.contactWechat?.trim() || undefined,
+        sourceProductId: input.sourceProductId?.trim() || undefined,
+        sourceProductName: input.sourceProductName?.trim() || undefined,
+      };
       const reservation = await deps.repository.reserve({
-        platform: input.platform,
-        shopKey: input.shopKey,
-        platformOrderNo: input.platformOrderNo,
+        platform: normalized.platform,
+        shopKey: normalized.shopKey,
+        platformOrderNo: normalized.platformOrderNo,
+        sourceProductName: normalized.sourceProductName,
         operatorId: actor.id,
         operatorName: actor.name,
         contactSource: input.contactSource,
@@ -127,25 +141,26 @@ export function createBrowserLeadIntakeService(deps: {
       }
 
       const leadInput = {
-        name: input.contactName,
-        phone: input.contactPhone || '',
-        phones: input.contactPhone
-          ? [{ number: input.contactPhone, isPrimary: true as const, label: '主手机号' as const }]
+        externalIntakeKey: reservation.record.id,
+        name: normalized.contactName,
+        phone: normalized.contactPhone || '',
+        phones: normalized.contactPhone
+          ? [{ number: normalized.contactPhone, isPrimary: true as const, label: '主手机号' as const }]
           : [],
-        wechat: input.contactWechat,
+        wechat: normalized.contactWechat,
         source: '抖音电商',
         sourceName: '飞鸽客服',
         sourceType: '公司资源' as const,
         sourcePlatformId: input.platform,
         sourcePlatformName: '抖音',
-        sourceShopId: input.shopKey,
-        platformOrderNo: input.platformOrderNo,
-        ...(input.sourceProductId && input.sourceProductName
-          ? { sourceProductId: input.sourceProductId, sourceProductName: input.sourceProductName }
+        sourceShopId: normalized.shopKey,
+        platformOrderNo: normalized.platformOrderNo,
+        ...(normalized.sourceProductId && normalized.sourceProductName
+          ? { sourceProductId: normalized.sourceProductId, sourceProductName: normalized.sourceProductName }
           : {}),
         ...(input.sourcePaymentAmount !== undefined ? { sourcePaymentAmount: input.sourcePaymentAmount } : {}),
         ...(input.sourcePaymentAt ? { sourcePaymentAt: input.sourcePaymentAt } : {}),
-        remark: `由极享AI浏览器员工从飞鸽客服录入${input.sourceProductName ? `；平台商品：${input.sourceProductName}` : ''}`,
+        remark: `由极享AI浏览器员工从飞鸽客服录入${normalized.sourceProductName ? `；平台商品：${normalized.sourceProductName}` : ''}`,
         status: '新线索',
       } as Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followUpRecords'>;
 
@@ -174,10 +189,10 @@ export function createBrowserLeadIntakeService(deps: {
 
     async reportOrderRemark(
       syncId: string,
-      input: { status: 'SUCCEEDED' | 'FAILED'; errorMessage?: string },
+      input: { status: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED'; errorMessage?: string },
       actor: AuthenticatedUser,
     ) {
-      if (!['SUCCEEDED', 'FAILED'].includes(input.status)) {
+      if (!['SUBMITTED', 'SUCCEEDED', 'FAILED'].includes(input.status)) {
         return failure<{ syncId: string; orderRemarkStatus: BrowserLeadSyncRecord['orderRemarkStatus'] }>(
           '订单备注结果不正确',
           400,

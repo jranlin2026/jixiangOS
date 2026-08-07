@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { BrowserLeadSyncRecord } from './browserLeadIntakeService';
 
-type BrowserLeadSyncPrisma = Pick<PrismaClient, 'browserLeadSync'>;
+type BrowserLeadSyncPrisma = Pick<PrismaClient, 'browserLeadSync' | 'leadRecord'>;
+
+const PENDING_LEASE_MS = 10 * 60 * 1000;
 
 function record(row: any): BrowserLeadSyncRecord {
   return {
@@ -16,12 +18,24 @@ function isUniqueConflict(error: unknown) {
   return Boolean(error && typeof error === 'object' && (error as { code?: string }).code === 'P2002');
 }
 
+function leadFromRow(row: any) {
+  const data = row?.data && typeof row.data === 'object' ? row.data : {};
+  return {
+    leadId: row.id,
+    leadName: String(data.name || row.name || ''),
+    assignedTo: data.assignedTo || row.assignedTo || null,
+    assignedToId: data.assignedToId || null,
+    intakeStatus: data.intakeStatus || null,
+  };
+}
+
 export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPrisma) {
   return {
     async reserve(input: {
       platform: string;
       shopKey: string;
       platformOrderNo: string;
+      sourceProductName?: string;
       operatorId: string;
       operatorName: string;
       contactSource: 'CHAT' | 'OFF_PLATFORM';
@@ -51,10 +65,33 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
         },
       });
       if (!existing) throw new Error('浏览器线索同步保留记录未找到');
-      if (existing.status !== 'FAILED') return { acquired: false as const, record: record(existing) };
+
+      const createdLead = await prisma.leadRecord.findUnique({ where: { externalIntakeKey: existing.id } });
+      if (createdLead) {
+        const reconciled = await prisma.browserLeadSync.update({
+          where: { id: existing.id },
+          data: {
+            ...leadFromRow(createdLead),
+            status: 'SUCCEEDED',
+            lastError: null,
+            completedAt: new Date(),
+          },
+        });
+        return { acquired: false as const, record: record(reconciled) };
+      }
+
+      const stalePending = existing.status === 'PENDING'
+        && existing.updatedAt.getTime() <= Date.now() - PENDING_LEASE_MS;
+      if (existing.status !== 'FAILED' && !stalePending) {
+        return { acquired: false as const, record: record(existing) };
+      }
 
       const claimed = await prisma.browserLeadSync.updateMany({
-        where: { id: existing.id, status: 'FAILED' },
+        where: {
+          id: existing.id,
+          status: existing.status,
+          ...(stalePending ? { updatedAt: { lte: new Date(Date.now() - PENDING_LEASE_MS) } } : {}),
+        },
         data: {
           status: 'PENDING',
           lastError: null,
@@ -91,10 +128,10 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
     async reportOrderRemark(
       id: string,
       operator: { id: string; name: string },
-      input: { status: 'SUCCEEDED' | 'FAILED'; errorMessage?: string },
+      input: { status: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED'; errorMessage?: string },
     ) {
       const existing = await prisma.browserLeadSync.findUnique({ where: { id } });
-      if (!existing) return null;
+      if (!existing || existing.status !== 'SUCCEEDED') return null;
       return record(await prisma.browserLeadSync.update({
         where: { id },
         data: {

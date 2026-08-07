@@ -1,16 +1,11 @@
 import type { ApiEnvelope, AuthenticatedOperator, ExtensionConfig, WorkerCommand } from '../shared/contracts';
+import { normalizedApiBaseUrl } from '../shared/apiBaseUrl';
 
 const CONFIG_KEY = 'jixiang_browser_employee_config';
 const TOKEN_KEY = 'jixiang_browser_employee_token';
 const OPERATOR_KEY = 'jixiang_browser_employee_operator';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
-
-function normalizedBaseUrl(value: string) {
-  const url = new URL(value);
-  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('极享OS地址必须使用HTTP或HTTPS');
-  return url.toString().replace(/\/$/, '');
-}
 
 async function stored<T>(area: chrome.storage.StorageArea, key: string): Promise<T | undefined> {
   return (await area.get(key))[key] as T | undefined;
@@ -24,7 +19,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnve
   if (init.body) headers.set('content-type', 'application/json');
   if (token) headers.set('authorization', `Bearer ${token}`);
   try {
-    const response = await fetch(`${normalizedBaseUrl(config.apiBaseUrl)}${path}`, { ...init, headers });
+    const response = await fetch(`${normalizedApiBaseUrl(config.apiBaseUrl)}${path}`, { ...init, headers });
     const payload = await response.json().catch(() => null) as ApiEnvelope<T> | null;
     if (response.status === 401) await chrome.storage.session.remove([TOKEN_KEY, OPERATOR_KEY]);
     return payload || { code: response.status, data: null, message: `极享OS返回了HTTP ${response.status}` };
@@ -45,13 +40,13 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
       return;
     }
     if (message.type === 'SAVE_CONFIG') {
-      const config = { ...message.config, apiBaseUrl: normalizedBaseUrl(message.config.apiBaseUrl) };
+      const config = { ...message.config, apiBaseUrl: normalizedApiBaseUrl(message.config.apiBaseUrl) };
       await chrome.storage.local.set({ [CONFIG_KEY]: config });
       sendResponse({ code: 0, data: config, message: 'success' });
       return;
     }
     if (message.type === 'LOGIN') {
-      const config = { ...message.config, apiBaseUrl: normalizedBaseUrl(message.config.apiBaseUrl) };
+      const config = { ...message.config, apiBaseUrl: normalizedApiBaseUrl(message.config.apiBaseUrl) };
       await chrome.storage.local.set({ [CONFIG_KEY]: config });
       const result = await request<{ token: string; user: AuthenticatedOperator }>('/auth/login', {
         method: 'POST', body: JSON.stringify({ account: message.account, password: message.password, remember: false }),

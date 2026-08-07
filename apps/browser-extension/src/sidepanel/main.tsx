@@ -14,7 +14,7 @@ import type { FeigePageContext } from '../content/douyinFeigeAdapter';
 const scripts = [
   { label: '下单欢迎', text: '您好，已经看到您的订单了，我们会尽快为您安排后续服务。' },
   { label: '索要联系方式', text: '为了安排专属老师联系您，请回复您的姓名和手机号。' },
-  { label: '站外联系', text: '如果平台内不方便发送联系方式，您可以通过站外联系老师，取得联方后我帮您完成登记。' },
+  { label: '站外联系', text: '如果平台内不方便发送联系方式，您可以通过站外联系老师，取得联系方式后我帮您完成登记。' },
 ];
 
 type AuthState = { config?: ExtensionConfig; operator?: AuthenticatedOperator };
@@ -35,12 +35,8 @@ function permissionPattern(apiBaseUrl: string) {
   return `${url.origin}/*`;
 }
 
-function maskedPhone(phone: string) {
-  return phone.length === 11 ? `${phone.slice(0, 3)}****${phone.slice(-4)}` : phone;
-}
-
 function orderRemarkText(form: ContactForm, result: LeadIntakeResponse, operator?: AuthenticatedOperator) {
-  const contact = form.phone ? maskedPhone(form.phone) : `微信：${form.wechat}`;
+  const contact = form.phone ? form.phone : `微信：${form.wechat}`;
   return `【极享OS已录入】客户：${form.name}；联系：${contact}；线索：${result.lead.id}；录入：${operator?.name || '-'}；`;
 }
 
@@ -59,8 +55,10 @@ function App() {
   const [sync, setSync] = useState<LeadIntakeResponse | null>(null);
   const [remarkText, setRemarkText] = useState('');
   const [remarkMessage, setRemarkMessage] = useState('');
+  const [contactConfirmed, setContactConfirmed] = useState(false);
 
-  const canIntake = Boolean(context?.supported && context.platformOrderNo && form.name.trim() && (form.phone.trim() || form.wechat.trim()) && shopKey.trim());
+  const canIntake = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
+    && (form.phone.trim() || form.wechat.trim()) && shopKey.trim() && contactConfirmed);
   const workflowLabel = useMemo(() => {
     if (sync) return sync.orderRemarkStatus === 'SUCCEEDED' ? '已完成' : '线索已入库，待备注';
     if (form.phone || form.wechat) return '联系方式待确认';
@@ -76,6 +74,7 @@ function App() {
       const orderChanged = context?.platformOrderNo !== result.context.platformOrderNo;
       setContext(result.context);
       if (orderChanged) {
+        setContactConfirmed(false);
         setSync(null); setRemarkText(''); setRemarkMessage('');
         setForm({
           name: result.context.customerDisplayName,
@@ -144,16 +143,24 @@ function App() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : '填入话术失败'); }
   };
 
-  const reportRemark = async (result: LeadIntakeResponse, text: string) => {
+  const reportRemark = async (result: LeadIntakeResponse, text: string, expectedOrderNo: string) => {
     try {
+      const current = await activeTabCommand({ type: 'READ_FEIGE_CONTEXT' });
+      if (!('context' in current) || !current.context.supported
+        || current.context.platformOrderNo !== expectedOrderNo) {
+        throw new Error('当前飞鸽会话已切换，已停止写入订单备注');
+      }
       const pageResult = await activeTabCommand({ type: 'SAVE_ORDER_REMARK', text });
-      const status = pageResult.ok ? 'SUCCEEDED' : 'FAILED';
-      await worker({
+      const status = pageResult.ok ? 'SUBMITTED' : 'FAILED';
+      const reported = await worker<{ syncId: string; orderRemarkStatus: LeadIntakeResponse['orderRemarkStatus'] }>({
         type: 'REPORT_ORDER_REMARK', syncId: result.syncId, status,
         ...(!pageResult.ok ? { errorMessage: pageResult.message } : {}),
       });
+      if (reported.code !== 0) throw new Error(reported.message);
       setSync({ ...result, orderRemarkStatus: status });
-      setRemarkMessage(pageResult.ok ? '订单备注已保存' : `${pageResult.message}，可复制下方备注手工处理`);
+      setRemarkMessage(pageResult.ok
+        ? '已点击平台保存，等待真实飞鸽页面校准成功信号；请客服目视确认'
+        : `${pageResult.message}，可复制下方备注手工处理`);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : '订单备注失败';
       await worker({ type: 'REPORT_ORDER_REMARK', syncId: result.syncId, status: 'FAILED', errorMessage: message });
@@ -166,6 +173,14 @@ function App() {
     if (!context || !canIntake) return;
     setBusy(true); setError(''); setNotice(''); setRemarkMessage('');
     try {
+      const latest = await activeTabCommand({ type: 'READ_FEIGE_CONTEXT' });
+      if (!('context' in latest) || !latest.context.supported
+        || latest.context.platformOrderNo !== context.platformOrderNo) {
+        setContactConfirmed(false);
+        setSync(null);
+        throw new Error('当前飞鸽会话已切换，请刷新识别并重新确认客户资料');
+      }
+      setContext(latest.context);
       const result = await worker<LeadIntakeResponse>({
         type: 'CREATE_LEAD_INTAKE',
         input: {
@@ -182,7 +197,12 @@ function App() {
       setNotice(result.data.outcome === 'CREATED'
         ? `线索已入库，销售：${result.data.lead.assignedTo || '待分配'}`
         : '该订单已入库，本次没有重复创建线索');
-      await reportRemark(result.data, text);
+      if (result.data.outcome === 'CREATED') {
+        await reportRemark(result.data, text, context.platformOrderNo);
+      } else {
+        setRemarkText('');
+        setRemarkMessage('为避免覆盖原客户资料，重复入库不会再次改写平台订单备注');
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '线索入库失败');
     } finally { setBusy(false); }
@@ -228,18 +248,19 @@ function App() {
 
     <section className="card">
       <div className="section-title"><h2>联系方式</h2><span className={`status ${form.phone || form.wechat ? 'ready' : ''}`}>{form.phone || form.wechat ? '已获取' : '待获取'}</span></div>
-      <div className="source-switch"><button className={form.source === 'CHAT' ? 'active' : ''} onClick={() => setForm({ ...form, source: 'CHAT' })}>客户聊天提供</button><button className={form.source === 'OFF_PLATFORM' ? 'active' : ''} onClick={() => setForm({ ...form, source: 'OFF_PLATFORM' })}>站外已获取</button></div>
-      <label>客户姓名<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="请客服确认真实姓名" /></label>
-      <label>手机号<input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="手机号和微信至少填一项" /></label>
-      <label>微信号<input value={form.wechat} onChange={(event) => setForm({ ...form, wechat: event.target.value })} placeholder="可选" /></label>
+      <div className="source-switch"><button className={form.source === 'CHAT' ? 'active' : ''} onClick={() => { setForm({ ...form, source: 'CHAT' }); setContactConfirmed(false); }}>客户聊天提供</button><button className={form.source === 'OFF_PLATFORM' ? 'active' : ''} onClick={() => { setForm({ ...form, source: 'OFF_PLATFORM' }); setContactConfirmed(false); }}>站外已获取</button></div>
+      <label>客户姓名<input value={form.name} onChange={(event) => { setForm({ ...form, name: event.target.value }); setContactConfirmed(false); }} placeholder="请客服确认真实姓名" /></label>
+      <label>手机号<input value={form.phone} onChange={(event) => { setForm({ ...form, phone: event.target.value }); setContactConfirmed(false); }} placeholder="手机号和微信至少填一项" /></label>
+      <label>微信号<input value={form.wechat} onChange={(event) => { setForm({ ...form, wechat: event.target.value }); setContactConfirmed(false); }} placeholder="可选" /></label>
+      <label className="confirm-row"><input type="checkbox" checked={contactConfirmed} onChange={(event) => setContactConfirmed(event.target.checked)} /> 我已确认姓名和联系方式属于当前订单</label>
       <button className="primary" disabled={busy || !canIntake || Boolean(sync)} onClick={() => void intake()}>{busy ? '正在入库…' : sync ? '线索已入库' : '一键完成入库'}</button>
     </section>
 
     {sync && <section className="card result-card">
       <h2>处理结果</h2>
-      <div className="facts"><div><span>线索编号</span><strong>{sync.lead.id}</strong></div><div><span>分配销售</span><strong>{sync.lead.assignedTo || '待分配'}</strong></div><div><span>订单备注</span><strong>{sync.orderRemarkStatus === 'SUCCEEDED' ? '已保存' : '待人工确认'}</strong></div></div>
+      <div className="facts"><div><span>线索编号</span><strong>{sync.lead.id}</strong></div><div><span>分配销售</span><strong>{sync.lead.assignedTo || '待分配'}</strong></div><div><span>订单备注</span><strong>{sync.orderRemarkStatus === 'SUCCEEDED' ? '已确认保存' : sync.orderRemarkStatus === 'SUBMITTED' ? '已提交待确认' : '待人工确认'}</strong></div></div>
       {remarkMessage && <div className={`alert ${sync.orderRemarkStatus === 'SUCCEEDED' ? 'success' : 'warning'}`}>{remarkMessage}</div>}
-      {remarkText && <><pre className="remark-preview">{remarkText}</pre><div className="result-actions"><button className="secondary" onClick={() => void navigator.clipboard.writeText(remarkText)}>复制备注</button>{sync.orderRemarkStatus !== 'SUCCEEDED' && <button className="secondary" onClick={() => void reportRemark(sync, remarkText)}>重试写入</button>}</div></>}
+      {remarkText && <><pre className="remark-preview">{remarkText}</pre><div className="result-actions"><button className="secondary" onClick={() => void navigator.clipboard.writeText(remarkText)}>复制备注</button>{sync.orderRemarkStatus !== 'SUCCEEDED' && context?.platformOrderNo && <button className="secondary" onClick={() => void reportRemark(sync, remarkText, context.platformOrderNo)}>重试写入</button>}</div></>}
     </section>}
   </main>;
 }

@@ -152,6 +152,9 @@ function assertProductionOrigins(origins: string[]): void {
   if (example) {
     throw new Error(`CORS_ORIGINS still contains the example domain: ${example}`);
   }
+  if (!origins.some((origin) => origin.startsWith('https://') || LOCALHOST_ORIGIN.test(origin))) {
+    throw new Error('CORS_ORIGINS must include the production HTTPS web origin in addition to any Chrome extension origin.');
+  }
 }
 
 function assertIntegerRange(env: NodeJS.ProcessEnv, name: string, min: number, max: number): void {

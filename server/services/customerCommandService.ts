@@ -1999,6 +1999,7 @@ export function createCustomerCommandService(
         await tx.leadRecord.create({
           data: {
             id,
+            externalIntakeKey: nullableText(lead.externalIntakeKey),
             name: lead.name,
             company: nullableText(lead.company),
             phone: nullableText(lead.phone),

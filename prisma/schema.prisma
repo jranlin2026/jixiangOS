@@ -214,6 +214,7 @@ model BrowserLeadSync {
   platform          String    @db.VarChar(40)
   shopKey           String    @db.VarChar(120)
   platformOrderNo   String    @db.VarChar(160)
+  sourceProductName String?   @db.VarChar(240)
   operatorId        String    @db.VarChar(64)
   operatorName      String    @db.VarChar(100)
   contactSource     String    @db.VarChar(24)
@@ -395,6 +396,7 @@ model CoCreationEvent {
 
 model LeadRecord {
   id                  String   @id @db.VarChar(64)
+  externalIntakeKey   String?  @unique @db.VarChar(191)
   name                String   @db.VarChar(120)
   company             String?  @db.VarChar(200)
   phone               String?  @db.VarChar(50)

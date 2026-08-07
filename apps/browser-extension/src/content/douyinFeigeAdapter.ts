@@ -109,6 +109,8 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       const save = first(document, selectors.orderRemarkSave);
       if (!save) return { ok: false, code: 'ORDER_REMARK_SAVE_NOT_FOUND', message: '备注已填入，但未找到保存按钮，请人工确认' };
       save.click();
+      // Clicking is only a submission attempt. The side panel deliberately keeps
+      // this in SUBMITTED until a calibrated platform success signal is observed.
       return { ok: true };
     },
   };

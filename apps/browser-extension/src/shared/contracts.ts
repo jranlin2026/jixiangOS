@@ -14,7 +14,7 @@ export type LeadIntakeResponse = {
   syncId: string;
   outcome: 'CREATED' | 'ALREADY_CREATED';
   lead: { id: string; name: string; assignedTo?: string; assignedToId?: string; intakeStatus?: string };
-  orderRemarkStatus: 'NOT_ATTEMPTED' | 'SUCCEEDED' | 'FAILED';
+  orderRemarkStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
 };
 
 export type PageCommand =
@@ -32,4 +32,4 @@ export type WorkerCommand =
   | { type: 'LOGOUT' }
   | { type: 'SAVE_CONFIG'; config: ExtensionConfig }
   | { type: 'CREATE_LEAD_INTAKE'; input: Record<string, unknown> }
-  | { type: 'REPORT_ORDER_REMARK'; syncId: string; status: 'SUCCEEDED' | 'FAILED'; errorMessage?: string };
+  | { type: 'REPORT_ORDER_REMARK'; syncId: string; status: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED'; errorMessage?: string };

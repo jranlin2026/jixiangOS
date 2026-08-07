@@ -27,6 +27,7 @@ const repository = {
       status: 'PENDING',
       orderRemarkStatus: 'NOT_ATTEMPTED',
       attemptCount: 1,
+      updatedAt: new Date(),
     };
     records.set(key, record);
     return { acquired: true as const, record };
@@ -89,7 +90,9 @@ assert.equal(first.data?.syncId, 'browser-sync-1');
 assert.equal(first.data?.lead.id, 'lead-1');
 assert.equal(first.data?.lead.assignedTo, '销售小王');
 assert.equal(createLeadCalls.length, 1);
+assert.equal([...records.values()][0].sourceProductName, 'AI口播智能体');
 assert.deepEqual(createLeadCalls[0].input, {
+  externalIntakeKey: 'browser-sync-1',
   name: '张先生',
   phone: '13800138000',
   phones: [{ number: '13800138000', isPrimary: true, label: '主手机号' }],
@@ -105,11 +108,18 @@ assert.deepEqual(createLeadCalls[0].input, {
   status: '新线索',
 });
 
-const duplicate = await service.intake(input, actor);
+const duplicate = await service.intake({
+  ...input,
+  shopKey: ` ${input.shopKey} `,
+  platformOrderNo: ` ${input.platformOrderNo} `,
+  contactName: ` ${input.contactName} `,
+  contactPhone: ` ${input.contactPhone} `,
+}, actor);
 assert.equal(duplicate.code, 0);
 assert.equal(duplicate.data?.outcome, 'ALREADY_CREATED');
 assert.equal(duplicate.data?.lead.id, 'lead-1');
 assert.equal(createLeadCalls.length, 1, '重复点击不能再创建线索');
+assert.equal(records.size, 1, '业务幂等键必须先规范化再持久化');
 
 const invalid = await service.intake({
   ...input,
@@ -121,9 +131,9 @@ assert.equal(invalid.code, 400);
 assert.equal(invalid.message, '手机号或微信至少填写一项');
 assert.equal(createLeadCalls.length, 1, '无效联系方式不能进入线索创建');
 
-const remark = await service.reportOrderRemark('browser-sync-1', { status: 'SUCCEEDED' }, actor);
+const remark = await service.reportOrderRemark('browser-sync-1', { status: 'SUBMITTED' }, actor);
 assert.equal(remark.code, 0);
-assert.equal(remark.data?.orderRemarkStatus, 'SUCCEEDED');
+assert.equal(remark.data?.orderRemarkStatus, 'SUBMITTED');
 const colleagueRemark = await service.reportOrderRemark(
   'browser-sync-1',
   { status: 'FAILED', errorMessage: '备注按钮未找到' },
