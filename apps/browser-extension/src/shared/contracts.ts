@@ -1,5 +1,6 @@
 import type { DetectedContact } from '../domain/contactDetection';
 import type { FeigePageContext, PageWriteResult } from '../content/douyinFeigeAdapter';
+import type { ScriptLibrary } from '../domain/scriptLibrary';
 
 export type ExtensionConfig = {
   apiBaseUrl: string;
@@ -31,5 +32,7 @@ export type WorkerCommand =
   | { type: 'LOGIN'; config: ExtensionConfig; account: string; password: string }
   | { type: 'LOGOUT' }
   | { type: 'SAVE_CONFIG'; config: ExtensionConfig }
+  | { type: 'GET_SCRIPT_LIBRARY' }
+  | { type: 'SAVE_SCRIPT_LIBRARY'; library: ScriptLibrary }
   | { type: 'CREATE_LEAD_INTAKE'; input: Record<string, unknown> }
   | { type: 'REPORT_ORDER_REMARK'; syncId: string; status: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED'; errorMessage?: string };

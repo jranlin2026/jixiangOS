@@ -65,6 +65,16 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
       sendResponse({ code: 0, data: true, message: 'success' });
       return;
     }
+    if (message.type === 'GET_SCRIPT_LIBRARY') {
+      sendResponse(await request('/browser-agent/script-library'));
+      return;
+    }
+    if (message.type === 'SAVE_SCRIPT_LIBRARY') {
+      sendResponse(await request('/browser-agent/script-library', {
+        method: 'PUT', body: JSON.stringify(message.library),
+      }));
+      return;
+    }
     if (message.type === 'CREATE_LEAD_INTAKE') {
       sendResponse(await request('/browser-agent/lead-intakes', { method: 'POST', body: JSON.stringify(message.input) }));
       return;
