@@ -26,6 +26,7 @@ type BusinessSourceFieldsProps = {
   paymentTimeLabel?: string;
   platformOrderLabel?: string;
   disabled?: boolean;
+  required?: boolean;
 };
 
 function dateTimeLocalValue(value?: string): string {
@@ -50,6 +51,7 @@ const BusinessSourceFields: React.FC<BusinessSourceFieldsProps> = ({
   paymentTimeLabel = '平台付款时间',
   platformOrderLabel = '平台订单号',
   disabled = false,
+  required = false,
 }) => {
   const platforms = useMemo(() => configs
     .filter((item) => !item.parentId && (item.isActive || item.id === value.sourcePlatformId))
@@ -84,6 +86,7 @@ const BusinessSourceFields: React.FC<BusinessSourceFieldsProps> = ({
           });
         }}
         fullWidth
+        required={required}
       >
         <MenuItem value="">未选择</MenuItem>
         {platforms.map((platform) => <MenuItem key={platform.id} value={platform.id}>{platform.name}</MenuItem>)}
@@ -98,6 +101,7 @@ const BusinessSourceFields: React.FC<BusinessSourceFieldsProps> = ({
           onChange({ ...value, sourceShopId: shop?.id || '', sourceShopName: shop?.name || '' });
         }}
         fullWidth
+        required={required}
       >
         <MenuItem value="">未选择</MenuItem>
         {shops.map((shop) => <MenuItem key={shop.id} value={shop.id}>{shop.name}</MenuItem>)}
@@ -107,8 +111,9 @@ const BusinessSourceFields: React.FC<BusinessSourceFieldsProps> = ({
         value={value.platformOrderNo}
         disabled={disabled}
         onChange={(event) => onChange({ ...value, platformOrderNo: event.target.value })}
-        placeholder="可选，保留字母、数字和前导零"
+        placeholder={required ? '请输入平台订单号' : '可选，保留字母、数字和前导零'}
         fullWidth
+        required={required}
       />
       {includePurchaseSnapshot && (
         <TextField

@@ -59,6 +59,12 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
 import CommissionCorrectionImpactDialog from '../../shared/components/CommissionCorrectionImpactDialog';
 import BusinessSourceFields from '../../shared/components/BusinessSourceFields';
+import {
+  clearOrderPlatformSource,
+  hasOrderPlatformSource,
+  isOrderPlatformSourceComplete,
+  isSelfOperatedStoreChannel,
+} from '../../shared/utils/orderPlatformSource';
 
 interface OrderFormProps {
   open: boolean;
@@ -261,6 +267,8 @@ const OrderForm: React.FC<OrderFormProps> = ({
     paymentDate: toDateTimeInputValue(new Date()),
     paymentOrderNo: '',
   });
+  const showPlatformSourceFields = isSelfOperatedStoreChannel(form.officialPaymentChannel)
+    || (Boolean(order || application) && hasOrderPlatformSource(form));
 
   useEffect(() => {
     if (!open) return;
@@ -299,11 +307,11 @@ const OrderForm: React.FC<OrderFormProps> = ({
         leadInputBy: customer?.leadInputBy || '',
         leadContributorId: customer?.leadContributorId || '',
         leadContributorName: customer?.leadContributorName || '',
-        thirdPartyOrderNo: customer?.platformOrderNo || '',
-        sourcePlatformId: customer?.sourcePlatformId || '',
-        sourcePlatformName: customer?.sourcePlatformName || '',
-        sourceShopId: customer?.sourceShopId || '',
-        sourceShopName: customer?.sourceShopName || '',
+        thirdPartyOrderNo: '',
+        sourcePlatformId: '',
+        sourcePlatformName: '',
+        sourceShopId: '',
+        sourceShopName: '',
         notes: '',
         refundStatus: '无',
         paymentDate: toDateTimeInputValue(new Date()),
@@ -525,6 +533,13 @@ const OrderForm: React.FC<OrderFormProps> = ({
     setForm({ ...form, [field]: val });
   };
 
+  const handleOfficialPaymentChannelChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const officialPaymentChannel = event.target.value as OfficialPaymentChannel;
+    setForm((current) => isSelfOperatedStoreChannel(officialPaymentChannel)
+      ? { ...current, officialPaymentChannel }
+      : clearOrderPlatformSource({ ...current, officialPaymentChannel }));
+  };
+
   const handleOwnerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedOwner = users.find((user) => user.id === e.target.value);
     setForm({
@@ -536,22 +551,35 @@ const OrderForm: React.FC<OrderFormProps> = ({
 
   const handleCustomerSelect = (_event: React.SyntheticEvent, selected: Customer | null) => {
     setSelectedCustomer(selected);
-    setForm({
-      ...form,
-      customerId: selected?.id || '',
-      customerName: getCustomerDisplayName(selected),
-      salesId: selected?.ownerId || '',
-      owner: selected?.owner || form.owner,
-      sourceType: sourceTypeFromCustomer(selected, form.sourceType),
-      leadInputBy: selected?.leadInputBy || '',
-      leadContributorId: selected?.leadContributorId || '',
-      leadContributorName: selected?.leadContributorName || '',
-      resourceOwnership: resourceOwnershipFromCustomer(selected, form.resourceOwnership),
-      sourcePlatformId: selected?.sourcePlatformId || '',
-      sourcePlatformName: selected?.sourcePlatformName || '',
-      sourceShopId: selected?.sourceShopId || '',
-      sourceShopName: selected?.sourceShopName || '',
-      thirdPartyOrderNo: selected?.platformOrderNo || '',
+    setForm((current) => {
+      const platformSource = isSelfOperatedStoreChannel(current.officialPaymentChannel)
+        ? {
+            sourcePlatformId: selected?.sourcePlatformId || '',
+            sourcePlatformName: selected?.sourcePlatformName || '',
+            sourceShopId: selected?.sourceShopId || '',
+            sourceShopName: selected?.sourceShopName || '',
+            thirdPartyOrderNo: selected?.platformOrderNo || '',
+          }
+        : {
+            sourcePlatformId: '',
+            sourcePlatformName: '',
+            sourceShopId: '',
+            sourceShopName: '',
+            thirdPartyOrderNo: '',
+          };
+      return {
+        ...current,
+        customerId: selected?.id || '',
+        customerName: getCustomerDisplayName(selected),
+        salesId: selected?.ownerId || '',
+        owner: selected?.owner || current.owner,
+        sourceType: sourceTypeFromCustomer(selected, current.sourceType),
+        leadInputBy: selected?.leadInputBy || '',
+        leadContributorId: selected?.leadContributorId || '',
+        leadContributorName: selected?.leadContributorName || '',
+        resourceOwnership: resourceOwnershipFromCustomer(selected, current.resourceOwnership),
+        ...platformSource,
+      };
     });
     if (selected) {
       setCustomerSearch(getCustomerOptionLabel(selected));
@@ -673,6 +701,10 @@ const OrderForm: React.FC<OrderFormProps> = ({
     const primaryItem = canonicalProducts.items.find((item) => item.isPrimary) || canonicalProducts.items[0];
     if (!form.customerId || !form.customerName || !primaryItem || !form.salesId || !form.orderType || !form.officialPaymentChannel || !form.paymentDate || Number(form.actualAmount) <= 0) {
       await showFormIssue('请完整填写客户、产品、销售负责人、订单类型和付款信息');
+      return;
+    }
+    if (isSelfOperatedStoreChannel(form.officialPaymentChannel) && !isOrderPlatformSourceComplete(form)) {
+      await showFormIssue('公司自营小店订单必须完整填写来源平台、来源店铺和平台订单号');
       return;
     }
     const actualAmount = Number(form.actualAmount) || 0;
@@ -835,9 +867,15 @@ const OrderForm: React.FC<OrderFormProps> = ({
   const customerLocked = Boolean(application || customer || formalFieldLocked);
   const customerErrorCount = submitAttempted ? Number(!form.customerId || !form.customerName) + Number(!form.salesId) : 0;
   const productErrorCount = submitAttempted ? Number(!orderItems.length) : 0;
-  const orderErrorCount = submitAttempted ? Number(!form.orderType) : 0;
+  const orderErrorCount = submitAttempted
+    ? Number(!form.orderType)
+      + Number(!form.officialPaymentChannel)
+      + (isSelfOperatedStoreChannel(form.officialPaymentChannel)
+        ? Number(!form.sourcePlatformId) + Number(!form.sourceShopId) + Number(!form.thirdPartyOrderNo.trim())
+        : 0)
+    : 0;
   const paymentErrorCount = submitAttempted
-    ? Number(!form.officialPaymentChannel) + Number(!form.paymentDate) + Number(Number(form.actualAmount) <= 0)
+    ? Number(!form.paymentDate) + Number(Number(form.actualAmount) <= 0)
     : 0;
   const formTitle = correctionMode ? '订单更正' : order ? '编辑订单资料' : application ? '修改订单申请' : '提交订单申请';
   const actionText = correctionMode ? '确认更正并重算' : order ? '保存资料' : application ? '重新提交审核' : '提交审核';
@@ -1092,40 +1130,43 @@ const OrderForm: React.FC<OrderFormProps> = ({
           </Box>
         </BusinessFormSection>
 
-        <BusinessFormSection step={3} solidStep title="订单信息" summary={[form.orderType, form.sourcePlatformName, form.sourceShopName, form.thirdPartyOrderNo].filter(Boolean).join(' / ') || '待填写'} errorCount={orderErrorCount}>
+        <BusinessFormSection step={3} solidStep title="订单与成交渠道" summary={[form.orderType, form.officialPaymentChannel, form.sourcePlatformName, form.sourceShopName, form.thirdPartyOrderNo].filter(Boolean).join(' / ') || '待填写'} errorCount={orderErrorCount}>
           <TextField select label="订单类型" value={form.orderType} onChange={handleChange('orderType')} fullWidth disabled={formalFieldLocked} required>
             {orderTypeOptions.map((item) => (
               <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
             ))}
           </TextField>
-          <BusinessSourceFields
-            configs={businessSourceConfigs}
-            value={{
-              sourcePlatformId: form.sourcePlatformId,
-              sourcePlatformName: form.sourcePlatformName,
-              sourceShopId: form.sourceShopId,
-              sourceShopName: form.sourceShopName,
-              platformOrderNo: form.thirdPartyOrderNo,
-            }}
-            platformOrderLabel="平台订单号"
-            onChange={(value) => setForm((current) => ({
-              ...current,
-              sourcePlatformId: value.sourcePlatformId,
-              sourcePlatformName: value.sourcePlatformName,
-              sourceShopId: value.sourceShopId,
-              sourceShopName: value.sourceShopName,
-              thirdPartyOrderNo: value.platformOrderNo,
-            }))}
-          />
-          <TextField label="备注信息" value={form.notes} onChange={handleChange('notes')} placeholder="请输入订单补充说明（选填）" fullWidth multiline minRows={2} sx={{ gridColumn: '1 / -1' }} />
-        </BusinessFormSection>
-
-        <BusinessFormSection step={4} solidStep title="收款与凭证" summary={form.actualAmount > 0 ? `实付 ¥${Number(form.actualAmount).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}` : '待填写付款'} errorCount={paymentErrorCount}>
-          <TextField select label="官方收款渠道" value={form.officialPaymentChannel} onChange={handleChange('officialPaymentChannel')} fullWidth disabled={formalFieldLocked} required>
+          <TextField select label="官方收款渠道" value={form.officialPaymentChannel} onChange={handleOfficialPaymentChannelChange} fullWidth disabled={formalFieldLocked} required>
             {OFFICIAL_PAYMENT_CHANNELS.map((item) => (
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
+          {showPlatformSourceFields ? (
+            <BusinessSourceFields
+              configs={businessSourceConfigs}
+              value={{
+                sourcePlatformId: form.sourcePlatformId,
+                sourcePlatformName: form.sourcePlatformName,
+                sourceShopId: form.sourceShopId,
+                sourceShopName: form.sourceShopName,
+                platformOrderNo: form.thirdPartyOrderNo,
+              }}
+              platformOrderLabel="平台订单号"
+              onChange={(value) => setForm((current) => ({
+                ...current,
+                sourcePlatformId: value.sourcePlatformId,
+                sourcePlatformName: value.sourcePlatformName,
+                sourceShopId: value.sourceShopId,
+                sourceShopName: value.sourceShopName,
+                thirdPartyOrderNo: value.platformOrderNo,
+              }))}
+              required={isSelfOperatedStoreChannel(form.officialPaymentChannel)}
+            />
+          ) : null}
+          <TextField label="备注信息" value={form.notes} onChange={handleChange('notes')} placeholder="请输入订单补充说明（选填）" fullWidth multiline minRows={2} sx={{ gridColumn: '1 / -1' }} />
+        </BusinessFormSection>
+
+        <BusinessFormSection step={4} solidStep title="付款与凭证" summary={form.actualAmount > 0 ? `实付 ¥${Number(form.actualAmount).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}` : '待填写付款'} errorCount={paymentErrorCount}>
           <TextField label="实付金额" type="number" value={form.actualAmount} onChange={handleChange('actualAmount')} fullWidth disabled={formalFieldLocked} required />
           <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} disabled={formalFieldLocked} required />
           <TextField label="付款订单号" value={form.paymentOrderNo} onChange={handleChange('paymentOrderNo')} placeholder="填写付款流水号或付款订单号" fullWidth />
