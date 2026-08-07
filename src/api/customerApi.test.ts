@@ -218,7 +218,7 @@ assert.equal(updatedLead.owner, '李娜');
 assert.equal(updatedLead.industry, '智能制造');
 assert.equal(updatedLead.city, '广州');
 assert.equal(updatedLead.remark, '客户资料已完善');
-assert.deepEqual(updatedLead.changeHistory?.[0]?.changes?.map((item) => item.field), ['phone', 'industry', 'city', 'assignedTo', 'remark']);
+assert.deepEqual(updatedLead.changeHistory?.[0]?.changes?.map((item) => item.field), ['phone', 'phones', 'industry', 'city', 'assignedTo', 'remark']);
 
 const assignRes = await customerApi.assignCustomerOwner('cust-test', 'user-zhao-min', '主管重新分配');
 assert.equal(assignRes.code, 0);

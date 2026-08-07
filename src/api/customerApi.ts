@@ -698,9 +698,13 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
     Object.prototype.hasOwnProperty.call(safeData, 'phone')
     || Object.prototype.hasOwnProperty.call(safeData, 'phones')
   ) {
+    const hasPhoneListPatch = Object.prototype.hasOwnProperty.call(safeData, 'phones');
+    const phoneEntries = hasPhoneListPatch
+      ? safeData.phones
+      : (existing.phones || []).filter((item) => !item.isPrimary);
     const phones = canonicalizeContactPhones(
       Object.prototype.hasOwnProperty.call(safeData, 'phone') ? safeData.phone : existing.phone,
-      Object.prototype.hasOwnProperty.call(safeData, 'phones') ? safeData.phones : existing.phones,
+      phoneEntries,
     );
     safeData.phone = phones[0]?.number || '';
     safeData.phones = phones;
