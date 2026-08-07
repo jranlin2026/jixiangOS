@@ -9,12 +9,9 @@ import type {
 } from '../shared/contracts';
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
 import { activeTabCommand } from '../shared/activeTabMessaging';
-
-const scripts = [
-  { label: '下单欢迎', text: '您好，已经看到您的订单了，我们会尽快为您安排后续服务。' },
-  { label: '索要联系方式', text: '为了安排专属老师联系您，请回复您的姓名和手机号。' },
-  { label: '站外联系', text: '如果平台内不方便发送联系方式，您可以通过站外联系老师，取得联系方式后我帮您完成登记。' },
-];
+import type { ScriptLibrary, ScriptLibraryView } from '../domain/scriptLibrary';
+import { ScriptLibraryEditor } from './ScriptLibraryEditor';
+import { ScriptLibrarySection } from './ScriptLibrarySection';
 
 type AuthState = { config?: ExtensionConfig; operator?: AuthenticatedOperator };
 type ContactForm = { name: string; phone: string; wechat: string; source: 'CHAT' | 'OFF_PLATFORM' };
@@ -49,6 +46,10 @@ function App() {
   const [remarkText, setRemarkText] = useState('');
   const [remarkMessage, setRemarkMessage] = useState('');
   const [contactConfirmed, setContactConfirmed] = useState(false);
+  const [scriptView, setScriptView] = useState<ScriptLibraryView | null>(null);
+  const [scriptDraft, setScriptDraft] = useState<ScriptLibrary | null>(null);
+  const [managingScripts, setManagingScripts] = useState(false);
+  const [savingScripts, setSavingScripts] = useState(false);
 
   const canIntake = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
     && (form.phone.trim() || form.wechat.trim()) && shopKey.trim() && contactConfirmed);
@@ -89,6 +90,13 @@ function App() {
     }
   };
 
+  const loadScriptLibrary = async () => {
+    const result = await worker<ScriptLibraryView>({ type: 'GET_SCRIPT_LIBRARY' });
+    if (result.code !== 0 || !result.data) throw new Error(result.message);
+    setScriptView(result.data);
+    return result.data;
+  };
+
   useEffect(() => {
     void worker<AuthState>({ type: 'AUTH_STATE' }).then((result) => {
       if (result.data?.config) {
@@ -97,7 +105,10 @@ function App() {
       }
       setAuth(result.data || {});
       setLoading(false);
-      if (result.data?.operator) void refreshContext();
+      if (result.data?.operator) {
+        void refreshContext();
+        void loadScriptLibrary().catch((caught) => setError(caught instanceof Error ? caught.message : '话术加载失败'));
+      }
     });
   }, []);
 
@@ -115,7 +126,7 @@ function App() {
       setAuth(result.data);
       setPassword('');
       setNotice(`已以${result.data.operator.name}登录`);
-      await refreshContext();
+      await Promise.all([refreshContext(), loadScriptLibrary()]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '登录失败');
     } finally { setBusy(false); }
@@ -124,7 +135,7 @@ function App() {
   const logout = async () => {
     await worker({ type: 'LOGOUT' });
     setAuth((current) => ({ config: current.config }));
-    setContext(null); setSync(null); setNotice('');
+    setContext(null); setSync(null); setNotice(''); setScriptView(null); setScriptDraft(null); setManagingScripts(false);
   };
 
   const fillScript = async (text: string) => {
@@ -134,6 +145,27 @@ function App() {
       if (!result.ok) throw new Error(result.message);
       setNotice('话术已填入飞鸽，请客服确认后发送');
     } catch (caught) { setError(caught instanceof Error ? caught.message : '填入话术失败'); }
+  };
+
+  const beginManageScripts = () => {
+    if (!scriptView?.canManage) return;
+    setScriptDraft(structuredClone(scriptView.library));
+    setManagingScripts(true);
+  };
+
+  const saveScripts = async () => {
+    if (!scriptDraft) return;
+    setSavingScripts(true); setError(''); setNotice('');
+    try {
+      const result = await worker<ScriptLibraryView>({ type: 'SAVE_SCRIPT_LIBRARY', library: scriptDraft });
+      if (result.code !== 0 || !result.data) throw new Error(result.message);
+      setScriptView(result.data);
+      setScriptDraft(structuredClone(result.data.library));
+      setManagingScripts(false);
+      setNotice('话术库已更新，公司插件下次加载即使用新版本');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '话术保存失败');
+    } finally { setSavingScripts(false); }
   };
 
   const reportRemark = async (result: LeadIntakeResponse, text: string, expectedOrderNo: string) => {
@@ -217,6 +249,12 @@ function App() {
     </section>
   </main>;
 
+  if (managingScripts && scriptDraft) return <main className="shell">
+    <header><span className="brand-mark">JX</span><div><h1>飞鸽客服副驾驶</h1><p>{auth.operator.name}·话术库管理</p></div></header>
+    {error && <div className="alert error">{error}</div>}
+    <ScriptLibraryEditor library={scriptDraft} saving={savingScripts} onChange={setScriptDraft} onSave={() => void saveScripts()} onCancel={() => setManagingScripts(false)} />
+  </main>;
+
   return <main className="shell">
     <header><span className="brand-mark">JX</span><div><h1>飞鸽客服副驾驶</h1><p>{auth.operator.name}·{workflowLabel}</p></div><button className="text-button" onClick={() => void logout()}>退出</button></header>
     {error && <div className="alert error">{error}</div>}
@@ -233,11 +271,7 @@ function App() {
       {context?.diagnostics.length ? <ul className="diagnostics">{context.diagnostics.map((item) => <li key={item}>{item}</li>)}</ul> : null}
     </section>
 
-    <section className="card">
-      <h2>常用话术</h2>
-      <div className="script-grid">{scripts.map((item) => <button key={item.label} className="script-button" onClick={() => void fillScript(item.text)}><strong>{item.label}</strong><span>{item.text}</span></button>)}</div>
-      <p className="hint">话术只填入输入框，需客服确认后发送。</p>
-    </section>
+    <ScriptLibrarySection view={scriptView} onFill={(text) => void fillScript(text)} onManage={beginManageScripts} />
 
     <section className="card">
       <div className="section-title"><h2>联系方式</h2><span className={`status ${form.phone || form.wechat ? 'ready' : ''}`}>{form.phone || form.wechat ? '已获取' : '待获取'}</span></div>
