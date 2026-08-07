@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { matchScript, type ScriptLibrary } from './scriptLibrary';
+import { matchScript, recommendationKey, shouldAttemptAutoFill, type ScriptLibrary } from './scriptLibrary';
 
 const library: ScriptLibrary = {
   schemaVersion: 1,
@@ -63,5 +63,12 @@ const tied: ScriptLibrary = {
 assert.equal(matchScript(tied, {
   orderStatus: '已付款', productName: '', hasContact: false,
 })?.script.id, 'a', '同分时依次按分组、话术排序和ID稳定选择');
+
+const key = recommendationKey('DY-1', 'script-1');
+assert.equal(key, 'DY-1:script-1');
+assert.equal(shouldAttemptAutoFill({ orderNo: 'DY-1', orderStatus: '已付款', key, attemptedKeys: new Set() }), true);
+assert.equal(shouldAttemptAutoFill({ orderNo: '', orderStatus: '已付款', key, attemptedKeys: new Set() }), false);
+assert.equal(shouldAttemptAutoFill({ orderNo: 'DY-1', orderStatus: '', key, attemptedKeys: new Set() }), false);
+assert.equal(shouldAttemptAutoFill({ orderNo: 'DY-1', orderStatus: '已付款', key, attemptedKeys: new Set([key]) }), false);
 
 console.log('browser script matcher: ok');

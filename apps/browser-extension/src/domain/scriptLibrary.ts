@@ -62,6 +62,7 @@ function evaluate(script: ScriptTemplate, facts: ScriptMatchFacts) {
   if (script.match.contactState === 'PRESENT') reasons.push('客户已提供联系方式');
   const specificity = Number(Boolean(statuses.length)) + Number(Boolean(keywords.length))
     + Number(script.match.contactState !== 'ANY');
+  if (specificity === 0) return null;
   return { reasons, specificity };
 }
 
@@ -84,4 +85,17 @@ export function matchScript(library: ScriptLibrary, facts: ScriptMatchFacts): Sc
   ));
   const best = candidates[0];
   return best ? { group: best.group, script: best.script, reasons: best.reasons } : null;
+}
+
+export function recommendationKey(orderNo: string, scriptId: string) {
+  return `${orderNo.trim()}:${scriptId.trim()}`;
+}
+
+export function shouldAttemptAutoFill(input: {
+  orderNo: string;
+  orderStatus: string;
+  key: string;
+  attemptedKeys: ReadonlySet<string>;
+}) {
+  return Boolean(input.orderNo.trim() && input.orderStatus.trim() && input.key && !input.attemptedKeys.has(input.key));
 }

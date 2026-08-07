@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type {
   ApiEnvelope,
@@ -9,7 +9,13 @@ import type {
 } from '../shared/contracts';
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
 import { activeTabCommand } from '../shared/activeTabMessaging';
-import type { ScriptLibrary, ScriptLibraryView } from '../domain/scriptLibrary';
+import {
+  matchScript,
+  recommendationKey,
+  shouldAttemptAutoFill,
+  type ScriptLibrary,
+  type ScriptLibraryView,
+} from '../domain/scriptLibrary';
 import { ScriptLibraryEditor } from './ScriptLibraryEditor';
 import { ScriptLibrarySection } from './ScriptLibrarySection';
 
@@ -50,6 +56,8 @@ function App() {
   const [scriptDraft, setScriptDraft] = useState<ScriptLibrary | null>(null);
   const [managingScripts, setManagingScripts] = useState(false);
   const [savingScripts, setSavingScripts] = useState(false);
+  const [recommendationMessage, setRecommendationMessage] = useState('');
+  const attemptedRecommendationKeys = useRef(new Set<string>());
 
   const canIntake = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
     && (form.phone.trim() || form.wechat.trim()) && shopKey.trim() && contactConfirmed);
@@ -58,6 +66,38 @@ function App() {
     if (form.phone || form.wechat) return '联系方式待确认';
     return '等待联系方式';
   }, [form.phone, form.wechat, sync]);
+  const recommendation = useMemo(() => context && scriptView
+    ? matchScript(scriptView.library, {
+        orderStatus: context.orderStatus,
+        productName: context.productName,
+        hasContact: Boolean(form.phone.trim() || form.wechat.trim()),
+      })
+    : null, [context, form.phone, form.wechat, scriptView]);
+
+  useEffect(() => {
+    if (!context || !recommendation) {
+      setRecommendationMessage('');
+      return;
+    }
+    const key = recommendationKey(context.platformOrderNo, recommendation.script.id);
+    if (!shouldAttemptAutoFill({
+      orderNo: context.platformOrderNo,
+      orderStatus: context.orderStatus,
+      key,
+      attemptedKeys: attemptedRecommendationKeys.current,
+    })) return;
+    attemptedRecommendationKeys.current.add(key);
+    void activeTabCommand({ type: 'FILL_FEIGE_REPLY_IF_EMPTY', text: recommendation.script.content })
+      .then((result) => {
+        if (!result.ok) {
+          setRecommendationMessage(`已推荐话术，自动填入失败：${result.message}`);
+          return;
+        }
+        if ('filled' in result && result.filled) setRecommendationMessage('已自动填入，请客服确认后发送');
+        else setRecommendationMessage('输入框已有内容，仅提供推荐，未覆盖人工输入');
+      })
+      .catch((caught) => setRecommendationMessage(`已推荐话术，自动填入失败：${caught instanceof Error ? caught.message : '执行失败'}`));
+  }, [context, recommendation]);
 
   const refreshContext = async () => {
     setError('');
@@ -136,6 +176,7 @@ function App() {
     await worker({ type: 'LOGOUT' });
     setAuth((current) => ({ config: current.config }));
     setContext(null); setSync(null); setNotice(''); setScriptView(null); setScriptDraft(null); setManagingScripts(false);
+    setRecommendationMessage(''); attemptedRecommendationKeys.current.clear();
   };
 
   const fillScript = async (text: string) => {
@@ -265,13 +306,14 @@ function App() {
       {context ? <div className="facts">
         <div><span>客户</span><strong>{context.customerDisplayName || '未识别'}</strong></div>
         <div><span>订单</span><strong>{context.platformOrderNo || '未识别'}</strong></div>
+        <div><span>订单状态</span><strong>{context.orderStatus || '未识别'}</strong></div>
         <div><span>商品</span><strong>{context.productName || '未识别'}</strong></div>
         <div><span>消息</span><strong>{context.messages.length}条</strong></div>
       </div> : <p className="empty">请打开抖店飞鸽客服会话，然后点击“刷新识别”。</p>}
       {context?.diagnostics.length ? <ul className="diagnostics">{context.diagnostics.map((item) => <li key={item}>{item}</li>)}</ul> : null}
     </section>
 
-    <ScriptLibrarySection view={scriptView} onFill={(text) => void fillScript(text)} onManage={beginManageScripts} />
+    <ScriptLibrarySection view={scriptView} match={recommendation} recommendationMessage={recommendationMessage} onFill={(text) => void fillScript(text)} onManage={beginManageScripts} />
 
     <section className="card">
       <div className="section-title"><h2>联系方式</h2><span className={`status ${form.phone || form.wechat ? 'ready' : ''}`}>{form.phone || form.wechat ? '已获取' : '待获取'}</span></div>

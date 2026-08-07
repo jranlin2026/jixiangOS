@@ -17,6 +17,9 @@ export function ScriptLibrarySection({ view, match, recommendationMessage, onFil
   useEffect(() => {
     if (!groups.some((group) => group.id === activeGroupId)) setActiveGroupId(groups[0]?.id || '');
   }, [activeGroupId, groups]);
+  useEffect(() => {
+    if (match?.group.id && groups.some((group) => group.id === match.group.id)) setActiveGroupId(match.group.id);
+  }, [groups, match?.group.id]);
   const active = groups.find((group) => group.id === activeGroupId) || groups[0];
   const scripts = (active?.scripts || []).filter((script) => script.enabled)
     .sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id));
