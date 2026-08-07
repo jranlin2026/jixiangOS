@@ -13,6 +13,10 @@ chrome.runtime.onMessage.addListener((message: PageCommand, _sender, sendRespons
     sendResponse(adapter.fillReply(String(message.text || '')));
     return;
   }
+  if (message.type === 'FILL_FEIGE_REPLY_IF_EMPTY') {
+    sendResponse(adapter.fillReplyIfEmpty(String(message.text || '')));
+    return;
+  }
   if (message.type === 'SAVE_ORDER_REMARK') {
     sendResponse(adapter.fillOrderRemark(String(message.text || '')));
   }

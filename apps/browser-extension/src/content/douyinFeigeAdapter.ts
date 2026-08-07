@@ -5,17 +5,23 @@ export type FeigePageContext = {
   pageUrl: string;
   customerDisplayName: string;
   platformOrderNo: string;
+  orderStatus: string;
   productName: string;
   messages: BrowserChatMessage[];
   diagnostics: string[];
 };
 
 export type PageWriteResult = { ok: true } | { ok: false; code: string; message: string };
+export type SafeReplyFillResult =
+  | { ok: true; filled: true }
+  | { ok: true; filled: false; reason: 'NOT_EMPTY' }
+  | { ok: false; code: string; message: string };
 
 const selectors = {
   root: ['[data-jx-feige-conversation]', '#workspace-chat', '[data-testid="conversation-panel"]', '[class*="conversation"]'],
   customer: ['[data-jx-customer-name]', '#topbar-left-info span', '[data-testid="conversation-customer-name"]', '[class*="customer-name"]'],
   orderNo: ['[data-jx-order-no]', '[data-testid="order-no"]', '[data-order-no]'],
+  orderStatus: ['[data-jx-order-status]', '[data-testid="order-status"]'],
   product: ['[data-jx-product-name]', '[data-testid="product-name"]', '[class*="product-name"]'],
   message: ['[data-jx-message]', '.leaveMessage', '[data-testid="message-item"]', '[data-message-direction]'],
   reply: ['[data-jx-reply-input]', '[data-qa-id="qa-send-message-textarea"]', 'textarea[placeholder*="消息"]', '[contenteditable="true"][role="textbox"]'],
@@ -86,6 +92,12 @@ function setEditableValue(element: HTMLElement, value: string): PageWriteResult 
   return { ok: true };
 }
 
+function editableValue(element: HTMLElement) {
+  if (element instanceof element.ownerDocument.defaultView!.HTMLTextAreaElement
+    || element instanceof element.ownerDocument.defaultView!.HTMLInputElement) return element.value;
+  return element.textContent || '';
+}
+
 export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
   return {
     readContext(): FeigePageContext {
@@ -95,18 +107,21 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       const scope: ParentNode = root || document;
       const customerDisplayName = text(scope, selectors.customer);
       const platformOrderNo = text(document, selectors.orderNo);
+      const orderStatus = text(document, selectors.orderStatus);
       const productName = consultationProductName(document);
       const messages = all(scope, selectors.message)
         .map((element) => ({ direction: direction(element), text: element.textContent?.trim() || '' }))
         .filter((message) => message.text);
       if (!customerDisplayName) diagnostics.push('未识别客户昵称');
       if (!platformOrderNo) diagnostics.push('未识别平台订单号');
+      if (!orderStatus) diagnostics.push('未识别订单状态');
       if (!messages.length) diagnostics.push('未识别会话消息');
       return {
         supported: Boolean(root),
         pageUrl,
         customerDisplayName,
         platformOrderNo,
+        orderStatus,
         productName,
         messages,
         diagnostics,
@@ -118,6 +133,14 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       return editor
         ? setEditableValue(editor, value)
         : { ok: false, code: 'REPLY_EDITOR_NOT_FOUND', message: '未找到飞鸽回复输入框' };
+    },
+
+    fillReplyIfEmpty(value: string): SafeReplyFillResult {
+      const editor = first(document, selectors.reply);
+      if (!editor) return { ok: false, code: 'REPLY_EDITOR_NOT_FOUND', message: '未找到飞鸽回复输入框' };
+      if (editableValue(editor).trim()) return { ok: true, filled: false, reason: 'NOT_EMPTY' };
+      const result = setEditableValue(editor, value);
+      return result.ok ? { ok: true, filled: true } : result;
     },
 
     fillOrderRemark(value: string): PageWriteResult {

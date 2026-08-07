@@ -1,5 +1,5 @@
 import type { DetectedContact } from '../domain/contactDetection';
-import type { FeigePageContext, PageWriteResult } from '../content/douyinFeigeAdapter';
+import type { FeigePageContext, PageWriteResult, SafeReplyFillResult } from '../content/douyinFeigeAdapter';
 import type { ScriptLibrary } from '../domain/scriptLibrary';
 
 export type ExtensionConfig = {
@@ -21,11 +21,13 @@ export type LeadIntakeResponse = {
 export type PageCommand =
   | { type: 'READ_FEIGE_CONTEXT' }
   | { type: 'FILL_FEIGE_REPLY'; text: string }
+  | { type: 'FILL_FEIGE_REPLY_IF_EMPTY'; text: string }
   | { type: 'SAVE_ORDER_REMARK'; text: string };
 
 export type PageCommandResult =
   | { ok: true; context: FeigePageContext; detectedContact: DetectedContact | null }
-  | PageWriteResult;
+  | PageWriteResult
+  | SafeReplyFillResult;
 
 export type WorkerCommand =
   | { type: 'AUTH_STATE' }

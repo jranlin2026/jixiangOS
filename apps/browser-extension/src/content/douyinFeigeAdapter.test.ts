@@ -6,6 +6,7 @@ const dom = new JSDOM(`<!doctype html><html><body>
   <section data-jx-feige-conversation>
     <div data-jx-customer-name>张先生</div>
     <div data-jx-order-no>DY-20260808-001</div>
+    <div data-jx-order-status>已付款</div>
     <div data-jx-product-name>AI口播智能体</div>
     <div data-jx-message data-direction="OUTBOUND">老师您好，请留下联系方式。</div>
     <div data-jx-message data-direction="INBOUND">我姓张，13800138000</div>
@@ -20,6 +21,7 @@ const context = adapter.readContext();
 assert.equal(context.supported, true);
 assert.equal(context.customerDisplayName, '张先生');
 assert.equal(context.platformOrderNo, 'DY-20260808-001');
+assert.equal(context.orderStatus, '已付款');
 assert.equal(context.productName, 'AI口播智能体');
 assert.deepEqual(context.messages.map((message) => message.direction), ['OUTBOUND', 'INBOUND']);
 
@@ -49,6 +51,8 @@ const realAdapter = createDouyinFeigeAdapter(realFeigeDom.window.document, realF
 const realContext = realAdapter.readContext();
 assert.equal(realContext.supported, true);
 assert.equal(realContext.customerDisplayName, 'TK小学生');
+assert.equal(realContext.orderStatus, '');
+assert.ok(realContext.diagnostics.includes('未识别订单状态'));
 assert.equal(realContext.productName, 'N哥IP口播智能体');
 assert.deepEqual(realContext.messages, [
   { direction: 'INBOUND', text: '1117' },
@@ -59,5 +63,12 @@ assert.equal(
   (realFeigeDom.window.document.querySelector('[data-qa-id="qa-send-message-textarea"]') as HTMLTextAreaElement).value,
   '测试话术',
 );
+const reply = realFeigeDom.window.document.querySelector('[data-qa-id="qa-send-message-textarea"]') as HTMLTextAreaElement;
+reply.value = '客服正在输入';
+assert.deepEqual(realAdapter.fillReplyIfEmpty('系统推荐'), { ok: true, filled: false, reason: 'NOT_EMPTY' });
+assert.equal(reply.value, '客服正在输入');
+reply.value = '';
+assert.deepEqual(realAdapter.fillReplyIfEmpty('系统推荐'), { ok: true, filled: true });
+assert.equal(reply.value, '系统推荐');
 
 console.log('douyin feige page adapter: ok');
