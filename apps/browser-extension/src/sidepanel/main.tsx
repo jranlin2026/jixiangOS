@@ -5,11 +5,10 @@ import type {
   AuthenticatedOperator,
   ExtensionConfig,
   LeadIntakeResponse,
-  PageCommand,
-  PageCommandResult,
   WorkerCommand,
 } from '../shared/contracts';
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
+import { activeTabCommand } from '../shared/activeTabMessaging';
 
 const scripts = [
   { label: '下单欢迎', text: '您好，已经看到您的订单了，我们会尽快为您安排后续服务。' },
@@ -22,12 +21,6 @@ type ContactForm = { name: string; phone: string; wechat: string; source: 'CHAT'
 
 async function worker<T>(message: WorkerCommand): Promise<ApiEnvelope<T>> {
   return chrome.runtime.sendMessage(message);
-}
-
-async function activeTabCommand(message: PageCommand): Promise<PageCommandResult> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) throw new Error('未找到当前标签页');
-  return chrome.tabs.sendMessage(tab.id, message);
 }
 
 function permissionPattern(apiBaseUrl: string) {

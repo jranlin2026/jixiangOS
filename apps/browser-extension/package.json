@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx src/shared/apiBaseUrl.test.ts && tsx src/domain/contactDetection.test.ts && tsx src/content/douyinFeigeAdapter.test.ts"
+    "test": "tsx src/shared/apiBaseUrl.test.ts && tsx src/shared/activeTabMessaging.test.ts && tsx src/domain/contactDetection.test.ts && tsx src/content/douyinFeigeAdapter.test.ts"
   },
   "dependencies": {
     "react": "^18.2.0",

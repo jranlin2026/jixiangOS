@@ -4,7 +4,7 @@
   "description": "连接抖店飞鸽与极享OS，辅助客服完成话术、联系方式确认、线索入库和订单备注。",
   "version": "0.1.0",
   "minimum_chrome_version": "116",
-  "permissions": ["activeTab", "sidePanel", "storage", "tabs"],
+  "permissions": ["activeTab", "scripting", "sidePanel", "storage", "tabs"],
   "host_permissions": [
     "https://*.jinritemai.com/*",
     "https://*.douyinec.com/*"
