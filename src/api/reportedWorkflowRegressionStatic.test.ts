@@ -42,7 +42,9 @@ assert.match(
 assert.match(commissionApiSource, /await hydrateCommissionOrderCache\(\)/);
 assert.match(customerFormSource, /const saved =/);
 assert.match(customerFormSource, /if \(!saved\) return;/);
-assert.match(customerFormSource, /setSubmitError/);
+assert.match(customerFormSource, /useAppFeedback/);
+assert.match(customerFormSource, /await alert\(/);
+assert.doesNotMatch(customerFormSource, /setSubmitError/);
 assert.match(customersSource, /permissionKey=\{PERMISSION_KEYS\.CUSTOMER_PUBLIC_POOL_CLAIM\}/);
 assert.match(customerDetailSource, /permissionKey=\{PERMISSION_KEYS\.CUSTOMER_PUBLIC_POOL_CLAIM\}/);
 assert.match(customersSource, /!isPublicPoolScope\s*&&\s*\([\s\S]*?新增客户/);

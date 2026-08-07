@@ -41,7 +41,19 @@ const createFormResetSource = orderFormSource.slice(
 for (const resetField of ['actualAmount: 0', "notes: ''", "paymentOrderNo: ''"]) {
   assert.match(createFormResetSource, new RegExp(resetField.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `新建订单必须重置 ${resetField}`);
 }
-assert.match(createFormResetSource, /thirdPartyOrderNo: customer\?\.platformOrderNo \|\| ''/, '新建订单应继承客户已有的平台订单号，客户无值时保持为空');
+for (const platformField of [
+  "thirdPartyOrderNo: ''",
+  "sourcePlatformId: ''",
+  "sourcePlatformName: ''",
+  "sourceShopId: ''",
+  "sourceShopName: ''",
+]) {
+  assert.match(
+    createFormResetSource,
+    new RegExp(platformField.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    `新建订单必须清空本单的平台来源字段 ${platformField}`,
+  );
+}
 assert.match(
   orderFormSource,
   /if \(correctionMode && !correctionReason\.trim\(\)\)/,
@@ -85,7 +97,7 @@ assert.match(
   '审核资料必须在正式订单修改后提示当前值',
 );
 
-for (const section of ['客户信息', '产品信息', '订单信息', '收款与凭证']) {
+for (const section of ['客户信息', '产品信息', '订单与成交渠道', '付款与凭证']) {
   assert.match(orderFormSource, new RegExp(`title="${section}"`), `订单填写页应包含“${section}”分区`);
 }
 assert.match(orderFormSource, /<BusinessFormSection/, '订单填写页应使用默认展开且可折叠的统一业务表单分段');
@@ -96,8 +108,8 @@ const customerFormSection = orderFormSource.slice(
 );
 assert.doesNotMatch(customerFormSection, /label="资源归属"|label="线索录入人"|label="线索贡献人"/);
 const paymentFormSection = orderFormSource.slice(
-  orderFormSource.indexOf('title="收款与凭证"'),
-  orderFormSource.indexOf('</BusinessFormSection>', orderFormSource.indexOf('title="收款与凭证"')),
+  orderFormSource.indexOf('title="付款与凭证"'),
+  orderFormSource.indexOf('</BusinessFormSection>', orderFormSource.indexOf('title="付款与凭证"')),
 );
 assert.doesNotMatch(paymentFormSection, /label="产品总计"|label="优惠"/);
 

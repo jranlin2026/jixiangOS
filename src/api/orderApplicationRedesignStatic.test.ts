@@ -6,7 +6,8 @@ const source = readFileSync(join(process.cwd(), 'src/pages/Orders/OrderForm.tsx'
 
 assert.match(source, /申请人/);
 assert.match(source, /申请日期/);
-assert.match(source, /title="收款与凭证"/);
+assert.match(source, /title="订单与成交渠道"/);
+assert.match(source, /title="付款与凭证"/);
 assert.match(source, /position: 'sticky'/, '订单申请应使用底部吸附汇总操作栏');
 assert.match(source, /产品合计/);
 assert.match(source, /实付金额/);
