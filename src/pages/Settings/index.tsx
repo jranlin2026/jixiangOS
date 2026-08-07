@@ -18,6 +18,7 @@ import LeadFlowConfigTab from '../Leads/LeadFlowConfigTab';
 import CustomerTagConfig from './CustomerTagConfig';
 import DeliveryAssignmentConfig from './DeliveryAssignmentConfig';
 import AfterSalesSourceConfigPage from './AfterSalesSourceConfig';
+import NotificationSettings from './NotificationSettings';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
@@ -109,6 +110,14 @@ const Settings: React.FC = () => {
       description: '客户成功自动分配规则',
       tabs: [
         { label: '客户成功分配', permissionKey: PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT, component: <DeliveryAssignmentConfig /> },
+      ],
+    },
+    {
+      key: 'notifications',
+      label: '消息与提醒',
+      description: '业务提醒规则、飞书渠道和投递日志',
+      tabs: [
+        { label: '提醒规则', permissionKey: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, superAdminOnly: true, component: <NotificationSettings /> },
       ],
     },
     {

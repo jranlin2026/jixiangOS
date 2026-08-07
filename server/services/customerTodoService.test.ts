@@ -115,9 +115,22 @@ const prisma = {
   },
 };
 
+const notificationCalls: Array<{ action: string; todoId: string }> = [];
 const service = createCustomerTodoService(
   prisma as any,
-  { now: () => at, createId: () => 'todo-1' },
+  {
+    now: () => at,
+    createId: () => 'todo-1',
+    notificationWorkflow: {
+      scheduleTodo: async (_tx: any, input: any) => {
+        notificationCalls.push({ action: 'schedule', todoId: input.todoId });
+      },
+      resolveTodo: async (_tx: any, todoId: string) => {
+        notificationCalls.push({ action: 'resolve', todoId });
+        return { notifications: 1, schedules: 1 };
+      },
+    } as any,
+  },
 );
 
 const created = await service.create('customer-1', {
@@ -132,6 +145,7 @@ assert.ok(
 );
 assert.equal(auditEvents[0]?.operation, 'add_todo');
 assert.match(auditEvents[0]?.inputHash || '', /^[a-f0-9]{64}$/);
+assert.deepEqual(notificationCalls, [{ action: 'schedule', todoId: 'todo-1' }]);
 
 const mine = await service.listMine(actor);
 assert.equal(mine.code, 0);
@@ -150,6 +164,7 @@ assert.equal(completed.code, 0);
 assert.equal(completed.data?.status, 'completed');
 assert.equal(customerData.activityRecords?.[0]?.title, '完成了客户待办');
 assert.equal(auditEvents[1]?.operation, 'complete_todo');
+assert.equal(notificationCalls[notificationCalls.length - 1]?.action, 'resolve');
 
 const repeated = await service.complete('customer-1', 'todo-1', actor);
 assert.equal(repeated.code, 409);

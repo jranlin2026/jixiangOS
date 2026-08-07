@@ -22,6 +22,7 @@ export const ROUTES = {
   ENABLEMENT: '/enablement',
   TASKS: '/tasks',
   CO_CREATION: '/co-creation',
+  NOTIFICATIONS: '/notifications',
   SETTINGS: '/settings',
   REFUND_CENTER: '/refund-center',
 } as const;

@@ -28,6 +28,7 @@ const Enablement = React.lazy(() => import('./pages/Enablement'));
 const Tasks = React.lazy(() => import('./pages/Tasks'));
 const CoCreation = React.lazy(() => import('./pages/CoCreation'));
 const Settings = React.lazy(() => import('./pages/Settings'));
+const Notifications = React.lazy(() => import('./pages/Notifications'));
 const Login = React.lazy(() => import('./pages/Login'));
 const NoPermission = React.lazy(() => import('./pages/NoPermission'));
 const SystemSetup = React.lazy(() => import('./pages/SystemSetup'));
@@ -118,6 +119,7 @@ const App: React.FC = () => {
         />
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<AppLayout />}>
+          <Route path={ROUTES.NOTIFICATIONS} element={<Suspense fallback={<PageLoader />}><Notifications /></Suspense>} />
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.HOME} />}>
             <Route
               index
