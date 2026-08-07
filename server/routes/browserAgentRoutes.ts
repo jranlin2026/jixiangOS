@@ -1,6 +1,7 @@
 import express from 'express';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { BrowserLeadIntakeService } from '../services/browserAgent/browserLeadIntakeService';
+import type { BrowserScriptLibraryService } from '../services/browserAgent/scriptLibraryService';
 
 function statusFor(code: number, successStatus = 200) {
   if (code === 0) return successStatus;
@@ -13,6 +14,7 @@ function routeParam(value: string | string[] | undefined) {
 
 export function createBrowserAgentRouter(deps: {
   service: BrowserLeadIntakeService;
+  scriptLibrary: BrowserScriptLibraryService;
   requireLeadCreate: express.RequestHandler;
 }) {
   const router = express.Router();
@@ -35,6 +37,16 @@ export function createBrowserAgentRouter(deps: {
       res.status(statusFor(result.code)).json(result);
     },
   );
+
+  router.get('/script-library', deps.requireLeadCreate, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.scriptLibrary.get(req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+
+  router.put('/script-library', deps.requireLeadCreate, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.scriptLibrary.update(req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
 
   return router;
 }

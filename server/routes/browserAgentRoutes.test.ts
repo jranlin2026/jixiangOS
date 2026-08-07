@@ -26,6 +26,24 @@ const service = {
     return { code: 0, data: { syncId, orderRemarkStatus: input.status }, message: 'success' };
   },
 } as any;
+const scriptLibrary = {
+  async get(actor: any) {
+    calls.push({ method: 'script-library:get', actor });
+    return {
+      code: 0,
+      data: { library: { schemaVersion: 1, revision: 1, groups: [] }, canManage: false },
+      message: 'success',
+    };
+  },
+  async update(input: any, actor: any) {
+    calls.push({ method: 'script-library:update', input, actor });
+    return {
+      code: 0,
+      data: { library: { ...input, revision: input.revision + 1 }, canManage: true },
+      message: 'success',
+    };
+  },
+} as any;
 
 const allow: express.RequestHandler = (req: any, _res, next) => {
   req.currentUser = { id: 'user-1', name: '客服小李' };
@@ -33,7 +51,7 @@ const allow: express.RequestHandler = (req: any, _res, next) => {
 };
 const app = express();
 app.use(express.json());
-app.use('/api/browser-agent', createBrowserAgentRouter({ service, requireLeadCreate: allow }));
+app.use('/api/browser-agent', createBrowserAgentRouter({ service, scriptLibrary, requireLeadCreate: allow }));
 const listener = app.listen(0, '127.0.0.1');
 await once(listener, 'listening');
 const address = listener.address() as AddressInfo;
@@ -55,7 +73,20 @@ try {
   });
   assert.equal(remark.status, 200);
   assert.equal((await remark.json()).data.orderRemarkStatus, 'SUCCEEDED');
-  assert.deepEqual(calls.map((call) => call.method), ['intake', 'remark']);
+
+  const library = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/script-library`);
+  assert.equal(library.status, 200);
+  assert.equal((await library.json()).data.library.revision, 1);
+
+  const updateLibrary = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/script-library`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ schemaVersion: 1, revision: 1, groups: [] }),
+  });
+  assert.equal(updateLibrary.status, 200);
+  assert.equal((await updateLibrary.json()).data.library.revision, 2);
+  assert.deepEqual(calls.map((call) => call.method), [
+    'intake', 'remark', 'script-library:get', 'script-library:update',
+  ]);
 } finally {
   await new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));
 }

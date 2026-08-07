@@ -115,6 +115,7 @@ import { createCoCreationRouter } from './routes/coCreationRoutes';
 import { createBrowserAgentRouter } from './routes/browserAgentRoutes';
 import { createBrowserLeadIntakeService } from './services/browserAgent/browserLeadIntakeService';
 import { createPrismaBrowserLeadSyncRepository } from './services/browserAgent/prismaBrowserLeadSyncRepository';
+import { createBrowserScriptLibraryService } from './services/browserAgent/scriptLibraryService';
 import { createRuntimeStorageGetHandler } from './routes/runtimeStorageRoutes';
 import { createDisabledCrmCustomerImportHandler } from './routes/crmMigrationRoutes';
 import { createCustomerFollowUpHandler } from './routes/customerFollowUpRoutes';
@@ -222,6 +223,7 @@ const browserLeadIntakeService = createBrowserLeadIntakeService({
   repository: createPrismaBrowserLeadSyncRepository(prisma),
   createLead: (input, actor) => customerCommandService.createLead(input, actor),
 });
+const browserScriptLibraryService = createBrowserScriptLibraryService(prisma);
 // Transfer/release/delete use the shared atomic command engine. Profile,
 // todo, claim, creation, and follow-up services retain their dedicated
 // request contracts, but each appends its audit event in the same transaction.
@@ -535,6 +537,7 @@ app.use('/api/enterprise-brain', createEnterpriseBrainRouter({
 app.use('/api/co-creation', createCoCreationRouter({ service: coCreationService, requireAuth: requireCoCreationAccess }));
 app.use('/api/browser-agent', createBrowserAgentRouter({
   service: browserLeadIntakeService,
+  scriptLibrary: browserScriptLibraryService,
   requireLeadCreate: requireLeadCreateAccess,
 }));
 
