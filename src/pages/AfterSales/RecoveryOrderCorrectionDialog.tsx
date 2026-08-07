@@ -39,6 +39,7 @@ import BusinessAttachmentPicker from '../../shared/components/BusinessAttachment
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
 import CommissionCorrectionImpactDialog from '../../shared/components/CommissionCorrectionImpactDialog';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 const shell = {
   ink: '#0f172a',
@@ -420,15 +421,18 @@ const RecoveryOrderCorrectionDialog: React.FC<RecoveryOrderCorrectionDialogProps
         </DialogContent>
       </Dialog>
 
-      <Dialog
+      <ProtectedFormDialog
         open={open && Boolean(editingOrder) && !loading}
-        onClose={correctionSubmitting ? undefined : onClose}
+        onClose={onClose}
+        submitting={correctionSubmitting}
+        resetKey={editingOrder?.id || orderId || ''}
         maxWidth="md"
         fullWidth
         fullScreen={mobileFullScreen}
         PaperProps={{ sx: { maxHeight: { xs: '100dvh', sm: '94vh' }, bgcolor: '#f8fafc' } }}
       >
-        <DialogCloseTitle onClose={onClose} closeDisabled={correctionSubmitting} sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' }}>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={correctionSubmitting} sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' }}>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 850 }}>{recoveryFormTitle}</Typography>
             <Typography variant="body2" sx={{ mt: 0.35, color: '#64748b' }}>
@@ -562,12 +566,13 @@ const RecoveryOrderCorrectionDialog: React.FC<RecoveryOrderCorrectionDialogProps
               </Typography>
             </Box>
           </Box>
-          <Button onClick={onClose} disabled={correctionSubmitting}>取消</Button>
+          <Button onClick={() => void requestClose()} disabled={correctionSubmitting}>取消</Button>
           <Button variant="contained" size="large" onClick={() => void handleSubmit()} disabled={correctionSubmitting || !correctionReason.trim()} sx={{ minWidth: { xs: 104, sm: 132 }, fontWeight: 800 }}>
             {recoveryFormAction}
           </Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
 
       <Dialog open={Boolean(correctionBlocker)} onClose={closeBlocker} maxWidth="sm" fullWidth>
         <DialogCloseTitle onClose={closeBlocker}>暂不能更正售后挽回订单</DialogCloseTitle>

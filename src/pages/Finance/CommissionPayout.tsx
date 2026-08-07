@@ -64,6 +64,7 @@ import {
   buildPostPayoutProcessingContext,
   type PostPayoutProcessingContext,
 } from './postPayoutProcessing';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 type PayoutView = 'pending' | 'records' | 'corrections' | 'summary';
 type CorrectionStatusFilter = '全部' | '无差额' | '待处理' | '已处理';
@@ -798,7 +799,8 @@ const CommissionPayout: React.FC = () => {
       />
     )}
 
-    <Dialog open={issueOpen} onClose={() => !submitting && setIssueOpen(false)} fullWidth maxWidth="sm">
+    <ProtectedFormDialog open={issueOpen} onClose={() => setIssueOpen(false)} submitting={submitting} resetKey={String(issueOpen)} fullWidth maxWidth="sm">
+      {({ requestClose }) => <>
       <DialogTitle>确认发放提成</DialogTitle>
       <DialogContent dividers><Stack spacing={2}>
         <Alert severity="info">本次将向 {selectedIds.length} 名员工发放其全部月份中处于待发放状态的 {selectedCount} 笔提成，共 {formatCurrency(selectedAmount)}。确认后系统会自动生成发放记录。</Alert>
@@ -809,15 +811,19 @@ const CommissionPayout: React.FC = () => {
         <TextField label="付款流水号（选填）" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} />
         <TextField label="备注（选填）" value={note} onChange={(event) => setNote(event.target.value)} multiline minRows={2} />
       </Stack></DialogContent>
-      <DialogActions><Button onClick={() => setIssueOpen(false)} disabled={submitting}>取消</Button><Button variant="contained" onClick={() => void submitIssue()} disabled={submitting || !issueAt || !paymentMethod}>确认发放</Button></DialogActions>
-    </Dialog>
+      <DialogActions><Button onClick={() => void requestClose()} disabled={submitting}>取消</Button><Button variant="contained" onClick={() => void submitIssue()} disabled={submitting || !issueAt || !paymentMethod}>确认发放</Button></DialogActions>
+      </>}
+    </ProtectedFormDialog>
 
-    <Dialog
+    <ProtectedFormDialog
       open={Boolean(correctionHandlingTarget)}
-      onClose={() => !correctionSubmitting && setCorrectionHandlingTarget(null)}
+      onClose={() => setCorrectionHandlingTarget(null)}
+      submitting={correctionSubmitting}
+      resetKey={correctionHandlingTarget?.leg.id || ''}
       fullWidth
       maxWidth="sm"
     >
+      {({ requestClose }) => <>
       <DialogTitle>处理追回差额</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
@@ -867,14 +873,15 @@ const CommissionPayout: React.FC = () => {
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={() => setCorrectionHandlingTarget(null)} disabled={correctionSubmitting}>取消</Button>
+        <Button onClick={() => void requestClose()} disabled={correctionSubmitting}>取消</Button>
         <Button
           variant="contained"
           onClick={() => void completeRecoverHandling()}
           disabled={correctionSubmitting || !correctionHandlingNote.trim()}
         >确认留痕</Button>
       </DialogActions>
-    </Dialog>
+      </>}
+    </ProtectedFormDialog>
 
     <Dialog open={Boolean(detailEmployee)} onClose={() => setDetailEmployee(null)} fullWidth maxWidth="lg">
       <DialogTitle>{detailEmployee?.owner} · 全部待办提成明细</DialogTitle>

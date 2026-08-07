@@ -3,7 +3,6 @@ import {
   Box,
   Button,
   Chip,
-  Dialog,
   DialogActions,
   DialogContent,
   FormControlLabel,
@@ -26,6 +25,7 @@ import { settingsApi } from '../../api';
 import type { OrderTypeConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 type OrderTypeForm = Omit<OrderTypeConfig, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -42,6 +42,7 @@ const OrderTypeConfigPage: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<OrderTypeConfig | null>(null);
   const [form, setForm] = useState<OrderTypeForm>(emptyForm);
+  const [saving, setSaving] = useState(false);
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
   const loadData = async () => {
@@ -84,15 +85,20 @@ const OrderTypeConfigPage: React.FC = () => {
       name: form.name.trim(),
       sortOrder: Number(form.sortOrder),
     };
-    const res = editingItem
-      ? await settingsApi.updateOrderTypeConfig(editingItem.id, payload)
-      : await settingsApi.createOrderTypeConfig(payload);
-    if (res.code !== 0) {
-      alert(res.message);
-      return;
+    setSaving(true);
+    try {
+      const res = editingItem
+        ? await settingsApi.updateOrderTypeConfig(editingItem.id, payload)
+        : await settingsApi.createOrderTypeConfig(payload);
+      if (res.code !== 0) {
+        await alert(res.message);
+        return;
+      }
+      setFormOpen(false);
+      await loadData();
+    } finally {
+      setSaving(false);
     }
-    setFormOpen(false);
-    loadData();
   };
 
   const handleToggleActive = async (item: OrderTypeConfig) => {
@@ -168,8 +174,9 @@ const OrderTypeConfigPage: React.FC = () => {
         </Table>
       </TableContainer>
 
-      <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editingItem ? '编辑订单类型' : '新增订单类型'}</DialogCloseTitle>
+      <ProtectedFormDialog open={formOpen} onClose={() => setFormOpen(false)} submitting={saving} resetKey={editingItem?.id || 'new-order-type'} maxWidth="xs" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={saving}>{editingItem ? '编辑订单类型' : '新增订单类型'}</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
             <TextField
@@ -201,11 +208,13 @@ const OrderTypeConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleSubmit} disabled={!form.name.trim()}>
+          <Button onClick={() => void requestClose()} disabled={saving}>取消</Button>
+          <Button variant="contained" onClick={handleSubmit} disabled={!form.name.trim() || saving}>
             {editingItem ? '保存' : '创建'}
           </Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
       {feedbackDialog}
     </Box>
   );

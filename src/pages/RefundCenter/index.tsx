@@ -47,6 +47,7 @@ import ResizableHeaderCell, {
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
+import useResetListFiltersOnPageExit from '../../shared/hooks/useResetListFiltersOnPageExit';
 
 type RefundColumn = {
   id: string;
@@ -90,6 +91,7 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
     fetchItems,
     fetchStats,
     setFilters,
+    resetListFilters,
     assign,
     addLog,
     markSuccess,
@@ -102,6 +104,7 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
   const [activeTab, setActiveTab] = useState(0);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(REFUND_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
+  useResetListFiltersOnPageExit(resetListFilters);
 
   useEffect(() => {
     fetchItems();
@@ -483,4 +486,3 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
 };
 
 export default RefundCenter;
-

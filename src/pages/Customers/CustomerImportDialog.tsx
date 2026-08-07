@@ -4,7 +4,6 @@ import {
   Box,
   Button,
   Chip,
-  Dialog,
   DialogActions,
   DialogContent,
   LinearProgress,
@@ -40,6 +39,7 @@ import type {
   CustomerImportTemplateOptions,
 } from '../../types/customerDataExchange';
 import type { CustomerBatchJobSummary } from '../../types/customerBatch';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 type Props = {
   open: boolean;
@@ -191,8 +191,9 @@ export default function CustomerImportDialog({ open, onClose, onQueued }: Props)
   const missingTagNames = precheck?.missingTagNames || [];
 
   return (
-    <Dialog open={open} onClose={busy ? undefined : onClose} maxWidth="lg" fullWidth>
-      <DialogCloseTitle onClose={() => { if (!busy) onClose(); }}>批量导入客户</DialogCloseTitle>
+    <ProtectedFormDialog open={open} onClose={onClose} submitting={busy} resetKey={String(open)} maxWidth="lg" fullWidth>
+      {({ requestClose }) => <>
+      <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={busy}>批量导入客户</DialogCloseTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
           <Alert severity="info">
@@ -315,10 +316,11 @@ export default function CustomerImportDialog({ open, onClose, onQueued }: Props)
       <DialogActions>
         {visibleRows.some((row) => row.status === 'blocked' || row.status === 'failed') ? <Button onClick={() => void downloadErrors()}>下载错误报告</Button> : null}
         <Box sx={{ flex: 1 }} />
-        <Button onClick={onClose} disabled={busy}>取消</Button>
+        <Button onClick={() => void requestClose()} disabled={busy}>取消</Button>
         {!precheck ? <Button variant="contained" onClick={() => void handlePrecheck()} disabled={!rows.length || busy}>开始预检</Button> : null}
         {precheck ? <Button variant="contained" onClick={() => void handleConfirm()} disabled={!precheck.readyCount || busy}>确认并后台导入 {precheck.readyCount} 条</Button> : null}
       </DialogActions>
-    </Dialog>
+      </>}
+    </ProtectedFormDialog>
   );
 }

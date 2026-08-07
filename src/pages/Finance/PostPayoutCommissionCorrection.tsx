@@ -5,7 +5,6 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Dialog,
   DialogActions,
   DialogContent,
   Divider,
@@ -39,6 +38,7 @@ import { moduleTablePaperSx, moduleTableSx } from '../../shared/components/Modul
 import OrderForm from '../Orders/OrderForm';
 import RecoveryOrderCorrectionDialog from '../AfterSales/RecoveryOrderCorrectionDialog';
 import type { PostPayoutProcessingContext } from './postPayoutProcessing';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 interface PostPayoutCommissionCorrectionProps {
   context: PostPayoutProcessingContext | null;
@@ -190,8 +190,16 @@ const PostPayoutCommissionCorrection: React.FC<PostPayoutCommissionCorrectionPro
 
   return (
     <>
-      <Dialog open={!editorOpen} onClose={loading ? undefined : onClose} maxWidth="lg" fullWidth>
-        <DialogCloseTitle onClose={onClose} closeDisabled={loading}>发放后更正</DialogCloseTitle>
+      <ProtectedFormDialog
+        open={!editorOpen}
+        onClose={onClose}
+        submitting={loading}
+        resetKey={`${context.payoutRecordId}:${context.commissionId}`}
+        maxWidth="lg"
+        fullWidth
+      >
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={loading}>发放后更正</DialogCloseTitle>
         <DialogContent dividers>
           <Stack spacing={2}>
             <Alert severity="warning">
@@ -296,7 +304,7 @@ const PostPayoutCommissionCorrection: React.FC<PostPayoutCommissionCorrectionPro
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={onClose} disabled={loading}>取消</Button>
+          <Button onClick={() => void requestClose()} disabled={loading}>取消</Button>
           <Button
             variant="contained"
             onClick={() => setEditorOpen(true)}
@@ -305,7 +313,8 @@ const PostPayoutCommissionCorrection: React.FC<PostPayoutCommissionCorrectionPro
             开始更正
           </Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
 
       {context.sourceType === 'formal_order' && formalOrder ? (
         <OrderForm

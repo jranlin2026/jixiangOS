@@ -3,7 +3,6 @@ import {
   Box,
   Button,
   Chip,
-  Dialog,
   DialogActions,
   DialogContent,
   FormControl,
@@ -28,6 +27,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import { settingsApi } from '../../api';
 import type { LeadSourceConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 const emptyForm = { name: '', parentId: '', isActive: true, sortOrder: 1, description: '' };
 
@@ -37,6 +37,7 @@ const LeadSourceConfigPage: React.FC = () => {
   const [editing, setEditing] = useState<LeadSourceConfig | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const parentSources = useMemo(() => items.filter((item) => !item.parentId).sort((a, b) => a.sortOrder - b.sortOrder), [items]);
   const childrenByParent = useMemo(() => {
@@ -79,15 +80,20 @@ const LeadSourceConfigPage: React.FC = () => {
 
   const handleSubmit = async () => {
     const payload = { ...form, parentId: form.parentId || undefined, sortOrder: Number(form.sortOrder) || 1 };
-    const res = editing
-      ? await settingsApi.updateLeadSourceConfig(editing.id, payload)
-      : await settingsApi.createLeadSourceConfig(payload);
-    if (res.code !== 0) {
-      setError(res.message);
-      return;
+    setSaving(true);
+    try {
+      const res = editing
+        ? await settingsApi.updateLeadSourceConfig(editing.id, payload)
+        : await settingsApi.createLeadSourceConfig(payload);
+      if (res.code !== 0) {
+        setError(res.message);
+        return;
+      }
+      setFormOpen(false);
+      await loadData();
+    } finally {
+      setSaving(false);
     }
-    setFormOpen(false);
-    loadData();
   };
 
   const handleDelete = async (id: string) => {
@@ -159,8 +165,9 @@ const LeadSourceConfigPage: React.FC = () => {
         </Table>
       </TableContainer>
 
-      <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editing ? '编辑线索来源' : '新增线索来源'}</DialogCloseTitle>
+      <ProtectedFormDialog open={formOpen} onClose={() => setFormOpen(false)} submitting={saving} resetKey={editing?.id || 'new-lead-source'} maxWidth="sm" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={saving}>{editing ? '编辑线索来源' : '新增线索来源'}</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
             <TextField label="来源名称" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required fullWidth />
@@ -182,9 +189,11 @@ const LeadSourceConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleSubmit} disabled={!form.name.trim()}>保存</Button>
+          <Button onClick={() => void requestClose()} disabled={saving}>取消</Button>
+          <Button variant="contained" onClick={handleSubmit} disabled={!form.name.trim() || saving}>保存</Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
     </Box>
   );
 };

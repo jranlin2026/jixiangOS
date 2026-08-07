@@ -73,6 +73,7 @@ import ResizableHeaderCell, {
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import useResetListFiltersOnPageExit from '../../shared/hooks/useResetListFiltersOnPageExit';
 import { ModuleHeader, ModulePage, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 import CustomerTagFilter from './CustomerTagFilter';
@@ -277,7 +278,7 @@ const getCustomerScopeFromTab = (tab?: string | null): CustomerScope => (
 const Customers: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { items, filters, pagination, fetchItems, setFilters } = useCustomerStore();
+  const { items, filters, pagination, fetchItems, setFilters, resetListFilters } = useCustomerStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -321,6 +322,8 @@ const Customers: React.FC = () => {
   }, [customerLevelConfigs]);
   const [viewConfig, setViewConfig] = useState<CustomerViewConfig>(() => readCustomerViewConfig(buildCustomerColumns([], customerScope)));
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
+
+  useResetListFiltersOnPageExit(resetListFilters);
 
   useEffect(() => {
     customerApi.fetchManageableUsers().then((res) => {

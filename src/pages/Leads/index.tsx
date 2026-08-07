@@ -57,6 +57,7 @@ import ResizableHeaderCell, {
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import useResetListFiltersOnPageExit from '../../shared/hooks/useResetListFiltersOnPageExit';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
@@ -237,7 +238,7 @@ const readLeadViewConfig = (columns: LeadColumn[]) => {
 };
 
 const Leads: React.FC = () => {
-  const { items, filters, pagination, fetchItems, setFilters } = useLeadStore();
+  const { items, filters, pagination, fetchItems, setFilters, resetListFilters } = useLeadStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const [activeTab, setActiveTab] = useState(0);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
@@ -261,6 +262,7 @@ const Leads: React.FC = () => {
   const [viewConfig, setViewConfig] = useState<LeadViewConfig>(() => readLeadViewConfig(buildColumns([])));
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(LEAD_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
   const { alert, dialog: feedbackDialog } = useAppFeedback();
+  useResetListFiltersOnPageExit(resetListFilters);
   const orderedColumns = useMemo(() => {
     const columnMap = new Map(columns.map((column) => [column.id, column]));
     const ordered = viewConfig.columnOrder

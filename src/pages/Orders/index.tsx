@@ -63,6 +63,7 @@ import ResizableHeaderCell, {
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import useResetListFiltersOnPageExit from '../../shared/hooks/useResetListFiltersOnPageExit';
 import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
 import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
@@ -203,7 +204,7 @@ const readOrderViewConfig = () => {
 };
 
 const Orders: React.FC = () => {
-  const { items, filters, pagination, loading, error, fetchItems, setFilters, delete: deleteOrder } = useOrderStore();
+  const { items, filters, pagination, loading, error, fetchItems, setFilters, resetListFilters, delete: deleteOrder } = useOrderStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -250,6 +251,7 @@ const Orders: React.FC = () => {
   const [orderLookupMessage, setOrderLookupMessage] = useState('');
   const [submittedOrderApplication, setSubmittedOrderApplication] = useState<OrderApplication | null>(null);
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
+  useResetListFiltersOnPageExit(resetListFilters);
 
   const clearCorrectionTarget = () => {
     handledCorrectionTargetRef.current = '';

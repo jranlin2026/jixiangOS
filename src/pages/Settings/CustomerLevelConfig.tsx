@@ -3,7 +3,6 @@ import {
   Box,
   Button,
   Chip,
-  Dialog,
   DialogActions,
   DialogContent,
   FormControlLabel,
@@ -27,6 +26,7 @@ import type { CustomerLevelConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { getCustomerLevelTagSx } from '../../shared/utils/constants';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 type CustomerLevelForm = Omit<CustomerLevelConfig, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -44,6 +44,7 @@ const CustomerLevelConfigPage: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<CustomerLevelConfig | null>(null);
   const [form, setForm] = useState<CustomerLevelForm>(emptyForm);
+  const [saving, setSaving] = useState(false);
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
   const loadData = async () => {
@@ -79,15 +80,20 @@ const CustomerLevelConfigPage: React.FC = () => {
       label: form.label.trim(),
       sortOrder: Number(form.sortOrder),
     };
-    const res = editingItem
-      ? await settingsApi.updateCustomerLevelConfig(editingItem.id, payload)
-      : await settingsApi.createCustomerLevelConfig(payload);
-    if (res.code !== 0) {
-      alert(res.message);
-      return;
+    setSaving(true);
+    try {
+      const res = editingItem
+        ? await settingsApi.updateCustomerLevelConfig(editingItem.id, payload)
+        : await settingsApi.createCustomerLevelConfig(payload);
+      if (res.code !== 0) {
+        await alert(res.message);
+        return;
+      }
+      setFormOpen(false);
+      await loadData();
+    } finally {
+      setSaving(false);
     }
-    setFormOpen(false);
-    loadData();
   };
 
   const handleToggleActive = async (item: CustomerLevelConfig) => {
@@ -170,8 +176,9 @@ const CustomerLevelConfigPage: React.FC = () => {
         </Table>
       </TableContainer>
 
-      <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editingItem ? '编辑客户等级' : '新增客户等级'}</DialogCloseTitle>
+      <ProtectedFormDialog open={formOpen} onClose={() => setFormOpen(false)} submitting={saving} resetKey={editingItem?.id || 'new-customer-level'} maxWidth="xs" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={saving}>{editingItem ? '编辑客户等级' : '新增客户等级'}</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
             <TextField label="等级编码" value={form.value} onChange={(e) => updateForm('value', e.target.value)} required fullWidth />
@@ -186,11 +193,13 @@ const CustomerLevelConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleSubmit} disabled={!form.value.trim() || !form.label.trim()}>
+          <Button onClick={() => void requestClose()} disabled={saving}>取消</Button>
+          <Button variant="contained" onClick={handleSubmit} disabled={!form.value.trim() || !form.label.trim() || saving}>
             保存
           </Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
       {feedbackDialog}
     </Box>
   );

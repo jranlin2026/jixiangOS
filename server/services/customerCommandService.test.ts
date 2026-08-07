@@ -2428,8 +2428,23 @@ for (const targetType of ['customer', 'lead'] as const) {
   const collisionFake = createFakePrisma({
     businessRecords: [businessCustomer(collisionCustomer)],
     leads: [],
+  }, {
+    roleRows: [{
+      ...salesRole,
+      permissions: [
+        ...salesRole.permissions,
+        { module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] },
+      ],
+    }, managerRole, financeRole, superRole],
   });
   const collisionService = createCustomerCommandService(collisionFake.prisma, serviceOptions);
+  const leadEditorWithCustomerList = {
+    ...leadEditor,
+    permissions: [
+      ...leadEditor.permissions,
+      { module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] },
+    ],
+  };
   const collision = await collisionService.createLead({
     name: '重复线索',
     phone: '13900000007',
@@ -2437,8 +2452,9 @@ for (const targetType of ['customer', 'lead'] as const) {
     status: '新线索',
     owner: '待分配',
     sourceType: '公司资源',
-  }, leadEditor);
+  }, leadEditorWithCustomerList);
   assert.equal(collision.code, 409);
+  assert.equal(collision.message, '系统中已存在相同联系方式客户，销售负责人是：销售甲');
   assert.equal(collisionFake.getState().leads.length, 0);
 }
 

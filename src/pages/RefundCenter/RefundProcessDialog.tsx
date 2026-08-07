@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Dialog, DialogContent, DialogActions, Button,
+  DialogContent, DialogActions, Button,
   TextField, MenuItem, Box, Typography,
 } from '@mui/material';
 import { PAYMENT_METHODS, RECOVERY_ACTION_TYPES, RECOVERY_SOLUTIONS } from '../../shared/utils/constants';
 import type { RecoveryRole, Refund } from '../../types/refund';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 interface RefundProcessDialogProps {
   open: boolean;
@@ -100,8 +101,9 @@ const RefundProcessDialog: React.FC<RefundProcessDialogProps> = ({ open, action,
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogCloseTitle onClose={onClose}>{titles[action]}</DialogCloseTitle>
+    <ProtectedFormDialog open={open} onClose={onClose} resetKey={`${refund?.id || ''}:${action}`} maxWidth="sm" fullWidth>
+      {({ requestClose }) => <>
+      <DialogCloseTitle onClose={() => void requestClose()}>{titles[action]}</DialogCloseTitle>
       <DialogContent>
         {action === 'assign' && (
           <Box sx={{ mt: 1, display: 'grid', gap: 2 }}>
@@ -212,6 +214,7 @@ const RefundProcessDialog: React.FC<RefundProcessDialogProps> = ({ open, action,
         )}
       </DialogContent>
       <DialogActions>
+        <Button onClick={() => void requestClose()}>取消</Button>
         <Button
           variant="contained"
           color={action === 'reject' ? 'error' : action === 'complete' ? 'success' : 'primary'}
@@ -225,7 +228,8 @@ const RefundProcessDialog: React.FC<RefundProcessDialogProps> = ({ open, action,
           确认{titles[action]}
         </Button>
       </DialogActions>
-    </Dialog>
+      </>}
+    </ProtectedFormDialog>
   );
 };
 

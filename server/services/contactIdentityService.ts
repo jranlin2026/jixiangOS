@@ -37,7 +37,7 @@ export interface ContactIdentityRecord {
 }
 
 export interface SafeContactIdentityConflictPayload {
-  message: '系统中已存在相同联系方式';
+  message: string;
   customer?: Pick<Customer, 'id' | 'name' | 'company' | 'owner'>;
 }
 
@@ -371,6 +371,11 @@ function parseCustomer(row: any): Customer | null {
   return value as Customer;
 }
 
+export function duplicateCustomerContactMessage(owner: unknown): string {
+  const ownerName = String(owner || '').trim() || '待分配';
+  return `${GENERIC_CONFLICT_MESSAGE}客户，销售负责人是：${ownerName}`;
+}
+
 async function safeConflictPayload(
   tx: ContactIdentityStore,
   customerIds: string[],
@@ -387,7 +392,7 @@ async function safeConflictPayload(
     const customer = parseCustomer(row);
     if (!customer || !viewer.canReadCustomer(customer)) continue;
     return {
-      message: GENERIC_CONFLICT_MESSAGE,
+      message: duplicateCustomerContactMessage(customer.owner),
       customer: {
         id: customer.id,
         name: customer.name,

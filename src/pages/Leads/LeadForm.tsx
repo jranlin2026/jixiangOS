@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   Box,
   Button,
   Dialog,
@@ -33,6 +32,7 @@ import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssign
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import useProtectedFormClose from '../../shared/hooks/useProtectedFormClose';
 import BusinessSourceFields from '../../shared/components/BusinessSourceFields';
 
 interface LeadFormProps {
@@ -53,7 +53,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
-  const [submitError, setSubmitError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const parentSources = useMemo(
     () => sourceConfigs.filter((item) => !item.parentId && item.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -143,7 +143,6 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     const defaultSource = lead?.source || defaultSourceOption?.parentName || '';
     const defaultSourceName = lead?.sourceName || defaultSourceOption?.childName || '';
     const defaultInputBy = lead?.inputBy || getCurrentLeadInputName(users.find((user) => user.isActive)?.name || '');
-    setSubmitError('');
     setForm({
       name: lead?.name || '',
       company: lead?.company || '',
@@ -206,42 +205,44 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   };
 
   const handleSubmit = async () => {
-    const phones = contactPhonesFromValues(form.phone, form.alternatePhone);
-    const effectiveOwner = canAssignLeads
-      ? form.owner
-      : isEdit
-        ? (lead?.assignedTo || lead?.owner || '待分配')
-        : '待分配';
-    const payload = {
-      ...form,
-      alternatePhone: undefined,
-      owner: effectiveOwner,
-      assignedTo: effectiveOwner === '待分配' ? undefined : effectiveOwner,
-      phone: phones[0]?.number || '',
-      phones,
-      sourcePaymentAmount: form.sourcePaymentAmount === '' ? (isEdit ? null : undefined) : Number(form.sourcePaymentAmount),
-      sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : (isEdit ? null : undefined),
-      sourceType: normalizeResourceOwnership(form.sourceType),
-      status: lead?.status || '新线索',
-    };
-    setSubmitError('');
+    setSubmitting(true);
+    try {
+      const phones = contactPhonesFromValues(form.phone, form.alternatePhone);
+      const effectiveOwner = canAssignLeads
+        ? form.owner
+        : isEdit
+          ? (lead?.assignedTo || lead?.owner || '待分配')
+          : '待分配';
+      const payload = {
+        ...form,
+        alternatePhone: undefined,
+        owner: effectiveOwner,
+        assignedTo: effectiveOwner === '待分配' ? undefined : effectiveOwner,
+        phone: phones[0]?.number || '',
+        phones,
+        sourcePaymentAmount: form.sourcePaymentAmount === '' ? (isEdit ? null : undefined) : Number(form.sourcePaymentAmount),
+        sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : (isEdit ? null : undefined),
+        sourceType: normalizeResourceOwnership(form.sourceType),
+        status: lead?.status || '新线索',
+      };
+      if (isEdit && lead) {
+        await update(lead.id, payload);
+        onSuccess?.();
+        onClose();
+        return;
+      }
 
-    if (isEdit && lead) {
-      await update(lead.id, payload);
+      const createPayload = applyCurrentLeadInputBy(payload, 'inputBy');
+      const res = await create(createPayload);
+      if (res.code !== 0) {
+        await alert(res.message || '线索入库失败', '无法新增线索');
+        return;
+      }
       onSuccess?.();
       onClose();
-      return;
+    } finally {
+      setSubmitting(false);
     }
-
-    const createPayload = applyCurrentLeadInputBy(payload, 'inputBy');
-    const res = await create(createPayload);
-    if (res.code !== 0) {
-      setSubmitError(res.message || '入库失败');
-      onSuccess?.();
-      return;
-    }
-    onSuccess?.();
-    onClose();
   };
 
   const missingContact = !form.phone.trim() && !form.alternatePhone.trim() && !form.wechat.trim();
@@ -252,18 +253,25 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   const showContactError = !isEdit && !!form.name.trim() && missingContact;
   const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor
     && !sourcePaymentAmountError && !!form.source && !!form.inputBy;
+  const protectedClose = useProtectedFormClose({
+    open,
+    submitting,
+    resetKey: lead?.id || 'new-lead',
+    onClose,
+  });
 
   return (
     <>
       <Dialog
         open={open}
-        onClose={onClose}
+        onClose={protectedClose.handleDialogClose}
+        disableEscapeKeyDown
         maxWidth="md"
         fullWidth
         fullScreen={mobileFullScreen}
         PaperProps={{ sx: { maxHeight: { xs: '100dvh', sm: '94vh' }, bgcolor: isEdit ? '#fff' : '#f8fafc' } }}
       >
-      <DialogCloseTitle onClose={onClose} sx={!isEdit ? { px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' } : undefined}>
+      <DialogCloseTitle onClose={() => void protectedClose.requestClose()} closeDisabled={submitting} sx={!isEdit ? { px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' } : undefined}>
         {!isEdit ? (
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 850 }}>新增线索入库</Typography>
@@ -271,10 +279,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           </Box>
         ) : '编辑线索资料'}
       </DialogCloseTitle>
-      <DialogContent sx={!isEdit ? { px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' } : undefined}>
+      <DialogContent {...protectedClose.interactionProps} sx={!isEdit ? { px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' } : undefined}>
         {!isEdit ? (
           <Box sx={{ pt: 1 }}>
-            {submitError && <Alert severity="error" sx={{ mb: 2 }}>{submitError}</Alert>}
             <BusinessFormSection
               step={1}
               solidStep
@@ -353,11 +360,6 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           </Box>
         ) : (
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mt: 1 }}>
-          {submitError && (
-            <Alert severity="error" sx={{ gridColumn: '1 / -1' }}>
-              {submitError}
-            </Alert>
-          )}
           <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
           <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
           <ContactPhoneFields
@@ -460,13 +462,14 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
         )}
       </DialogContent>
       <DialogActions sx={!isEdit ? { px: { xs: 2, sm: 3 }, py: 2, bgcolor: '#fff', borderTop: '1px solid #e2e8f0' } : undefined}>
-        {!isEdit ? <Button onClick={onClose}>取消</Button> : null}
-        <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
+        {!isEdit ? <Button onClick={() => void protectedClose.requestClose()} disabled={submitting}>取消</Button> : null}
+        <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit || submitting}>
           {isEdit ? '保存' : '确认入库'}
         </Button>
       </DialogActions>
       </Dialog>
       {feedbackDialog}
+      {protectedClose.dialog}
     </>
   );
 };

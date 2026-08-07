@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   Box,
   Button,
   Dialog,
@@ -31,6 +30,8 @@ import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
 import useAuthStore from '../../store/useAuthStore';
 import BusinessSourceFields from '../../shared/components/BusinessSourceFields';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import useProtectedFormClose from '../../shared/hooks/useProtectedFormClose';
 
 interface CustomerFormProps {
   open: boolean;
@@ -50,6 +51,7 @@ type SourceOption = {
 const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, onSuccess }) => {
   const { create, update } = useCustomerStore();
   const currentUser = useAuthStore((state) => state.currentUser);
+  const { alert, dialog: feedbackDialog } = useAppFeedback();
   const mobileFullScreen = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const isEdit = !!customer;
   const [users, setUsers] = useState<CustomerManageableUser[]>([]);
@@ -58,7 +60,6 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   const [businessSourceConfigs, setBusinessSourceConfigs] = useState<AfterSalesSourceConfig[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
-  const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const parentSources = useMemo(
@@ -252,7 +253,6 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     };
 
     setSubmitting(true);
-    setSubmitError('');
     try {
       const saved = isEdit && customer
         ? await update(customer.id, payload)
@@ -261,7 +261,10 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       onSuccess?.();
       onClose();
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : '客户资料保存失败');
+      await alert(
+        error instanceof Error ? error.message : '客户资料保存失败',
+        isEdit ? '无法保存客户资料' : '无法新增客户',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -286,17 +289,25 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   const showContactError = !!form.name.trim() && missingContact;
   const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor
     && !sourcePaymentAmountError && !!form.ownerId && !!form.leadInputBy && !!form.leadSource;
+  const protectedClose = useProtectedFormClose({
+    open,
+    submitting,
+    resetKey: customer?.id || 'new-customer',
+    onClose,
+  });
 
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      maxWidth="md"
-      fullWidth
-      fullScreen={mobileFullScreen}
-      PaperProps={{ sx: { maxHeight: { xs: '100dvh', sm: '94vh' }, bgcolor: isEdit ? '#fff' : '#f8fafc' } }}
-    >
-      <DialogCloseTitle onClose={onClose} sx={!isEdit ? { px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' } : undefined}>
+    <>
+      <Dialog
+        open={open}
+        onClose={protectedClose.handleDialogClose}
+        disableEscapeKeyDown
+        maxWidth="md"
+        fullWidth
+        fullScreen={mobileFullScreen}
+        PaperProps={{ sx: { maxHeight: { xs: '100dvh', sm: '94vh' }, bgcolor: isEdit ? '#fff' : '#f8fafc' } }}
+      >
+      <DialogCloseTitle onClose={() => void protectedClose.requestClose()} closeDisabled={submitting} sx={!isEdit ? { px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' } : undefined}>
         {!isEdit ? (
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 850 }}>新增客户</Typography>
@@ -304,8 +315,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
           </Box>
         ) : '编辑客户资料'}
       </DialogCloseTitle>
-      <DialogContent sx={!isEdit ? { px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' } : undefined}>
-        {submitError && <Alert severity="error" sx={{ mt: 1 }}>{submitError}</Alert>}
+      <DialogContent {...protectedClose.interactionProps} sx={!isEdit ? { px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' } : undefined}>
         {!isEdit ? (
           <Box sx={{ pt: 1 }}>
             <BusinessFormSection
@@ -530,12 +540,15 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
         )}
       </DialogContent>
       <DialogActions sx={!isEdit ? { px: { xs: 2, sm: 3 }, py: 2, bgcolor: '#fff', borderTop: '1px solid #e2e8f0' } : undefined}>
-        {!isEdit ? <Button onClick={onClose}>取消</Button> : null}
+        {!isEdit ? <Button onClick={() => void protectedClose.requestClose()} disabled={submitting}>取消</Button> : null}
         <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit || submitting}>
           {isEdit ? '保存' : '创建客户'}
         </Button>
       </DialogActions>
-    </Dialog>
+      </Dialog>
+      {feedbackDialog}
+      {protectedClose.dialog}
+    </>
   );
 };
 

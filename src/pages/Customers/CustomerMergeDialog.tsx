@@ -5,7 +5,6 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Dialog,
   DialogActions,
   DialogContent,
   Divider,
@@ -33,6 +32,7 @@ import {
   type CustomerMergeFieldDecision,
   type CustomerMergePrecheckResult,
 } from '../../types/customerMerge';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 import {
   buildCustomerMergeInput,
   buildInitialMergeDecisions,
@@ -253,9 +253,11 @@ const CustomerMergeDialog: React.FC<CustomerMergeDialogProps> = ({
   };
 
   return (
-    <Dialog
+    <ProtectedFormDialog
       open={open}
-      onClose={busy ? undefined : onClose}
+      onClose={onClose}
+      submitting={busy}
+      resetKey={customerIds.join(':')}
       maxWidth="lg"
       fullWidth
       PaperProps={{
@@ -266,7 +268,8 @@ const CustomerMergeDialog: React.FC<CustomerMergeDialogProps> = ({
         },
       }}
     >
-      <DialogCloseTitle onClose={() => { if (!busy) onClose(); }}>
+      {({ requestClose }) => <>
+      <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={busy}>
         <Stack direction="row" alignItems="center" gap={1.25}>
           <MergeTypeRoundedIcon color="primary" />
           <Box>
@@ -413,7 +416,7 @@ const CustomerMergeDialog: React.FC<CustomerMergeDialogProps> = ({
       </DialogContent>
 
       <DialogActions sx={{ px: { xs: 2, md: 3 }, py: 2, borderTop: '1px solid #e2e8f0', bgcolor: '#fff' }}>
-        <Button onClick={onClose} disabled={busy}>取消</Button>
+        <Button onClick={() => void requestClose()} disabled={busy}>取消</Button>
         {!precheckToken ? (
           <Button variant="contained" onClick={runPrecheck} disabled={busy || !selectionReady}>
             {busy ? '正在检查…' : '检查合并影响'}
@@ -424,7 +427,8 @@ const CustomerMergeDialog: React.FC<CustomerMergeDialogProps> = ({
           </Button>
         )}
       </DialogActions>
-    </Dialog>
+      </>}
+    </ProtectedFormDialog>
   );
 };
 

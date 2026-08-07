@@ -17,6 +17,7 @@ interface CustomerState {
   fetchAIPortrait: (id: string) => Promise<AICustomerPortrait | null>;
   addFollowUp: (id: string, content: string, operator?: string, attachments?: CustomerActivityRecord['attachments']) => Promise<Customer | null>;
   setFilters: (filters: CustomerFilters) => void;
+  resetListFilters: () => void;
   reset: () => void;
 }
 
@@ -124,6 +125,12 @@ const useCustomerStore = create<CustomerState>((set, get) => ({
   },
 
   setFilters: (filters) => set({ filters }),
+  resetListFilters: () => set((state) => ({
+    filters: {
+      page: 1,
+      pageSize: state.filters.pageSize || state.pagination.pageSize || defaultPagination.pageSize,
+    },
+  })),
   reset: () => set({ items: [], current: null, loading: false, error: null, filters: { page: 1, pageSize: 10 }, pagination: defaultPagination }),
 }));
 

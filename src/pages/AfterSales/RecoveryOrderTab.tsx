@@ -64,6 +64,7 @@ import useAuthStore from '../../store/useAuthStore';
 import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentPicker from '../../shared/components/BusinessAttachmentPicker';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
+import useProtectedFormClose from '../../shared/hooks/useProtectedFormClose';
 import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
 import { getRecoveryEvidenceAttachments } from '../../shared/utils/recoveryEvidence';
 import {
@@ -354,6 +355,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   const [correctionOrderId, setCorrectionOrderId] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<RecoveryFormMode>('create');
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [formSubmitting, setFormSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success'; text: string } | null>(null);
   const [submittedRecoveryOrder, setSubmittedRecoveryOrder] = useState<RecoveryOrder | null>(null);
   const [errorDialog, setErrorDialog] = useState<{ title: string; text: string } | null>(null);
@@ -698,43 +700,50 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
       createdBy: currentUser.id,
       createdByName: currentUser.name,
     };
-    const res = editingOrder
-      ? formMode === 'metadata'
-        ? await recoveryOrderApi.editRecoveryOrderMetadata(editingOrder.id, {
-          sourcePlatform: input.sourcePlatform,
-          sourcePlatformId: input.sourcePlatformId,
-          sourcePlatformName: input.sourcePlatformName,
-          sourceShopId: input.sourceShopId,
-          sourceShopName: input.sourceShopName,
-          paymentOrderNo: input.paymentOrderNo,
-          recoveryAttachments: input.recoveryAttachments,
-          remark: input.remark,
-        })
-        : await recoveryOrderApi.updateRecoveryOrder(editingOrder.id, input)
-      : await recoveryOrderApi.createRecoveryOrder(input);
-    if (res.code !== 0) {
-      showErrorDialog(
-        res.message || (editingOrder ? '修改售后挽回订单失败' : '新建售后挽回订单失败'),
-        '无法提交',
-      );
-      return;
+    setFormSubmitting(true);
+    try {
+      const res = editingOrder
+        ? formMode === 'metadata'
+          ? await recoveryOrderApi.editRecoveryOrderMetadata(editingOrder.id, {
+            sourcePlatform: input.sourcePlatform,
+            sourcePlatformId: input.sourcePlatformId,
+            sourcePlatformName: input.sourcePlatformName,
+            sourceShopId: input.sourceShopId,
+            sourceShopName: input.sourceShopName,
+            paymentOrderNo: input.paymentOrderNo,
+            recoveryAttachments: input.recoveryAttachments,
+            remark: input.remark,
+          })
+          : await recoveryOrderApi.updateRecoveryOrder(editingOrder.id, input)
+        : await recoveryOrderApi.createRecoveryOrder(input);
+      if (res.code !== 0) {
+        showErrorDialog(
+          res.message || (editingOrder ? '修改售后挽回订单失败' : '新建售后挽回订单失败'),
+          '无法提交',
+        );
+        return;
+      }
+      const isNewSubmission = formMode === 'create' && !editingOrder;
+      setOpen(false);
+      setEditingOrder(null);
+      if (isNewSubmission && res.data) {
+        setSubmittedRecoveryOrder(res.data);
+      } else {
+        setMessage({
+          type: 'success',
+          text: formMode === 'metadata'
+            ? '售后挽回订单补充资料已保存，不影响现有审核和分账状态'
+            : editingOrder
+              ? '已修改售后挽回订单，并重新提交审核'
+              : '已提交售后挽回订单，待财务审核通过后进入售后挽回订单列表',
+        });
+      }
+      await load();
+    } catch (error) {
+      showErrorDialog(error instanceof Error ? error.message : '售后挽回订单提交失败', '无法提交');
+    } finally {
+      setFormSubmitting(false);
     }
-    const isNewSubmission = formMode === 'create' && !editingOrder;
-    setOpen(false);
-    setEditingOrder(null);
-    if (isNewSubmission && res.data) {
-      setSubmittedRecoveryOrder(res.data);
-    } else {
-      setMessage({
-        type: 'success',
-        text: formMode === 'metadata'
-          ? '售后挽回订单补充资料已保存，不影响现有审核和分账状态'
-          : editingOrder
-            ? '已修改售后挽回订单，并重新提交审核'
-            : '已提交售后挽回订单，待财务审核通过后进入售后挽回订单列表',
-      });
-    }
-    await load();
   };
 
   const handleDelete = async (row: RecoveryOrder) => {
@@ -1081,6 +1090,12 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   const recoveryFormAction = formMode === 'metadata'
     ? '保存资料'
     : editingOrder ? '保存并提交审核' : '提交审核';
+  const protectedFormClose = useProtectedFormClose({
+    open,
+    submitting: formSubmitting,
+    resetKey: editingOrder?.id || `new-recovery-${createSignal}`,
+    onClose: () => { setOpen(false); setEditingOrder(null); },
+  });
 
   return (
     <Box sx={{ display: 'grid', gap: 1.5 }}>
@@ -1290,13 +1305,14 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
 
       <Dialog
         open={open}
-        onClose={() => { setOpen(false); setEditingOrder(null); }}
+        onClose={protectedFormClose.handleDialogClose}
+        disableEscapeKeyDown
         maxWidth="md"
         fullWidth
         fullScreen={mobileFullScreen}
         PaperProps={{ sx: { maxHeight: { xs: '100dvh', sm: '94vh' }, bgcolor: '#f8fafc' } }}
       >
-        <DialogCloseTitle onClose={() => { setOpen(false); setEditingOrder(null); }} sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' }}>
+        <DialogCloseTitle onClose={() => void protectedFormClose.requestClose()} closeDisabled={formSubmitting} sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' }}>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 850 }}>{recoveryFormTitle}</Typography>
             <Typography variant="body2" sx={{ mt: 0.35, color: '#64748b' }}>
@@ -1304,7 +1320,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
             </Typography>
           </Box>
         </DialogCloseTitle>
-        <DialogContent sx={{ px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' }}>
+        <DialogContent {...protectedFormClose.interactionProps} sx={{ px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' }}>
           <Box sx={{ pt: 1 }}>
           {formMode === 'create' ? (
             <BusinessSummaryGrid
@@ -1430,17 +1446,19 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
               </Typography>
             </Box>
           </Box>
-          <Button onClick={() => { setOpen(false); setEditingOrder(null); }}>取消</Button>
+          <Button onClick={() => void protectedFormClose.requestClose()} disabled={formSubmitting}>取消</Button>
           <Button
             variant="contained"
             size="large"
             onClick={handleCreate}
+            disabled={formSubmitting}
             sx={{ minWidth: { xs: 104, sm: 132 }, fontWeight: 800 }}
           >
             {recoveryFormAction}
           </Button>
         </DialogActions>
       </Dialog>
+      {protectedFormClose.dialog}
 
       <Dialog
         open={Boolean(detailOrder)}

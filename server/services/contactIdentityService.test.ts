@@ -640,7 +640,9 @@ assert.equal(normalizeContactIdentity('wechat', ' WeiXin_A '), 'weixin_a');
   const { store, state } = createStore({
     customers: [{
       id: 'aaos_customers:c-1', domain: 'aaos_customers', recordId: 'c-1',
-      data: { id: 'c-1', name: '客户一', phone: '13800138000', ownerId: 'u-1', ownerIdentityStatus: 'resolved' },
+      data: {
+        id: 'c-1', name: '客户一', phone: '13800138000', owner: '销售甲', ownerId: 'u-1', ownerIdentityStatus: 'resolved',
+      },
     }],
   });
   const identities = await upsertCustomerContactIdentities(store, {
@@ -702,8 +704,8 @@ assert.equal(normalizeContactIdentity('wechat', ' WeiXin_A '), 'weixin_a');
     (error: unknown) => {
       const conflict = error as ContactIdentityConflictError;
       assert.deepEqual(conflict.safePayload, {
-        message: '系统中已存在相同联系方式',
-        customer: { id: 'c-1', name: '客户一', company: undefined, owner: undefined },
+        message: '系统中已存在相同联系方式客户，销售负责人是：销售甲',
+        customer: { id: 'c-1', name: '客户一', company: undefined, owner: '销售甲' },
       });
       assert.equal(JSON.stringify(conflict.safePayload).includes('13800138000'), false);
       return true;

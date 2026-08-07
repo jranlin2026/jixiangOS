@@ -4,7 +4,6 @@ import {
   Button,
   Checkbox,
   Chip,
-  Dialog,
   DialogActions,
   DialogContent,
   FormControlLabel,
@@ -55,6 +54,7 @@ import {
 import { DEFAULT_USER_ROLE, normalizeUserRoleName } from '../../shared/utils/roles';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import { isPositionApplicableToDepartment } from '../../shared/utils/positionApplicability';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 type UserForm = {
   name: string;
@@ -142,9 +142,20 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const [resetUser, setResetUser] = useState<User | null>(null);
   const [resetPassword, setResetPassword] = useState('');
   const [error, setError] = useState('');
+  const [formSubmitting, setFormSubmitting] = useState(false);
   const [menuDepartment, setMenuDepartment] = useState<Department | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
+
+  const runFormMutation = async (mutation: () => Promise<void>) => {
+    if (formSubmitting) return;
+    setFormSubmitting(true);
+    try {
+      await mutation();
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     fetchItems();
@@ -349,16 +360,18 @@ const EmployeeDepartmentManagement: React.FC = () => {
       password: userForm.password,
       reason: userForm.changeReason.trim() || undefined,
     };
-    const res = editingUser
-      ? await settingsApi.updateUser(editingUser.id, payload)
-      : await settingsApi.createUser(payload);
-    if (res.code !== 0) {
-      await alert(res.message || '保存失败', dialogTitle);
-      return;
-    }
-    setUserFormOpen(false);
-    await loadUsers();
-    await fetchItems();
+    await runFormMutation(async () => {
+      const res = editingUser
+        ? await settingsApi.updateUser(editingUser.id, payload)
+        : await settingsApi.createUser(payload);
+      if (res.code !== 0) {
+        await alert(res.message || '保存失败', dialogTitle);
+        return;
+      }
+      setUserFormOpen(false);
+      await loadUsers();
+      await fetchItems();
+    });
   };
 
   const handleToggleUserActive = async (user: User) => {
@@ -407,12 +420,14 @@ const EmployeeDepartmentManagement: React.FC = () => {
       setError('新密码至少 6 位');
       return;
     }
-    const res = await settingsApi.resetUserPassword(resetUser.id, resetPassword);
-    if (res.code !== 0) {
-      setError(res.message || '重置密码失败');
-      return;
-    }
-    setResetUser(null);
+    await runFormMutation(async () => {
+      const res = await settingsApi.resetUserPassword(resetUser.id, resetPassword);
+      if (res.code !== 0) {
+        setError(res.message || '重置密码失败');
+        return;
+      }
+      setResetUser(null);
+    });
   };
 
   const openCreateDepartment = (parentId = selectedDepartment?.id || COMPANY_ROOT) => {
@@ -447,16 +462,18 @@ const EmployeeDepartmentManagement: React.FC = () => {
       memberCount: users.filter((user) => user.departmentId === editingDepartment?.id).length,
       isActive: editingDepartment?.isActive ?? true,
     };
-    const res = editingDepartment
-      ? await departmentApi.updateDepartment(editingDepartment.id, payload)
-      : await departmentApi.createDepartment(payload);
-    if (res.code !== 0) {
-      setError(res.message || '保存部门失败');
-      return;
-    }
-    setDepartmentFormOpen(false);
-    await fetchItems();
-    if (!editingDepartment && res.data?.id) setSelectedNodeId(res.data.id);
+    await runFormMutation(async () => {
+      const res = editingDepartment
+        ? await departmentApi.updateDepartment(editingDepartment.id, payload)
+        : await departmentApi.createDepartment(payload);
+      if (res.code !== 0) {
+        setError(res.message || '保存部门失败');
+        return;
+      }
+      setDepartmentFormOpen(false);
+      await fetchItems();
+      if (!editingDepartment && res.data?.id) setSelectedNodeId(res.data.id);
+    });
   };
 
   const handleDeleteDepartment = async (department = selectedDepartment) => {
@@ -509,19 +526,21 @@ const EmployeeDepartmentManagement: React.FC = () => {
       await alert('请选择业务接收人', '离职交接');
       return;
     }
-    const results = await Promise.all(leaveTargets.map((user) => settingsApi.leaveUser(user.id, {
-      customerAction: leaveAction,
-      targetUserId: leaveAction === 'transfer' ? leaveReceiverId : undefined,
-      reason: leaveReason.trim() || undefined,
-    })));
-    const failed = results.filter((res) => res.code !== 0);
-    if (failed.length > 0) {
-      await alert(failed[0].message || `有 ${failed.length} 名员工办理离职失败`, '办理离职失败');
-      return;
-    }
-    closeLeaveHandoffDialog();
-    clearSelection();
-    await loadUsers();
+    await runFormMutation(async () => {
+      const results = await Promise.all(leaveTargets.map((user) => settingsApi.leaveUser(user.id, {
+        customerAction: leaveAction,
+        targetUserId: leaveAction === 'transfer' ? leaveReceiverId : undefined,
+        reason: leaveReason.trim() || undefined,
+      })));
+      const failed = results.filter((res) => res.code !== 0);
+      if (failed.length > 0) {
+        await alert(failed[0].message || `有 ${failed.length} 名员工办理离职失败`, '办理离职失败');
+        return;
+      }
+      closeLeaveHandoffDialog();
+      clearSelection();
+      await loadUsers();
+    });
   };
 
   const handleOpenMove = () => {
@@ -544,27 +563,29 @@ const EmployeeDepartmentManagement: React.FC = () => {
       `有 ${incompatibleUserIds.size} 名员工的原岗位不属于目标部门，转移后将清空这些员工的岗位，是否继续？`,
       '批量转部门',
     )) return;
-    const results = await Promise.all(selectedUsers.map((user) => settingsApi.updateUser(user.id, {
-      departmentId: moveDepartmentId,
-      ...(incompatibleUserIds.has(user.id) ? { positionId: '' } : {}),
-      reason: moveReason.trim(),
-    })));
-    const failed = results.map((result, index) => ({ result, user: selectedUsers[index] }))
-      .filter(({ result }) => result.code !== 0);
-    if (failed.length > 0) {
+    await runFormMutation(async () => {
+      const results = await Promise.all(selectedUsers.map((user) => settingsApi.updateUser(user.id, {
+        departmentId: moveDepartmentId,
+        ...(incompatibleUserIds.has(user.id) ? { positionId: '' } : {}),
+        reason: moveReason.trim(),
+      })));
+      const failed = results.map((result, index) => ({ result, user: selectedUsers[index] }))
+        .filter(({ result }) => result.code !== 0);
+      if (failed.length > 0) {
+        await loadUsers();
+        await fetchItems();
+        clearSelection();
+        setMoveOpen(false);
+        const succeededCount = results.length - failed.length;
+        const failedNames = failed.map(({ user }) => user.name).join('、');
+        await alert(`已成功转移 ${succeededCount} 人；失败 ${failed.length} 人：${failedNames}。${failed[0].result.message ? `\n${failed[0].result.message}` : ''}`, '批量转部门结果');
+        return;
+      }
+      setMoveOpen(false);
+      clearSelection();
       await loadUsers();
       await fetchItems();
-      clearSelection();
-      setMoveOpen(false);
-      const succeededCount = results.length - failed.length;
-      const failedNames = failed.map(({ user }) => user.name).join('、');
-      await alert(`已成功转移 ${succeededCount} 人；失败 ${failed.length} 人：${failedNames}。${failed[0].result.message ? `\n${failed[0].result.message}` : ''}`, '批量转部门结果');
-      return;
-    }
-    setMoveOpen(false);
-    clearSelection();
-    await loadUsers();
-    await fetchItems();
+    });
   };
 
   const handleDepartmentChange = (departmentId: string) => {
@@ -579,13 +600,15 @@ const EmployeeDepartmentManagement: React.FC = () => {
   };
 
   const handleSaveCompanyName = async () => {
-    const res = await settingsApi.updateOrganizationProfile({ companyName: companyNameDraft });
-    if (res.code !== 0) {
-      setError(res.message || '保存公司名称失败');
-      return;
-    }
-    setOrganizationProfile(res.data!);
-    setCompanyDialogOpen(false);
+    await runFormMutation(async () => {
+      const res = await settingsApi.updateOrganizationProfile({ companyName: companyNameDraft });
+      if (res.code !== 0) {
+        setError(res.message || '保存公司名称失败');
+        return;
+      }
+      setOrganizationProfile(res.data!);
+      setCompanyDialogOpen(false);
+    });
   };
 
   const toggleUserSelected = (id: string) => {
@@ -1019,8 +1042,9 @@ const EmployeeDepartmentManagement: React.FC = () => {
         </MenuItem>
       </Menu>
 
-      <Dialog open={userFormOpen} onClose={() => setUserFormOpen(false)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setUserFormOpen(false)}>{editingUser ? '编辑员工' : '创建员工'}</DialogCloseTitle>
+      <ProtectedFormDialog open={userFormOpen} onClose={() => setUserFormOpen(false)} submitting={formSubmitting} resetKey={editingUser?.id || 'new-user'} maxWidth="sm" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={formSubmitting}>{editingUser ? '编辑员工' : '创建员工'}</DialogCloseTitle>
         <DialogContent dividers>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
             <TextField label="姓名" value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} required fullWidth />
@@ -1073,12 +1097,15 @@ const EmployeeDepartmentManagement: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleSaveUser}>保存</Button>
+          <Button onClick={() => void requestClose()} disabled={formSubmitting}>取消</Button>
+          <Button variant="contained" onClick={handleSaveUser} disabled={formSubmitting}>保存</Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
 
-      <Dialog open={departmentFormOpen} onClose={() => setDepartmentFormOpen(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setDepartmentFormOpen(false)}>{editingDepartment ? '编辑部门' : '新增部门'}</DialogCloseTitle>
+      <ProtectedFormDialog open={departmentFormOpen} onClose={() => setDepartmentFormOpen(false)} submitting={formSubmitting} resetKey={editingDepartment?.id || 'new-organization-department'} maxWidth="xs" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={formSubmitting}>{editingDepartment ? '编辑部门' : '新增部门'}</DialogCloseTitle>
         <DialogContent dividers>
           <Box sx={{ display: 'grid', gap: 2 }}>
             <TextField label="部门名称" value={departmentForm.name} onChange={(event) => setDepartmentForm({ ...departmentForm, name: event.target.value })} required fullWidth />
@@ -1089,24 +1116,28 @@ const EmployeeDepartmentManagement: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="outlined" onClick={() => setDepartmentFormOpen(false)}>取消</Button>
-          <Button variant="contained" onClick={handleSaveDepartment}>确定</Button>
+          <Button variant="outlined" onClick={() => void requestClose()} disabled={formSubmitting}>取消</Button>
+          <Button variant="contained" onClick={handleSaveDepartment} disabled={formSubmitting}>确定</Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
 
-      <Dialog open={companyDialogOpen} onClose={() => setCompanyDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setCompanyDialogOpen(false)}>编辑公司名称</DialogCloseTitle>
+      <ProtectedFormDialog open={companyDialogOpen} onClose={() => setCompanyDialogOpen(false)} submitting={formSubmitting} resetKey={String(companyDialogOpen)} maxWidth="xs" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={formSubmitting}>编辑公司名称</DialogCloseTitle>
         <DialogContent dividers>
           <TextField label="公司名称" value={companyNameDraft} onChange={(event) => setCompanyNameDraft(event.target.value)} required fullWidth />
         </DialogContent>
         <DialogActions>
-          <Button variant="outlined" onClick={() => setCompanyDialogOpen(false)}>取消</Button>
-          <Button variant="contained" onClick={handleSaveCompanyName}>确定</Button>
+          <Button variant="outlined" onClick={() => void requestClose()} disabled={formSubmitting}>取消</Button>
+          <Button variant="contained" onClick={handleSaveCompanyName} disabled={formSubmitting}>确定</Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
 
-      <Dialog open={moveOpen} onClose={() => setMoveOpen(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setMoveOpen(false)}>移动员工</DialogCloseTitle>
+      <ProtectedFormDialog open={moveOpen} onClose={() => setMoveOpen(false)} submitting={formSubmitting} resetKey={String(moveOpen)} maxWidth="xs" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={formSubmitting}>移动员工</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
             已选择 {selectedUserIds.length} 名员工，选择目标部门后会统一更新所属部门。已绑定岗位仅在适用于目标部门时保留，不适用的岗位将清空。
@@ -1127,12 +1158,15 @@ const EmployeeDepartmentManagement: React.FC = () => {
           />
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleMoveUsers} disabled={!moveDepartmentId || !moveReason.trim()}>确认移动</Button>
+          <Button onClick={() => void requestClose()} disabled={formSubmitting}>取消</Button>
+          <Button variant="contained" onClick={handleMoveUsers} disabled={!moveDepartmentId || !moveReason.trim() || formSubmitting}>确认移动</Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
 
-      <Dialog open={leaveDialogOpen} onClose={closeLeaveHandoffDialog} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={closeLeaveHandoffDialog}>离职业务交接</DialogCloseTitle>
+      <ProtectedFormDialog open={leaveDialogOpen} onClose={closeLeaveHandoffDialog} submitting={formSubmitting} resetKey={leaveTargets.map((user) => user.id).join(':')} maxWidth="sm" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={formSubmitting}>离职业务交接</DialogCloseTitle>
         <DialogContent dividers>
           <Box sx={{ display: 'grid', gap: 2 }}>
             <Typography variant="body2" sx={{ color: '#475569' }}>
@@ -1170,15 +1204,17 @@ const EmployeeDepartmentManagement: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="outlined" onClick={closeLeaveHandoffDialog}>取消</Button>
-          <Button variant="contained" color="warning" onClick={handleConfirmLeaveHandoff}>
+          <Button variant="outlined" onClick={() => void requestClose()} disabled={formSubmitting}>取消</Button>
+          <Button variant="contained" color="warning" onClick={handleConfirmLeaveHandoff} disabled={formSubmitting}>
             确认交接并办理离职
           </Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
 
-      <Dialog open={Boolean(resetUser)} onClose={() => setResetUser(null)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setResetUser(null)}>重置密码</DialogCloseTitle>
+      <ProtectedFormDialog open={Boolean(resetUser)} onClose={() => setResetUser(null)} submitting={formSubmitting} resetKey={resetUser?.id || ''} maxWidth="xs" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={formSubmitting}>重置密码</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#6b7280', mb: 2 }}>
             将为 {resetUser?.name} 设置新的登录密码，原密码不会显示。
@@ -1193,9 +1229,11 @@ const EmployeeDepartmentManagement: React.FC = () => {
           />
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleResetPassword}>确认重置</Button>
+          <Button onClick={() => void requestClose()} disabled={formSubmitting}>取消</Button>
+          <Button variant="contained" onClick={handleResetPassword} disabled={formSubmitting}>确认重置</Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
       {feedbackDialog}
     </Box>
   );

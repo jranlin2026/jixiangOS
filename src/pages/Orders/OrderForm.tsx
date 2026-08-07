@@ -56,6 +56,7 @@ import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { canonicalizeOrderItems } from '../../shared/utils/orderItems';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import useProtectedFormClose from '../../shared/hooks/useProtectedFormClose';
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
 import CommissionCorrectionImpactDialog from '../../shared/components/CommissionCorrectionImpactDialog';
 import BusinessSourceFields from '../../shared/components/BusinessSourceFields';
@@ -885,23 +886,30 @@ const OrderForm: React.FC<OrderFormProps> = ({
     : order
       ? '补充和更新订单资料，不改变已生成的订单业务结果。'
       : '提交后进入订单审核台，财务审核通过后生成正式订单、提成和交付记录。';
+  const protectedClose = useProtectedFormClose({
+    open,
+    submitting,
+    resetKey: order?.id || application?.id || customer?.id || 'new-order',
+    onClose,
+  });
 
   return (
     <>
     <Dialog
       open={open}
-      onClose={submitting ? undefined : onClose}
+      onClose={protectedClose.handleDialogClose}
+      disableEscapeKeyDown
       maxWidth="md"
       fullWidth
       PaperProps={{ sx: { maxHeight: '94vh', bgcolor: '#f8fafc' } }}
     >
-      <DialogCloseTitle onClose={onClose} closeDisabled={submitting} sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' }}>
+      <DialogCloseTitle onClose={() => void protectedClose.requestClose()} closeDisabled={submitting} sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' }}>
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 850 }}>{formTitle}</Typography>
           <Typography variant="body2" sx={{ mt: 0.35, color: '#64748b' }}>{dialogSubtitle}</Typography>
         </Box>
       </DialogCloseTitle>
-      <DialogContent sx={{ px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' }}>
+      <DialogContent {...protectedClose.interactionProps} sx={{ px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' }}>
         {!order && (
           <Box
             aria-label="订单申请人信息"
@@ -1255,7 +1263,7 @@ const OrderForm: React.FC<OrderFormProps> = ({
             <Typography sx={{ color: '#0f172a', fontWeight: 750 }}>¥{Number(form.actualAmount || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</Typography>
           </Box>
         </Box>
-        {correctionMode && <Button onClick={onClose} disabled={submitting}>取消更正</Button>}
+        {correctionMode && <Button onClick={() => void protectedClose.requestClose()} disabled={submitting}>取消更正</Button>}
         <Button variant="contained" size="large" onClick={handleSubmit} disabled={submitting} sx={{ minWidth: { xs: 112, sm: 148 }, fontWeight: 800 }}>
           {actionText}
         </Button>
@@ -1272,6 +1280,7 @@ const OrderForm: React.FC<OrderFormProps> = ({
       onConfirm={() => void handleConfirmCorrectionImpact()}
     />
     {feedbackDialog}
+    {protectedClose.dialog}
     </>
   );
 };

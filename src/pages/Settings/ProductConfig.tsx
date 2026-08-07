@@ -15,6 +15,7 @@ import { formatCurrency } from '../../shared/utils/formatters';
 import { getProductLevelTagSx } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 type ProductForm = Omit<Product, 'id' | 'createdAt' | 'updatedAt'>;
 type ProductLevelConfigForm = Omit<ProductLevelConfig, 'id' | 'createdAt' | 'updatedAt'>;
@@ -48,11 +49,13 @@ const ProductConfigPage: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
+  const [formSubmitting, setFormSubmitting] = useState(false);
   const [stagesText, setStagesText] = useState(joinLines(emptyForm.deliveryStages));
   const [levelManagerOpen, setLevelManagerOpen] = useState(false);
   const [levelFormOpen, setLevelFormOpen] = useState(false);
   const [editingLevel, setEditingLevel] = useState<ProductLevelConfig | null>(null);
   const [levelForm, setLevelForm] = useState<ProductLevelConfigForm>(emptyLevelForm);
+  const [levelSubmitting, setLevelSubmitting] = useState(false);
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
   useEffect(() => {
@@ -136,13 +139,18 @@ const ProductConfigPage: React.FC = () => {
       deliveryStages: splitLines(stagesText),
     };
 
-    if (editingProduct) {
-      await productApi.updateProduct(editingProduct.id, payload);
-    } else {
-      await productApi.createProduct(payload);
+    setFormSubmitting(true);
+    try {
+      if (editingProduct) {
+        await productApi.updateProduct(editingProduct.id, payload);
+      } else {
+        await productApi.createProduct(payload);
+      }
+      setFormOpen(false);
+      await loadData();
+    } finally {
+      setFormSubmitting(false);
     }
-    setFormOpen(false);
-    loadData();
   };
 
   const handleLevelSubmit = async () => {
@@ -151,15 +159,20 @@ const ProductConfigPage: React.FC = () => {
       name: levelForm.name.trim(),
       sortOrder: Number(levelForm.sortOrder),
     };
-    const res = editingLevel
-      ? await productApi.updateProductLevelConfig(editingLevel.id, payload)
-      : await productApi.createProductLevelConfig(payload);
-    if (res.code !== 0) {
-      alert(res.message);
-      return;
+    setLevelSubmitting(true);
+    try {
+      const res = editingLevel
+        ? await productApi.updateProductLevelConfig(editingLevel.id, payload)
+        : await productApi.createProductLevelConfig(payload);
+      if (res.code !== 0) {
+        await alert(res.message);
+        return;
+      }
+      setLevelFormOpen(false);
+      await loadData();
+    } finally {
+      setLevelSubmitting(false);
     }
-    setLevelFormOpen(false);
-    loadData();
   };
 
   const handleToggleActive = async (product: Product) => {
@@ -359,8 +372,9 @@ const ProductConfigPage: React.FC = () => {
         </Table>
       </TableContainer>
 
-      <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="md" fullWidth>
-        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editingProduct ? '编辑产品' : '新增产品'}</DialogCloseTitle>
+      <ProtectedFormDialog open={formOpen} onClose={() => setFormOpen(false)} submitting={formSubmitting} resetKey={editingProduct?.id || 'new-product'} maxWidth="md" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={formSubmitting}>{editingProduct ? '编辑产品' : '新增产品'}</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 2, mt: 1 }}>
             <TextField label="产品名称" value={form.name} onChange={(e) => updateForm('name', e.target.value)} fullWidth required />
@@ -408,14 +422,17 @@ const ProductConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleSubmit} disabled={!form.name || loading}>
+          <Button onClick={() => void requestClose()} disabled={formSubmitting}>取消</Button>
+          <Button variant="contained" onClick={handleSubmit} disabled={!form.name || loading || formSubmitting}>
             {editingProduct ? '保存' : '创建'}
           </Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
 
-      <Dialog open={levelFormOpen} onClose={() => setLevelFormOpen(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setLevelFormOpen(false)}>{editingLevel ? '编辑产品等级' : '新增产品等级'}</DialogCloseTitle>
+      <ProtectedFormDialog open={levelFormOpen} onClose={() => setLevelFormOpen(false)} submitting={levelSubmitting} resetKey={editingLevel?.id || 'new-product-level'} maxWidth="xs" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={levelSubmitting}>{editingLevel ? '编辑产品等级' : '新增产品等级'}</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
             <TextField
@@ -473,11 +490,13 @@ const ProductConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleLevelSubmit} disabled={!levelForm.name.trim()}>
+          <Button onClick={() => void requestClose()} disabled={levelSubmitting}>取消</Button>
+          <Button variant="contained" onClick={handleLevelSubmit} disabled={!levelForm.name.trim() || levelSubmitting}>
             {editingLevel ? '保存' : '创建'}
           </Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
       {feedbackDialog}
     </Box>
   );

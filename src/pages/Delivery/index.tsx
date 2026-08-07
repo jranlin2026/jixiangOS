@@ -66,6 +66,7 @@ import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/Mo
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import BusinessAttachmentPicker from '../../shared/components/BusinessAttachmentPicker';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 type DeliveryColumnId =
   | 'orderNo'
@@ -236,6 +237,7 @@ const DeliveryPage: React.FC = () => {
   const [createSearch, setCreateSearch] = useState('');
   const [selectedCreateOrderId, setSelectedCreateOrderId] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
+  const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createLoadError, setCreateLoadError] = useState('');
   const [productTypes, setProductTypes] = useState<DeliveryProductType[]>(['代理', '贴牌', '合伙人', '899', '课程']);
   const [users, setUsers] = useState<User[]>([]);
@@ -252,6 +254,7 @@ const DeliveryPage: React.FC = () => {
   const [assignOwnerId, setAssignOwnerId] = useState('');
   const [assignPriority, setAssignPriority] = useState<DeliveryPriority>('normal');
   const [assignPlanDate, setAssignPlanDate] = useState('');
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [orderDetail, setOrderDetail] = useState<Order | null>(null);
   const [customerDetail, setCustomerDetail] = useState<Customer | null>(null);
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
@@ -396,17 +399,22 @@ const DeliveryPage: React.FC = () => {
       await alert('请先选择一笔可新建交付单的订单');
       return;
     }
-    const res = await deliveryApi.createDeliveryFromOrder(selectedCreateOrderId);
-    if (res.code !== 0 || !res.data) {
-      await alert(res.message || '新建交付单失败');
-      return;
+    setCreateSubmitting(true);
+    try {
+      const res = await deliveryApi.createDeliveryFromOrder(selectedCreateOrderId);
+      if (res.code !== 0 || !res.data) {
+        await alert(res.message || '新建交付单失败');
+        return;
+      }
+      setCreateOpen(false);
+      setCreateSearch('');
+      setSelectedCreateOrderId('');
+      await loadWorkbench({ ...filters, page: 1 });
+      setFilters((current) => ({ ...current, page: 1 }));
+      setSelectedDelivery(res.data);
+    } finally {
+      setCreateSubmitting(false);
     }
-    setCreateOpen(false);
-    setCreateSearch('');
-    setSelectedCreateOrderId('');
-    await loadWorkbench({ ...filters, page: 1 });
-    setFilters((current) => ({ ...current, page: 1 }));
-    setSelectedDelivery(res.data);
   };
 
   const handleViewOrder = async (delivery: Delivery) => {
@@ -563,19 +571,24 @@ const DeliveryPage: React.FC = () => {
   const saveAssign = async () => {
     if (!canMutateDelivery) return;
     if (!assignDelivery) return;
-    const user = users.find((item) => item.id === assignOwnerId);
-    const res = await deliveryApi.updateDelivery(assignDelivery.id, {
-      ownerId: user?.id,
-      owner: user?.name || '待分配',
-      priority: assignPriority,
-      plannedCompletedAt: assignPlanDate || undefined,
-    });
-    if (res.code === 0) {
-      setAssignDelivery(null);
-      await loadWorkbench(filters);
-      await alert('分配成功');
-    } else {
-      await alert(res.message || '交付负责人保存失败', '分配失败');
+    setAssignSubmitting(true);
+    try {
+      const user = users.find((item) => item.id === assignOwnerId);
+      const res = await deliveryApi.updateDelivery(assignDelivery.id, {
+        ownerId: user?.id,
+        owner: user?.name || '待分配',
+        priority: assignPriority,
+        plannedCompletedAt: assignPlanDate || undefined,
+      });
+      if (res.code === 0) {
+        setAssignDelivery(null);
+        await loadWorkbench(filters);
+        await alert('分配成功');
+      } else {
+        await alert(res.message || '交付负责人保存失败', '分配失败');
+      }
+    } finally {
+      setAssignSubmitting(false);
     }
   };
 
@@ -1024,10 +1037,11 @@ const DeliveryPage: React.FC = () => {
   const selectedCreateOrder = creatableOrders.find((order) => order.orderId === selectedCreateOrderId);
 
   const renderCreateDialog = () => (
-    <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="md" fullWidth>
+    <ProtectedFormDialog open={createOpen} onClose={() => setCreateOpen(false)} submitting={createSubmitting} resetKey={String(createOpen)} maxWidth="md" fullWidth>
+      {({ requestClose }) => <>
       <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography component="div" variant="h6" sx={{ fontWeight: 800 }}>新建交付单</Typography>
-        <IconButton onClick={() => setCreateOpen(false)}><CloseIcon /></IconButton>
+        <IconButton onClick={() => void requestClose()} disabled={createSubmitting}><CloseIcon /></IconButton>
       </DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
@@ -1097,14 +1111,15 @@ const DeliveryPage: React.FC = () => {
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>
-        <Button onClick={() => setCreateOpen(false)}>取消</Button>
+        <Button onClick={() => void requestClose()} disabled={createSubmitting}>取消</Button>
         {canMutateDelivery && (
-          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateDelivery} disabled={!selectedCreateOrderId || createLoading}>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateDelivery} disabled={!selectedCreateOrderId || createLoading || createSubmitting}>
             新建交付单
           </Button>
         )}
       </DialogActions>
-    </Dialog>
+      </>}
+    </ProtectedFormDialog>
   );
 
   return (
@@ -1171,7 +1186,15 @@ const DeliveryPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(assignDelivery)} onClose={() => setAssignDelivery(null)} maxWidth="xs" fullWidth>
+      <ProtectedFormDialog
+        open={Boolean(assignDelivery)}
+        onClose={() => setAssignDelivery(null)}
+        submitting={assignSubmitting}
+        resetKey={assignDelivery?.id || ''}
+        maxWidth="xs"
+        fullWidth
+      >
+        {({ requestClose }) => <>
         <DialogTitle>分配交付负责人</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2} sx={{ pt: 0.5 }}>
@@ -1186,10 +1209,11 @@ const DeliveryPage: React.FC = () => {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setAssignDelivery(null)}>取消</Button>
-          {canMutateDelivery && <Button variant="contained" onClick={saveAssign}>保存</Button>}
+          <Button onClick={() => void requestClose()} disabled={assignSubmitting}>取消</Button>
+          {canMutateDelivery && <Button variant="contained" onClick={saveAssign} disabled={assignSubmitting}>保存</Button>}
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
 
       {orderDetail && <OrderDetail order={orderDetail} open={Boolean(orderDetail)} onClose={() => setOrderDetail(null)} />}
       {customerDetail && <CustomerDetail customer={customerDetail} open={Boolean(customerDetail)} onClose={() => setCustomerDetail(null)} readOnly />}

@@ -21,6 +21,7 @@ interface RefundState {
   reject: (id: string, approverId: string, approverName: string, rejectReason: string) => Promise<void>;
   complete: (id: string, refundMethod: string, refundVoucher?: string, refundSerialNo?: string, refundedAt?: string) => Promise<void>;
   setFilters: (filters: RefundFilters) => void;
+  resetListFilters: () => void;
   reset: () => void;
 }
 
@@ -173,6 +174,12 @@ const useRefundStore = create<RefundState>((set, get) => ({
   },
 
   setFilters: (filters) => set({ filters }),
+  resetListFilters: () => set((state) => ({
+    filters: {
+      page: 1,
+      pageSize: state.filters.pageSize || state.pagination.pageSize || defaultPagination.pageSize,
+    },
+  })),
   reset: () => set({ items: [], current: null, stats: null, loading: false, error: null, filters: {}, pagination: defaultPagination }),
 }));
 

@@ -3,7 +3,6 @@ import {
   Box,
   Button,
   Chip,
-  Dialog,
   DialogActions,
   DialogContent,
   FormControlLabel,
@@ -31,6 +30,7 @@ import useDepartmentStore from '../../store/useDepartmentStore';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TablePagination from '../../shared/components/TablePagination';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 type PositionForm = Omit<Position, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -55,6 +55,7 @@ const PositionManagement: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingPosition, setEditingPosition] = useState<Position | null>(null);
   const [form, setForm] = useState<PositionForm>(emptyForm);
+  const [saving, setSaving] = useState(false);
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
   const loadPositions = async () => {
@@ -123,15 +124,20 @@ const PositionManagement: React.FC = () => {
       await alert('岗位名称和岗位编码不能为空', editingPosition ? '编辑岗位' : '新增岗位');
       return;
     }
-    const response = editingPosition
-      ? await settingsApi.updatePosition(editingPosition.id, payload)
-      : await settingsApi.createPosition(payload);
-    if (response.code !== 0) {
-      await alert(response.message || '保存岗位失败', editingPosition ? '编辑岗位' : '新增岗位');
-      return;
+    setSaving(true);
+    try {
+      const response = editingPosition
+        ? await settingsApi.updatePosition(editingPosition.id, payload)
+        : await settingsApi.createPosition(payload);
+      if (response.code !== 0) {
+        await alert(response.message || '保存岗位失败', editingPosition ? '编辑岗位' : '新增岗位');
+        return;
+      }
+      setFormOpen(false);
+      await loadPositions();
+    } finally {
+      setSaving(false);
     }
-    setFormOpen(false);
-    await loadPositions();
   };
 
   const togglePosition = async (position: Position) => {
@@ -211,8 +217,9 @@ const PositionManagement: React.FC = () => {
 
       <TablePagination count={filteredPositions.length} page={page} rowsPerPage={rowsPerPage} onPageChange={(_event, nextPage) => setPage(nextPage)} onRowsPerPageChange={(event) => setRowsPerPage(Number(event.target.value))} sx={{ mt: 2 }} />
 
-      <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editingPosition ? '编辑岗位' : '新增岗位'}</DialogCloseTitle>
+      <ProtectedFormDialog open={formOpen} onClose={() => setFormOpen(false)} submitting={saving} resetKey={editingPosition?.id || 'new-position'} maxWidth="sm" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={saving}>{editingPosition ? '编辑岗位' : '新增岗位'}</DialogCloseTitle>
         <DialogContent><Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
           <TextField required label="岗位名称" value={form.name} onChange={(event) => updateForm('name', event.target.value)} />
           <TextField required label="岗位编码" value={form.code} onChange={(event) => updateForm('code', event.target.value)} helperText="编码保存后作为系统稳定标识" />
@@ -232,8 +239,9 @@ const PositionManagement: React.FC = () => {
           <TextField type="number" label="排序" value={form.sortOrder} onChange={(event) => updateForm('sortOrder', Number(event.target.value))} />
           <FormControlLabel control={<Switch checked={form.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} />} label={form.isActive ? '启用' : '停用'} />
         </Box></DialogContent>
-        <DialogActions><Button onClick={() => setFormOpen(false)}>取消</Button><Button variant="contained" onClick={savePosition}>保存</Button></DialogActions>
-      </Dialog>
+        <DialogActions><Button onClick={() => void requestClose()} disabled={saving}>取消</Button><Button variant="contained" onClick={savePosition} disabled={saving}>保存</Button></DialogActions>
+        </>}
+      </ProtectedFormDialog>
       {feedbackDialog}
     </Box>
   );

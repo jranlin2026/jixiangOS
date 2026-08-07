@@ -3,7 +3,6 @@ import {
   Box,
   Button,
   Chip,
-  Dialog,
   DialogActions,
   DialogContent,
   IconButton,
@@ -30,6 +29,7 @@ import { settingsApi } from '../../api';
 import type { Department } from '../../types/department';
 import type { User } from '../../types/settings';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 type DepartmentForm = {
   name: string;
@@ -56,6 +56,7 @@ const DepartmentManagement: React.FC = () => {
   const [editing, setEditing] = useState<Department | null>(null);
   const [form, setForm] = useState<DepartmentForm>(emptyForm);
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const { confirm, dialog } = useAppFeedback();
 
   const load = async () => {
@@ -108,6 +109,7 @@ const DepartmentManagement: React.FC = () => {
       memberCount: editing ? memberCount(editing.id) : 0,
       isActive: form.isActive,
     };
+    setSaving(true);
     try {
       if (editing) {
         await update(editing.id, payload);
@@ -117,6 +119,8 @@ const DepartmentManagement: React.FC = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
       return;
+    } finally {
+      setSaving(false);
     }
     setFormOpen(false);
     await load();
@@ -198,8 +202,9 @@ const DepartmentManagement: React.FC = () => {
         </Table>
       </TableContainer>
 
-      <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editing ? '编辑部门' : '新增部门'}</DialogCloseTitle>
+      <ProtectedFormDialog open={formOpen} onClose={() => setFormOpen(false)} submitting={saving} resetKey={editing?.id || 'new-department'} maxWidth="sm" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={saving}>{editing ? '编辑部门' : '新增部门'}</DialogCloseTitle>
         <DialogContent dividers>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
             <TextField label="部门名称" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required fullWidth />
@@ -220,9 +225,11 @@ const DepartmentManagement: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleSave}>保存</Button>
+          <Button onClick={() => void requestClose()} disabled={saving}>取消</Button>
+          <Button variant="contained" onClick={handleSave} disabled={saving}>保存</Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
       {dialog}
     </Box>
   );

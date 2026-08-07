@@ -16,6 +16,7 @@ interface LeadState {
   update: (id: string, data: Partial<Lead>) => Promise<void>;
   delete: (id: string) => Promise<void>;
   setFilters: (filters: LeadFilters) => void;
+  resetListFilters: () => void;
   reset: () => void;
 }
 
@@ -95,6 +96,12 @@ const useLeadStore = create<LeadState>((set, get) => ({
   },
 
   setFilters: (filters) => set({ filters }),
+  resetListFilters: () => set((state) => ({
+    filters: {
+      page: 1,
+      pageSize: state.filters.pageSize || state.pagination.pageSize || defaultPagination.pageSize,
+    },
+  })),
   reset: () => set({ items: [], current: null, loading: false, error: null, filters: { page: 1, pageSize: 10 }, pagination: defaultPagination }),
 }));
 

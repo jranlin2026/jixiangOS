@@ -14,8 +14,15 @@ type FeedbackState =
       type: 'confirm';
       title: string;
       message: React.ReactNode;
+      confirmText?: string;
+      cancelText?: string;
       resolve: (confirmed: boolean) => void;
     };
+
+interface ConfirmOptions {
+  confirmText?: string;
+  cancelText?: string;
+}
 
 export const useAppFeedback = () => {
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
@@ -35,9 +42,9 @@ export const useAppFeedback = () => {
     })
   ), []);
 
-  const confirm = useCallback((message: React.ReactNode, title = '确认操作') => (
+  const confirm = useCallback((message: React.ReactNode, title = '确认操作', options: ConfirmOptions = {}) => (
     new Promise<boolean>((resolve) => {
-      setFeedback({ type: 'confirm', title, message, resolve });
+      setFeedback({ type: 'confirm', title, message, ...options, resolve });
     })
   ), []);
 
@@ -61,10 +68,10 @@ export const useAppFeedback = () => {
       </DialogContent>
       <DialogActions>
         {feedback?.type === 'confirm' && (
-          <Button onClick={() => close(false)}>取消</Button>
+          <Button onClick={() => close(false)}>{feedback.cancelText || '取消'}</Button>
         )}
         <Button variant="contained" color={feedback?.type === 'confirm' ? 'error' : 'primary'} onClick={() => close(true)}>
-          确定
+          {feedback?.type === 'confirm' ? feedback.confirmText || '确定' : '确定'}
         </Button>
       </DialogActions>
     </Dialog>

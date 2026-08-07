@@ -3,7 +3,6 @@ import {
   Alert,
   Box,
   Button,
-  Dialog,
   DialogActions,
   DialogContent,
   LinearProgress,
@@ -19,6 +18,7 @@ import {
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { leadBulkImportApi, type LeadBulkImportResult } from '../../api';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 const LABEL = {
   title: '\u6279\u91cf\u5165\u5e93',
@@ -108,8 +108,9 @@ const LeadBulkImportDialog: React.FC<LeadBulkImportDialogProps> = ({ open, onClo
   };
 
   return (
-    <Dialog open={open} onClose={() => { if (!importing) onClose(); }} maxWidth="md" fullWidth>
-      <DialogCloseTitle onClose={() => { if (!importing) onClose(); }}>{LABEL.title}</DialogCloseTitle>
+    <ProtectedFormDialog open={open} onClose={onClose} submitting={importing} resetKey={String(open)} maxWidth="md" fullWidth>
+      {({ requestClose }) => <>
+      <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={importing}>{LABEL.title}</DialogCloseTitle>
       <DialogContent dividers>
         <Box sx={{ display: 'grid', gap: 2 }}>
           <Alert severity="info">{LABEL.helper}</Alert>
@@ -176,12 +177,13 @@ const LeadBulkImportDialog: React.FC<LeadBulkImportDialogProps> = ({ open, onClo
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={importing}>{LABEL.close}</Button>
+        <Button onClick={() => void requestClose()} disabled={importing}>{LABEL.close}</Button>
         <Button variant="contained" onClick={handleImport} disabled={!file || importing}>
           {importing ? LABEL.importing : LABEL.import}
         </Button>
       </DialogActions>
-    </Dialog>
+      </>}
+    </ProtectedFormDialog>
   );
 };
 

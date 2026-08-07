@@ -67,6 +67,7 @@ import { appendCustomerAuditEvent } from './customerAuditService';
 import {
   ContactIdentityConflictError,
   createContactIdentityCryptoFromEnv,
+  duplicateCustomerContactMessage,
   endCustomerContactIdentityLinks,
   endLeadContactIdentityLinks,
   hashContactIdentity,
@@ -1864,15 +1865,22 @@ export function createCustomerCommandService(
         if (customerCollision || leadCollision) {
           // Intake history is durable and may be viewed by a wider audience
           // later, so collision identity/name/id never belongs in that record.
-          const message = '系统中已存在相同联系方式';
+          const genericMessage = '系统中已存在相同联系方式';
+          let responseMessage = genericMessage;
+          if (customerCollision && context.customerAccess?.canReadCustomerList) {
+            const matchedCustomer = readJson<Customer>(customerCollision.data);
+            if (canReadCustomer(context.customerAccess, matchedCustomer)) {
+              responseMessage = duplicateCustomerContactMessage(matchedCustomer.owner);
+            }
+          }
           await recordIntake({
             id: newId('intake'),
             ...intakeBase,
             status: '入库失败',
             matchedRule: '手机号和微信二选一',
-            failureReason: message,
+            failureReason: genericMessage,
           });
-          return failure<Lead>(message, 409);
+          return failure<Lead>(responseMessage, 409);
         }
 
         if (flowConfig.autoClaimAfterAssignmentEnabled && assignedTo) {

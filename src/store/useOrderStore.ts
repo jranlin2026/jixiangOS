@@ -17,6 +17,7 @@ interface OrderState {
   update: (id: string, data: Partial<Order>) => Promise<void>;
   delete: (id: string) => Promise<void>;
   setFilters: (filters: OrderFilters) => void;
+  resetListFilters: () => void;
   reset: () => void;
 }
 
@@ -116,6 +117,12 @@ const useOrderStore = create<OrderState>((set, get) => ({
   },
 
   setFilters: (filters) => set({ filters }),
+  resetListFilters: () => set((state) => ({
+    filters: {
+      ...defaultFilters,
+      pageSize: state.filters.pageSize || state.pagination.pageSize || defaultPagination.pageSize,
+    },
+  })),
   reset: () => set({ items: [], current: null, stats: null, loading: false, error: null, filters: defaultFilters, pagination: defaultPagination }),
 }));
 

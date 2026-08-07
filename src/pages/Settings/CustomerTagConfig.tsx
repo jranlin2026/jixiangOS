@@ -23,6 +23,7 @@ import { invalidateManualTagCatalogCache } from '../../shared/components/ManualT
 import useAuthStore from '../../store/useAuthStore';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { formatCustomerTagDialogError, staleMigrationMessage } from './customerTagSettingsState';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 const emptyCatalog: CustomerTagCatalog = { groups: [], tags: [] };
 type GroupDraft = Pick<CustomerTagGroup, 'name' | 'color' | 'selectionMode' | 'isActive' | 'sortOrder'>;
@@ -236,8 +237,9 @@ const CustomerTagConfig: React.FC = () => {
         </>}
       </Menu>
 
-      <Dialog open={groupDialog} onClose={() => !saving && setGroupDialog(false)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setGroupDialog(false)}>{editingGroup ? '编辑标签分组' : '添加分组'}</DialogCloseTitle>
+      <ProtectedFormDialog open={groupDialog} onClose={() => setGroupDialog(false)} submitting={saving} resetKey={editingGroup?.id || 'new-tag-group'} maxWidth="sm" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={saving}>{editingGroup ? '编辑标签分组' : '添加分组'}</DialogCloseTitle>
         <DialogContent><Stack spacing={2} sx={{ mt: 1 }}>
           {dialogError && <Alert severity="error">{dialogError}</Alert>}
           <TextField label="分组名称" required value={groupDraft.name} onChange={(e) => setGroupDraft({ ...groupDraft, name: e.target.value })} />
@@ -246,14 +248,17 @@ const CustomerTagConfig: React.FC = () => {
           <TextField label="排序" type="number" value={groupDraft.sortOrder} onChange={(e) => setGroupDraft({ ...groupDraft, sortOrder: Number(e.target.value) })} />
           <FormControlLabel control={<Switch checked={groupDraft.isActive} onChange={(e) => setGroupDraft({ ...groupDraft, isActive: e.target.checked })} />} label={groupDraft.isActive ? '启用' : '停用'} />
         </Stack></DialogContent>
-        <DialogActions><Button onClick={() => setGroupDialog(false)}>取消</Button><Button variant="contained" disabled={saving || !groupDraft.name.trim()} onClick={() => void saveGroup()}>{saving ? '保存中…' : '保存'}</Button></DialogActions>
-      </Dialog>
+        <DialogActions><Button onClick={() => void requestClose()} disabled={saving}>取消</Button><Button variant="contained" disabled={saving || !groupDraft.name.trim()} onClick={() => void saveGroup()}>{saving ? '保存中…' : '保存'}</Button></DialogActions>
+        </>}
+      </ProtectedFormDialog>
 
-      <Dialog open={tagDialog} onClose={() => !saving && setTagDialog(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setTagDialog(false)}>{editingTag ? '编辑标签' : '添加标签'}</DialogCloseTitle>
+      <ProtectedFormDialog open={tagDialog} onClose={() => setTagDialog(false)} submitting={saving} resetKey={editingTag?.id || 'new-tag'} maxWidth="xs" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={saving}>{editingTag ? '编辑标签' : '添加标签'}</DialogCloseTitle>
         <DialogContent><Stack spacing={2} sx={{ mt: 1 }}>{dialogError && <Alert severity="error">{dialogError}</Alert>}<TextField label="标签名称" required value={tagDraft.name} onChange={(e) => setTagDraft({ ...tagDraft, name: e.target.value })} /><TextField label="标签颜色" type="color" value={tagDraft.color} onChange={(e) => setTagDraft({ ...tagDraft, color: e.target.value })} /><TextField label="排序" type="number" value={tagDraft.sortOrder} onChange={(e) => setTagDraft({ ...tagDraft, sortOrder: Number(e.target.value) })} /><FormControlLabel control={<Switch checked={tagDraft.isActive} onChange={(e) => setTagDraft({ ...tagDraft, isActive: e.target.checked })} />} label={tagDraft.isActive ? '启用' : '停用'} /></Stack></DialogContent>
-        <DialogActions><Button onClick={() => setTagDialog(false)}>取消</Button><Button variant="contained" disabled={saving || !tagDraft.name.trim()} onClick={() => void saveTag()}>{saving ? '保存中…' : '保存'}</Button></DialogActions>
-      </Dialog>
+        <DialogActions><Button onClick={() => void requestClose()} disabled={saving}>取消</Button><Button variant="contained" disabled={saving || !tagDraft.name.trim()} onClick={() => void saveTag()}>{saving ? '保存中…' : '保存'}</Button></DialogActions>
+        </>}
+      </ProtectedFormDialog>
 
       <Dialog open={Boolean(mergeSource)} onClose={() => !saving && setMergeSource(null)} maxWidth="xs" fullWidth>
         <DialogCloseTitle onClose={() => setMergeSource(null)}>合并标签</DialogCloseTitle><DialogContent>{dialogError && <Alert severity="error" sx={{ mb: 2 }}>{dialogError}</Alert>}<Alert severity="warning" sx={{ mb: 2 }}>“{mergeSource?.name}”的引用将迁移至目标标签，源标签随后停用。</Alert><FormControl fullWidth><InputLabel>目标标签</InputLabel><Select label="目标标签" value={mergeTargetId} onChange={(e) => setMergeTargetId(e.target.value)}>{compatibleTargets.map((tag) => <MenuItem key={tag.id} value={tag.id}>{tag.name}</MenuItem>)}</Select></FormControl></DialogContent><DialogActions><Button onClick={() => setMergeSource(null)}>取消</Button><Button variant="contained" disabled={!mergeSource || !mergeTargetId || saving} onClick={() => mergeSource && void runMutation(() => mergeCustomerTag(mergeSource.id, mergeTargetId), () => setMergeSource(null), setDialogError)}>确认合并</Button></DialogActions>
@@ -271,9 +276,9 @@ const CustomerTagConfig: React.FC = () => {
         <DialogActions><Button onClick={() => setMergeGroupSource(null)}>取消</Button><Button variant="contained" disabled={!mergeGroupSource || !mergeGroupTargetId || saving} onClick={() => mergeGroupSource && void runMutation(() => mergeCustomerTagGroup(mergeGroupSource.id, mergeGroupTargetId), () => setMergeGroupSource(null), setDialogError)}>确认合并</Button></DialogActions>
       </Dialog>
 
-      <Dialog open={migrationOpen} onClose={() => !saving && setMigrationOpen(false)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setMigrationOpen(false)}>整理历史标签</DialogCloseTitle><DialogContent><Stack spacing={2}>{migrationError && <Alert severity="error">{migrationError}</Alert>}{saving && !preview ? <Box sx={{ py: 3, textAlign: 'center' }}><CircularProgress size={28} /></Box> : preview ? <><Alert severity="info">预览：客户 {preview.customerCount} 条、线索 {preview.leadCount} 条、标签引用 {preview.assignmentCount} 条。</Alert>{preview.ambiguousNameCount > 0 && <Alert severity="error">发现 {preview.ambiguousNameCount} 个跨分组同名标签：{preview.ambiguousNames.map((item) => item.name).join('、')}。为避免历史数据归错组，请先在客户标签设置中合并或重命名，再重新预览。</Alert>}{preview.assignmentConflicts.length > 0 && <Alert severity="error">发现 {preview.assignmentConflicts.length} 条标签分配冲突：{preview.assignmentConflicts.map((item) => `${item.recordType === 'customer' ? '客户' : '线索'} ${item.recordId}（${item.reason}）`).join('；')}</Alert>}<Box><Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>待创建标签名称</Typography>{preview.missingNames.length ? <Stack direction="row" flexWrap="wrap" gap={1}>{preview.missingNames.map((name) => <Chip key={name} label={name} size="small" />)}</Stack> : <Typography variant="body2" color="text.secondary">没有缺失名称</Typography>}</Box><TextField label="输入“整理历史标签”确认" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} fullWidth /></> : !saving && <Button variant="outlined" startIcon={<SyncIcon />} onClick={() => void openMigration()}>重新预览</Button>}</Stack></DialogContent><DialogActions><Button onClick={() => setMigrationOpen(false)}>取消</Button><Button variant="contained" color="warning" disabled={!preview || preview.ambiguousNameCount > 0 || preview.assignmentConflicts.length > 0 || confirmation !== '整理历史标签' || saving} onClick={() => void applyMigration()}>确认整理</Button></DialogActions>
-      </Dialog>
+      <ProtectedFormDialog open={migrationOpen} onClose={() => setMigrationOpen(false)} submitting={saving} resetKey={String(migrationOpen)} maxWidth="sm" fullWidth>
+        {({ requestClose }) => <><DialogCloseTitle onClose={() => void requestClose()} closeDisabled={saving}>整理历史标签</DialogCloseTitle><DialogContent><Stack spacing={2}>{migrationError && <Alert severity="error">{migrationError}</Alert>}{saving && !preview ? <Box sx={{ py: 3, textAlign: 'center' }}><CircularProgress size={28} /></Box> : preview ? <><Alert severity="info">预览：客户 {preview.customerCount} 条、线索 {preview.leadCount} 条、标签引用 {preview.assignmentCount} 条。</Alert>{preview.ambiguousNameCount > 0 && <Alert severity="error">发现 {preview.ambiguousNameCount} 个跨分组同名标签：{preview.ambiguousNames.map((item) => item.name).join('、')}。为避免历史数据归错组，请先在客户标签设置中合并或重命名，再重新预览。</Alert>}{preview.assignmentConflicts.length > 0 && <Alert severity="error">发现 {preview.assignmentConflicts.length} 条标签分配冲突：{preview.assignmentConflicts.map((item) => `${item.recordType === 'customer' ? '客户' : '线索'} ${item.recordId}（${item.reason}）`).join('；')}</Alert>}<Box><Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>待创建标签名称</Typography>{preview.missingNames.length ? <Stack direction="row" flexWrap="wrap" gap={1}>{preview.missingNames.map((name) => <Chip key={name} label={name} size="small" />)}</Stack> : <Typography variant="body2" color="text.secondary">没有缺失名称</Typography>}</Box><TextField label="输入“整理历史标签”确认" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} fullWidth /></> : !saving && <Button variant="outlined" startIcon={<SyncIcon />} onClick={() => void openMigration()}>重新预览</Button>}</Stack></DialogContent><DialogActions><Button onClick={() => void requestClose()} disabled={saving}>取消</Button><Button variant="contained" color="warning" disabled={!preview || preview.ambiguousNameCount > 0 || preview.assignmentConflicts.length > 0 || confirmation !== '整理历史标签' || saving} onClick={() => void applyMigration()}>确认整理</Button></DialogActions></>}
+      </ProtectedFormDialog>
     </Box>
   );
 };

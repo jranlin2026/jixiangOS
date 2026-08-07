@@ -3,7 +3,6 @@ import {
   Box,
   Button,
   Chip,
-  Dialog,
   DialogActions,
   DialogContent,
   FormControlLabel,
@@ -25,6 +24,7 @@ import type { LifecycleStatusConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { getLifecycleStatusTagSx } from '../../shared/utils/constants';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 
 type LifecycleForm = Omit<LifecycleStatusConfig, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -43,6 +43,7 @@ const LifecycleStatusConfigPage: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<LifecycleStatusConfig | null>(null);
   const [form, setForm] = useState<LifecycleForm>(emptyForm);
+  const [saving, setSaving] = useState(false);
   const { alert, dialog: feedbackDialog } = useAppFeedback();
 
   const loadData = async () => {
@@ -75,13 +76,18 @@ const LifecycleStatusConfigPage: React.FC = () => {
   const handleSubmit = async () => {
     if (!editingItem) return;
     const payload = { ...form, name: form.name.trim(), sortOrder: Number(form.sortOrder), isSystem: true };
-    const res = await settingsApi.updateLifecycleStatusConfig(editingItem.id, payload);
-    if (res.code !== 0) {
-      alert(res.message);
-      return;
+    setSaving(true);
+    try {
+      const res = await settingsApi.updateLifecycleStatusConfig(editingItem.id, payload);
+      if (res.code !== 0) {
+        await alert(res.message);
+        return;
+      }
+      setFormOpen(false);
+      await loadData();
+    } finally {
+      setSaving(false);
     }
-    setFormOpen(false);
-    loadData();
   };
 
   const handleToggleActive = async (item: LifecycleStatusConfig) => {
@@ -142,8 +148,9 @@ const LifecycleStatusConfigPage: React.FC = () => {
         </Table>
       </TableContainer>
 
-      <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setFormOpen(false)}>编辑生命周期状态</DialogCloseTitle>
+      <ProtectedFormDialog open={formOpen} onClose={() => setFormOpen(false)} submitting={saving} resetKey={editingItem?.id || ''} maxWidth="xs" fullWidth>
+        {({ requestClose }) => <>
+        <DialogCloseTitle onClose={() => void requestClose()} closeDisabled={saving}>编辑生命周期状态</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
             <TextField label="状态码" value={form.code} disabled fullWidth />
@@ -155,11 +162,13 @@ const LifecycleStatusConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleSubmit} disabled={!form.name.trim()}>
+          <Button onClick={() => void requestClose()} disabled={saving}>取消</Button>
+          <Button variant="contained" onClick={handleSubmit} disabled={!form.name.trim() || saving}>
             保存
           </Button>
         </DialogActions>
-      </Dialog>
+        </>}
+      </ProtectedFormDialog>
       {feedbackDialog}
     </Box>
   );
