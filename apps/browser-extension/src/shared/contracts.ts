@@ -18,6 +18,17 @@ export type LeadIntakeResponse = {
   orderRemarkStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
 };
 
+export type CompleteOsOrderInput = {
+  expectedOrderNo: string;
+  expectedCustomerDisplayName: string;
+  phone?: string;
+  wechat?: string;
+};
+
+export type CompleteOsOrderResult =
+  | { ok: true; remarkText: string; remarkStatus: 'SUCCEEDED'; greenFlagStatus: 'SUCCEEDED' }
+  | { ok: false; code: string; message: string; stage: 'CONTEXT' | 'REMARK' | 'GREEN_FLAG' | 'SAVE'; remarkText?: string };
+
 export type PageCommand =
   | { type: 'READ_FEIGE_CONTEXT' }
   | { type: 'FILL_FEIGE_REPLY'; text: string }
@@ -33,12 +44,14 @@ export type PageCommand =
       expectedOrderNo?: string;
       expectedCustomerDisplayName: string;
     }
-  | { type: 'SAVE_ORDER_REMARK'; text: string };
+  | { type: 'SAVE_ORDER_REMARK'; text: string }
+  | { type: 'COMPLETE_FEIGE_OS_ORDER'; input: CompleteOsOrderInput };
 
 export type PageCommandResult =
   | { ok: true; context: FeigePageContext; detectedContact: DetectedContact | null }
   | PageWriteResult
-  | SafeReplyFillResult;
+  | SafeReplyFillResult
+  | CompleteOsOrderResult;
 
 export type WorkerCommand =
   | { type: 'AUTH_STATE' }

@@ -61,4 +61,42 @@ assert.deepEqual(appendedCommand, {
 }, '人工选择的话术应作为追加命令发送到飞鸽页面');
 assert.deepEqual(appendResult, { ok: true });
 
+let completionCommand: unknown;
+const completionInput = {
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  phone: '13826459812',
+  wechat: 'wx_user88',
+};
+const completionResult = await activeTabCommand({
+  type: 'COMPLETE_FEIGE_OS_ORDER',
+  input: completionInput,
+}, {
+  tabs: {
+    async query() {
+      return [{ id: 10, url: 'https://fxg.jinritemai.com/ffa/morder/order/list' }];
+    },
+    async sendMessage(_tabId: number, command: unknown) {
+      completionCommand = command;
+      return {
+        ok: true,
+        remarkText: '#悠然一刻/13826459812\n#入OS',
+        remarkStatus: 'SUCCEEDED',
+        greenFlagStatus: 'SUCCEEDED',
+      };
+    },
+  },
+  scripting: bridge.scripting,
+} as any);
+assert.deepEqual(completionCommand, {
+  type: 'COMPLETE_FEIGE_OS_ORDER',
+  input: completionInput,
+}, '飞鸽订单完成参数应原样转发到当前页面');
+assert.deepEqual(completionResult, {
+  ok: true,
+  remarkText: '#悠然一刻/13826459812\n#入OS',
+  remarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'SUCCEEDED',
+});
+
 console.log('active tab messaging recovery: ok');
