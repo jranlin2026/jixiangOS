@@ -684,10 +684,13 @@ const liveAdjacentCounterOrderDom = new JSDOM(`<!doctype html><html><body>
   <main id="workspace-chat">
     <div id="topbar-left-info"><span>刚刚好</span><span>添加备注</span></div>
   </main>
-  <div role="button" aria-expanded="true" class="ecom-collapse-header">
-    <div><div>已发货</div></div>
-    <div aria-hidden="true">+0</div><div><span>6955059225013785777</span></div>
-    <button>修改</button>
+  <div class="ecom-collapse-item ecom-collapse-item-active">
+    <div role="button" aria-expanded="true" class="ecom-collapse-header">
+      <div><div>已发货</div></div>
+      <div aria-hidden="true">+0</div><div><span>6955059225013785777</span></div>
+      <button>修改</button>
+    </div>
+    <div data-btm="d5834"><span>淘金AI 多模态创作智能体 读书卡</span></div>
   </div>
 </body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
 const liveAdjacentCounterContext = createDouyinFeigeAdapter(
@@ -704,6 +707,73 @@ assert.equal(
   '已发货',
   '应从唯一展开订单卡的独立状态节点识别订单状态',
 );
+assert.equal(
+  liveAdjacentCounterContext.productName,
+  '淘金AI 多模态创作智能体 读书卡',
+  '应优先从当前展开订单卡的商品节点识别商品名称',
+);
+
+function createLiveGreenFlagCompletionFixture() {
+  const fixture = new JSDOM(`<!doctype html><html><body>
+    <main id="workspace-chat">
+      <div id="topbar-left-info"><span>悠然一刻</span><span>添加备注</span></div>
+    </main>
+    <div class="ecom-collapse-item ecom-collapse-item-active">
+      <div role="button" aria-expanded="true" class="ecom-collapse-header">
+        <div>已发货</div>
+        <span>6955059225013785777</span>
+        <div data-real-remark-summary>
+          <span class="i-icon i-icon-flag"><svg><path data-real-current-flag fill="#FF3B52"></path></svg></span>
+          <span data-real-remark-lines>#销售：小王</span>
+          <button type="button" render_type="feature_button">修改</button>
+        </div>
+      </div>
+      <div data-btm="d5834">淘金AI 多模态创作智能体 读书卡</div>
+    </div>
+    <div class="ecom-drawer-wrapper-body" hidden>
+      <div>订单备注</div>
+      <div>订单标记</div>
+      <label><input type="radio" value="4"><span class="i-icon i-icon-flag"><svg><path fill="#FF5C00"></path></svg></span></label>
+      <label><input type="radio" value="1"><span class="i-icon i-icon-flag"><svg><path fill="#6C26FD"></path></svg></span></label>
+      <label><input type="radio" value="2"><span class="i-icon i-icon-flag"><svg><path fill="#04CBE7"></path></svg></span></label>
+      <label><input type="radio" value="3"><span class="i-icon i-icon-flag"><svg><path fill="#00C87F"></path></svg></span></label>
+      <label><input type="radio" value="5"><span class="i-icon i-icon-flag"><svg><path fill="#FF3B52"></path></svg></span></label>
+      <label><input type="radio" value="0"><span class="i-icon i-icon-flag"><svg><path fill="#69718C"></path></svg></span></label>
+      <textarea id="textareaID" placeholder="请输入备注信息，使用Enter保存，使用⌘+Enter换行"></textarea>
+      <button type="button">确定</button>
+      <button type="button">取消</button>
+    </div>
+  </body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+  const fixtureDocument = fixture.window.document;
+  const drawer = fixtureDocument.querySelector('.ecom-drawer-wrapper-body') as HTMLElement;
+  const input = fixtureDocument.querySelector('#textareaID') as HTMLTextAreaElement;
+  const summaryLines = fixtureDocument.querySelector('[data-real-remark-lines]') as HTMLElement;
+  const currentFlag = fixtureDocument.querySelector('[data-real-current-flag]') as HTMLElement;
+  fixtureDocument.querySelector('button[render_type="feature_button"]')?.addEventListener('click', () => {
+    drawer.hidden = false;
+    input.value = summaryLines.textContent || '';
+  });
+  [...drawer.querySelectorAll('button')]
+    .find((button) => button.textContent?.trim() === '确定')
+    ?.addEventListener('click', () => {
+      summaryLines.textContent = `${input.value}\n#0808/platform-generated`;
+      currentFlag.setAttribute('fill', '#00C87F');
+      drawer.hidden = true;
+    });
+  return createDouyinFeigeAdapter(fixtureDocument, fixture.window.location.href);
+}
+
+const liveGreenFlagCompletionResult = await createLiveGreenFlagCompletionFixture().completeOsOrder({
+  expectedOrderNo: '6955059225013785777',
+  expectedCustomerDisplayName: '悠然一刻',
+  phone: '13826459812',
+});
+assert.deepEqual(liveGreenFlagCompletionResult, {
+  ok: true,
+  remarkText: '#销售：小王\n#悠然一刻/13826459812\n#入OS',
+  remarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'SUCCEEDED',
+}, '应识别飞鸽真实绿色旗帜并允许平台在保存后追加备注人和时间行');
 
 function createCalibratedPaidOrderFixture(options: { includeConfirm?: boolean } = {}) {
   const fixture = new JSDOM(`<!doctype html><html><body>

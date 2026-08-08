@@ -151,9 +151,21 @@ function hasExactGreenSemantic(element: HTMLElement) {
   return exactMatch;
 }
 
+function hasLiveGreenFlagSemantic(element: HTMLElement) {
+  if (element.tagName !== 'INPUT' || element.getAttribute('type')?.toLowerCase() !== 'radio') return false;
+  const label = element.closest('label');
+  if (!label) return false;
+  const colors = [...label.querySelectorAll('.i-icon-flag svg path[fill]')]
+    .map((path) => path.getAttribute('fill')?.trim().toLowerCase() || '')
+    .filter(Boolean);
+  return colors.length === 1 && colors[0] === '#00c87f';
+}
+
 function findUniqueGreenFlag(dialog: HTMLElement) {
-  const candidates = uniqueMatches(dialog, selectors.greenFlag)
-    .filter((element) => isVisible(element) && isEnabled(element) && hasExactGreenSemantic(element));
+  const liveFlagRadios = [...dialog.querySelectorAll<HTMLElement>('input[type="radio"]')];
+  const candidates = [...new Set([...uniqueMatches(dialog, selectors.greenFlag), ...liveFlagRadios])]
+    .filter((element) => isVisible(element) && isEnabled(element))
+    .filter((element) => hasExactGreenSemantic(element) || hasLiveGreenFlagSemantic(element));
   return candidates.length === 1 ? candidates[0] : null;
 }
 
@@ -233,8 +245,22 @@ async function waitForElement(
 
 function isGreenActive(orderCard: HTMLElement) {
   const currentFlags = uniqueMatches(orderCard, selectors.currentOrderFlag).filter(isVisible);
-  return currentFlags.length === 1
-    && currentFlags[0].dataset.currentFlag?.trim().toLowerCase() === 'green';
+  if (currentFlags.length === 1
+    && currentFlags[0].dataset.currentFlag?.trim().toLowerCase() === 'green') return true;
+  const liveGreenFlags = [...orderCard.querySelectorAll<HTMLElement>('.i-icon-flag')]
+    .filter(isVisible)
+    .filter((icon) => [...icon.querySelectorAll('svg path[fill]')]
+      .some((path) => path.getAttribute('fill')?.trim().toLowerCase() === '#00c87f'));
+  return liveGreenFlags.length === 1;
+}
+
+function hasSavedRemark(orderCard: HTMLElement, remarkText: string) {
+  const summary = text(orderCard, selectors.orderRemarkSummary) || orderCard.textContent || '';
+  const requiredLines = remarkText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return requiredLines.length > 0 && requiredLines.every((line) => summary.includes(line));
 }
 
 function direction(element: HTMLElement): BrowserChatMessage['direction'] {
@@ -263,6 +289,11 @@ function consultationProductName(document: Document) {
     .filter((value) => !/[￥¥]/.test(value))
     .filter((value) => !/^(详情|已售\d*|邀请下单|规格属性|商品视频|商品评价)$/.test(value));
   return candidates.sort((left, right) => left.length - right.length)[0] || '';
+}
+
+function activeOrderProductName(orderCard: HTMLElement) {
+  const orderContainer = orderCard.closest<HTMLElement>('.ecom-collapse-item') || orderCard;
+  return text(orderContainer, [...selectors.product, '[data-btm="d5834"]']);
 }
 
 function setEditableValue(element: HTMLElement, value: string): PageWriteResult {
@@ -297,7 +328,8 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       const activeOrderCard = uniqueActiveOrderCard(document);
       const platformOrderNo = activeOrderCard ? orderNoFromElement(activeOrderCard) : '';
       const orderStatus = activeOrderCard ? orderStatusFromElement(activeOrderCard) : '';
-      const productName = consultationProductName(document);
+      const productName = (activeOrderCard && activeOrderProductName(activeOrderCard))
+        || consultationProductName(document);
       const messages = all(scope, selectors.message)
         .map((element) => ({ direction: direction(element), text: element.textContent?.trim() || '' }))
         .filter((message) => message.text);
@@ -610,9 +642,8 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
 
       const verified = await waitForElement(document, () => {
         if (!hasSameBoundContext()) return null;
-        const summary = text(orderCard, selectors.orderRemarkSummary);
         const closed = !dialog.isConnected || !isVisible(dialog);
-        return closed && summary.replace(/\r\n/g, '\n') === remarkText.replace(/\r\n/g, '\n').trim()
+        return closed && hasSavedRemark(orderCard, remarkText)
           && isGreenActive(orderCard)
           ? orderCard
           : null;
