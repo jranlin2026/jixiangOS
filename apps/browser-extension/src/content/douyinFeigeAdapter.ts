@@ -47,6 +47,8 @@ const selectors = {
   currentOrderFlag: ['[data-testid="current-order-flag"]', '[data-current-flag]'],
 };
 
+const exactOrderStatusPattern = /^(?:待付款|未付款|已付款|待发货|已发货|已收货|交易成功|已完成|退款中|退款成功|已退款|已关闭(?:（[^）]+）)?|已取消|取消)$/;
+
 function first(root: ParentNode, candidates: string[]): HTMLElement | null {
   for (const selector of candidates) {
     const element = root.querySelector<HTMLElement>(selector);
@@ -75,6 +77,12 @@ function findButtonByText(root: ParentNode, labels: string[]): HTMLElement | nul
 function orderNoFromElement(root: ParentNode) {
   const explicit = text(root, selectors.orderNo);
   if (explicit) return explicit;
+  const standalone = [...root.querySelectorAll<HTMLElement>('*')]
+    .filter(isVisible)
+    .map((element) => element.textContent?.trim() || '')
+    .filter((value) => /^\d{19}$/.test(value));
+  const uniqueStandalone = [...new Set(standalone)];
+  if (uniqueStandalone.length === 1) return uniqueStandalone[0];
   const candidates = [...String(root.textContent || '').matchAll(/(?:^|\D)(\d{19})(?!\d)/g)]
     .map((match) => match[1]);
   const unique = [...new Set(candidates)];
@@ -106,7 +114,14 @@ function uniqueActiveOrderCard(document: Document) {
 }
 
 function orderStatusFromElement(root: ParentNode) {
-  return text(root, selectors.orderStatus);
+  const explicit = text(root, selectors.orderStatus);
+  if (explicit) return explicit;
+  const candidates = [...root.querySelectorAll<HTMLElement>('*')]
+    .filter(isVisible)
+    .map((element) => element.textContent?.trim() || '')
+    .filter((value) => exactOrderStatusPattern.test(value));
+  const unique = [...new Set(candidates)];
+  return unique.length === 1 ? unique[0] : '';
 }
 
 function isEnabled(element: HTMLElement) {

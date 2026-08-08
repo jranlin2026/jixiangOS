@@ -680,6 +680,31 @@ assert.equal(visibleOpenedDialogResult.ok, false, '本次打开的弹窗仍可�
 assert.equal(visibleOpenedDialogResult.ok ? '' : visibleOpenedDialogResult.code, 'ORDER_COMPLETION_NOT_VERIFIED');
 assert.equal(visibleOpenedDialogFixture.getSaveClicks(), 1);
 
+const liveAdjacentCounterOrderDom = new JSDOM(`<!doctype html><html><body>
+  <main id="workspace-chat">
+    <div id="topbar-left-info"><span>刚刚好</span><span>添加备注</span></div>
+  </main>
+  <div role="button" aria-expanded="true" class="ecom-collapse-header">
+    <div><div>已发货</div></div>
+    <div aria-hidden="true">+0</div><div><span>6955059225013785777</span></div>
+    <button>修改</button>
+  </div>
+</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+const liveAdjacentCounterContext = createDouyinFeigeAdapter(
+  liveAdjacentCounterOrderDom.window.document,
+  liveAdjacentCounterOrderDom.window.location.href,
+).readContext();
+assert.equal(
+  liveAdjacentCounterContext.platformOrderNo,
+  '6955059225013785777',
+  '隐藏的 +0 计数与订单号相邻时，应从唯一展开订单卡的独立节点识别19位订单号',
+);
+assert.equal(
+  liveAdjacentCounterContext.orderStatus,
+  '已发货',
+  '应从唯一展开订单卡的独立状态节点识别订单状态',
+);
+
 function createCalibratedPaidOrderFixture(options: { includeConfirm?: boolean } = {}) {
   const fixture = new JSDOM(`<!doctype html><html><body>
     <main id="workspace-chat">
