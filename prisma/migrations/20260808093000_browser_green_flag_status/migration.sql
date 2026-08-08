@@ -1,0 +1,4 @@
+ALTER TABLE `browser_lead_syncs`
+  ADD COLUMN `greenFlagStatus` VARCHAR(24) NOT NULL DEFAULT 'NOT_ATTEMPTED',
+  ADD COLUMN `greenFlagError` VARCHAR(1000) NULL,
+  ADD COLUMN `greenFlaggedAt` DATETIME(3) NULL;

@@ -26,6 +26,7 @@ const repository = {
       ...input,
       status: 'PENDING',
       orderRemarkStatus: 'NOT_ATTEMPTED',
+      greenFlagStatus: 'NOT_ATTEMPTED',
       attemptCount: 1,
       updatedAt: new Date(),
     };
@@ -48,6 +49,19 @@ const repository = {
     Object.assign(current, {
       orderRemarkStatus: input.status,
       orderRemarkError: input.errorMessage || null,
+      remarkOperatorId: operator.id,
+      remarkOperatorName: operator.name,
+    });
+    return current;
+  },
+  async reportPlatformCompletion(id: string, operator: any, input: any) {
+    const current = [...records.values()].find((item) => item.id === id);
+    if (!current) return null;
+    Object.assign(current, {
+      orderRemarkStatus: input.orderRemarkStatus,
+      greenFlagStatus: input.greenFlagStatus,
+      orderRemarkError: input.errorMessage || null,
+      greenFlagError: input.errorMessage || null,
       remarkOperatorId: operator.id,
       remarkOperatorName: operator.name,
     });
@@ -89,6 +103,7 @@ assert.equal(first.data?.outcome, 'CREATED');
 assert.equal(first.data?.syncId, 'browser-sync-1');
 assert.equal(first.data?.lead.id, 'lead-1');
 assert.equal(first.data?.lead.assignedTo, '销售小王');
+assert.equal(first.data?.greenFlagStatus, 'NOT_ATTEMPTED');
 assert.equal(createLeadCalls.length, 1);
 assert.equal([...records.values()][0].sourceProductName, 'AI口播智能体');
 assert.deepEqual(createLeadCalls[0].input, {
@@ -140,6 +155,26 @@ const colleagueRemark = await service.reportOrderRemark(
   { ...actor, id: 'user-customer-service-2', name: '客服小周' },
 );
 assert.equal(colleagueRemark.code, 0, '同一订单由另一位有线索录入权限的客服接手时仍可回报备注');
+
+const completion = await service.reportPlatformCompletion('browser-sync-1', {
+  orderRemarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'SUCCEEDED',
+}, actor);
+assert.equal(completion.code, 0);
+assert.equal(completion.data?.orderRemarkStatus, 'SUCCEEDED');
+assert.equal(completion.data?.greenFlagStatus, 'SUCCEEDED');
+
+const invalidRemarkCompletion = await service.reportPlatformCompletion('browser-sync-1', {
+  orderRemarkStatus: 'NOT_ATTEMPTED' as any,
+  greenFlagStatus: 'SUCCEEDED',
+}, actor);
+assert.equal(invalidRemarkCompletion.code, 400);
+
+const invalidGreenFlagCompletion = await service.reportPlatformCompletion('browser-sync-1', {
+  orderRemarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'UNKNOWN' as any,
+}, actor);
+assert.equal(invalidGreenFlagCompletion.code, 400);
 
 const throwingService = createBrowserLeadIntakeService({
   repository,

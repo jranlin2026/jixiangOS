@@ -11,6 +11,7 @@ function record(row: any): BrowserLeadSyncRecord {
     ...row,
     status: row.status as BrowserLeadSyncRecord['status'],
     orderRemarkStatus: row.orderRemarkStatus as BrowserLeadSyncRecord['orderRemarkStatus'],
+    greenFlagStatus: row.greenFlagStatus as BrowserLeadSyncRecord['greenFlagStatus'],
   };
 }
 
@@ -47,6 +48,7 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
             ...input,
             status: 'PENDING',
             orderRemarkStatus: 'NOT_ATTEMPTED',
+            greenFlagStatus: 'NOT_ATTEMPTED',
             attemptCount: 1,
           },
         });
@@ -139,7 +141,44 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
           remarkOperatorId: operator.id,
           remarkOperatorName: operator.name,
           orderRemarkError: input.status === 'FAILED' ? (input.errorMessage || '订单备注失败').slice(0, 1000) : null,
-          orderRemarkedAt: input.status === 'SUCCEEDED' ? new Date() : null,
+          orderRemarkedAt: input.status === 'SUCCEEDED'
+            ? existing.orderRemarkedAt || new Date()
+            : existing.orderRemarkedAt,
+        },
+      }));
+    },
+
+    async reportPlatformCompletion(
+      id: string,
+      operator: { id: string; name: string },
+      input: {
+        orderRemarkStatus: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
+        greenFlagStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
+        errorMessage?: string;
+      },
+    ) {
+      const existing = await prisma.browserLeadSync.findUnique({ where: { id } });
+      if (!existing || existing.status !== 'SUCCEEDED') return null;
+      const errorMessage = input.errorMessage?.slice(0, 1000);
+      return record(await prisma.browserLeadSync.update({
+        where: { id },
+        data: {
+          orderRemarkStatus: input.orderRemarkStatus,
+          greenFlagStatus: input.greenFlagStatus,
+          remarkOperatorId: operator.id,
+          remarkOperatorName: operator.name,
+          orderRemarkError: input.orderRemarkStatus === 'FAILED'
+            ? errorMessage || '订单备注失败'
+            : null,
+          greenFlagError: input.greenFlagStatus === 'FAILED'
+            ? errorMessage || '绿色旗帜设置失败'
+            : null,
+          orderRemarkedAt: input.orderRemarkStatus === 'SUCCEEDED'
+            ? existing.orderRemarkedAt || new Date()
+            : existing.orderRemarkedAt,
+          greenFlaggedAt: input.greenFlagStatus === 'SUCCEEDED'
+            ? existing.greenFlaggedAt || new Date()
+            : existing.greenFlaggedAt,
         },
       }));
     },

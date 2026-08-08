@@ -15,7 +15,7 @@ const service = {
     return {
       code: 0,
       data: {
-        syncId: 'sync-1', outcome: 'CREATED', orderRemarkStatus: 'NOT_ATTEMPTED',
+        syncId: 'sync-1', outcome: 'CREATED', orderRemarkStatus: 'NOT_ATTEMPTED', greenFlagStatus: 'NOT_ATTEMPTED',
         lead: { id: 'lead-1', name: input.contactName, assignedTo: '销售小王' },
       },
       message: 'success',
@@ -24,6 +24,18 @@ const service = {
   async reportOrderRemark(syncId: string, input: any, actor: any) {
     calls.push({ method: 'remark', syncId, input, actor });
     return { code: 0, data: { syncId, orderRemarkStatus: input.status }, message: 'success' };
+  },
+  async reportPlatformCompletion(syncId: string, input: any, actor: any) {
+    calls.push({ method: 'platform-completion', syncId, input, actor });
+    return {
+      code: 0,
+      data: {
+        syncId,
+        orderRemarkStatus: input.orderRemarkStatus,
+        greenFlagStatus: input.greenFlagStatus,
+      },
+      message: 'success',
+    };
   },
 } as any;
 const scriptLibrary = {
@@ -85,6 +97,17 @@ try {
   assert.equal(remark.status, 200);
   assert.equal((await remark.json()).data.orderRemarkStatus, 'SUCCEEDED');
 
+  const completion = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/lead-intakes/sync-1/platform-completion`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ orderRemarkStatus: 'SUCCEEDED', greenFlagStatus: 'SUCCEEDED' }),
+  });
+  assert.equal(completion.status, 200);
+  assert.deepEqual((await completion.json()).data, {
+    syncId: 'sync-1',
+    orderRemarkStatus: 'SUCCEEDED',
+    greenFlagStatus: 'SUCCEEDED',
+  });
+
   const library = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/script-library`);
   assert.equal(library.status, 200);
   assert.equal((await library.json()).data.library.revision, 1);
@@ -106,8 +129,17 @@ try {
     body: JSON.stringify({}),
   });
   assert.equal(deniedIntake.status, 403, '线索入库仍必须校验线索录入权限');
+  const deniedCompletion = await fetch(
+    `http://127.0.0.1:${address.port}/api/browser-agent/lead-intakes/sync-1/platform-completion`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-test-no-lead-create': '1' },
+      body: JSON.stringify({ orderRemarkStatus: 'SUCCEEDED', greenFlagStatus: 'SUCCEEDED' }),
+    },
+  );
+  assert.equal(deniedCompletion.status, 403, '平台完成上报必须校验线索录入权限');
   assert.deepEqual(calls.map((call) => call.method), [
-    'intake', 'remark', 'script-library:get', 'script-library:update', 'script-library:get',
+    'intake', 'remark', 'platform-completion', 'script-library:get', 'script-library:update', 'script-library:get',
   ]);
 } finally {
   await new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));

@@ -16,6 +16,10 @@ const delegate = {
       intakeStatus: null,
       lastError: null,
       orderRemarkError: null,
+      greenFlagStatus: 'NOT_ATTEMPTED',
+      greenFlagError: null,
+      orderRemarkedAt: null,
+      greenFlaggedAt: null,
     };
     return row;
   },
@@ -94,5 +98,41 @@ row = {
 const staleRetry = await repository.reserve(reservationInput);
 assert.equal(staleRetry.acquired, true, '没有生成线索的超时任务必须释放重试');
 assert.equal(staleRetry.record.attemptCount, 3);
+
+row = {
+  ...row,
+  id: 'browser-sync-completion',
+  status: 'SUCCEEDED',
+  orderRemarkStatus: 'NOT_ATTEMPTED',
+  greenFlagStatus: 'NOT_ATTEMPTED',
+  orderRemarkError: null,
+  greenFlagError: null,
+  orderRemarkedAt: null,
+  greenFlaggedAt: null,
+};
+const completed = await repository.reportPlatformCompletion(
+  row.id,
+  { id: 'user-1', name: '客服小李' },
+  { orderRemarkStatus: 'SUCCEEDED', greenFlagStatus: 'SUCCEEDED' },
+);
+assert.equal(completed?.orderRemarkStatus, 'SUCCEEDED');
+assert.equal(completed?.greenFlagStatus, 'SUCCEEDED');
+assert.ok(row.orderRemarkedAt instanceof Date);
+assert.ok(row.greenFlaggedAt instanceof Date);
+const firstOrderRemarkedAt = row.orderRemarkedAt;
+const firstGreenFlaggedAt = row.greenFlaggedAt;
+
+const longError = 'x'.repeat(1200);
+const retried = await repository.reportPlatformCompletion(
+  row.id,
+  { id: 'user-2', name: '客服小周' },
+  { orderRemarkStatus: 'FAILED', greenFlagStatus: 'FAILED', errorMessage: longError },
+);
+assert.equal(retried?.orderRemarkStatus, 'FAILED');
+assert.equal(retried?.greenFlagStatus, 'FAILED');
+assert.equal(row.orderRemarkedAt, firstOrderRemarkedAt, '备注重试失败不得清空历史成功时间');
+assert.equal(row.greenFlaggedAt, firstGreenFlaggedAt, '绿旗重试失败不得清空历史成功时间');
+assert.equal(row.orderRemarkError.length, 1000);
+assert.equal(row.greenFlagError.length, 1000);
 
 console.log('browser lead sync repository reservation: ok');

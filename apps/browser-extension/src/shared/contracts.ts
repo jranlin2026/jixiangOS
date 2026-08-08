@@ -16,6 +16,7 @@ export type LeadIntakeResponse = {
   outcome: 'CREATED' | 'ALREADY_CREATED';
   lead: { id: string; name: string; assignedTo?: string; assignedToId?: string; intakeStatus?: string };
   orderRemarkStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
+  greenFlagStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
 };
 
 export type CompleteOsOrderInput = {
@@ -61,4 +62,11 @@ export type WorkerCommand =
   | { type: 'GET_SCRIPT_LIBRARY' }
   | { type: 'SAVE_SCRIPT_LIBRARY'; library: ScriptLibrary }
   | { type: 'CREATE_LEAD_INTAKE'; input: Record<string, unknown> }
+  | {
+      type: 'REPORT_PLATFORM_COMPLETION';
+      syncId: string;
+      orderRemarkStatus: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
+      greenFlagStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
+      errorMessage?: string;
+    }
   | { type: 'REPORT_ORDER_REMARK'; syncId: string; status: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED'; errorMessage?: string };

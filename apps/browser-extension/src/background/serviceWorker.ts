@@ -79,6 +79,17 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
       sendResponse(await request('/browser-agent/lead-intakes', { method: 'POST', body: JSON.stringify(message.input) }));
       return;
     }
+    if (message.type === 'REPORT_PLATFORM_COMPLETION') {
+      sendResponse(await request(`/browser-agent/lead-intakes/${encodeURIComponent(message.syncId)}/platform-completion`, {
+        method: 'POST',
+        body: JSON.stringify({
+          orderRemarkStatus: message.orderRemarkStatus,
+          greenFlagStatus: message.greenFlagStatus,
+          errorMessage: message.errorMessage,
+        }),
+      }));
+      return;
+    }
     if (message.type === 'REPORT_ORDER_REMARK') {
       sendResponse(await request(`/browser-agent/lead-intakes/${encodeURIComponent(message.syncId)}/order-remark`, {
         method: 'POST', body: JSON.stringify({ status: message.status, errorMessage: message.errorMessage }),

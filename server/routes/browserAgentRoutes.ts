@@ -39,6 +39,19 @@ export function createBrowserAgentRouter(deps: {
     },
   );
 
+  router.post(
+    '/lead-intakes/:syncId/platform-completion',
+    deps.requireLeadCreate,
+    async (req: AuthenticatedRequest, res) => {
+      const result = await deps.service.reportPlatformCompletion(
+        routeParam(req.params.syncId),
+        req.body || {},
+        req.currentUser!,
+      );
+      res.status(statusFor(result.code)).json(result);
+    },
+  );
+
   router.get('/script-library', deps.requireAuthenticated, async (req: AuthenticatedRequest, res) => {
     const result = await deps.scriptLibrary.get(req.currentUser!);
     res.status(statusFor(result.code)).json(result);

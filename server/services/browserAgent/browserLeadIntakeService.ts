@@ -27,6 +27,7 @@ export type BrowserLeadSyncRecord = {
   contactSource: 'CHAT' | 'OFF_PLATFORM';
   status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
   orderRemarkStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
+  greenFlagStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
   attemptCount: number;
   updatedAt?: Date;
   leadId?: string | null;
@@ -60,6 +61,15 @@ type BrowserLeadSyncRepository = {
     operator: { id: string; name: string },
     input: { status: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED'; errorMessage?: string },
   ): Promise<BrowserLeadSyncRecord | null>;
+  reportPlatformCompletion(
+    id: string,
+    operator: { id: string; name: string },
+    input: {
+      orderRemarkStatus: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
+      greenFlagStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
+      errorMessage?: string;
+    },
+  ): Promise<BrowserLeadSyncRecord | null>;
 };
 
 type LeadCreator = (
@@ -78,6 +88,7 @@ export type BrowserLeadIntakeResult = {
     intakeStatus?: string | null;
   };
   orderRemarkStatus: BrowserLeadSyncRecord['orderRemarkStatus'];
+  greenFlagStatus: BrowserLeadSyncRecord['greenFlagStatus'];
 };
 
 function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadIntakeResult['outcome']) {
@@ -92,6 +103,7 @@ function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadInt
       intakeStatus: record.intakeStatus,
     },
     orderRemarkStatus: record.orderRemarkStatus,
+    greenFlagStatus: record.greenFlagStatus,
   });
 }
 
@@ -206,6 +218,48 @@ export function createBrowserLeadIntakeService(deps: {
         );
       }
       return success({ syncId: updated.id, orderRemarkStatus: updated.orderRemarkStatus });
+    },
+
+    async reportPlatformCompletion(
+      syncId: string,
+      input: {
+        orderRemarkStatus: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
+        greenFlagStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
+        errorMessage?: string;
+      },
+      actor: AuthenticatedUser,
+    ) {
+      if (!['SUBMITTED', 'SUCCEEDED', 'FAILED'].includes(input.orderRemarkStatus)) {
+        return failure<{
+          syncId: string;
+          orderRemarkStatus: BrowserLeadSyncRecord['orderRemarkStatus'];
+          greenFlagStatus: BrowserLeadSyncRecord['greenFlagStatus'];
+        }>('订单备注结果不正确', 400);
+      }
+      if (!['NOT_ATTEMPTED', 'SUBMITTED', 'SUCCEEDED', 'FAILED'].includes(input.greenFlagStatus)) {
+        return failure<{
+          syncId: string;
+          orderRemarkStatus: BrowserLeadSyncRecord['orderRemarkStatus'];
+          greenFlagStatus: BrowserLeadSyncRecord['greenFlagStatus'];
+        }>('绿色旗帜结果不正确', 400);
+      }
+      const updated = await deps.repository.reportPlatformCompletion(
+        syncId,
+        { id: actor.id, name: actor.name },
+        input,
+      );
+      if (!updated) {
+        return failure<{
+          syncId: string;
+          orderRemarkStatus: BrowserLeadSyncRecord['orderRemarkStatus'];
+          greenFlagStatus: BrowserLeadSyncRecord['greenFlagStatus'];
+        }>('同步记录不存在或无权操作', 404);
+      }
+      return success({
+        syncId: updated.id,
+        orderRemarkStatus: updated.orderRemarkStatus,
+        greenFlagStatus: updated.greenFlagStatus,
+      });
     },
   };
 }
