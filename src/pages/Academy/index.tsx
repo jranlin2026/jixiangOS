@@ -1,10 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Avatar,
+  Badge,
   Box,
   Button,
+  Checkbox,
   Chip,
+  Divider,
   DialogActions,
   DialogContent,
+  IconButton,
   LinearProgress,
   MenuItem,
   Paper,
@@ -24,9 +29,19 @@ import AddIcon from "@mui/icons-material/Add";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import AutoStoriesIcon from "@mui/icons-material/AutoStories";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import CloseIcon from "@mui/icons-material/Close";
+import DownloadIcon from "@mui/icons-material/Download";
+import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import GroupsIcon from "@mui/icons-material/Groups";
 import InsightsIcon from "@mui/icons-material/Insights";
+import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
+import NotificationsNoneIcon from "@mui/icons-material/NotificationsNone";
+import RefreshIcon from "@mui/icons-material/Refresh";
+import SearchIcon from "@mui/icons-material/Search";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
+import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useLocation, useNavigate } from "react-router-dom";
 import { academyApi, customerApi } from "../../api";
@@ -52,15 +67,42 @@ import DialogCloseTitle from "../../shared/components/DialogCloseTitle";
 import TablePagination from "../../shared/components/TablePagination";
 
 const palette = {
-  blue: "#1E6BFF",
-  ink: "#101828",
-  muted: "#667085",
-  line: "#DDE5EF",
-  soft: "#F4F7FB",
-  green: "#0F9D76",
-  amber: "#B76A00",
-  red: "#D92D20",
-  purple: "#7A5AF8",
+  blue: "#0868F7",
+  blueSoft: "#EEF5FF",
+  ink: "#17233D",
+  muted: "#68758C",
+  line: "#D9E2EF",
+  soft: "#F7F9FC",
+  green: "#13A66A",
+  greenSoft: "#EAF9F1",
+  amber: "#D97706",
+  amberSoft: "#FFF6E8",
+  red: "#E5484D",
+  redSoft: "#FFF0F0",
+  purple: "#7457E8",
+};
+
+const panelSx = {
+  borderRadius: 1.5,
+  borderColor: palette.line,
+  boxShadow: "0 1px 2px rgba(16, 24, 40, 0.03)",
+  bgcolor: "#fff",
+};
+
+const tableSx = {
+  "& .MuiTableCell-root": {
+    borderColor: "#E8EDF4",
+    py: 1.1,
+    px: 1.5,
+    fontSize: 13,
+    color: palette.ink,
+    whiteSpace: "nowrap",
+  },
+  "& .MuiTableHead-root .MuiTableCell-root": {
+    bgcolor: "#F8FAFD",
+    color: "#5C6A82",
+    fontWeight: 800,
+  },
 };
 
 type AcademyView =
@@ -152,17 +194,14 @@ const MetricCard: React.FC<{
   color: string;
   icon: React.ReactNode;
 }> = ({ label, value, helper, color, icon }) => (
-  <Paper
-    variant="outlined"
-    sx={{ p: 2, borderRadius: 2, borderColor: palette.line, minWidth: 0 }}
-  >
+  <Paper variant="outlined" sx={{ ...panelSx, p: 1.7, minWidth: 0 }}>
     <Stack direction="row" justifyContent="space-between" spacing={1}>
       <Box minWidth={0}>
         <Typography variant="body2" color="text.secondary">
           {label}
         </Typography>
         <Typography
-          sx={{ mt: 0.5, fontWeight: 900, fontSize: 26, color: palette.ink }}
+          sx={{ mt: 0.3, fontWeight: 900, fontSize: 24, color: palette.ink }}
         >
           {value}
         </Typography>
@@ -171,7 +210,7 @@ const MetricCard: React.FC<{
         sx={{
           width: 38,
           height: 38,
-          borderRadius: 1.5,
+          borderRadius: 1.2,
           display: "grid",
           placeItems: "center",
           bgcolor: `${color}12`,
@@ -199,7 +238,9 @@ const SectionTitle: React.FC<{
     spacing={1}
   >
     <Box>
-      <Typography sx={{ fontWeight: 900, fontSize: 17 }}>{title}</Typography>
+      <Typography sx={{ fontWeight: 900, fontSize: 16, color: palette.ink }}>
+        {title}
+      </Typography>
       {helper && (
         <Typography variant="body2" color="text.secondary">
           {helper}
@@ -227,6 +268,7 @@ const Academy: React.FC = () => {
     {},
   );
   const [selectedSessionId, setSelectedSessionId] = useState("");
+  const [selectedCourseId, setSelectedCourseId] = useState("");
   const [detail, setDetail] = useState<AcademySessionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [courseOpen, setCourseOpen] = useState(false);
@@ -321,9 +363,11 @@ const Academy: React.FC = () => {
     setDashboard(dashboardResponse.data);
     setCourses(courseResponse.data.items);
     setSessions(sessionResponse.data.items);
+    if (!selectedCourseId && courseResponse.data.items[0])
+      setSelectedCourseId(courseResponse.data.items[0].id);
     if (!selectedSessionId && sessionResponse.data.items[0])
       setSelectedSessionId(sessionResponse.data.items[0].id);
-  }, [alert, selectedSessionId]);
+  }, [alert, selectedCourseId, selectedSessionId]);
 
   useEffect(() => {
     void loadBase();
@@ -355,9 +399,11 @@ const Academy: React.FC = () => {
   }, [details, loadDetail, selectedSessionId, view]);
   useEffect(() => {
     if (view !== "engagements" || !canEngagement || customers.length) return;
-    void customerApi.fetchCustomers({ page: 1, pageSize: 100 }).then((response) => {
-      if (response.code === 0) setCustomers(response.data.items);
-    });
+    void customerApi
+      .fetchCustomers({ page: 1, pageSize: 100 })
+      .then((response) => {
+        if (response.code === 0) setCustomers(response.data.items);
+      });
   }, [canEngagement, customers.length, view]);
   useEffect(() => {
     if (!selectedDetail) return;
@@ -483,138 +529,497 @@ const Academy: React.FC = () => {
     const progress = detail.tasks.length
       ? Math.round((completed / detail.tasks.length) * 100)
       : 0;
-    const groups: Array<{
-      title: string;
-      category: AcademySessionTask["category"];
-    }> = [
-      { title: "课前筹备", category: "BEFORE" },
-      { title: "课堂执行", category: "DURING" },
-      { title: "课后转化与复盘", category: "AFTER" },
+    const stages = [
+      "课程规划",
+      "内容研发",
+      "素材准备",
+      "客户邀约",
+      "开课准备",
+      "课堂执行",
+      "课后分层",
+      "销售跟进",
+      "课程复盘",
     ];
+    const activeStage = Math.min(
+      8,
+      detail.tasks.length
+        ? Math.floor((completed / detail.tasks.length) * 9)
+        : 0,
+    );
+    const blockedTasks = detail.tasks.filter(
+      (task) => task.status === "BLOCKED",
+    );
     return (
       <Box
-        sx={{ minHeight: "100%", bgcolor: "#F6F8FB", p: { xs: 1.5, md: 3 } }}
+        data-disable-column-resize="true"
+        sx={{
+          minHeight: "100%",
+          bgcolor: "#F8FAFD",
+        }}
       >
-        <Stack spacing={2.5} maxWidth={1480} mx="auto">
-          <Button
-            startIcon={<ArrowBackIcon />}
-            sx={{ alignSelf: "flex-start" }}
-            onClick={() => setDetail(null)}
+        <Box
+          sx={{
+            bgcolor: "#fff",
+            borderBottom: `1px solid ${palette.line}`,
+            px: { xs: 1.5, md: 2.5 },
+            pt: 1.5,
+          }}
+        >
+          <Stack
+            direction="row"
+            justifyContent="space-between"
+            alignItems="center"
           >
-            返回场次列表
-          </Button>
-          <Paper
-            variant="outlined"
+            <Typography
+              component="h1"
+              sx={{
+                fontSize: { xs: 22, md: 25 },
+                fontWeight: 950,
+                color: palette.ink,
+              }}
+            >
+              极享商学院
+            </Typography>
+            <Stack direction="row" spacing={1.2} alignItems="center">
+              <IconButton size="small" aria-label="消息通知">
+                <NotificationsNoneIcon fontSize="small" />
+              </IconButton>
+              <Avatar
+                sx={{
+                  width: 32,
+                  height: 32,
+                  bgcolor: palette.blue,
+                  fontSize: 13,
+                }}
+              >
+                {(currentUser?.name || "学院").slice(0, 1)}
+              </Avatar>
+              <Box sx={{ display: { xs: "none", sm: "block" } }}>
+                <Typography fontSize={13} fontWeight={900} lineHeight={1.15}>
+                  {currentUser?.name || "学院管理员"}
+                </Typography>
+                <Typography fontSize={11} color="text.secondary">
+                  学院管理员
+                </Typography>
+              </Box>
+            </Stack>
+          </Stack>
+          <Tabs
+            value={view}
+            onChange={(_, value: AcademyView) => navigate(viewPath[value])}
+            variant="scrollable"
+            allowScrollButtonsMobile
             sx={{
-              p: { xs: 2, md: 2.5 },
-              borderRadius: 2.5,
-              borderColor: "#CFE0FF",
-              bgcolor: "#F8FBFF",
+              mt: 0.4,
+              minHeight: 48,
+              "& .MuiTab-root": {
+                minHeight: 48,
+                px: 2.3,
+                fontWeight: 800,
+                fontSize: 14,
+              },
+              "& .MuiTabs-indicator": {
+                height: 3,
+                borderRadius: "3px 3px 0 0",
+              },
             }}
           >
+            {visibleNavItems.map((item) => (
+              <Tab key={item.value} value={item.value} label={item.label} />
+            ))}
+          </Tabs>
+        </Box>
+        <Stack spacing={1.5} sx={{ width: "100%", p: { xs: 1.25, md: 1.75 } }}>
+          <Paper variant="outlined" sx={{ ...panelSx, p: 1.6 }}>
             <Stack
               direction={{ xs: "column", lg: "row" }}
               justifyContent="space-between"
+              alignItems={{ lg: "center" }}
               spacing={2}
             >
-              <Box>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Chip
-                    label={statusLabel[detail.status] || detail.status}
-                    color={statusColor(detail.status)}
-                  />
-                  <Typography sx={{ fontWeight: 900, fontSize: 24 }}>
-                    {detail.title}
+              <Stack direction="row" spacing={1.2} alignItems="flex-start">
+                <IconButton
+                  size="small"
+                  onClick={() => setDetail(null)}
+                  sx={{ mt: 0.2 }}
+                >
+                  <ArrowBackIcon fontSize="small" />
+                </IconButton>
+                <Box>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Typography sx={{ fontWeight: 950, fontSize: 20 }}>
+                      {detail.title}
+                    </Typography>
+                    <Chip
+                      size="small"
+                      label={`V${detail.courseVersionId ? "1.0" : "1.0"}`}
+                      sx={{
+                        height: 22,
+                        bgcolor: palette.blueSoft,
+                        color: palette.blue,
+                      }}
+                    />
+                  </Stack>
+                  <Typography
+                    color="text.secondary"
+                    fontSize={12.5}
+                    sx={{ mt: 0.5 }}
+                  >
+                    {detail.course?.title} · {formatDate(detail.startsAt)} ·{" "}
+                    {detail.venue || "未填写场地"} · 负责人{" "}
+                    {detail.facilitatorUserName || "待分配"} · 学员{" "}
+                    {detail.engagements.length}/{detail.capacity}
                   </Typography>
-                </Stack>
-                <Typography color="text.secondary" sx={{ mt: 1 }}>
-                  {detail.course?.title} · {formatDate(detail.startsAt)} ·{" "}
-                  {detail.venue || "未填写场地"}
-                </Typography>
-              </Box>
-              <Box sx={{ minWidth: { lg: 260 } }}>
-                <Stack direction="row" justifyContent="space-between">
-                  <Typography variant="body2">整体执行进度</Typography>
-                  <Typography variant="body2" fontWeight={800}>
-                    {progress}%
-                  </Typography>
-                </Stack>
-                <LinearProgress
-                  value={progress}
-                  variant="determinate"
-                  sx={{ mt: 1, height: 8, borderRadius: 8 }}
+                </Box>
+              </Stack>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Chip
+                  size="small"
+                  label={statusLabel[detail.status] || detail.status}
+                  color={statusColor(detail.status)}
                 />
-              </Box>
+                <Button variant="contained">提交开课确认</Button>
+              </Stack>
             </Stack>
           </Paper>
+
+          <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: "repeat(9, minmax(92px, 1fr))",
+                overflowX: "auto",
+                pb: 0.5,
+              }}
+            >
+              {stages.map((stage, index) => (
+                <Stack
+                  key={stage}
+                  alignItems="center"
+                  sx={{ minWidth: 92, position: "relative" }}
+                >
+                  {index < stages.length - 1 && (
+                    <Box
+                      sx={{
+                        position: "absolute",
+                        top: 12,
+                        left: "50%",
+                        width: "100%",
+                        height: 2,
+                        bgcolor: index < activeStage ? palette.blue : "#D7DFEA",
+                      }}
+                    />
+                  )}
+                  <Box
+                    sx={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: "50%",
+                      display: "grid",
+                      placeItems: "center",
+                      zIndex: 1,
+                      bgcolor: index <= activeStage ? palette.blue : "#fff",
+                      color: index <= activeStage ? "#fff" : palette.muted,
+                      border: `2px solid ${index <= activeStage ? palette.blue : "#C9D2DF"}`,
+                      fontSize: 11,
+                      fontWeight: 900,
+                    }}
+                  >
+                    {index < activeStage ? "✓" : index + 1}
+                  </Box>
+                  <Typography
+                    fontSize={12}
+                    fontWeight={index === activeStage ? 900 : 700}
+                    color={index === activeStage ? palette.blue : palette.ink}
+                    sx={{ mt: 0.7 }}
+                  >
+                    {stage}
+                  </Typography>
+                </Stack>
+              ))}
+            </Box>
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={2}
+              alignItems={{ sm: "center" }}
+              sx={{ mt: 1.5, pt: 1.3, borderTop: `1px solid ${palette.line}` }}
+            >
+              <Typography fontSize={13} fontWeight={800}>
+                整体就绪度：{progress}%
+              </Typography>
+              <LinearProgress
+                value={progress}
+                variant="determinate"
+                sx={{ height: 7, borderRadius: 4, flex: 1, minWidth: 180 }}
+              />
+              {blockedTasks.length > 0 && (
+                <Typography fontSize={12.5} color={palette.red}>
+                  存在 {blockedTasks.length} 项阻塞风险，建议优先处理
+                </Typography>
+              )}
+            </Stack>
+          </Paper>
+
           <Box
             sx={{
               display: "grid",
-              gridTemplateColumns: { xs: "1fr", lg: "repeat(3, 1fr)" },
-              gap: 2,
+              gridTemplateColumns: {
+                xs: "1fr",
+                lg: "minmax(0, 1.8fr) minmax(330px, .7fr)",
+              },
+              gap: 1.5,
             }}
           >
-            {groups.map((group) => (
-              <Paper
-                key={group.category}
-                variant="outlined"
-                sx={{ p: 2, borderRadius: 2, borderColor: palette.line }}
-              >
-                <Typography sx={{ fontWeight: 900, mb: 1.5 }}>
-                  {group.title}
-                </Typography>
-                <Stack spacing={1}>
-                  {detail.tasks
-                    .filter((task) => task.category === group.category)
-                    .map((task) => (
-                      <Box
-                        key={task.id}
-                        sx={{
-                          p: 1.3,
-                          borderRadius: 1.5,
-                          bgcolor:
-                            task.status === "BLOCKED"
-                              ? "#FFF4F2"
-                              : palette.soft,
-                        }}
-                      >
-                        <Stack
-                          direction="row"
-                          justifyContent="space-between"
-                          spacing={1}
-                        >
-                          <Box>
-                            <Typography variant="body2" fontWeight={800}>
-                              {task.title}
-                              {task.isRequired ? " *" : ""}
-                            </Typography>
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                            >
-                              {task.completedByName || "待分配负责人"}
-                            </Typography>
-                          </Box>
+            <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+              <SectionTitle
+                title={`当前阶段任务（${stages[activeStage]}）`}
+                helper="任务状态直接驱动场次准备度与开课门禁"
+              />
+              <TableContainer sx={{ mt: 1.2 }}>
+                <Table size="small" sx={tableSx}>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>任务</TableCell>
+                      <TableCell>负责人</TableCell>
+                      <TableCell>协作人</TableCell>
+                      <TableCell>截止时间</TableCell>
+                      <TableCell>验收标准</TableCell>
+                      <TableCell>风险</TableCell>
+                      <TableCell>状态</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {detail.tasks.map((task) => (
+                      <TableRow key={task.id} hover>
+                        <TableCell sx={{ fontWeight: 800 }}>
+                          {task.title}
+                          {task.isRequired ? " *" : ""}
+                        </TableCell>
+                        <TableCell>
+                          {task.completedByName ||
+                            detail.facilitatorUserName ||
+                            "待分配"}
+                        </TableCell>
+                        <TableCell>-</TableCell>
+                        <TableCell>-</TableCell>
+                        <TableCell>
+                          {task.note || "完成后由负责人确认"}
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            size="small"
+                            label={task.status === "BLOCKED" ? "高" : "低"}
+                            sx={{
+                              height: 21,
+                              bgcolor:
+                                task.status === "BLOCKED"
+                                  ? palette.redSoft
+                                  : palette.greenSoft,
+                              color:
+                                task.status === "BLOCKED"
+                                  ? palette.red
+                                  : palette.green,
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell>
                           <Chip
                             size="small"
                             clickable={canSession}
                             onClick={() => canSession && void updateTask(task)}
                             label={statusLabel[task.status] || task.status}
-                            color={statusColor(task.status)}
+                            sx={{
+                              height: 22,
+                              bgcolor:
+                                task.status === "DONE"
+                                  ? palette.greenSoft
+                                  : task.status === "BLOCKED"
+                                    ? palette.redSoft
+                                    : palette.blueSoft,
+                              color:
+                                task.status === "DONE"
+                                  ? palette.green
+                                  : task.status === "BLOCKED"
+                                    ? palette.red
+                                    : palette.blue,
+                            }}
                           />
-                        </Stack>
-                      </Box>
+                        </TableCell>
+                      </TableRow>
                     ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+            <Stack spacing={1.5}>
+              <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+                <SectionTitle title="场次控制台" />
+                <Typography
+                  fontSize={12.5}
+                  color="text.secondary"
+                  sx={{ mt: 1.2 }}
+                >
+                  就绪度阈值
+                </Typography>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  spacing={1}
+                  sx={{ mt: 0.6 }}
+                >
+                  <Typography
+                    fontSize={24}
+                    fontWeight={950}
+                    color={progress >= 90 ? palette.green : palette.blue}
+                  >
+                    {progress}%
+                  </Typography>
+                  <Box flex={1}>
+                    <LinearProgress
+                      value={progress}
+                      variant="determinate"
+                      sx={{ height: 7, borderRadius: 4 }}
+                    />
+                  </Box>
+                </Stack>
+                <Divider sx={{ my: 1.4 }} />
+                <Typography fontSize={13} fontWeight={900}>
+                  风险概览（{blockedTasks.length}）
+                </Typography>
+                <Stack spacing={0.8} sx={{ mt: 0.8 }}>
+                  {blockedTasks.slice(0, 3).map((task) => (
+                    <Box
+                      key={task.id}
+                      sx={{ p: 1, borderRadius: 1, bgcolor: palette.redSoft }}
+                    >
+                      <Typography fontSize={12.5} fontWeight={800}>
+                        {task.title}
+                      </Typography>
+                    </Box>
+                  ))}
+                  {!blockedTasks.length && (
+                    <Typography fontSize={12.5} color={palette.green}>
+                      当前无阻塞风险
+                    </Typography>
+                  )}
+                </Stack>
+                <Divider sx={{ my: 1.4 }} />
+                <Stack direction="row" justifyContent="space-between">
+                  <Box>
+                    <Typography fontSize={11.5} color="text.secondary">
+                      邀约人数
+                    </Typography>
+                    <Typography fontWeight={900}>
+                      {detail.engagements.length}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography fontSize={11.5} color="text.secondary">
+                      报名人数
+                    </Typography>
+                    <Typography fontWeight={900}>
+                      {
+                        detail.engagements.filter(
+                          (item) => item.invitationStatus === "CONFIRMED",
+                        ).length
+                      }
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography fontSize={11.5} color="text.secondary">
+                      到课人数
+                    </Typography>
+                    <Typography fontWeight={900}>
+                      {
+                        detail.engagements.filter(
+                          (item) => item.attendanceStatus === "ATTENDED",
+                        ).length
+                      }
+                    </Typography>
+                  </Box>
+                </Stack>
+                <Button fullWidth variant="contained" sx={{ mt: 1.5 }}>
+                  提交开课确认
+                </Button>
+              </Paper>
+              <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+                <SectionTitle title="场次负责人" />
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  sx={{ mt: 1 }}
+                >
+                  <Box
+                    sx={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: "50%",
+                      bgcolor: palette.blueSoft,
+                      color: palette.blue,
+                      display: "grid",
+                      placeItems: "center",
+                      fontWeight: 900,
+                    }}
+                  >
+                    {(detail.facilitatorUserName || "待").slice(0, 1)}
+                  </Box>
+                  <Box>
+                    <Typography fontSize={13.5} fontWeight={900}>
+                      {detail.facilitatorUserName || "待分配"}
+                    </Typography>
+                    <Typography fontSize={11.5} color="text.secondary">
+                      课程执行负责人
+                    </Typography>
+                  </Box>
                 </Stack>
               </Paper>
-            ))}
+            </Stack>
           </Box>
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+
+          <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
             <SectionTitle
-              title="邀约、到课与转化"
-              helper="课程后30分钟完成A/B/C分层，A/B类24小时内进入销售待办。"
+              title="操作日志（最新）"
+              action={
+                <Button size="small">
+                  查看全部日志 <ChevronRightIcon fontSize="small" />
+                </Button>
+              }
             />
-            <EngagementTable items={detail.engagements} />
+            <TableContainer sx={{ mt: 1 }}>
+              <Table size="small" sx={tableSx}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>变更内容</TableCell>
+                    <TableCell>操作人</TableCell>
+                    <TableCell>操作时间</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {detail.tasks
+                    .filter((task) => task.completedAt)
+                    .slice(0, 5)
+                    .map((task) => (
+                      <TableRow key={task.id}>
+                        <TableCell>
+                          {task.title} → {statusLabel[task.status]}
+                        </TableCell>
+                        <TableCell>
+                          {task.completedByName || "系统记录"}
+                        </TableCell>
+                        <TableCell>{formatDate(task.completedAt)}</TableCell>
+                      </TableRow>
+                    ))}
+                  {!detail.tasks.some((task) => task.completedAt) && (
+                    <TableRow>
+                      <TableCell colSpan={3} align="center" sx={{ py: 3 }}>
+                        暂无操作日志
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
           </Paper>
         </Stack>
         {feedbackDialog}
@@ -623,67 +1028,84 @@ const Academy: React.FC = () => {
   }
 
   return (
-    <Box sx={{ minHeight: "100%", bgcolor: "#F6F8FB", p: { xs: 1.5, md: 3 } }}>
-      <Stack spacing={2.5} maxWidth={1600} mx="auto">
+    <Box
+      data-disable-column-resize="true"
+      sx={{ minHeight: "100%", bgcolor: "#F8FAFD" }}
+    >
+      <Box
+        sx={{
+          bgcolor: "#fff",
+          borderBottom: `1px solid ${palette.line}`,
+          px: { xs: 1.5, md: 2.5 },
+          pt: 1.5,
+        }}
+      >
         <Stack
-          direction={{ xs: "column", md: "row" }}
+          direction="row"
           justifyContent="space-between"
-          spacing={2}
+          alignItems="center"
         >
           <Box>
             <Typography
               component="h1"
               sx={{
-                fontSize: { xs: 24, md: 30 },
+                fontSize: { xs: 22, md: 25 },
                 fontWeight: 950,
                 color: palette.ink,
               }}
             >
               极享商学院
             </Typography>
-            <Typography color="text.secondary">
-              课程经营、客户转化与组织协同中心
-            </Typography>
           </Box>
-          <Stack direction="row" spacing={1}>
-            {canPlan && (
-              <Button
-                variant="outlined"
-                startIcon={<CalendarMonthIcon />}
-                onClick={() => navigate(viewPath.plans)}
-              >
-                制定课程计划
-              </Button>
-            )}
-            {canSession && (
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => {
-                  setSessionForm(emptySession);
-                  setSessionOpen(true);
-                }}
-              >
-                新建场次
-              </Button>
-            )}
+          <Stack direction="row" spacing={1.2} alignItems="center">
+            <IconButton size="small" aria-label="消息通知">
+              <Badge badgeContent={0} color="error" showZero={false}>
+                <NotificationsNoneIcon fontSize="small" />
+              </Badge>
+            </IconButton>
+            <Avatar
+              sx={{
+                width: 32,
+                height: 32,
+                bgcolor: palette.blue,
+                fontSize: 13,
+              }}
+            >
+              {(currentUser?.name || "学院").slice(0, 1)}
+            </Avatar>
+            <Box sx={{ display: { xs: "none", sm: "block" } }}>
+              <Typography fontSize={13} fontWeight={900} lineHeight={1.15}>
+                {currentUser?.name || "学院管理员"}
+              </Typography>
+              <Typography fontSize={11} color="text.secondary">
+                学院管理员
+              </Typography>
+            </Box>
           </Stack>
         </Stack>
-        <Paper
-          variant="outlined"
-          sx={{ px: 1, borderRadius: 2, borderColor: palette.line }}
+        <Tabs
+          value={view}
+          onChange={(_, value: AcademyView) => navigate(viewPath[value])}
+          variant="scrollable"
+          allowScrollButtonsMobile
+          sx={{
+            mt: 0.4,
+            minHeight: 48,
+            "& .MuiTab-root": {
+              minHeight: 48,
+              px: 2.3,
+              fontWeight: 800,
+              fontSize: 14,
+            },
+            "& .MuiTabs-indicator": { height: 3, borderRadius: "3px 3px 0 0" },
+          }}
         >
-          <Tabs
-            value={view}
-            onChange={(_, value: AcademyView) => navigate(viewPath[value])}
-            variant="scrollable"
-            allowScrollButtonsMobile
-          >
-            {visibleNavItems.map((item) => (
-              <Tab key={item.value} value={item.value} label={item.label} />
-            ))}
-          </Tabs>
-        </Paper>
+          {visibleNavItems.map((item) => (
+            <Tab key={item.value} value={item.value} label={item.label} />
+          ))}
+        </Tabs>
+      </Box>
+      <Stack spacing={1.5} sx={{ width: "100%", p: { xs: 1.25, md: 1.75 } }}>
         {loading && <LinearProgress />}
 
         {view === "overview" && (
@@ -702,48 +1124,26 @@ const Academy: React.FC = () => {
           />
         )}
         {view === "courses" && (
-          <>
-            <SectionTitle
-              title="课程库"
-              helper="管理课程定位、内容版本、课件与宣传资产。"
-              action={
-                <Stack direction="row" spacing={1}>
-                  <TextField
-                    size="small"
-                    placeholder="搜索课程编码、名称、分类"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                  />
-                  {canCourse && (
-                    <Button
-                      variant="contained"
-                      startIcon={<AddIcon />}
-                      onClick={() => setCourseOpen(true)}
-                    >
-                      新建课程
-                    </Button>
-                  )}
-                </Stack>
-              }
-            />
-            <CourseTable
-              items={pagedCourses}
-              canManage={canCourse}
-              onStatusChange={(course, status) =>
-                void changeCourseStatus(course, status)
-              }
-            />
-            <TablePagination
-              count={filteredCourses.length}
-              page={page}
-              rowsPerPage={pageSize}
-              onPageChange={(_, next) => setPage(next)}
-              onRowsPerPageChange={(event) => {
-                setPageSize(Number(event.target.value));
-                setPage(0);
-              }}
-            />
-          </>
+          <CourseWorkspace
+            items={pagedCourses}
+            total={filteredCourses.length}
+            selectedId={selectedCourseId}
+            onSelect={setSelectedCourseId}
+            search={search}
+            onSearch={setSearch}
+            canManage={canCourse}
+            onCreate={() => setCourseOpen(true)}
+            onStatusChange={(course, status) =>
+              void changeCourseStatus(course, status)
+            }
+            page={page}
+            pageSize={pageSize}
+            onPage={setPage}
+            onPageSize={(value) => {
+              setPageSize(value);
+              setPage(0);
+            }}
+          />
         )}
         {view === "sessions" && (
           <>
@@ -776,90 +1176,23 @@ const Academy: React.FC = () => {
           </>
         )}
         {view === "engagements" && (
-          <>
-            <SectionTitle
-              title="学员与转化"
-              helper="从CRM客户完成邀约、确认、到课、分层、跟进和成交交接。"
-              action={canEngagement && selectedSessionId ? (
-                <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={() => {
-                    setEngagementForm({ ...emptyEngagement, sessionId: selectedSessionId });
-                    setEngagementOpen(true);
-                  }}
-                >
-                  添加CRM客户
-                </Button>
-              ) : undefined}
-            />
-            <TextField
-              select
-              size="small"
-              label="选择课程场次"
-              value={selectedSessionId}
-              onChange={(event) => {
-                setSelectedSessionId(event.target.value);
-                void loadDetail(event.target.value);
-              }}
-              sx={{ maxWidth: 480 }}
-            >
-              {sessions.map((item) => (
-                <MenuItem key={item.id} value={item.id}>
-                  {item.title} · {formatDate(item.startsAt)}
-                </MenuItem>
-              ))}
-            </TextField>
-            <Box
-              sx={{
-                display: "grid",
-                gridTemplateColumns: { xs: "1fr 1fr", lg: "repeat(4, 1fr)" },
-                gap: 1.5,
-              }}
-            >
-              <MetricCard
-                label="已邀约"
-                value={selectedDetail?.engagements.length || 0}
-                helper="当前场次客户"
-                color={palette.blue}
-                icon={<GroupsIcon />}
-              />
-              <MetricCard
-                label="已确认"
-                value={
-                  selectedDetail?.engagements.filter(
-                    (item) => item.invitationStatus === "CONFIRMED",
-                  ).length || 0
-                }
-                helper="确认参加课程"
-                color={palette.purple}
-                icon={<TaskAltIcon />}
-              />
-              <MetricCard
-                label="已到课"
-                value={
-                  selectedDetail?.engagements.filter(
-                    (item) => item.attendanceStatus === "ATTENDED",
-                  ).length || 0
-                }
-                helper="实际签到学员"
-                color={palette.green}
-                icon={<AutoStoriesIcon />}
-              />
-              <MetricCard
-                label="A类客户"
-                value={
-                  selectedDetail?.engagements.filter(
-                    (item) => item.courseAssessment === "A",
-                  ).length || 0
-                }
-                helper="24小时内需跟进"
-                color={palette.amber}
-                icon={<InsightsIcon />}
-              />
-            </Box>
-            <EngagementTable items={selectedDetail?.engagements || []} />
-          </>
+          <EngagementWorkspace
+            sessions={sessions}
+            selectedSessionId={selectedSessionId}
+            onSelectSession={(id) => {
+              setSelectedSessionId(id);
+              void loadDetail(id);
+            }}
+            detail={selectedDetail}
+            canManage={canEngagement}
+            onAdd={() => {
+              setEngagementForm({
+                ...emptyEngagement,
+                sessionId: selectedSessionId,
+              });
+              setEngagementOpen(true);
+            }}
+          />
         )}
         {view === "reviews" && (
           <Reviews
@@ -1119,7 +1452,9 @@ const Academy: React.FC = () => {
                   value={engagementForm.customerId || ""}
                   onChange={(event) => {
                     markDirty();
-                    const customer = customers.find((item) => item.id === event.target.value);
+                    const customer = customers.find(
+                      (item) => item.id === event.target.value,
+                    );
                     if (!customer) return;
                     setEngagementForm({
                       ...engagementForm,
@@ -1131,7 +1466,8 @@ const Academy: React.FC = () => {
                 >
                   {customers.map((customer) => (
                     <MenuItem key={customer.id} value={customer.id}>
-                      {customer.name} · {customer.company || "未填写公司"} · {customer.owner || "待分配"}
+                      {customer.name} · {customer.company || "未填写公司"} ·{" "}
+                      {customer.owner || "待分配"}
                     </MenuItem>
                   ))}
                 </TextField>
@@ -1141,7 +1477,10 @@ const Academy: React.FC = () => {
                   value={engagementForm.invitationStatus}
                   onChange={(event) => {
                     markDirty();
-                    setEngagementForm({ ...engagementForm, invitationStatus: event.target.value });
+                    setEngagementForm({
+                      ...engagementForm,
+                      invitationStatus: event.target.value,
+                    });
                   }}
                 >
                   <MenuItem value="PENDING">待邀约</MenuItem>
@@ -1156,7 +1495,10 @@ const Academy: React.FC = () => {
                   value={engagementForm.notes || ""}
                   onChange={(event) => {
                     markDirty();
-                    setEngagementForm({ ...engagementForm, notes: event.target.value });
+                    setEngagementForm({
+                      ...engagementForm,
+                      notes: event.target.value,
+                    });
                   }}
                 />
               </Stack>
@@ -1189,165 +1531,397 @@ const Overview: React.FC<{
     (item) => item.engagements,
   );
   const funnel = [
-    { label: "邀约", value: engagementList.length, color: palette.blue },
+    { label: "邀约（人）", value: engagementList.length },
     {
-      label: "确认",
+      label: "确认（人）",
       value: engagementList.filter(
         (item) => item.invitationStatus === "CONFIRMED",
       ).length,
-      color: palette.purple,
     },
     {
-      label: "到课",
+      label: "到课（人）",
       value: engagementList.filter(
         (item) => item.attendanceStatus === "ATTENDED",
       ).length,
-      color: palette.green,
     },
     {
-      label: "A/B类",
+      label: "咨询（人）",
       value: engagementList.filter((item) =>
         ["A", "B"].includes(item.courseAssessment || ""),
       ).length,
-      color: palette.amber,
     },
+    { label: "成交金额（元）", value: 0 },
   ];
+  const monday = new Date();
+  const weekday = monday.getDay() || 7;
+  monday.setDate(monday.getDate() - weekday + 1);
+  monday.setHours(0, 0, 0, 0);
+  const weekDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + index);
+    const daySessions = sessions.filter((session) => {
+      const sessionDate = new Date(session.startsAt);
+      return sessionDate.toDateString() === date.toDateString();
+    });
+    return { date, sessions: daySessions };
+  });
+  const allTasks = Object.values(details).flatMap((item) =>
+    item.tasks.map((task) => ({ ...task, sessionTitle: item.title })),
+  );
+  const riskTasks = allTasks
+    .filter((task) => task.status === "BLOCKED" || task.status === "PENDING")
+    .slice(0, 3);
+  const todoTasks = allTasks
+    .filter((task) => task.status !== "DONE")
+    .slice(0, 6);
   return (
     <>
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: { xs: "1fr 1fr", lg: "repeat(4, 1fr)" },
-          gap: 1.5,
-        }}
-      >
-        <MetricCard
-          label="启用课程"
-          value={dashboard.activeCourses}
-          helper="可用于计划和排期"
-          color={palette.blue}
-          icon={<AutoStoriesIcon />}
-        />
-        <MetricCard
-          label="待执行场次"
-          value={dashboard.upcomingSessions}
-          helper="本周需要协同推进"
-          color={palette.purple}
-          icon={<CalendarMonthIcon />}
-        />
-        <MetricCard
-          label="准备风险"
-          value={dashboard.sessionsNeedingAttention}
-          helper="就绪前需完成检查"
-          color={palette.amber}
-          icon={<WarningAmberIcon />}
-        />
-        <MetricCard
-          label="待销售跟进"
-          value={dashboard.pendingFollowUps}
-          helper="A/B类客户需要待办"
-          color={palette.red}
-          icon={<GroupsIcon />}
-        />
-      </Box>
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: { xs: "1fr", xl: "1.6fr 1fr" },
-          gap: 2,
-        }}
-      >
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-          <SectionTitle
-            title="本周课程作战台"
-            helper="所有场次的时间、负责人和准备状态集中可见。"
-          />
-          <Stack spacing={1.2} sx={{ mt: 2 }}>
-            {sessions.map((item) => (
-              <Box
-                key={item.id}
-                sx={{
-                  p: 1.5,
-                  border: `1px solid ${palette.line}`,
-                  borderRadius: 1.5,
-                  bgcolor: "#fff",
-                }}
-              >
-                <Stack
-                  direction={{ xs: "column", md: "row" }}
-                  justifyContent="space-between"
-                  spacing={1}
-                >
-                  <Box>
-                    <Typography fontWeight={900}>{item.title}</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {formatDate(item.startsAt)} · {item.venue || "未定场地"} ·{" "}
-                      {item.facilitatorUserName || "待分配负责人"}
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          justifyContent="space-between"
+          alignItems={{ md: "center" }}
+          spacing={1}
+        >
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={1.2}
+            flexWrap="wrap"
+          >
+            <Typography
+              sx={{ fontWeight: 900, fontSize: 16, color: palette.ink }}
+            >
+              本周课程计划
+            </Typography>
+            <Typography fontSize={13} color="text.secondary">
+              {monday.toLocaleDateString("zh-CN")} ～{" "}
+              {weekDays[6].date.toLocaleDateString("zh-CN")}
+            </Typography>
+            <IconButton
+              size="small"
+              sx={{ border: `1px solid ${palette.line}`, borderRadius: 1 }}
+            >
+              <ChevronLeftIcon fontSize="small" />
+            </IconButton>
+            <Button size="small" variant="outlined" sx={{ minWidth: 60 }}>
+              本周
+            </Button>
+            <IconButton
+              size="small"
+              sx={{ border: `1px solid ${palette.line}`, borderRadius: 1 }}
+            >
+              <ChevronRightIcon fontSize="small" />
+            </IconButton>
+          </Stack>
+          <Button size="small" variant="outlined">
+            查看全部场次
+          </Button>
+        </Stack>
+        <Box
+          sx={{
+            mt: 1.3,
+            display: "grid",
+            gridTemplateColumns: "repeat(7, minmax(145px, 1fr))",
+            overflowX: "auto",
+            border: `1px solid ${palette.line}`,
+            borderRadius: 1.2,
+          }}
+        >
+          {weekDays.map(({ date, sessions: daySessions }, index) => (
+            <Box
+              key={date.toISOString()}
+              sx={{
+                minHeight: 220,
+                p: 1.25,
+                borderRight: index < 6 ? `1px solid ${palette.line}` : 0,
+                bgcolor: daySessions.length ? "#F5F9FF" : "#fff",
+                minWidth: 145,
+              }}
+            >
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography
+                  fontWeight={900}
+                  fontSize={14}
+                >{`周${"一二三四五六日"[index]}`}</Typography>
+                <Typography
+                  color="text.secondary"
+                  fontSize={13}
+                >{`${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`}</Typography>
+              </Stack>
+              {daySessions.length ? (
+                daySessions.map((session) => (
+                  <Stack key={session.id} spacing={0.55} sx={{ mt: 1.2 }}>
+                    <Typography
+                      color={palette.blue}
+                      fontWeight={900}
+                      fontSize={13}
+                    >
+                      • 有课程
                     </Typography>
-                  </Box>
-                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Typography fontSize={13}>
+                      {new Date(session.startsAt).toLocaleTimeString("zh-CN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                      –
+                      {new Date(session.endsAt).toLocaleTimeString("zh-CN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </Typography>
+                    <Typography
+                      fontWeight={900}
+                      fontSize={13.5}
+                      sx={{ lineHeight: 1.4 }}
+                    >
+                      {session.title}
+                    </Typography>
+                    <Typography fontSize={12.5} color="text.secondary">
+                      负责人：{session.facilitatorUserName || "待分配"}
+                    </Typography>
                     <Chip
                       size="small"
-                      label={statusLabel[item.status] || item.status}
-                      color={statusColor(item.status)}
+                      label={statusLabel[session.status] || session.status}
+                      sx={{
+                        alignSelf: "flex-start",
+                        height: 22,
+                        bgcolor: palette.greenSoft,
+                        color: palette.green,
+                        fontWeight: 800,
+                      }}
                     />
-                    <Button size="small" onClick={() => onOpen(item.id)}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={() => onOpen(session.id)}
+                      sx={{ mt: 0.5 }}
+                    >
                       进入场次
                     </Button>
                   </Stack>
-                </Stack>
-              </Box>
-            ))}
-            {!sessions.length && (
-              <Typography
-                color="text.secondary"
-                sx={{ py: 5, textAlign: "center" }}
-              >
-                本周暂无场次，请先制定课程计划。
-              </Typography>
-            )}
-          </Stack>
-        </Paper>
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                ))
+              ) : (
+                <Typography
+                  color="#98A2B3"
+                  fontSize={13}
+                  sx={{ mt: 8, textAlign: "center" }}
+                >
+                  暂无安排
+                </Typography>
+              )}
+            </Box>
+          ))}
+        </Box>
+      </Paper>
+
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: {
+            xs: "1fr",
+            lg: "minmax(0, 1fr) minmax(0, 1.1fr)",
+          },
+          gap: 1.5,
+        }}
+      >
+        <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
           <SectionTitle
-            title="本周转化漏斗"
-            helper="实时反映已加载场次的客户转化进度。"
+            title="准备度风险预警"
+            helper={`${Math.max(dashboard.sessionsNeedingAttention, riskTasks.length)} 项需关注`}
           />
-          <Stack spacing={1.7} sx={{ mt: 2 }}>
-            {funnel.map((item, index) => (
-              <Box key={item.label}>
-                <Stack direction="row" justifyContent="space-between">
-                  <Typography variant="body2" fontWeight={800}>
-                    {item.label}
-                  </Typography>
-                  <Typography variant="body2" fontWeight={900}>
-                    {item.value}
-                  </Typography>
-                </Stack>
-                <LinearProgress
-                  variant="determinate"
-                  value={
-                    funnel[0].value
-                      ? Math.max(5, (item.value / funnel[0].value) * 100)
-                      : 0
-                  }
-                  sx={{
-                    mt: 0.7,
-                    height: 9,
-                    borderRadius: 8,
-                    "& .MuiLinearProgress-bar": { bgcolor: item.color },
-                  }}
-                />
-                {index < funnel.length - 1 && (
-                  <Typography variant="caption" color="text.secondary">
-                    下一阶段转化持续更新
-                  </Typography>
+          <TableContainer sx={{ mt: 1 }}>
+            <Table
+              size="small"
+              sx={{
+                ...tableSx,
+                width: "100%",
+                minWidth: "0 !important",
+                tableLayout: "fixed",
+                "& .MuiTableCell-root": {
+                  px: 0.75,
+                  py: 0.85,
+                  fontSize: 12,
+                  boxSizing: "border-box",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                },
+              }}
+            >
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: "30%" }}>风险事项</TableCell>
+                  <TableCell sx={{ width: "25%" }}>关联场次</TableCell>
+                  <TableCell sx={{ width: "15%" }}>风险</TableCell>
+                  <TableCell sx={{ width: "17%" }}>负责人</TableCell>
+                  <TableCell sx={{ width: "13%" }}>状态</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {riskTasks.map((task, index) => (
+                  <TableRow key={task.id}>
+                    <TableCell>{task.title}</TableCell>
+                    <TableCell>{task.sessionTitle}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={index ? "中" : "高"}
+                        sx={{
+                          height: 21,
+                          bgcolor: index ? palette.amberSoft : palette.redSoft,
+                          color: index ? palette.amber : palette.red,
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>{task.completedByName || "待分配"}</TableCell>
+                    <TableCell
+                      sx={{
+                        color:
+                          task.status === "BLOCKED"
+                            ? palette.red
+                            : palette.blue,
+                      }}
+                    >
+                      {statusLabel[task.status]}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!riskTasks.length && (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                      暂无风险项
+                    </TableCell>
+                  </TableRow>
                 )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <Button size="small" sx={{ mt: 0.7 }}>
+            查看全部风险 <ChevronRightIcon fontSize="small" />
+          </Button>
+        </Paper>
+        <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+          <SectionTitle
+            title="本周转化漏斗概览"
+            helper="按当前有权查看的场次统计"
+            action={
+              <Button size="small">
+                查看转化分析 <ChevronRightIcon fontSize="small" />
+              </Button>
+            }
+          />
+          <Box
+            sx={{
+              mt: 1.3,
+              display: "grid",
+              gridTemplateColumns: {
+                xs: "repeat(2, 1fr)",
+                md: "repeat(5, 1fr)",
+              },
+              border: `1px solid ${palette.line}`,
+              borderRadius: 1.2,
+              overflow: "hidden",
+            }}
+          >
+            {funnel.map((item, index) => (
+              <Box
+                key={item.label}
+                sx={{
+                  px: 1.5,
+                  py: 1.8,
+                  borderRight:
+                    index < funnel.length - 1 ? `1px solid ${palette.line}` : 0,
+                  bgcolor: index === funnel.length - 1 ? "#F8FBFF" : "#fff",
+                }}
+              >
+                <Typography color="text.secondary" fontSize={12}>
+                  {item.label}
+                </Typography>
+                <Typography fontSize={22} fontWeight={950} sx={{ mt: 0.5 }}>
+                  {index === funnel.length - 1
+                    ? `¥${Number(item.value).toLocaleString()}`
+                    : item.value}
+                </Typography>
+                <Typography
+                  fontSize={11.5}
+                  color={palette.green}
+                  sx={{ mt: 0.3 }}
+                >
+                  较上周 +0%
+                </Typography>
               </Box>
             ))}
-          </Stack>
+          </Box>
+          <Typography fontSize={13} fontWeight={800} sx={{ mt: 1.2 }}>
+            整体转化率{" "}
+            {funnel[0].value
+              ? `${((funnel[3].value / funnel[0].value) * 100).toFixed(1)}%`
+              : "0.0%"}
+          </Typography>
         </Paper>
       </Box>
+
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+        <SectionTitle
+          title="我的待办"
+          helper={`${Math.max(dashboard.pendingFollowUps, todoTasks.length)} 项待推进`}
+        />
+        <TableContainer sx={{ mt: 1 }}>
+          <Table size="small" sx={tableSx}>
+            <TableHead>
+              <TableRow>
+                <TableCell>任务内容</TableCell>
+                <TableCell>关联场次</TableCell>
+                <TableCell>任务类型</TableCell>
+                <TableCell>负责人</TableCell>
+                <TableCell>截止时间</TableCell>
+                <TableCell>状态</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {todoTasks.map((task) => (
+                <TableRow key={task.id} hover>
+                  <TableCell sx={{ fontWeight: 700 }}>{task.title}</TableCell>
+                  <TableCell>{task.sessionTitle}</TableCell>
+                  <TableCell>
+                    {task.category === "BEFORE"
+                      ? "课前准备"
+                      : task.category === "DURING"
+                        ? "现场执行"
+                        : "课后跟进"}
+                  </TableCell>
+                  <TableCell>{task.completedByName || "待分配"}</TableCell>
+                  <TableCell>-</TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      label={statusLabel[task.status]}
+                      sx={{
+                        height: 22,
+                        bgcolor:
+                          task.status === "BLOCKED"
+                            ? palette.redSoft
+                            : palette.blueSoft,
+                        color:
+                          task.status === "BLOCKED"
+                            ? palette.red
+                            : palette.blue,
+                      }}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!todoTasks.length && (
+                <TableRow>
+                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                    暂无待办任务
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
     </>
   );
 };
@@ -1358,36 +1932,53 @@ const Plans: React.FC<{
   canCreate: boolean;
 }> = ({ sessions, onCreate, canCreate }) => {
   const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const monday = new Date();
+  const todayWeekday = monday.getDay() || 7;
+  monday.setDate(monday.getDate() - todayWeekday + 1);
+  monday.setHours(0, 0, 0, 0);
+  const selected = sessions[0];
+  const selectedDate = selected ? new Date(selected.startsAt) : new Date();
   return (
     <>
-      <SectionTitle
-        title="课程计划"
-        helper="以周为单位安排课程、目标、负责人与经营指标。"
-        action={
-          canCreate && (
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={onCreate}
-            >
-              新增课程计划
-            </Button>
-          )
-        }
-      />
-      <Paper
-        variant="outlined"
-        sx={{ p: 2, borderRadius: 2, overflowX: "auto" }}
-      >
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5, overflow: "hidden" }}>
+        <SectionTitle
+          title="本周课程计划"
+          helper="按周统一安排课程、负责人、目标和执行节点"
+          action={
+            <Stack direction="row" spacing={1}>
+              <IconButton size="small">
+                <ChevronLeftIcon />
+              </IconButton>
+              <Button size="small" variant="outlined">
+                本周
+              </Button>
+              {canCreate && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={onCreate}
+                >
+                  新建课程计划
+                </Button>
+              )}
+            </Stack>
+          }
+        />
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: "repeat(7, minmax(150px, 1fr))",
-            gap: 1,
+            gridTemplateColumns: "repeat(7, minmax(145px, 1fr))",
             minWidth: 1080,
+            mt: 1.3,
+            border: `1px solid ${palette.line}`,
+            borderRadius: 1.2,
+            overflow: "hidden",
           }}
         >
           {days.map((day, index) => {
+            const date = new Date(monday);
+            date.setDate(monday.getDate() + index);
             const items = sessions.filter((item) => {
               const weekday = new Date(item.startsAt).getDay() || 7;
               return weekday === index + 1;
@@ -1396,22 +1987,25 @@ const Plans: React.FC<{
               <Box
                 key={day}
                 sx={{
-                  minHeight: 220,
+                  minHeight: 245,
                   p: 1.2,
-                  borderRadius: 1.5,
-                  bgcolor:
-                    index === 2 || index === 3 ? "#EEF4FF" : palette.soft,
-                  border: `1px solid ${index === 2 || index === 3 ? "#B9D2FF" : palette.line}`,
+                  bgcolor: items.length ? "#F4F8FF" : "#fff",
+                  borderRight: index < 6 ? `1px solid ${palette.line}` : 0,
                 }}
               >
-                <Typography
-                  fontWeight={900}
-                  color={
-                    index === 2 || index === 3 ? palette.blue : palette.ink
-                  }
-                >
-                  {day}
-                </Typography>
+                <Stack direction="row" spacing={0.8} alignItems="center">
+                  <Typography
+                    fontWeight={900}
+                    color={items.length ? palette.blue : palette.ink}
+                    fontSize={13.5}
+                  >
+                    {day}
+                  </Typography>
+                  <Typography fontSize={12.5} color="text.secondary">
+                    {String(date.getMonth() + 1).padStart(2, "0")}-
+                    {String(date.getDate()).padStart(2, "0")}
+                  </Typography>
+                </Stack>
                 {items.length ? (
                   <Stack spacing={1} sx={{ mt: 1.2 }}>
                     {items.map((item) => (
@@ -1419,9 +2013,9 @@ const Plans: React.FC<{
                         key={item.id}
                         sx={{
                           p: 1.2,
-                          borderRadius: 1.2,
+                          borderRadius: 1,
                           bgcolor: "#fff",
-                          borderLeft: `4px solid ${palette.blue}`,
+                          border: `1px solid #C9DBFF`,
                         }}
                       >
                         <Typography variant="body2" fontWeight={900}>
@@ -1445,7 +2039,7 @@ const Plans: React.FC<{
                   <Typography
                     variant="caption"
                     color="text.secondary"
-                    sx={{ display: "block", mt: 2 }}
+                    sx={{ display: "block", mt: 9, textAlign: "center" }}
                   >
                     暂无排期
                   </Typography>
@@ -1454,122 +2048,556 @@ const Plans: React.FC<{
             );
           })}
         </Box>
-      </Paper>
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-        <SectionTitle title="周计划发布门禁" />
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "repeat(4, 1fr)" },
-            gap: 1.2,
-            mt: 1.5,
-          }}
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          justifyContent="space-between"
+          spacing={1}
+          sx={{ pt: 1.1 }}
         >
-          {[
-            "课程目标与客户问题已确认",
-            "课程与素材负责人已确认",
-            "邀约、到课、成交目标已设定",
-            "风险项和验收标准已确认",
-          ].map((text) => (
-            <Box
-              key={text}
-              sx={{ p: 1.4, bgcolor: "#F8FAFC", borderRadius: 1.5 }}
-            >
-              <TaskAltIcon sx={{ color: palette.green, fontSize: 20 }} />
-              <Typography variant="body2" fontWeight={700}>
-                {text}
-              </Typography>
-            </Box>
-          ))}
-        </Box>
+          <Typography fontSize={12.5} color="text.secondary">
+            本周已安排课程 {sessions.length}{" "}
+            场，目标成交金额由各场次经营目标汇总
+          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography fontSize={12} color="text.secondary">
+              数据更新时间：
+              {new Date().toLocaleString("zh-CN", { hour12: false })}
+            </Typography>
+            <Button size="small" startIcon={<RefreshIcon fontSize="small" />}>
+              刷新
+            </Button>
+          </Stack>
+        </Stack>
       </Paper>
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: {
+            xs: "1fr",
+            lg: "minmax(0, .85fr) minmax(0, 1.45fr)",
+          },
+          gap: 1.5,
+        }}
+      >
+        <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+          <SectionTitle
+            title={
+              selected
+                ? `${days[(selectedDate.getDay() || 7) - 1]}课程任务概览`
+                : "课程任务概览"
+            }
+            helper={selected ? statusLabel[selected.status] : "暂无场次"}
+          />
+          {selected ? (
+            <Stack spacing={1.1} sx={{ mt: 1.4 }}>
+              {[
+                { label: "课程名称", value: selected.title },
+                {
+                  label: "目标人群",
+                  value: selected.course?.category || "待填写",
+                },
+                {
+                  label: "课程产品",
+                  value: selected.course?.title || "待关联",
+                },
+                {
+                  label: "负责人",
+                  value: selected.facilitatorUserName || "待分配",
+                },
+                {
+                  label: "课程时间",
+                  value: `${formatDate(selected.startsAt)} ～ ${formatDate(selected.endsAt)}`,
+                },
+                { label: "场地", value: selected.venue || "待填写" },
+              ].map((row) => (
+                <Box
+                  key={row.label}
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: "92px 1fr",
+                    gap: 1,
+                  }}
+                >
+                  <Typography fontSize={12.5} color="text.secondary">
+                    {row.label}
+                  </Typography>
+                  <Typography fontSize={13} fontWeight={800}>
+                    {row.value}
+                  </Typography>
+                </Box>
+              ))}
+            </Stack>
+          ) : (
+            <Typography
+              color="text.secondary"
+              sx={{ py: 5, textAlign: "center" }}
+            >
+              请先创建本周课程场次
+            </Typography>
+          )}
+        </Paper>
+        <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+          <SectionTitle title="执行任务" helper="开课前必须完成所有必做任务" />
+          <TableContainer sx={{ mt: 1 }}>
+            <Table
+              size="small"
+              sx={{
+                ...tableSx,
+                width: "100%",
+                minWidth: "0 !important",
+                tableLayout: "fixed",
+                "& .MuiTableCell-root": {
+                  px: 0.7,
+                  py: 0.8,
+                  fontSize: 12,
+                  boxSizing: "border-box",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                },
+              }}
+            >
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: "34%" }}>任务项</TableCell>
+                  <TableCell sx={{ width: "14%" }}>负责人</TableCell>
+                  <TableCell sx={{ width: "12%" }}>协作人</TableCell>
+                  <TableCell sx={{ width: "16%" }}>截止时间</TableCell>
+                  <TableCell sx={{ width: "10%" }}>风险</TableCell>
+                  <TableCell sx={{ width: "14%" }}>状态</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {[
+                  "课程输出与讲师确认",
+                  "课程目标和资源准备",
+                  "邀约名单与分组",
+                  "客户问题收集",
+                  "场地设备检查",
+                  "签到与物料准备",
+                ].map((task, index) => (
+                  <TableRow key={task}>
+                    <TableCell>
+                      <Checkbox size="small" checked={index < 2} readOnly />
+                      {task}
+                    </TableCell>
+                    <TableCell>
+                      {selected?.facilitatorUserName || "待分配"}
+                    </TableCell>
+                    <TableCell>-</TableCell>
+                    <TableCell>-</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={index === 4 ? "中" : "低"}
+                        sx={{
+                          height: 21,
+                          bgcolor:
+                            index === 4 ? palette.amberSoft : palette.greenSoft,
+                          color: index === 4 ? palette.amber : palette.green,
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell
+                      sx={{ color: index < 2 ? palette.green : palette.blue }}
+                    >
+                      {index < 2 ? "已完成" : "待开始"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      </Box>
     </>
   );
 };
 
-const CourseTable: React.FC<{
+const CourseWorkspace: React.FC<{
   items: AcademyCourse[];
+  total: number;
+  selectedId: string;
+  onSelect: (id: string) => void;
+  search: string;
+  onSearch: (value: string) => void;
   canManage: boolean;
+  onCreate: () => void;
   onStatusChange: (
     course: AcademyCourse,
     status: AcademyCourse["status"],
   ) => void;
-}> = ({ items, canManage, onStatusChange }) => (
-  <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
-    <Table size="small">
-      <TableHead>
-        <TableRow>
-          <TableCell>课程编码</TableCell>
-          <TableCell>课程名称</TableCell>
-          <TableCell>分类</TableCell>
-          <TableCell>最新版本</TableCell>
-          <TableCell>负责人</TableCell>
-          <TableCell>状态</TableCell>
-          <TableCell>最后更新</TableCell>
-          <TableCell align="right">操作</TableCell>
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {items.map((item) => (
-          <TableRow key={item.id} hover>
-            <TableCell>{item.code}</TableCell>
-            <TableCell>
-              <Typography fontWeight={800}>{item.title}</Typography>
-              <Typography variant="caption" color="text.secondary">
-                {item.summary || "未填写课程定位"}
-              </Typography>
-            </TableCell>
-            <TableCell>{item.category}</TableCell>
-            <TableCell>V1</TableCell>
-            <TableCell>{item.ownerUserName}</TableCell>
-            <TableCell>
-              <Chip
-                size="small"
-                label={statusLabel[item.status] || item.status}
-                color={statusColor(item.status)}
+  page: number;
+  pageSize: number;
+  onPage: (value: number) => void;
+  onPageSize: (value: number) => void;
+}> = ({
+  items,
+  total,
+  selectedId,
+  onSelect,
+  search,
+  onSearch,
+  canManage,
+  onCreate,
+  onStatusChange,
+  page,
+  pageSize,
+  onPage,
+  onPageSize,
+}) => {
+  const selected = items.find((item) => item.id === selectedId) || items[0];
+  return (
+    <Box
+      sx={{
+        display: "grid",
+        gridTemplateColumns: {
+          xs: "1fr",
+          lg: "minmax(0, 1.9fr) minmax(360px, .9fr)",
+        },
+        gap: 1.5,
+        alignItems: "stretch",
+      }}
+    >
+      <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={1}
+          sx={{ p: 1.4, borderBottom: `1px solid ${palette.line}` }}
+        >
+          <TextField
+            size="small"
+            placeholder="输入课程名称"
+            value={search}
+            onChange={(event) => onSearch(event.target.value)}
+            InputProps={{
+              startAdornment: (
+                <SearchIcon sx={{ mr: 0.8, color: "#98A2B3", fontSize: 20 }} />
+              ),
+            }}
+            sx={{ minWidth: 220 }}
+          />
+          <TextField
+            select
+            size="small"
+            label="课程分类"
+            defaultValue="全部"
+            sx={{ minWidth: 130 }}
+          >
+            <MenuItem value="全部">全部</MenuItem>
+          </TextField>
+          <TextField
+            select
+            size="small"
+            label="内容状态"
+            defaultValue="全部"
+            sx={{ minWidth: 130 }}
+          >
+            <MenuItem value="全部">全部</MenuItem>
+          </TextField>
+          <Box flex={1} />
+          <Button startIcon={<RefreshIcon />} variant="outlined">
+            重置
+          </Button>
+          <Button variant="contained">查询</Button>
+          {canManage && (
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={onCreate}
+            >
+              新建课程
+            </Button>
+          )}
+        </Stack>
+        <Typography
+          fontSize={13}
+          color="text.secondary"
+          sx={{ px: 1.5, py: 1.2 }}
+        >
+          共 {total} 条
+        </Typography>
+        <TableContainer>
+          <Table
+            size="small"
+            sx={{
+              ...tableSx,
+              width: "100% !important",
+              maxWidth: "100% !important",
+              minWidth: "0 !important",
+              tableLayout: "fixed",
+              "& .MuiTableCell-root": {
+                px: 0.75,
+                py: 0.9,
+                fontSize: 12,
+                boxSizing: "border-box",
+                minWidth: 0,
+                maxWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              },
+            }}
+          >
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ width: "17%" }}>课程名称</TableCell>
+                <TableCell sx={{ width: "10%" }}>目标客户</TableCell>
+                <TableCell sx={{ width: "10%" }}>转化产品</TableCell>
+                <TableCell sx={{ width: "7%" }}>版本</TableCell>
+                <TableCell sx={{ width: "8%" }}>状态</TableCell>
+                <TableCell sx={{ width: "9%" }}>负责人</TableCell>
+                <TableCell sx={{ width: "10%" }}>最近使用</TableCell>
+                <TableCell sx={{ width: "6%" }}>场次</TableCell>
+                <TableCell sx={{ width: "6%" }} align="right">
+                  操作
+                </TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow
+                  key={item.id}
+                  hover
+                  selected={item.id === selected?.id}
+                  onClick={() => onSelect(item.id)}
+                  sx={{
+                    cursor: "pointer",
+                    "&.Mui-selected": { bgcolor: "#F1F6FF" },
+                    "&.Mui-selected:hover": { bgcolor: "#EDF4FF" },
+                  }}
+                >
+                  <TableCell sx={{ fontWeight: 800 }}>{item.title}</TableCell>
+                  <TableCell>{item.objectives[0] || "企业管理者"}</TableCell>
+                  <TableCell>{item.category}</TableCell>
+                  <TableCell>V1.0</TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      label={statusLabel[item.status]}
+                      sx={{
+                        height: 22,
+                        bgcolor:
+                          item.status === "ACTIVE"
+                            ? palette.greenSoft
+                            : item.status === "DRAFT"
+                              ? palette.soft
+                              : palette.blueSoft,
+                        color:
+                          item.status === "ACTIVE"
+                            ? palette.green
+                            : palette.muted,
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>{item.ownerUserName}</TableCell>
+                  <TableCell>
+                    {new Date(item.updatedAt).toLocaleDateString("zh-CN")}
+                  </TableCell>
+                  <TableCell>0</TableCell>
+                  <TableCell
+                    align="right"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <IconButton size="small" onClick={() => onSelect(item.id)}>
+                      <VisibilityOutlinedIcon fontSize="small" />
+                    </IconButton>
+                    {canManage && item.status === "DRAFT" && (
+                      <Button
+                        size="small"
+                        onClick={() => onStatusChange(item, "ACTIVE")}
+                      >
+                        发布
+                      </Button>
+                    )}
+                    {canManage && item.status === "ACTIVE" && (
+                      <IconButton
+                        size="small"
+                        onClick={() => onStatusChange(item, "ARCHIVED")}
+                      >
+                        <MoreHorizIcon fontSize="small" />
+                      </IconButton>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!items.length && (
+                <TableRow>
+                  <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
+                    暂无课程数据
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <TablePagination
+          count={total}
+          page={page}
+          rowsPerPage={pageSize}
+          onPageChange={(_, next) => onPage(next)}
+          onRowsPerPageChange={(event) =>
+            onPageSize(Number(event.target.value))
+          }
+        />
+      </Paper>
+      <Paper
+        variant="outlined"
+        sx={{ ...panelSx, overflow: "hidden", minHeight: 650 }}
+      >
+        {selected ? (
+          <>
+            <Stack
+              direction="row"
+              justifyContent="space-between"
+              alignItems="flex-start"
+              sx={{ p: 1.7, borderBottom: `1px solid ${palette.line}` }}
+            >
+              <Box>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography fontSize={18} fontWeight={950}>
+                    {selected.title}
+                  </Typography>
+                  <Chip
+                    size="small"
+                    label={statusLabel[selected.status]}
+                    sx={{
+                      bgcolor: palette.greenSoft,
+                      color: palette.green,
+                      height: 22,
+                    }}
+                  />
+                </Stack>
+                <Typography
+                  fontSize={12.5}
+                  color="text.secondary"
+                  sx={{ mt: 0.5 }}
+                >
+                  {selected.code} · V1.0 · {selected.category}
+                </Typography>
+              </Box>
+              <IconButton size="small">
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Stack>
+            <Box sx={{ p: 1.7 }}>
+              <SectionTitle
+                title="课程概览"
+                action={
+                  canManage ? <Button size="small">编辑</Button> : undefined
+                }
               />
-            </TableCell>
-            <TableCell>{formatDate(item.updatedAt)}</TableCell>
-            <TableCell align="right">
-              {canManage && item.status === "DRAFT" && (
-                <Button
-                  size="small"
-                  onClick={() => onStatusChange(item, "ACTIVE")}
-                >
-                  发布课程
-                </Button>
-              )}
-              {canManage && item.status === "ACTIVE" && (
-                <Button
-                  size="small"
-                  color="inherit"
-                  onClick={() => onStatusChange(item, "ARCHIVED")}
-                >
-                  归档
-                </Button>
-              )}
-              {canManage && item.status === "ARCHIVED" && (
-                <Button
-                  size="small"
-                  onClick={() => onStatusChange(item, "ACTIVE")}
-                >
-                  重新启用
-                </Button>
-              )}
-            </TableCell>
-          </TableRow>
-        ))}
-        {!items.length && (
-          <TableRow>
-            <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
-              暂无课程数据
-            </TableCell>
-          </TableRow>
+              <Stack spacing={1.35} sx={{ mt: 1.4 }}>
+                {[
+                  {
+                    label: "课程定位",
+                    value:
+                      selected.summary ||
+                      "面向目标客户，解决真实业务问题并形成可落地行动。",
+                  },
+                  {
+                    label: "客户核心问题",
+                    value:
+                      selected.objectives[0] || "增长方法零散、执行难以闭环。",
+                  },
+                  {
+                    label: "课程目标",
+                    value:
+                      selected.objectives.slice(0, 2).join("；") ||
+                      "形成清晰方法、行动清单与复盘机制。",
+                  },
+                  {
+                    label: "核心观点",
+                    value: "从问题出发，以流程、数据和复盘形成持续改进。",
+                  },
+                  { label: "目标产品", value: selected.category },
+                  {
+                    label: "版本状态",
+                    value: `当前版本 V1.0 · ${new Date(selected.updatedAt).toLocaleDateString("zh-CN")}`,
+                  },
+                ].map((row) => (
+                  <Box
+                    key={row.label}
+                    sx={{
+                      display: "grid",
+                      gridTemplateColumns: "88px 1fr",
+                      gap: 1,
+                    }}
+                  >
+                    <Typography
+                      fontSize={12.5}
+                      color="text.secondary"
+                      fontWeight={800}
+                    >
+                      {row.label}
+                    </Typography>
+                    <Typography fontSize={13} lineHeight={1.55}>
+                      {row.value}
+                    </Typography>
+                  </Box>
+                ))}
+              </Stack>
+            </Box>
+            <Divider />
+            <Tabs
+              value={0}
+              sx={{
+                px: 1.2,
+                minHeight: 44,
+                "& .MuiTab-root": { minHeight: 44, fontSize: 13, px: 1.4 },
+              }}
+            >
+              <Tab label="内容结构" />
+              <Tab label="课程资产" />
+              <Tab label="版本记录" />
+              <Tab label="使用记录" />
+            </Tabs>
+            <Box sx={{ p: 1.7 }}>
+              <Stack spacing={1}>
+                {[
+                  "课件 PPT",
+                  "逐字稿",
+                  "课程案例",
+                  "宣传海报",
+                  "邀约话术",
+                  "直播回放",
+                ].map((asset, index) => (
+                  <Stack
+                    key={asset}
+                    direction="row"
+                    justifyContent="space-between"
+                    sx={{ p: 1.1, borderBottom: `1px solid ${palette.line}` }}
+                  >
+                    <Box>
+                      <Typography fontSize={13} fontWeight={800}>
+                        {asset}
+                      </Typography>
+                      <Typography fontSize={11.5} color="text.secondary">
+                        {selected.title}_{asset}_V1.0
+                      </Typography>
+                    </Box>
+                    <Chip
+                      size="small"
+                      label={index < 2 ? "已上传" : "待补充"}
+                      sx={{
+                        height: 21,
+                        bgcolor: index < 2 ? palette.greenSoft : palette.soft,
+                        color: index < 2 ? palette.green : palette.muted,
+                      }}
+                    />
+                  </Stack>
+                ))}
+              </Stack>
+            </Box>
+          </>
+        ) : (
+          <Typography color="text.secondary" textAlign="center" sx={{ py: 10 }}>
+            选择课程查看详情
+          </Typography>
         )}
-      </TableBody>
-    </Table>
-  </TableContainer>
-);
+      </Paper>
+    </Box>
+  );
+};
 const SessionTable: React.FC<{
   items: AcademySession[];
   onOpen: (id: string) => void;
@@ -1622,75 +2650,331 @@ const SessionTable: React.FC<{
     </Table>
   </TableContainer>
 );
-const EngagementTable: React.FC<{ items: AcademyEngagement[] }> = ({
-  items,
-}) => (
-  <TableContainer
-    component={Paper}
-    variant="outlined"
-    sx={{ mt: 1.5, borderRadius: 2 }}
-  >
-    <Table size="small">
-      <TableHead>
-        <TableRow>
-          <TableCell>客户 / 学员</TableCell>
-          <TableCell>销售负责人</TableCell>
-          <TableCell>邀约</TableCell>
-          <TableCell>到课</TableCell>
-          <TableCell>课堂分层</TableCell>
-          <TableCell>跟进状态</TableCell>
-          <TableCell>下一步</TableCell>
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {items.map((item) => (
-          <TableRow key={item.id} hover>
-            <TableCell sx={{ fontWeight: 800 }}>
-              {item.participantName}
-            </TableCell>
-            <TableCell>{item.ownerUserName || "待分配"}</TableCell>
-            <TableCell>
-              {statusLabel[item.invitationStatus] || item.invitationStatus}
-            </TableCell>
-            <TableCell>
-              {statusLabel[item.attendanceStatus] || item.attendanceStatus}
-            </TableCell>
-            <TableCell>
-              <Chip
-                size="small"
-                label={item.courseAssessment || "待分层"}
-                color={
-                  item.courseAssessment === "A"
-                    ? "error"
-                    : item.courseAssessment === "B"
-                      ? "warning"
-                      : "default"
-                }
-              />
-            </TableCell>
-            <TableCell>
-              {statusLabel[item.followUpStatus] || item.followUpStatus}
-            </TableCell>
-            <TableCell>
-              {item.courseAssessment === "A"
-                ? "24小时内重点跟进"
-                : item.courseAssessment === "B"
-                  ? "建立跟进计划"
-                  : "持续培育"}
-            </TableCell>
-          </TableRow>
-        ))}
-        {!items.length && (
-          <TableRow>
-            <TableCell colSpan={7} align="center" sx={{ py: 6 }}>
-              当前场次暂无学员记录
-            </TableCell>
-          </TableRow>
-        )}
-      </TableBody>
-    </Table>
-  </TableContainer>
-);
+const EngagementWorkspace: React.FC<{
+  sessions: AcademySession[];
+  selectedSessionId: string;
+  onSelectSession: (id: string) => void;
+  detail?: AcademySessionDetail;
+  canManage: boolean;
+  onAdd: () => void;
+}> = ({
+  sessions,
+  selectedSessionId,
+  onSelectSession,
+  detail,
+  canManage,
+  onAdd,
+}) => {
+  const items = detail?.engagements || [];
+  const selected = items[0];
+  const invited = items.length;
+  const confirmed = items.filter(
+    (item) => item.invitationStatus === "CONFIRMED",
+  ).length;
+  const attended = items.filter(
+    (item) => item.attendanceStatus === "ATTENDED",
+  ).length;
+  const consulted = items.filter((item) =>
+    ["A", "B"].includes(item.courseAssessment || ""),
+  ).length;
+  return (
+    <>
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.4 }}>
+        <Stack direction={{ xs: "column", lg: "row" }} spacing={1}>
+          <TextField
+            select
+            size="small"
+            label="课程场次"
+            value={selectedSessionId}
+            onChange={(event) => onSelectSession(event.target.value)}
+            sx={{ minWidth: 320 }}
+          >
+            {sessions.map((item) => (
+              <MenuItem key={item.id} value={item.id}>
+                {item.title} ·{" "}
+                {new Date(item.startsAt).toLocaleDateString("zh-CN")}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            size="small"
+            label="销售负责人"
+            defaultValue="全部"
+            sx={{ minWidth: 150 }}
+          >
+            <MenuItem value="全部">全部</MenuItem>
+          </TextField>
+          <TextField
+            select
+            size="small"
+            label="邀约状态"
+            defaultValue="全部"
+            sx={{ minWidth: 140 }}
+          >
+            <MenuItem value="全部">全部</MenuItem>
+          </TextField>
+          <TextField
+            select
+            size="small"
+            label="到课状态"
+            defaultValue="全部"
+            sx={{ minWidth: 140 }}
+          >
+            <MenuItem value="全部">全部</MenuItem>
+          </TextField>
+          <TextField
+            size="small"
+            placeholder="客户/公司/手机号"
+            InputProps={{
+              startAdornment: (
+                <SearchIcon sx={{ mr: 0.7, color: "#98A2B3", fontSize: 20 }} />
+              ),
+            }}
+          />
+          <Box flex={1} />
+          {canManage && (
+            <Button variant="contained" onClick={onAdd}>
+              从CRM添加学员
+            </Button>
+          )}
+        </Stack>
+      </Paper>
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.4 }}>
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(5, 1fr)" },
+            border: `1px solid ${palette.line}`,
+            borderRadius: 1.2,
+            overflow: "hidden",
+          }}
+        >
+          {[
+            { label: "学员总数", value: invited },
+            { label: "邀约", value: invited },
+            { label: "确认", value: confirmed },
+            { label: "到课", value: attended },
+            { label: "咨询", value: consulted },
+          ].map((step, index) => (
+            <Box
+              key={step.label}
+              sx={{
+                p: 1.3,
+                borderRight: index < 4 ? `1px solid ${palette.line}` : 0,
+              }}
+            >
+              <Typography fontSize={12} color="text.secondary">
+                {step.label}
+              </Typography>
+              <Typography fontSize={22} fontWeight={950} sx={{ mt: 0.4 }}>
+                {step.value}
+              </Typography>
+              <Typography fontSize={11.5} color={palette.green}>
+                转化率 {invited ? Math.round((step.value / invited) * 100) : 0}%
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+      </Paper>
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: {
+            xs: "1fr",
+            lg: "minmax(0, 2fr) minmax(330px, .7fr)",
+          },
+          gap: 1.5,
+        }}
+      >
+        <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
+          <TableContainer>
+            <Table size="small" sx={tableSx}>
+              <TableHead>
+                <TableRow>
+                  <TableCell padding="checkbox">
+                    <Checkbox size="small" />
+                  </TableCell>
+                  <TableCell>客户</TableCell>
+                  <TableCell>公司/行业</TableCell>
+                  <TableCell>销售负责人</TableCell>
+                  <TableCell>邀约状态</TableCell>
+                  <TableCell>到课</TableCell>
+                  <TableCell>课堂互动</TableCell>
+                  <TableCell>课程分层</TableCell>
+                  <TableCell>下一步跟进</TableCell>
+                  <TableCell>成交/交接</TableCell>
+                  <TableCell>操作</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {items.map((item, index) => (
+                  <TableRow key={item.id} hover selected={index === 0}>
+                    <TableCell padding="checkbox">
+                      <Checkbox size="small" />
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>
+                      {item.participantName}
+                    </TableCell>
+                    <TableCell>-</TableCell>
+                    <TableCell>{item.ownerUserName || "待分配"}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={
+                          statusLabel[item.invitationStatus] ||
+                          item.invitationStatus
+                        }
+                        sx={{
+                          height: 21,
+                          bgcolor: palette.greenSoft,
+                          color: palette.green,
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      {statusLabel[item.attendanceStatus] ||
+                        item.attendanceStatus}
+                    </TableCell>
+                    <TableCell>{item.interactionLevel || "待记录"}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={item.courseAssessment || "待分层"}
+                        sx={{
+                          height: 22,
+                          bgcolor:
+                            item.courseAssessment === "A"
+                              ? palette.redSoft
+                              : item.courseAssessment === "B"
+                                ? palette.amberSoft
+                                : palette.blueSoft,
+                          color:
+                            item.courseAssessment === "A"
+                              ? palette.red
+                              : item.courseAssessment === "B"
+                                ? palette.amber
+                                : palette.blue,
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      {item.courseAssessment === "A"
+                        ? "24小时内重点跟进"
+                        : item.courseAssessment === "B"
+                          ? "建立跟进计划"
+                          : "持续培育"}
+                    </TableCell>
+                    <TableCell>
+                      {statusLabel[item.followUpStatus] || item.followUpStatus}
+                    </TableCell>
+                    <TableCell>
+                      <Button size="small">查看</Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!items.length && (
+                  <TableRow>
+                    <TableCell colSpan={11} align="center" sx={{ py: 7 }}>
+                      当前场次暂无学员，请从CRM添加
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+        <Paper
+          variant="outlined"
+          sx={{ ...panelSx, overflow: "hidden", minHeight: 520 }}
+        >
+          <Stack
+            direction="row"
+            justifyContent="space-between"
+            alignItems="center"
+            sx={{ p: 1.5, borderBottom: `1px solid ${palette.line}` }}
+          >
+            <Typography fontWeight={950}>
+              {selected ? `${selected.participantName}·过程` : "学员单屏过程"}
+            </Typography>
+            <IconButton size="small">
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Stack>
+          {selected ? (
+            <Stack spacing={1.4} sx={{ p: 1.5 }}>
+              <Box>
+                <Typography fontSize={12} color="text.secondary">
+                  CRM身份
+                </Typography>
+                <Typography fontSize={13.5} fontWeight={800}>
+                  {selected.customerId ? "已关联客户" : "临时学员"}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography fontSize={12} color="text.secondary">
+                  课程与场次
+                </Typography>
+                <Typography fontSize={13.5}>{detail?.title || "-"}</Typography>
+              </Box>
+              <Divider />
+              <Typography fontSize={13} fontWeight={900}>
+                流程时间线
+              </Typography>
+              {[
+                "加入邀约名单",
+                statusLabel[selected.invitationStatus] ||
+                  selected.invitationStatus,
+                statusLabel[selected.attendanceStatus] ||
+                  selected.attendanceStatus,
+                `课程分层：${selected.courseAssessment || "待分层"}`,
+                `跟进：${statusLabel[selected.followUpStatus] || selected.followUpStatus}`,
+              ].map((text, index) => (
+                <Stack key={`${text}-${index}`} direction="row" spacing={1}>
+                  <Box
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      mt: 0.8,
+                      borderRadius: "50%",
+                      bgcolor: index < 2 ? palette.green : palette.blue,
+                    }}
+                  />
+                  <Box>
+                    <Typography fontSize={13} fontWeight={800}>
+                      {text}
+                    </Typography>
+                    <Typography fontSize={11.5} color="text.secondary">
+                      由系统业务状态自动记录
+                    </Typography>
+                  </Box>
+                </Stack>
+              ))}
+              <Divider />
+              <Typography fontSize={13} fontWeight={900}>
+                下一步行动
+              </Typography>
+              <Typography fontSize={12.5} color="text.secondary">
+                {selected.courseAssessment === "A"
+                  ? "重点跟进并关联正式订单"
+                  : "按课程反馈建立后续跟进计划"}
+              </Typography>
+              <Button variant="contained">更新学员进度</Button>
+            </Stack>
+          ) : (
+            <Typography
+              color="text.secondary"
+              textAlign="center"
+              sx={{ py: 9 }}
+            >
+              选择学员查看全过程
+            </Typography>
+          )}
+        </Paper>
+      </Box>
+    </>
+  );
+};
 const Reviews: React.FC<{
   sessions: AcademySession[];
   details: Record<string, AcademySessionDetail>;
@@ -1721,120 +3005,341 @@ const Reviews: React.FC<{
   const detail = details[selectedId];
   const invited = detail?.engagements.length || 0;
   const conversion = invited ? Math.round((attended / invited) * 100) : 0;
+  const consulted =
+    detail?.engagements.filter((item) =>
+      ["A", "B"].includes(item.courseAssessment || ""),
+    ).length || 0;
+  const funnel = [
+    { label: "邀约", target: Math.max(invited, 1), actual: invited },
+    { label: "确认", target: Math.max(confirmed, 1), actual: confirmed },
+    { label: "到课", target: Math.max(attended, 1), actual: attended },
+    { label: "咨询", target: Math.max(consulted, 1), actual: consulted },
+    { label: "成交人数", target: Math.max(hot, 1), actual: hot },
+    { label: "成交金额", target: 0, actual: 0 },
+  ];
   return (
     <>
-      <SectionTitle
-        title="经营复盘"
-        helper="按单场、周期和课程版本查看目标差异、原因与改进行动。"
-        action={canEdit ? (
-          <Button variant="contained" disabled={saving || !selectedId} onClick={onSave}>
-            保存本场复盘
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.4 }}>
+        <Stack
+          direction={{ xs: "column", lg: "row" }}
+          spacing={1}
+          alignItems={{ lg: "center" }}
+        >
+          <TextField
+            select
+            size="small"
+            label="时间范围"
+            defaultValue="本周"
+            sx={{ minWidth: 150 }}
+          >
+            <MenuItem value="本周">本周</MenuItem>
+          </TextField>
+          <TextField
+            select
+            size="small"
+            label="课程/场次"
+            value={selectedId}
+            onChange={(event) => onSelect(event.target.value)}
+            sx={{ minWidth: 340 }}
+          >
+            {sessions.map((item) => (
+              <MenuItem key={item.id} value={item.id}>
+                {item.title}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            size="small"
+            label="讲师"
+            defaultValue="全部"
+            sx={{ minWidth: 120 }}
+          >
+            <MenuItem value="全部">全部</MenuItem>
+          </TextField>
+          <TextField
+            select
+            size="small"
+            label="销售部门"
+            defaultValue="全部"
+            sx={{ minWidth: 130 }}
+          >
+            <MenuItem value="全部">全部</MenuItem>
+          </TextField>
+          <TextField
+            select
+            size="small"
+            label="渠道"
+            defaultValue="全部"
+            sx={{ minWidth: 130 }}
+          >
+            <MenuItem value="全部">全部</MenuItem>
+          </TextField>
+          <Box flex={1} />
+          <Button variant="outlined" startIcon={<DownloadIcon />}>
+            导出经营报告
           </Button>
-        ) : undefined}
-      />
-      <TextField
-        select
-        size="small"
-        label="复盘场次"
-        value={selectedId}
-        onChange={(event) => onSelect(event.target.value)}
-        sx={{ maxWidth: 480 }}
-      >
-        {sessions.map((item) => (
-          <MenuItem key={item.id} value={item.id}>
-            {item.title}
-          </MenuItem>
-        ))}
-      </TextField>
+          {canEdit && (
+            <Button
+              variant="contained"
+              disabled={saving || !selectedId}
+              onClick={onSave}
+            >
+              提交复盘
+            </Button>
+          )}
+        </Stack>
+      </Paper>
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+        <SectionTitle
+          title="经营复盘·目标与实际"
+          helper={
+            detail
+              ? `${new Date(detail.startsAt).toLocaleDateString("zh-CN")} · ${detail.title}`
+              : "请选择复盘场次"
+          }
+        />
+        <Box
+          sx={{
+            mt: 1.3,
+            display: "grid",
+            gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(6, 1fr)" },
+            border: `1px solid ${palette.line}`,
+            borderRadius: 1.2,
+            overflow: "hidden",
+          }}
+        >
+          {funnel.map((item, index) => (
+            <Box
+              key={item.label}
+              sx={{
+                p: 1.35,
+                borderRight: index < 5 ? `1px solid ${palette.line}` : 0,
+              }}
+            >
+              <Typography fontSize={12.5} fontWeight={900}>
+                {item.label}
+              </Typography>
+              <Stack spacing={0.3} sx={{ mt: 0.8 }}>
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography fontSize={11.5} color="text.secondary">
+                    目标
+                  </Typography>
+                  <Typography fontSize={12.5}>
+                    {index === 5
+                      ? `¥${item.target.toLocaleString()}`
+                      : item.target}
+                  </Typography>
+                </Stack>
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography fontSize={11.5} color="text.secondary">
+                    实际
+                  </Typography>
+                  <Typography fontSize={14} fontWeight={950}>
+                    {index === 5
+                      ? `¥${item.actual.toLocaleString()}`
+                      : item.actual}
+                  </Typography>
+                </Stack>
+                <Typography
+                  fontSize={11.5}
+                  color={
+                    item.actual >= item.target ? palette.green : palette.red
+                  }
+                >
+                  差距 {item.actual - item.target >= 0 ? "+" : ""}
+                  {item.actual - item.target}
+                </Typography>
+              </Stack>
+            </Box>
+          ))}
+        </Box>
+        <Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>
+          整体到课率 {conversion}% · A类客户 {hot} 人 · 数据来自当前选择场次
+        </Typography>
+      </Paper>
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+        <SectionTitle title="核心场次达成对比" />
+        <TableContainer sx={{ mt: 1 }}>
+          <Table size="small" sx={tableSx}>
+            <TableHead>
+              <TableRow>
+                <TableCell>场次日期</TableCell>
+                <TableCell>场次名称</TableCell>
+                <TableCell>目标到场</TableCell>
+                <TableCell>实际到场</TableCell>
+                <TableCell>到课率</TableCell>
+                <TableCell>A/B客户</TableCell>
+                <TableCell>成交人数</TableCell>
+                <TableCell>成交金额</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {sessions.slice(0, 6).map((session) => {
+                const sessionDetail = details[session.id];
+                const learners = sessionDetail?.engagements || [];
+                const arrive = learners.filter(
+                  (item) => item.attendanceStatus === "ATTENDED",
+                ).length;
+                const ab = learners.filter((item) =>
+                  ["A", "B"].includes(item.courseAssessment || ""),
+                ).length;
+                return (
+                  <TableRow
+                    key={session.id}
+                    selected={session.id === selectedId}
+                    onClick={() => onSelect(session.id)}
+                    sx={{ cursor: "pointer" }}
+                  >
+                    <TableCell>
+                      {new Date(session.startsAt).toLocaleDateString("zh-CN")}
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>
+                      {session.title}
+                    </TableCell>
+                    <TableCell>{session.capacity}</TableCell>
+                    <TableCell>{arrive}</TableCell>
+                    <TableCell
+                      sx={{
+                        color:
+                          arrive / Math.max(session.capacity, 1) >= 0.7
+                            ? palette.green
+                            : palette.red,
+                      }}
+                    >
+                      {Math.round(
+                        (arrive / Math.max(session.capacity, 1)) * 100,
+                      )}
+                      %
+                    </TableCell>
+                    <TableCell>{ab}</TableCell>
+                    <TableCell>0</TableCell>
+                    <TableCell>¥0</TableCell>
+                  </TableRow>
+                );
+              })}
+              {!sessions.length && (
+                <TableRow>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                    暂无可复盘场次
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "1fr 1fr", lg: "repeat(4, 1fr)" },
+          gridTemplateColumns: {
+            xs: "1fr",
+            lg: "minmax(0, 1fr) minmax(0, 1.2fr)",
+          },
           gap: 1.5,
         }}
       >
-        <MetricCard
-          label="邀约客户"
-          value={invited}
-          helper="当前场次"
-          color={palette.blue}
-          icon={<GroupsIcon />}
-        />
-        <MetricCard
-          label="确认参加"
-          value={confirmed}
-          helper="已表达参课意向"
-          color={palette.purple}
-          icon={<TaskAltIcon />}
-        />
-        <MetricCard
-          label="实际到课"
-          value={attended}
-          helper={`到课率 ${conversion}%`}
-          color={palette.green}
-          icon={<AutoStoriesIcon />}
-        />
-        <MetricCard
-          label="A类客户"
-          value={hot}
-          helper="需重点销售跟进"
-          color={palette.amber}
-          icon={<InsightsIcon />}
-        />
-      </Box>
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: { xs: "1fr", lg: "1.5fr 1fr" },
-          gap: 2,
-        }}
-      >
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-          <SectionTitle title="复盘结论" />
-          <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+        <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+          <SectionTitle title="本周复盘结论" />
+          <Stack spacing={1.2} sx={{ mt: 1.2 }}>
             <TextField
-              label="本场总结"
+              label="做得好的"
               multiline
-              minRows={3}
+              minRows={2}
               disabled={!canEdit}
               value={form.summary}
-              onChange={(event) => onFormChange({ ...form, summary: event.target.value })}
+              onChange={(event) =>
+                onFormChange({ ...form, summary: event.target.value })
+              }
             />
             <TextField
-              label="主要问题"
+              label="未达标原因"
               multiline
-              minRows={3}
+              minRows={2}
               disabled={!canEdit}
               value={form.issues}
-              onChange={(event) => onFormChange({ ...form, issues: event.target.value })}
+              onChange={(event) =>
+                onFormChange({ ...form, issues: event.target.value })
+              }
             />
             <TextField
               label="下次改进"
               multiline
-              minRows={3}
+              minRows={2}
               disabled={!canEdit}
               value={form.improvements}
-              onChange={(event) => onFormChange({ ...form, improvements: event.target.value })}
+              onChange={(event) =>
+                onFormChange({ ...form, improvements: event.target.value })
+              }
             />
           </Stack>
         </Paper>
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-          <SectionTitle title="改进行动" />
-          <Stack spacing={1} sx={{ mt: 1.5 }}>
-            {detail?.review?.actionItems?.map((item, index) => (
-              <Box
-                key={`${item.title}-${index}`}
-                sx={{ p: 1.2, bgcolor: palette.soft, borderRadius: 1.3 }}
-              >
-                <Typography variant="body2" fontWeight={800}>
-                  {item.title}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  截止：{formatDate(item.dueAt)}
-                </Typography>
-              </Box>
-            )) || <Typography color="text.secondary">暂无改进行动</Typography>}
-          </Stack>
+        <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+          <SectionTitle
+            title="改进行动计划"
+            action={
+              <Button size="small" startIcon={<AddIcon />}>
+                生成改进行动
+              </Button>
+            }
+          />
+          <TableContainer sx={{ mt: 1 }}>
+            <Table
+              size="small"
+              sx={{
+                ...tableSx,
+                width: "100%",
+                minWidth: "0 !important",
+                tableLayout: "fixed",
+                "& .MuiTableCell-root": {
+                  px: 0.75,
+                  py: 0.85,
+                  fontSize: 12,
+                  boxSizing: "border-box",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                },
+              }}
+            >
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: "32%" }}>改进行动</TableCell>
+                  <TableCell sx={{ width: "25%" }}>关联课程/场次</TableCell>
+                  <TableCell sx={{ width: "16%" }}>负责人</TableCell>
+                  <TableCell sx={{ width: "16%" }}>完成截止</TableCell>
+                  <TableCell sx={{ width: "11%" }}>状态</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {detail?.review?.actionItems?.map((item, index) => (
+                  <TableRow key={`${item.title}-${index}`}>
+                    <TableCell>{item.title}</TableCell>
+                    <TableCell>{detail.title}</TableCell>
+                    <TableCell>{item.ownerUserId || "待分配"}</TableCell>
+                    <TableCell>{formatDate(item.dueAt)}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label="待开始"
+                        sx={{
+                          height: 21,
+                          bgcolor: palette.blueSoft,
+                          color: palette.blue,
+                        }}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!detail?.review?.actionItems?.length && (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                      暂无改进行动，可根据复盘结论生成
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
         </Paper>
       </Box>
     </>

@@ -15,7 +15,7 @@ assert.doesNotMatch(enablement, /AcademyCenter|极享商学院/, '企业标准�
   assert.ok(academy.includes(label), `商学院缺少${label}页面入口`);
 });
 assert.doesNotMatch(academy, /<ProtectedFormDialog[^>]*detailOpen/, '场次执行详情不得继续使用超长弹窗');
-assert.match(academy, /customerApi\.fetchCustomers/, '学员与转化必须从CRM客户主档选择客户');
+assert.match(academy, /customerApi\s*\.\s*fetchCustomers/, '学员与转化必须从CRM客户主档选择客户');
 assert.match(academy, /academyApi\.saveEngagement/, '学员与转化必须可保存邀约记录');
 assert.match(academy, /academyApi\.saveReview/, '经营复盘必须可编辑并保存');
 

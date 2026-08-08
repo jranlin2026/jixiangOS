@@ -48,6 +48,7 @@ const updateTableMinWidth = (table: HTMLTableElement) => {
 };
 
 const enhanceTable = (table: HTMLTableElement, pathname: string, tableIndex: number) => {
+  if (table.closest('[data-disable-column-resize="true"]')) return;
   const headers = Array.from(table.querySelectorAll('thead th')) as HTMLTableCellElement[];
   if (!headers.length) return;
   const separators = headers.flatMap((header) => Array.from(header.querySelectorAll('[role="separator"]')));
