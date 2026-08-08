@@ -208,6 +208,31 @@ assert.equal(ambiguousCardsFixture.getEditClicks(), 0, '订单卡有歧义时不
 assert.equal(ambiguousCardsFixture.getGreenClicks(), 0);
 assert.equal(ambiguousCardsFixture.getSaveClicks(), 0);
 
+const nestedAmbiguousCardsFixture = createUnsafeOrderBindingFixture(`
+  <section data-testid="order-card">
+    <section data-testid="order-card">
+      <span data-testid="order-no">6925095897028853458</span><span data-testid="order-status">已付款</span>
+      <button data-testid="edit-order-remark">修改</button><div data-testid="order-remark-summary">A</div><span data-current-flag="red"></span>
+    </section>
+    <section data-testid="order-card">
+      <span data-testid="order-no">6925095897028853459</span><span data-testid="order-status">已付款</span>
+      <button data-testid="edit-order-remark">修改</button><div data-testid="order-remark-summary">B</div><span data-current-flag="red"></span>
+    </section>
+  </section>
+`);
+const nestedAmbiguousContext = nestedAmbiguousCardsFixture.adapter.readContext();
+assert.equal(nestedAmbiguousContext.platformOrderNo, '', '外层订单包装含两张可见子订单卡时必须保持歧义');
+assert.equal(nestedAmbiguousContext.orderStatus, '', '嵌套多订单歧义时不得识别任一订单状态');
+const nestedAmbiguousCardsResult = await nestedAmbiguousCardsFixture.adapter.completeOsOrder({
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  phone: '13826459812',
+});
+assert.equal(nestedAmbiguousCardsResult.ok, false, '嵌套多订单卡必须失败关闭');
+assert.equal(nestedAmbiguousCardsFixture.getEditClicks(), 0, '嵌套订单卡有歧义时不得点击任何编辑入口');
+assert.equal(nestedAmbiguousCardsFixture.getGreenClicks(), 0);
+assert.equal(nestedAmbiguousCardsFixture.getSaveClicks(), 0);
+
 const mixedSemanticCardsFixture = createUnsafeOrderBindingFixture(`
   <section data-testid="order-card">
     <span data-testid="order-no">ORDER-A</span><span data-testid="order-status">已付款</span>

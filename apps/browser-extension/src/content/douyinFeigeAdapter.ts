@@ -96,7 +96,7 @@ function isVisible(element: HTMLElement | null): element is HTMLElement {
 function visibleActiveOrderCards(document: Document) {
   const visible = uniqueMatches(document, selectors.orderCard).filter(isVisible);
   return visible.filter((candidate) => !visible.some((other) => (
-    other !== candidate && other.contains(candidate)
+    other !== candidate && candidate.contains(other)
   )));
 }
 
