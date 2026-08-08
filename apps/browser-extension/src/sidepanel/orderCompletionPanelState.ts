@@ -17,15 +17,29 @@ export type CompletionPanelState = {
   sync: LeadIntakeResponse | null;
   completion: OrderCompletionState | null;
   remarkText: string;
+  activeAttempt: { id: number; conversationKey: string } | null;
 };
 
 type RecognizedContact = Pick<DetectedContact, 'phone' | 'wechat'> | null;
 
 export type CompletionPanelAction =
   | { type: 'RECOGNIZE_CONTEXT'; context: FeigePageContext; detectedContact: RecognizedContact }
+  | {
+      type: 'RECOGNIZE_ATTEMPT_CONTEXT';
+      attemptId: number;
+      conversationKey: string;
+      context: FeigePageContext;
+      detectedContact: RecognizedContact;
+    }
+  | { type: 'START_ATTEMPT'; attemptId: number; conversationKey: string }
   | { type: 'SET_FORM_FIELD'; field: 'phone' | 'wechat' | 'source'; value: string }
   | { type: 'SET_CONTACT_CONFIRMED'; value: boolean }
-  | { type: 'APPLY_COMPLETION'; completion: OrderCompletionState }
+  | {
+      type: 'APPLY_COMPLETION';
+      attemptId: number;
+      conversationKey: string;
+      completion: OrderCompletionState;
+    }
   | { type: 'CLEAR_CONTEXT' }
   | { type: 'RESET' };
 
@@ -39,7 +53,12 @@ export function createCompletionPanelState(): CompletionPanelState {
     sync: null,
     completion: null,
     remarkText: '',
+    activeAttempt: null,
   };
+}
+
+export function conversationKey(context: Pick<FeigePageContext, 'platformOrderNo' | 'customerDisplayName'>) {
+  return JSON.stringify([context.platformOrderNo.trim(), context.customerDisplayName.trim()]);
 }
 
 export function isCompletionFormLocked(state: CompletionPanelState) {
@@ -77,6 +96,17 @@ export function completionPanelReducer(
 ): CompletionPanelState {
   if (action.type === 'RESET') return createCompletionPanelState();
   if (action.type === 'CLEAR_CONTEXT') return { ...createCompletionPanelState(), form: { ...emptyForm } };
+  if (action.type === 'RECOGNIZE_ATTEMPT_CONTEXT') {
+    if (!state.context
+      || state.activeAttempt?.id !== action.attemptId
+      || state.activeAttempt.conversationKey !== action.conversationKey
+      || conversationKey(state.context) !== action.conversationKey) return state;
+    return completionPanelReducer(state, {
+      type: 'RECOGNIZE_CONTEXT',
+      context: action.context,
+      detectedContact: action.detectedContact,
+    });
+  }
   if (action.type === 'RECOGNIZE_CONTEXT') {
     const conversationChanged = state.context?.platformOrderNo !== action.context.platformOrderNo
       || state.context?.customerDisplayName !== action.context.customerDisplayName;
@@ -93,6 +123,7 @@ export function completionPanelReducer(
         sync: null,
         completion: null,
         remarkText: '',
+        activeAttempt: null,
       };
     }
     if (state.sync) return { ...state, context: action.context };
@@ -108,7 +139,15 @@ export function completionPanelReducer(
       },
     };
   }
+  if (action.type === 'START_ATTEMPT') {
+    if (!state.context || conversationKey(state.context) !== action.conversationKey) return state;
+    return { ...state, activeAttempt: { id: action.attemptId, conversationKey: action.conversationKey } };
+  }
   if (action.type === 'APPLY_COMPLETION') {
+    if (!state.context
+      || state.activeAttempt?.id !== action.attemptId
+      || state.activeAttempt.conversationKey !== action.conversationKey
+      || conversationKey(state.context) !== action.conversationKey) return state;
     const nextSync = synchronizedIntake(action.completion);
     return {
       ...state,

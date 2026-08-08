@@ -29,6 +29,7 @@ import {
 import {
   completionAttemptSnapshot,
   completionPanelReducer,
+  conversationKey,
   createCompletionPanelState,
   isCompletionFormLocked,
 } from './orderCompletionPanelState';
@@ -76,6 +77,8 @@ function App() {
   const attemptedRecommendationKeys = useRef(new Set<string>());
   const recognitionSequence = useRef(0);
   const evaluatedRecognition = useRef(0);
+  const attemptSequence = useRef(0);
+  const activeAttempt = useRef<{ id: number; conversationKey: string } | null>(null);
 
   const paidOrderRecognized = Boolean(context && isPaidOrderStatus(context.orderStatus));
   const completionFormLocked = isCompletionFormLocked(panel);
@@ -141,6 +144,8 @@ function App() {
       const conversationChanged = context?.platformOrderNo !== result.context.platformOrderNo
         || context?.customerDisplayName !== result.context.customerDisplayName;
       const detectedHasContact = Boolean(result.detectedContact?.phone || result.detectedContact?.wechat);
+      const recognizedConversationKey = conversationKey(result.context);
+      if (activeAttempt.current?.conversationKey !== recognizedConversationKey) activeAttempt.current = null;
       dispatchPanel({ type: 'RECOGNIZE_CONTEXT', context: result.context, detectedContact: result.detectedContact });
       setRecognition({
         id: ++recognitionSequence.current,
@@ -148,6 +153,7 @@ function App() {
         hasContact: detectedHasContact || (!conversationChanged && Boolean(form.phone.trim() || form.wechat.trim())),
       });
     } catch (caught) {
+      activeAttempt.current = null;
       dispatchPanel({ type: 'CLEAR_CONTEXT' });
       setRecognition(null);
       setRecommendation(null);
@@ -208,7 +214,7 @@ function App() {
   const logout = async () => {
     await worker({ type: 'LOGOUT' });
     setAuth((current) => ({ config: current.config }));
-    dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
+    activeAttempt.current = null; dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
     setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
   };
 
@@ -262,6 +268,13 @@ function App() {
   const completeOrder = async () => {
     const attempt = completionAttemptSnapshot(panel);
     if (!context || !attempt || !canIntake) return;
+    const attemptId = ++attemptSequence.current;
+    const expectedConversationKey = conversationKey({
+      platformOrderNo: attempt.expectedOrderNo,
+      customerDisplayName: attempt.expectedCustomerDisplayName,
+    });
+    activeAttempt.current = { id: attemptId, conversationKey: expectedConversationKey };
+    dispatchPanel({ type: 'START_ATTEMPT', attemptId, conversationKey: expectedConversationKey });
     setBusy(true); setError(''); setNotice('');
     const latestRecognitionRef: { value: {
       context: FeigePageContext;
@@ -296,12 +309,21 @@ function App() {
           return completed as CompleteOsOrderResult;
         },
         report: (input) => worker<PlatformCompletionReport>({ type: 'REPORT_PLATFORM_COMPLETION', ...input }),
-        onState: (state) => dispatchPanel({ type: 'APPLY_COMPLETION', completion: state }),
+        onState: (state) => dispatchPanel({
+          type: 'APPLY_COMPLETION',
+          attemptId,
+          conversationKey: expectedConversationKey,
+          completion: state,
+        }),
       });
+      const ownsAttemptAtReturn = activeAttempt.current?.id === attemptId
+        && activeAttempt.current.conversationKey === expectedConversationKey;
       const latestRecognition = latestRecognitionRef.value;
-      if (latestRecognition) {
+      if (latestRecognition && ownsAttemptAtReturn) {
         dispatchPanel({
-          type: 'RECOGNIZE_CONTEXT',
+          type: 'RECOGNIZE_ATTEMPT_CONTEXT',
+          attemptId,
+          conversationKey: expectedConversationKey,
           context: latestRecognition.context,
           detectedContact: latestRecognition.detectedContact,
         });
@@ -313,14 +335,19 @@ function App() {
           hasContact: Boolean(latestRecognition.detectedContact?.phone || latestRecognition.detectedContact?.wechat)
             || (!conversationChanged && Boolean(form.phone.trim() || form.wechat.trim())),
         });
+        if (conversationChanged) activeAttempt.current = null;
       }
+      if (!ownsAttemptAtReturn) return;
       if (result.stage === 'COMPLETED') {
         setNotice(result.intakeResult?.outcome === 'ALREADY_CREATED'
           ? '该订单已入库，备注和绿色旗帜已完成'
           : `订单已完成，销售：${result.intakeResult?.lead.assignedTo || '待分配'}`);
       } else if (result.message) setError(result.message);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '线索入库失败');
+      if (activeAttempt.current?.id === attemptId
+        && activeAttempt.current.conversationKey === expectedConversationKey) {
+        setError(caught instanceof Error ? caught.message : '线索入库失败');
+      }
     } finally { setBusy(false); }
   };
 
@@ -352,7 +379,7 @@ function App() {
     {notice && <div className="alert success">{notice}</div>}
 
     <section className="card context-card">
-      <div className="section-title"><h2>当前会话</h2><button className="secondary compact" onClick={() => void refreshContext()}>刷新识别</button></div>
+      <div className="section-title"><h2>当前会话</h2><button className="secondary compact" disabled={busy} onClick={() => void refreshContext()}>刷新识别</button></div>
       {context ? <div className="facts">
         <div><span>客户</span><strong>{context.customerDisplayName || '未识别'}</strong></div>
         <div><span>订单</span><strong>{context.platformOrderNo || '未识别'}</strong></div>
