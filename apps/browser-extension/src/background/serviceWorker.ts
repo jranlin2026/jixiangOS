@@ -1,4 +1,12 @@
-import type { ApiEnvelope, AuthenticatedOperator, ExtensionConfig, WorkerCommand } from '../shared/contracts';
+import type {
+  ApiEnvelope,
+  AuthenticatedOperator,
+  BrowserRuntimeConfig,
+  BrowserRuntimeSelection,
+  BrowserRuntimeShop,
+  ExtensionConfig,
+  WorkerCommand,
+} from '../shared/contracts';
 import { normalizedApiBaseUrl } from '../shared/apiBaseUrl';
 
 const CONFIG_KEY = 'jixiang_browser_employee_config';
@@ -28,6 +36,29 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnve
   }
 }
 
+function normalizedBindingLookup(value: string) {
+  return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('zh-CN');
+}
+
+function selectedBindingId(config: ExtensionConfig, shops: BrowserRuntimeShop[]) {
+  const storedId = config.shopBindingId?.trim();
+  if (storedId) return shops.some((shop) => shop.id === storedId) ? storedId : undefined;
+  const legacy = normalizedBindingLookup(config.shopKey || '');
+  if (legacy) {
+    const matches = shops.filter((shop) => [shop.displayName, shop.shopKey, ...shop.aliases]
+      .some((candidate) => normalizedBindingLookup(candidate) === legacy));
+    return matches.length === 1 ? matches[0].id : undefined;
+  }
+  return shops.length === 1 ? shops[0].id : undefined;
+}
+
+function storedConfig(apiBaseUrl: string, shopBindingId?: string): ExtensionConfig {
+  return {
+    apiBaseUrl: normalizedApiBaseUrl(apiBaseUrl),
+    ...(shopBindingId?.trim() ? { shopBindingId: shopBindingId.trim() } : {}),
+  };
+}
+
 chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendResponse) => {
   void (async () => {
     if (message.type === 'AUTH_STATE') {
@@ -40,13 +71,18 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
       return;
     }
     if (message.type === 'SAVE_CONFIG') {
-      const config = { ...message.config, apiBaseUrl: normalizedApiBaseUrl(message.config.apiBaseUrl) };
+      const config = storedConfig(message.config.apiBaseUrl, message.config.shopBindingId);
       await chrome.storage.local.set({ [CONFIG_KEY]: config });
       sendResponse({ code: 0, data: config, message: 'success' });
       return;
     }
     if (message.type === 'LOGIN') {
-      const config = { ...message.config, apiBaseUrl: normalizedApiBaseUrl(message.config.apiBaseUrl) };
+      const config: ExtensionConfig = {
+        ...storedConfig(message.config.apiBaseUrl, message.config.shopBindingId),
+        ...(!message.config.shopBindingId && message.config.shopKey?.trim()
+          ? { shopKey: message.config.shopKey }
+          : {}),
+      };
       await chrome.storage.local.set({ [CONFIG_KEY]: config });
       const result = await request<{ token: string; user: AuthenticatedOperator }>('/auth/login', {
         method: 'POST', body: JSON.stringify({ account: message.account, password: message.password, remember: false }),
@@ -63,6 +99,26 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
       await request('/auth/logout', { method: 'POST' });
       await chrome.storage.session.remove([TOKEN_KEY, OPERATOR_KEY]);
       sendResponse({ code: 0, data: true, message: 'success' });
+      return;
+    }
+    if (message.type === 'GET_RUNTIME_CONFIG') {
+      const result = await request<BrowserRuntimeConfig>('/browser-agent/runtime-config');
+      if (result.code !== 0 || !result.data) {
+        sendResponse(result);
+        return;
+      }
+      const config = await stored<ExtensionConfig>(chrome.storage.local, CONFIG_KEY);
+      if (!config?.apiBaseUrl) {
+        sendResponse({ code: 400, data: null, message: '请先配置极享OS地址' });
+        return;
+      }
+      const shopBindingId = selectedBindingId(config, result.data.shops);
+      await chrome.storage.local.set({ [CONFIG_KEY]: storedConfig(config.apiBaseUrl, shopBindingId) });
+      const data: BrowserRuntimeSelection = {
+        ...result.data,
+        ...(shopBindingId ? { selectedShopBindingId: shopBindingId } : {}),
+      };
+      sendResponse({ ...result, data });
       return;
     }
     if (message.type === 'GET_SCRIPT_LIBRARY') {

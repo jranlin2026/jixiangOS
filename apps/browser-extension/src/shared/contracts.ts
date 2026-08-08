@@ -25,7 +25,51 @@ export type SafeReplyFillResult =
 
 export type ExtensionConfig = {
   apiBaseUrl: string;
+  shopBindingId?: string;
+  /** One-release migration input. Never submit this free text to intake. */
+  shopKey?: string;
+};
+
+export type BrowserRuntimeShop = {
+  id: string;
+  platform: string;
   shopKey: string;
+  platformShopId?: string | null;
+  displayName: string;
+  aliases: string[];
+  source: string;
+  sourceName: string;
+  sourceType: string;
+};
+
+export type BrowserRuntimeProduct = {
+  id: string;
+  name: string;
+  referencePrice?: number;
+};
+
+export type BrowserRuntimeProductMapping = {
+  id: string;
+  shopBindingId: string;
+  platformProductId?: string | null;
+  platformSkuId?: string | null;
+  platformProductName?: string | null;
+  aliases: string[];
+  osProductId: string;
+  osProductName: string;
+  osReferencePrice?: number;
+  active: boolean;
+};
+
+export type BrowserRuntimeConfig = {
+  shops: BrowserRuntimeShop[];
+  /** Optional forward-compatible preview catalog; current backend may omit it. */
+  products?: BrowserRuntimeProduct[];
+  productMappings?: BrowserRuntimeProductMapping[];
+};
+
+export type BrowserRuntimeSelection = BrowserRuntimeConfig & {
+  selectedShopBindingId?: string;
 };
 
 export type AuthenticatedOperator = { id: string; name: string; role: string };
@@ -37,6 +81,7 @@ export type BrowserLeadProductResolutionAudit = {
   method?: string;
   osProductId?: string;
   osProductName?: string;
+  osReferencePrice?: number;
   rawProductName?: string;
 } | {
   status: 'UNMATCHED';
@@ -100,6 +145,7 @@ export type WorkerCommand =
   | { type: 'AUTH_STATE' }
   | { type: 'LOGIN'; config: ExtensionConfig; account: string; password: string }
   | { type: 'LOGOUT' }
+  | { type: 'GET_RUNTIME_CONFIG' }
   | { type: 'SAVE_CONFIG'; config: ExtensionConfig }
   | { type: 'GET_SCRIPT_LIBRARY' }
   | { type: 'SAVE_SCRIPT_LIBRARY'; library: ScriptLibrary }

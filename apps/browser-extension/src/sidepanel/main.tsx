@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import type {
   ApiEnvelope,
   AuthenticatedOperator,
+  BrowserRuntimeSelection,
+  BrowserRuntimeShop,
   CompleteOsOrderResult,
   ExtensionConfig,
   LeadIntakeResponse,
@@ -33,7 +35,9 @@ import {
   conversationKey,
   createCompletionPanelState,
   isCompletionFormLocked,
+  productPreviewForPanel,
 } from './orderCompletionPanelState';
+import { pageShopMatchesBinding } from './orderCompletionWorkflow';
 
 type AuthState = { config?: ExtensionConfig; operator?: AuthenticatedOperator };
 type RecognitionSnapshot = { id: number; context: FeigePageContext; hasContact: boolean };
@@ -55,6 +59,22 @@ function permissionPattern(apiBaseUrl: string) {
   return `${url.origin}/*`;
 }
 
+function formatMoney(value?: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? `¥${value.toFixed(2)}` : '未识别';
+}
+
+function matchMethodLabel(method?: string) {
+  if (method === 'PLATFORM_PRODUCT_ID') return '店铺商品映射';
+  if (method === 'PLATFORM_SKU_ID') return '店铺SKU映射';
+  if (method === 'SHOP_ALIAS') return '店铺商品别名';
+  if (method === 'EXACT_OS_NAME') return 'OS产品同名';
+  return '待后端确认';
+}
+
+function selectedRuntimeShop(shops: BrowserRuntimeShop[], shopBindingId: string) {
+  return shops.find((shop) => shop.id === shopBindingId);
+}
+
 function App() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -62,11 +82,19 @@ function App() {
   const [notice, setNotice] = useState('');
   const [auth, setAuth] = useState<AuthState>({});
   const [apiBaseUrl, setApiBaseUrl] = useState('http://127.0.0.1:3001/api');
-  const [shopKey, setShopKey] = useState('jixiang-douyin');
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [panel, dispatchPanel] = useReducer(completionPanelReducer, undefined, createCompletionPanelState);
-  const { context, form, sync, completion, remarkText, contactConfirmed } = panel;
+  const {
+    context,
+    form,
+    sync,
+    completion,
+    remarkText,
+    contactConfirmed,
+    runtimeConfig,
+    shopBindingId,
+  } = panel;
   const [scriptView, setScriptView] = useState<ScriptLibraryView | null>(null);
   const [scriptLibraryError, setScriptLibraryError] = useState('');
   const [scriptDraft, setScriptDraft] = useState<ScriptLibrary | null>(null);
@@ -83,9 +111,22 @@ function App() {
 
   const paidOrderRecognized = Boolean(context && isPaidOrderStatus(context.orderStatus));
   const completionFormLocked = isCompletionFormLocked(panel);
+  const selectedShop = selectedRuntimeShop(runtimeConfig?.shops || [], shopBindingId);
+  const productPreview = productPreviewForPanel(panel);
+  const runtimeReferencePrice = productPreview?.status === 'MATCHED'
+    ? runtimeConfig?.products?.find((product) => product.id === productPreview.osProductId)?.referencePrice
+    : undefined;
+  const referencePrice = productPreview?.status === 'MATCHED'
+    ? productPreview.osReferencePrice ?? runtimeReferencePrice
+    : undefined;
+  const priceDiffers = typeof referencePrice === 'number'
+    && typeof context?.paymentAmount === 'number'
+    && referencePrice !== context.paymentAmount;
+  const pageShopMismatch = Boolean(context?.shopDisplayName && selectedShop
+    && !pageShopMatchesBinding(context.shopDisplayName, selectedShop));
   const canIntake = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
-    && (form.phone.trim() || form.wechat.trim()) && shopKey.trim() && contactConfirmed
-    && paidOrderRecognized);
+    && (form.phone.trim() || form.wechat.trim()) && selectedShop && contactConfirmed
+    && paidOrderRecognized && !pageShopMismatch);
   const workflowLabel = useMemo(() => {
     if (completion?.stage === 'COMPLETED') return '订单闭环已完成';
     if (sync) return '线索已入库，待完成订单';
@@ -177,17 +218,35 @@ function App() {
     }
   };
 
+  const loadRuntimeConfig = async () => {
+    const result = await worker<BrowserRuntimeSelection>({ type: 'GET_RUNTIME_CONFIG' });
+    if (result.code !== 0 || !result.data) throw new Error(result.message || '店铺绑定加载失败');
+    const runtimeSelection = result.data;
+    dispatchPanel({
+      type: 'APPLY_RUNTIME_CONFIG',
+      runtimeConfig: runtimeSelection,
+      selectedShopBindingId: runtimeSelection.selectedShopBindingId || '',
+    });
+    setAuth((current) => ({
+      ...current,
+      config: {
+        apiBaseUrl: current.config?.apiBaseUrl || apiBaseUrl,
+        ...(runtimeSelection.selectedShopBindingId ? { shopBindingId: runtimeSelection.selectedShopBindingId } : {}),
+      },
+    }));
+    return runtimeSelection;
+  };
+
   useEffect(() => {
     void worker<AuthState>({ type: 'AUTH_STATE' }).then((result) => {
       if (result.data?.config) {
         setApiBaseUrl(result.data.config.apiBaseUrl);
-        setShopKey(result.data.config.shopKey);
       }
       setAuth(result.data || {});
       setLoading(false);
       if (result.data?.operator) {
-        void refreshContext();
-        void loadScriptLibrary().catch((caught) => setError(caught instanceof Error ? caught.message : '话术加载失败'));
+        void Promise.all([refreshContext(), loadRuntimeConfig(), loadScriptLibrary()])
+          .catch((caught) => setError(caught instanceof Error ? caught.message : '初始化失败'));
       }
     });
   }, []);
@@ -198,7 +257,11 @@ function App() {
       const origin = permissionPattern(apiBaseUrl);
       const granted = await chrome.permissions.request({ origins: [origin] });
       if (!granted) throw new Error('未授权插件访问极享OS地址');
-      const config = { apiBaseUrl, shopKey };
+      const config: ExtensionConfig = {
+        apiBaseUrl,
+        ...(auth.config?.shopBindingId ? { shopBindingId: auth.config.shopBindingId } : {}),
+        ...(!auth.config?.shopBindingId && auth.config?.shopKey ? { shopKey: auth.config.shopKey } : {}),
+      };
       const result = await worker<{ operator: AuthenticatedOperator; config: ExtensionConfig }>({
         type: 'LOGIN', config, account, password,
       });
@@ -206,7 +269,7 @@ function App() {
       setAuth(result.data);
       setPassword('');
       setNotice(`已以${result.data.operator.name}登录`);
-      await Promise.all([refreshContext(), loadScriptLibrary()]);
+      await Promise.all([refreshContext(), loadRuntimeConfig(), loadScriptLibrary()]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '登录失败');
     } finally { setBusy(false); }
@@ -217,6 +280,25 @@ function App() {
     setAuth((current) => ({ config: current.config }));
     activeAttempt.current = null; dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
     setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
+  };
+
+  const selectShop = async (nextShopBindingId: string) => {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const config: ExtensionConfig = {
+        apiBaseUrl,
+        ...(nextShopBindingId ? { shopBindingId: nextShopBindingId } : {}),
+      };
+      const result = await worker<ExtensionConfig>({ type: 'SAVE_CONFIG', config });
+      if (result.code !== 0 || !result.data) throw new Error(result.message || '店铺选择保存失败');
+      const savedConfig = result.data;
+      dispatchPanel({ type: 'SELECT_SHOP_BINDING', shopBindingId: nextShopBindingId });
+      setAuth((current) => ({ ...current, config: savedConfig }));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '店铺选择保存失败');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const fillScript = async (text: string) => {
@@ -267,8 +349,13 @@ function App() {
   };
 
   const completeOrder = async () => {
+    if (productPreview?.status === 'CONFIG_CONFLICT') {
+      setError(productPreview.message);
+      return;
+    }
     const attempt = completionAttemptSnapshot(panel);
-    if (!context || !attempt || !canIntake) return;
+    const attemptShop = runtimeConfig?.shops.find((shop) => shop.id === attempt?.shopBindingId);
+    if (!context || !attempt || !attemptShop || !canIntake) return;
     const attemptId = ++attemptSequence.current;
     const expectedConversationKey = conversationKey({
       platformOrderNo: attempt.expectedOrderNo,
@@ -287,12 +374,20 @@ function App() {
         expectedCustomerDisplayName: attempt.expectedCustomerDisplayName,
         phone: attempt.phone,
         wechat: attempt.wechat,
+        shop: attemptShop,
+        pageShopDisplayName: context.shopDisplayName,
         existingIntake: attempt.existingIntake,
         intakeInput: {
-          platform: 'DOUYIN', shopKey: shopKey.trim(), platformOrderNo: attempt.expectedOrderNo,
+          platform: 'DOUYIN', shopBindingId: attempt.shopBindingId,
+          pageShopDisplayName: context.shopDisplayName || undefined,
+          platformOrderNo: attempt.expectedOrderNo,
           contactName: attempt.expectedCustomerDisplayName, contactPhone: attempt.phone,
           contactWechat: attempt.wechat, contactSource: attempt.source,
-          sourceProductName: context.productName || undefined,
+          platformProductId: context.platformProductId || undefined,
+          platformSkuId: context.platformSkuId || undefined,
+          platformProductName: context.productName || undefined,
+          paymentAmount: context.paymentAmount,
+          paymentAt: context.paymentAt,
         },
       }, {
         readContext: async () => {
@@ -340,9 +435,8 @@ function App() {
       }
       if (!ownsAttemptAtReturn) return;
       if (result.stage === 'COMPLETED') {
-        setNotice(result.intakeResult?.outcome === 'ALREADY_CREATED'
-          ? '该订单已入库，备注和绿色旗帜已完成'
-          : `订单已完成，销售：${result.intakeResult?.lead.assignedTo || '待分配'}`);
+        const completedIntake = result.intakeResult;
+        setNotice(`线索编号：${completedIntake?.lead.id || '未知'}；分配销售：${completedIntake?.lead.assignedTo || '暂未分配'}；订单备注、绿色旗帜均已验证`);
       } else if (result.message) setError(result.message);
     } catch (caught) {
       if (activeAttempt.current?.id === attemptId
@@ -365,10 +459,9 @@ function App() {
     <section className="card login-card">
       <h2>连接极享OS</h2>
       <label>极享OS API地址<input value={apiBaseUrl} onChange={(event) => setApiBaseUrl(event.target.value)} /></label>
-      <label>店铺标识<input value={shopKey} onChange={(event) => setShopKey(event.target.value)} /></label>
       <label>账号<input value={account} onChange={(event) => setAccount(event.target.value)} /></label>
       <label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-      <button className="primary" disabled={busy || !account || !password || !shopKey} onClick={() => void login()}>{busy ? '正在登录…' : '登录并连接'}</button>
+      <button className="primary" disabled={busy || !account || !password || !apiBaseUrl.trim()} onClick={() => void login()}>{busy ? '正在登录…' : '登录并连接'}</button>
       <p className="hint">密码仅用于本次登录，不会保存在插件中。</p>
     </section>
     {feedbackDialog}
@@ -386,14 +479,46 @@ function App() {
 
     <section className="card context-card">
       <div className="section-title"><h2>当前会话</h2><button className="secondary compact" disabled={busy} onClick={() => void refreshContext()}>刷新识别</button></div>
+      {runtimeConfig && runtimeConfig.shops.length > 1 ? <label>绑定店铺
+        <select
+          aria-label="绑定店铺"
+          disabled={busy || completionFormLocked}
+          value={shopBindingId}
+          onChange={(event) => void selectShop(event.target.value)}
+        >
+          <option value="">请选择当前店铺</option>
+          {runtimeConfig.shops.map((shop) => <option key={shop.id} value={shop.id}>{shop.displayName}</option>)}
+        </select>
+      </label> : null}
       {context ? <div className="facts">
         <div><span>客户</span><strong>{context.customerDisplayName || '未识别'}</strong></div>
         <div><span>订单</span><strong>{context.platformOrderNo || '未识别'}</strong></div>
         <div><span>订单状态</span><strong>{context.orderStatus || '未识别'}</strong></div>
-        <div><span>商品</span><strong>{context.productName || '未识别'}</strong></div>
+        <div><span>绑定店铺</span><strong>{selectedShop?.displayName || '未选择'}</strong></div>
+        <div><span>页面店铺</span><strong>{context.shopDisplayName || '未识别（按绑定店铺处理）'}</strong></div>
+        <div><span>平台商品</span><strong>{context.productName || '未识别'}</strong></div>
+        <div><span>匹配产品</span><strong>{productPreview?.status === 'MATCHED'
+          ? productPreview.osProductName || '待后端确认'
+          : productPreview?.status === 'UNMATCHED'
+            ? '待匹配（本次仍可录入，平台原名会写入OS备注）'
+            : productPreview?.status === 'CONFIG_CONFLICT'
+              ? '配置冲突'
+              : '待后端确认'}</strong></div>
+        <div><span>匹配方式</span><strong>{productPreview?.status === 'MATCHED' ? matchMethodLabel(productPreview.method) : '未匹配'}</strong></div>
+        <div><span>OS参考价</span><strong>{typeof referencePrice === 'number' ? formatMoney(referencePrice) : '暂未提供'}</strong></div>
+        <div><span>实付金额</span><strong>{formatMoney(context.paymentAmount)}</strong></div>
+        <div><span>付款时间</span><strong>{context.paymentAt || '未识别'}</strong></div>
         <div><span>消息</span><strong>{context.messages.length}条</strong></div>
       </div> : <p className="empty">请打开抖店飞鸽客服会话，然后点击“刷新识别”。</p>}
       {context?.diagnostics.length ? <ul className="diagnostics">{context.diagnostics.map((item) => <li key={item}>{item}</li>)}</ul> : null}
+      {runtimeConfig && runtimeConfig.shops.length > 1 && !selectedShop
+        ? <div className="alert warning">当前有多个启用店铺，请手工选择后再入库。</div> : null}
+      {pageShopMismatch
+        ? <div className="alert warning">当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试。</div> : null}
+      {productPreview?.status === 'UNMATCHED'
+        ? <div className="alert warning">商品尚未匹配OS标准产品，本次仍可录入；平台原名“{productPreview.rawProductName || context?.productName || '未识别'}”将写入OS备注。</div> : null}
+      {priceDiffers
+        ? <div className="alert warning">OS参考价 {formatMoney(referencePrice)}，仅供参考；本次按飞鸽实付 {formatMoney(context?.paymentAmount)} 录入</div> : null}
     </section>
 
     <ScriptLibrarySection
@@ -417,12 +542,12 @@ function App() {
       <label>微信号<input disabled={completionFormLocked} value={form.wechat} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'wechat', value: event.target.value })} placeholder="可选" /></label>
       <label className="confirm-row"><input disabled={completionFormLocked} type="checkbox" checked={contactConfirmed} onChange={(event) => dispatchPanel({ type: 'SET_CONTACT_CONFIRMED', value: event.target.checked })} /> 我已确认昵称和联系方式属于当前订单</label>
       {context && !paidOrderRecognized && <div className="alert warning">请先确认当前订单为已付款有效订单</div>}
-      <button className="primary" disabled={busy || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '一键入OS并完成订单'}</button>
+      <button data-action="complete-order" className="primary" disabled={busy || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '一键入OS并完成订单'}</button>
     </section>
 
     {(completion || sync) && <section className="card result-card">
       <h2>处理结果</h2>
-      {sync && <div className="facts"><div><span>线索编号</span><strong>{sync.lead.id}</strong></div><div><span>分配销售</span><strong>{sync.lead.assignedTo || '待分配'}</strong></div></div>}
+      {sync && <div className="facts"><div><span>线索编号</span><strong>{sync.lead.id}</strong></div><div><span>分配销售</span><strong>{sync.lead.assignedTo || '暂未分配'}</strong></div></div>}
       <div className="completion-steps">
         {([
           ['极享OS入库', completion?.osStatus || (sync ? 'SUCCEEDED' : 'NOT_ATTEMPTED')],
@@ -433,7 +558,6 @@ function App() {
           return <div key={label}><span>{label}</span><strong className={`status ${presentation.className}`}>{presentation.label}</strong></div>;
         })}
       </div>
-      {completion?.stage === 'PLATFORM_FAILED' && completion.message && <div className="alert warning">{completion.message}，可重试或复制备注手工处理</div>}
       {remarkText && <pre className="remark-preview">{remarkText}</pre>}
       {completion?.stage === 'PLATFORM_FAILED' && sync && <div className="result-actions">
         <button className="secondary" onClick={() => void navigator.clipboard.writeText(remarkText)}>复制备注</button>

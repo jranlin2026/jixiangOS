@@ -6,9 +6,22 @@ const currentContext = {
   customerDisplayName: '悠然一刻',
   platformOrderNo: 'ORDER-20260808-1',
   orderStatus: '已付款',
+  shopDisplayName: '极享官方店',
   productName: '体验套餐',
   messages: [],
   diagnostics: [],
+};
+
+const selectedShop = {
+  id: 'shop-1',
+  platform: 'DOUYIN',
+  shopKey: 'jixiang',
+  platformShopId: 'DY-SHOP-1',
+  displayName: '极享官方店',
+  aliases: ['极享官方旗舰店'],
+  source: '抖音电商',
+  sourceName: '飞鸽客服',
+  sourceType: '公司资源',
 };
 
 const backendRemarkLines: [string, string] = [
@@ -41,6 +54,8 @@ const result = await runOrderCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
+  shop: selectedShop,
+  pageShopDisplayName: currentContext.shopDisplayName,
   intakeInput: { platform: 'DOUYIN' },
 }, {
   readContext: async () => currentContext,
@@ -67,6 +82,38 @@ assert.deepEqual(firstPageInput, {
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   remarkLines: backendRemarkLines,
 }, '工作流必须把后端备注行原样传给页面，不得自行重建销售或时间');
+
+let mismatchReadCalls = 0;
+let mismatchIntakeCalls = 0;
+let mismatchPageCalls = 0;
+let mismatchReportCalls = 0;
+const pageShopMismatch = await runOrderCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13826459812',
+  shop: selectedShop,
+  pageShopDisplayName: '其他店铺',
+  intakeInput: { platform: 'DOUYIN', shopBindingId: selectedShop.id },
+}, {
+  readContext: async () => { mismatchReadCalls += 1; return currentContext; },
+  intake: async () => { mismatchIntakeCalls += 1; return { code: 0, data: intakeResult, message: 'success' }; },
+  completePage: async () => {
+    mismatchPageCalls += 1;
+    throw new Error('店铺不一致时不得操作页面');
+  },
+  report: async () => {
+    mismatchReportCalls += 1;
+    return { code: 0, data: completionResult, message: 'success' };
+  },
+});
+assert.equal(pageShopMismatch.stage, 'OS_FAILED');
+assert.equal(pageShopMismatch.errorCode, 'SHOP_CONTEXT_MISMATCH');
+assert.equal(pageShopMismatch.message, '当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试');
+assert.deepEqual(
+  [mismatchReadCalls, mismatchIntakeCalls, mismatchPageCalls, mismatchReportCalls],
+  [0, 0, 0, 0],
+  '已识别的页面店铺不一致时必须在任何网络或页面动作前终止',
+);
 
 let pageCallsAfterOsFailure = 0;
 const osFailure = await runOrderCompletion({

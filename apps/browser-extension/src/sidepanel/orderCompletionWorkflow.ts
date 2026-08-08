@@ -3,6 +3,7 @@ import { isPaidOrderStatus } from '../domain/orderCompletion';
 import { normalizePhoneForComparison } from '../../../../src/shared/utils/phoneNumber';
 import type {
   ApiEnvelope,
+  BrowserRuntimeShop,
   CompleteOsOrderInput,
   CompleteOsOrderResult,
   LeadIntakeResponse,
@@ -44,6 +45,8 @@ export type OrderCompletionInput = {
   wechat?: string;
   intakeInput: Record<string, unknown>;
   existingIntake?: LeadIntakeResponse;
+  shop?: BrowserRuntimeShop;
+  pageShopDisplayName?: string;
 };
 
 type ReportInput = {
@@ -68,6 +71,17 @@ function emit(deps: OrderCompletionDependencies, state: OrderCompletionState) {
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+function normalizedShopName(value: string) {
+  return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('zh-CN');
+}
+
+export function pageShopMatchesBinding(pageShopDisplayName: string | undefined, shop: BrowserRuntimeShop) {
+  const pageName = normalizedShopName(pageShopDisplayName || '');
+  if (!pageName) return true;
+  return [shop.displayName, ...shop.aliases]
+    .some((candidate) => normalizedShopName(candidate) === pageName);
 }
 
 function duplicateContactMismatch(
@@ -131,6 +145,16 @@ export async function runOrderCompletion(
     intakeResult: input.existingIntake,
   };
   emit(deps, initial);
+
+  if (input.shop && !pageShopMatchesBinding(input.pageShopDisplayName, input.shop)) {
+    return emit(deps, {
+      ...initial,
+      stage: 'OS_FAILED',
+      osStatus: 'FAILED',
+      errorCode: 'SHOP_CONTEXT_MISMATCH',
+      message: '当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试',
+    });
+  }
 
   if (input.existingIntake) {
     const reconciliationMessage = duplicateContactMismatch(input, input.existingIntake, true);
