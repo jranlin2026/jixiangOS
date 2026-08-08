@@ -22,6 +22,7 @@ import {
 import { isPaidOrderStatus } from '../domain/orderCompletion';
 import { ScriptLibraryEditor } from './ScriptLibraryEditor';
 import { ScriptLibrarySection } from './ScriptLibrarySection';
+import { FeedbackDialog } from './FeedbackDialog';
 import {
   runOrderCompletion,
   type PlatformCompletionReport,
@@ -351,6 +352,12 @@ function App() {
     } finally { setBusy(false); }
   };
 
+  const feedbackDialog = <FeedbackDialog
+    error={error}
+    notice={notice}
+    onClose={() => { setError(''); setNotice(''); }}
+  />;
+
   if (loading) return <main className="shell"><div className="loading">正在连接极享OS…</div></main>;
 
   if (!auth.operator) return <main className="shell">
@@ -361,22 +368,21 @@ function App() {
       <label>店铺标识<input value={shopKey} onChange={(event) => setShopKey(event.target.value)} /></label>
       <label>账号<input value={account} onChange={(event) => setAccount(event.target.value)} /></label>
       <label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-      {error && <div className="alert error">{error}</div>}
       <button className="primary" disabled={busy || !account || !password || !shopKey} onClick={() => void login()}>{busy ? '正在登录…' : '登录并连接'}</button>
       <p className="hint">密码仅用于本次登录，不会保存在插件中。</p>
     </section>
+    {feedbackDialog}
   </main>;
 
   if (managingScripts && scriptDraft) return <main className="shell">
     <header><span className="brand-mark">JX</span><div><h1>飞鸽客服副驾驶</h1><p>{auth.operator.name}·话术库管理</p></div></header>
-    {error && <div className="alert error">{error}</div>}
     <ScriptLibraryEditor library={scriptDraft} saving={savingScripts} onChange={setScriptDraft} onSave={() => void saveScripts()} onCancel={() => setManagingScripts(false)} />
+    {feedbackDialog}
   </main>;
 
   return <main className="shell">
     <header><span className="brand-mark">JX</span><div><h1>飞鸽客服副驾驶</h1><p>{auth.operator.name}·{workflowLabel}</p></div><button className="text-button" onClick={() => void logout()}>退出</button></header>
-    {error && <div className="alert error">{error}</div>}
-    {notice && <div className="alert success">{notice}</div>}
+    {feedbackDialog}
 
     <section className="card context-card">
       <div className="section-title"><h2>当前会话</h2><button className="secondary compact" disabled={busy} onClick={() => void refreshContext()}>刷新识别</button></div>
