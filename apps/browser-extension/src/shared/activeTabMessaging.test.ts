@@ -35,4 +35,30 @@ await assert.rejects(
   /请先打开抖店飞鸽客服会话/,
 );
 
+let appendedCommand: unknown;
+const appendResult = await activeTabCommand({
+  type: 'APPEND_FEIGE_REPLY',
+  text: '补充话术',
+  expectedOrderNo: 'ORDER-9',
+  expectedCustomerDisplayName: '王先生',
+}, {
+  tabs: {
+    async query() {
+      return [{ id: 9, url: 'https://fxg.jinritemai.com/ffa/morder/order/list' }];
+    },
+    async sendMessage(_tabId: number, command: unknown) {
+      appendedCommand = command;
+      return { ok: true };
+    },
+  },
+  scripting: bridge.scripting,
+} as any);
+assert.deepEqual(appendedCommand, {
+  type: 'APPEND_FEIGE_REPLY',
+  text: '补充话术',
+  expectedOrderNo: 'ORDER-9',
+  expectedCustomerDisplayName: '王先生',
+}, '人工选择的话术应作为追加命令发送到飞鸽页面');
+assert.deepEqual(appendResult, { ok: true });
+
 console.log('active tab messaging recovery: ok');

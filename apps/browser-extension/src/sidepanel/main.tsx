@@ -213,14 +213,12 @@ function App() {
     setError(''); setNotice('');
     try {
       const result = await activeTabCommand({
-        type: 'FILL_FEIGE_REPLY_IF_EMPTY', text,
+        type: 'APPEND_FEIGE_REPLY', text,
         expectedOrderNo: context?.platformOrderNo,
         expectedCustomerDisplayName: context?.customerDisplayName,
       });
       if (!result.ok) throw new Error(result.message);
-      setNotice('filled' in result && result.filled
-        ? '话术已填入飞鸽，请客服确认后发送'
-        : '输入框已有内容，未覆盖人工输入');
+      setNotice('话术已追加到飞鸽，请客服确认后发送');
     } catch (caught) { setError(caught instanceof Error ? caught.message : '填入话术失败'); }
   };
 

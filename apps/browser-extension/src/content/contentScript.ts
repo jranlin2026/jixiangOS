@@ -20,6 +20,13 @@ chrome.runtime.onMessage.addListener((message: PageCommand, _sender, sendRespons
     }));
     return;
   }
+  if (message.type === 'APPEND_FEIGE_REPLY') {
+    sendResponse(adapter.appendReply(String(message.text || ''), {
+      expectedOrderNo: message.expectedOrderNo,
+      expectedCustomerDisplayName: message.expectedCustomerDisplayName,
+    }));
+    return;
+  }
   if (message.type === 'SAVE_ORDER_REMARK') {
     sendResponse(adapter.fillOrderRemark(String(message.text || '')));
   }

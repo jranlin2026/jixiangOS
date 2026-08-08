@@ -27,6 +27,12 @@ export type PageCommand =
       expectedOrderNo?: string;
       expectedCustomerDisplayName?: string;
     }
+  | {
+      type: 'APPEND_FEIGE_REPLY';
+      text: string;
+      expectedOrderNo?: string;
+      expectedCustomerDisplayName?: string;
+    }
   | { type: 'SAVE_ORDER_REMARK'; text: string };
 
 export type PageCommandResult =
