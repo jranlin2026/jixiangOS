@@ -184,6 +184,13 @@ function productResolutionFromRecord(record: BrowserLeadSyncRecord): BrowserLead
   return { status: 'UNMATCHED', rawProductName: record.sourceProductName || '' };
 }
 
+function paymentAmountFromRecord(record: BrowserLeadSyncRecord) {
+  if (record.sourcePaymentAmount === null || record.sourcePaymentAmount === undefined) return undefined;
+  const amount = Number(record.sourcePaymentAmount);
+  if (!Number.isFinite(amount)) throw new Error('浏览器线索同步实付快照格式无效');
+  return amount;
+}
+
 export function createBrowserLeadIntakeService(deps: {
   repository: BrowserLeadSyncRepository;
   catalog: Pick<BrowserCatalogService, 'resolveForIntake'>;
@@ -272,8 +279,14 @@ export function createBrowserLeadIntakeService(deps: {
         );
       }
 
+      const reserved = reservation.record;
+      const reservedProduct = productResolutionFromRecord(reserved);
+      const reservedPaymentAmount = paymentAmountFromRecord(reserved);
+      const reservedPaymentAt = reserved.sourcePaymentAt?.toISOString();
+      const reservedShopDisplayName = reserved.shopDisplayName || binding.displayName;
+      const rawProductName = reserved.sourceProductName || '未识别';
       const leadInput = {
-        externalIntakeKey: reservation.record.id,
+        externalIntakeKey: reserved.id,
         name: normalized.contactName,
         phone: normalized.contactPhone || '',
         phones: normalized.contactPhone
@@ -285,18 +298,18 @@ export function createBrowserLeadIntakeService(deps: {
         sourceType: binding.sourceType,
         sourcePlatformId: 'DOUYIN',
         sourcePlatformName: '抖音',
-        sourceShopId: binding.shopKey,
-        sourceShopName: binding.displayName,
-        platformOrderNo: normalized.platformOrderNo,
-        ...(resolution.status === 'MATCHED' ? {
-          sourceProductId: resolution.osProductId,
-          sourceProductName: resolution.osProductName,
+        sourceShopId: reserved.shopKey,
+        sourceShopName: reservedShopDisplayName,
+        platformOrderNo: reserved.platformOrderNo,
+        ...(reservedProduct.status === 'MATCHED' && reservedProduct.osProductId && reservedProduct.osProductName ? {
+          sourceProductId: reservedProduct.osProductId,
+          sourceProductName: reservedProduct.osProductName,
         } : {}),
-        ...(normalized.paymentAmount !== undefined ? { sourcePaymentAmount: normalized.paymentAmount } : {}),
-        ...(normalized.paymentAt ? { sourcePaymentAt: normalized.paymentAt } : {}),
-        remark: resolution.status === 'MATCHED'
-          ? `由极享AI浏览器员工从飞鸽客服录入；店铺：${binding.displayName}；平台商品：${normalized.platformProductName || '未识别'}；匹配OS产品：${resolution.osProductName}`
-          : `由极享AI浏览器员工从飞鸽客服录入；店铺：${binding.displayName}；平台商品待匹配：${normalized.platformProductName || '未识别'}`,
+        ...(reservedPaymentAmount !== undefined ? { sourcePaymentAmount: reservedPaymentAmount } : {}),
+        ...(reservedPaymentAt ? { sourcePaymentAt: reservedPaymentAt } : {}),
+        remark: reservedProduct.status === 'MATCHED' && reservedProduct.osProductName
+          ? `由极享AI浏览器员工从飞鸽客服录入；店铺：${reservedShopDisplayName}；平台商品：${rawProductName}；匹配OS产品：${reservedProduct.osProductName}`
+          : `由极享AI浏览器员工从飞鸽客服录入；店铺：${reservedShopDisplayName}；平台商品待匹配：${rawProductName}`,
         status: '新线索',
       } as Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followUpRecords'>;
 

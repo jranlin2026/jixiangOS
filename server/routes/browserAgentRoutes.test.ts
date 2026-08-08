@@ -11,6 +11,9 @@ assert.match(readFileSync(join(process.cwd(), 'server/index.ts'), 'utf8'), /app\
 const calls: any[] = [];
 const service = {
   async intake(input: any, actor: any) {
+    if (!String(input.shopBindingId || '').trim()) {
+      return { code: 400, data: null, message: '店铺绑定不能为空' };
+    }
     calls.push({ method: 'intake', input, actor });
     return {
       code: 0,
@@ -144,12 +147,22 @@ try {
   const intake = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/lead-intakes`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      platform: 'DOUYIN', shopKey: 'shop-1', platformOrderNo: 'order-1',
+      platform: 'DOUYIN', shopBindingId: 'shop-binding-1', platformOrderNo: 'order-1',
       contactName: '张先生', contactPhone: '13800138000', contactSource: 'CHAT',
     }),
   });
   assert.equal(intake.status, 201);
   assert.equal((await intake.json()).data.lead.id, 'lead-1');
+
+  const legacyShopKeyOnly = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/lead-intakes`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      platform: 'DOUYIN', shopKey: 'shop-1', platformOrderNo: 'legacy-order-1',
+      contactName: '张先生', contactPhone: '13800138000', contactSource: 'CHAT',
+    }),
+  });
+  assert.equal(legacyShopKeyOnly.status, 400);
+  assert.equal((await legacyShopKeyOnly.json()).message, '店铺绑定不能为空');
 
   const remark = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/lead-intakes/sync-1/order-remark`, {
     method: 'POST', headers: { 'content-type': 'application/json' },

@@ -219,12 +219,73 @@ assert.deepEqual({
   sourcePaymentAmount: '123456789012.34',
   sourcePaymentAt: new Date('2026-08-08T09:00:00.000Z'),
 }, '重复入库从Prisma读回时必须保留完整商品解析审计和精确实付快照');
+const successfulDuplicateWithChangedFacts = await repository.reserve({
+  ...reservationInput,
+  matchedProductId: 'product-should-not-overwrite',
+  matchedProductName: '不得覆盖首次审计',
+  sourcePaymentAmount: '999.99',
+  sourcePaymentAt: new Date('2026-08-10T00:00:00.000Z'),
+});
+assert.equal(successfulDuplicateWithChangedFacts.acquired, false);
+assert.equal(successfulDuplicateWithChangedFacts.record.matchedProductId, 'product-taojin');
+assert.equal(successfulDuplicateWithChangedFacts.record.matchedProductName, '淘金AI');
+assert.equal(successfulDuplicateWithChangedFacts.record.sourcePaymentAmount, '123456789012.34');
+assert.equal(
+  successfulDuplicateWithChangedFacts.record.sourcePaymentAt?.getTime(),
+  new Date('2026-08-08T09:00:00.000Z').getTime(),
+  '成功重复记录必须保持首次商品与实付审计不变',
+);
 
 await repository.markFailed(first.record.id, '极享OS暂时不可用');
-const retry = await repository.reserve(reservationInput);
+const correctedReservationInput = {
+  ...reservationInput,
+  shopBindingId: 'binding-1-corrected',
+  shopDisplayName: '极享抖音官方店',
+  platformProductId: 'DY-200',
+  platformSkuId: 'SKU-200-B',
+  sourceProductName: '更正后的平台商品',
+  matchedProductId: 'product-corrected',
+  matchedProductName: '更正后OS产品',
+  productMatchMethod: 'PLATFORM_SKU_ID',
+  sourcePaymentAmount: '399.25',
+  sourcePaymentAt: new Date('2026-08-09T02:30:00.000Z'),
+  operatorId: 'user-2',
+  operatorName: '客服小周',
+  contactSource: 'OFF_PLATFORM' as const,
+};
+const retry = await repository.reserve(correctedReservationInput);
 assert.equal(retry.acquired, true, '失败记录可以被后续重试重新获取');
 assert.equal(retry.record.status, 'PENDING');
 assert.equal(retry.record.attemptCount, 2);
+assert.deepEqual({
+  shopBindingId: retry.record.shopBindingId,
+  shopDisplayName: retry.record.shopDisplayName,
+  platformProductId: retry.record.platformProductId,
+  platformSkuId: retry.record.platformSkuId,
+  sourceProductName: retry.record.sourceProductName,
+  matchedProductId: retry.record.matchedProductId,
+  matchedProductName: retry.record.matchedProductName,
+  productMatchMethod: retry.record.productMatchMethod,
+  sourcePaymentAmount: retry.record.sourcePaymentAmount,
+  sourcePaymentAt: retry.record.sourcePaymentAt,
+  operatorId: retry.record.operatorId,
+  operatorName: retry.record.operatorName,
+  contactSource: retry.record.contactSource,
+}, {
+  shopBindingId: 'binding-1-corrected',
+  shopDisplayName: '极享抖音官方店',
+  platformProductId: 'DY-200',
+  platformSkuId: 'SKU-200-B',
+  sourceProductName: '更正后的平台商品',
+  matchedProductId: 'product-corrected',
+  matchedProductName: '更正后OS产品',
+  productMatchMethod: 'PLATFORM_SKU_ID',
+  sourcePaymentAmount: '399.25',
+  sourcePaymentAt: new Date('2026-08-09T02:30:00.000Z'),
+  operatorId: 'user-2',
+  operatorName: '客服小周',
+  contactSource: 'OFF_PLATFORM',
+}, '原子抢占失败记录时必须同步刷新当前入库的全部审计事实');
 
 row = {
   ...row,

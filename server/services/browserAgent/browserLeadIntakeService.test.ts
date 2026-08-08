@@ -73,14 +73,40 @@ const catalogRepository: BrowserCatalogRepository = {
 
 const records = new Map<string, any>();
 const createLeadCalls: any[] = [];
+
+function prismaAuditSnapshot(input: any) {
+  return {
+    ...input,
+    shopBindingId: input.shopBindingId ?? null,
+    shopDisplayName: input.shopDisplayName ?? null,
+    platformProductId: input.platformProductId ?? null,
+    platformSkuId: input.platformSkuId ?? null,
+    sourceProductName: input.sourceProductName ?? null,
+    matchedProductId: input.matchedProductId ?? null,
+    matchedProductName: input.matchedProductName ?? null,
+    productMatchMethod: input.productMatchMethod ?? null,
+    sourcePaymentAmount: input.sourcePaymentAmount === undefined ? null : String(input.sourcePaymentAmount),
+    sourcePaymentAt: input.sourcePaymentAt ? new Date(input.sourcePaymentAt) : null,
+  };
+}
+
 const repository = {
   async reserve(input: any) {
     const key = `${input.platform}:${input.shopKey}:${input.platformOrderNo}`;
     const existing = records.get(key);
-    if (existing) return { acquired: false as const, record: existing };
+    if (existing) {
+      if (existing.status !== 'FAILED') return { acquired: false as const, record: existing };
+      Object.assign(existing, prismaAuditSnapshot(input), {
+        status: 'PENDING',
+        lastError: null,
+        attemptCount: existing.attemptCount + 1,
+        updatedAt: new Date(),
+      });
+      return { acquired: true as const, record: existing };
+    }
     const record = {
       id: `browser-sync-${records.size + 1}`,
-      ...input,
+      ...prismaAuditSnapshot(input),
       status: 'PENDING',
       orderRemarkStatus: 'NOT_ATTEMPTED',
       greenFlagStatus: 'NOT_ATTEMPTED',
@@ -197,7 +223,7 @@ assert.deepEqual(createLeadCalls[0].input, {
   sourceProductId: 'prod-taojin',
   sourceProductName: '淘金AI',
   sourcePaymentAmount: 299,
-  sourcePaymentAt: '2026-08-08T09:00:00+08:00',
+  sourcePaymentAt: '2026-08-08T01:00:00.000Z',
   remark: '由极享AI浏览器员工从飞鸽客服录入；店铺：极享官方旗舰店；平台商品：淘金AI 多模态创作智能体 读书卡；匹配OS产品：淘金AI',
   status: '新线索',
 });
@@ -219,7 +245,7 @@ assert.deepEqual({
   matchedProductId: 'prod-taojin',
   matchedProductName: '淘金AI',
   productMatchMethod: 'PLATFORM_PRODUCT_ID',
-  sourcePaymentAmount: 299,
+  sourcePaymentAmount: '299',
   sourcePaymentAt: new Date('2026-08-08T09:00:00+08:00'),
 });
 
@@ -264,6 +290,15 @@ for (const shopBindingId of ['binding-off', 'binding-missing']) {
   assert.equal(unavailable.errorCode, 'SHOP_BINDING_UNAVAILABLE');
 }
 assert.equal(createLeadCalls.length, 3, '停用或不存在店铺不得创建线索');
+const legacyShopKeyOnly = await service.intake({
+  ...shopAInput,
+  shopBindingId: undefined,
+  shopKey: 'jixiang-a',
+  platformOrderNo: 'DY-20260808-LEGACY',
+} as any, actor);
+assert.equal(legacyShopKeyOnly.code, 400);
+assert.equal(legacyShopKeyOnly.message, '店铺绑定不能为空');
+assert.equal(createLeadCalls.length, 3, '仅提交旧 shopKey 合同不得进入创建线索');
 
 const mismatch = await service.intake({
   ...shopAInput,
@@ -321,6 +356,91 @@ const invalid = await service.intake({
 assert.equal(invalid.code, 400);
 assert.equal(invalid.message, '手机号或微信至少填写一项');
 assert.equal(createLeadCalls.length, 3, '无效联系方式不能进入线索创建');
+
+const retryCreateLeadCalls: any[] = [];
+const retryService = createBrowserLeadIntakeService({
+  repository,
+  catalog: createBrowserCatalogService({ repository: catalogRepository }),
+  async createLead(input) {
+    retryCreateLeadCalls.push(input);
+    if (retryCreateLeadCalls.length === 1) {
+      return { code: 503, data: null, message: '极享OS暂时不可用' } as any;
+    }
+    return {
+      code: 0,
+      data: {
+        id: 'lead-retried',
+        name: input.name,
+        phone: input.phone,
+        wechat: input.wechat,
+        assignedTo: '销售小周',
+        assignedToId: 'sales-2',
+        intakeStatus: '入库成功',
+      },
+      message: 'success',
+    } as any;
+  },
+});
+const retryOrderInput = {
+  ...shopAInput,
+  platformOrderNo: 'DY-20260808-RETRY',
+};
+const failedFirstAttempt = await retryService.intake(retryOrderInput, actor);
+assert.equal(failedFirstAttempt.code, 503);
+const originalMapping = { ...mappings[0] };
+products.push({ id: 'prod-corrected', name: '更正后OS产品', price: 599, isActive: true });
+Object.assign(mappings[0], {
+  osProductId: 'prod-corrected',
+  osProductName: '更正后OS产品',
+});
+const retried = await retryService.intake({
+  ...retryOrderInput,
+  platformProductName: '更正后的平台商品',
+  paymentAmount: 399.25,
+  paymentAt: '2026-08-09T10:30:00+08:00',
+}, actor);
+Object.assign(mappings[0], originalMapping);
+products.pop();
+assert.equal(retried.code, 0);
+assert.equal(retried.data?.outcome, 'CREATED');
+assert.deepEqual({
+  sourceProductId: retryCreateLeadCalls[1].sourceProductId,
+  sourceProductName: retryCreateLeadCalls[1].sourceProductName,
+  sourcePaymentAmount: retryCreateLeadCalls[1].sourcePaymentAmount,
+  sourcePaymentAt: retryCreateLeadCalls[1].sourcePaymentAt,
+  remark: retryCreateLeadCalls[1].remark,
+}, {
+  sourceProductId: 'prod-corrected',
+  sourceProductName: '更正后OS产品',
+  sourcePaymentAmount: 399.25,
+  sourcePaymentAt: '2026-08-09T02:30:00.000Z',
+  remark: '由极享AI浏览器员工从飞鸽客服录入；店铺：极享官方旗舰店；平台商品：更正后的平台商品；匹配OS产品：更正后OS产品',
+}, '重试创建线索必须只使用原子抢占后的当前审计快照');
+const retriedRecord = records.get('DOUYIN:jixiang-a:DY-20260808-RETRY');
+assert.deepEqual({
+  matchedProductId: retriedRecord.matchedProductId,
+  matchedProductName: retriedRecord.matchedProductName,
+  productMatchMethod: retriedRecord.productMatchMethod,
+  sourceProductName: retriedRecord.sourceProductName,
+  sourcePaymentAmount: retriedRecord.sourcePaymentAmount,
+  sourcePaymentAt: retriedRecord.sourcePaymentAt,
+  attemptCount: retriedRecord.attemptCount,
+}, {
+  matchedProductId: 'prod-corrected',
+  matchedProductName: '更正后OS产品',
+  productMatchMethod: 'PLATFORM_PRODUCT_ID',
+  sourceProductName: '更正后的平台商品',
+  sourcePaymentAmount: '399.25',
+  sourcePaymentAt: new Date('2026-08-09T02:30:00.000Z'),
+  attemptCount: 2,
+});
+assert.deepEqual(retried.data?.productResolution, {
+  status: 'MATCHED',
+  method: 'PLATFORM_PRODUCT_ID',
+  osProductId: 'prod-corrected',
+  osProductName: '更正后OS产品',
+  rawProductName: '更正后的平台商品',
+}, '重试响应必须返回刷新后的持久化商品审计');
 
 const remark = await service.reportOrderRemark('browser-sync-1', { status: 'SUBMITTED' }, actor);
 assert.equal(remark.code, 0);
