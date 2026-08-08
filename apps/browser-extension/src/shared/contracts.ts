@@ -31,7 +31,7 @@ export type PageCommand =
       type: 'APPEND_FEIGE_REPLY';
       text: string;
       expectedOrderNo?: string;
-      expectedCustomerDisplayName?: string;
+      expectedCustomerDisplayName: string;
     }
   | { type: 'SAVE_ORDER_REMARK'; text: string };
 

@@ -211,11 +211,16 @@ function App() {
 
   const fillScript = async (text: string) => {
     setError(''); setNotice('');
+    const expectedCustomerDisplayName = context?.customerDisplayName.trim();
+    if (!expectedCustomerDisplayName) {
+      setError('请先刷新并识别当前飞鸽客户，再追加话术');
+      return;
+    }
     try {
       const result = await activeTabCommand({
         type: 'APPEND_FEIGE_REPLY', text,
         expectedOrderNo: context?.platformOrderNo,
-        expectedCustomerDisplayName: context?.customerDisplayName,
+        expectedCustomerDisplayName,
       });
       if (!result.ok) throw new Error(result.message);
       setNotice('话术已追加到飞鸽，请客服确认后发送');

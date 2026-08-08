@@ -78,11 +78,20 @@ assert.deepEqual(realAdapter.fillReplyIfEmpty('系统推荐'), { ok: true, fille
 assert.equal(reply.value, '系统推荐');
 
 reply.value = '已有内容';
-assert.deepEqual(realAdapter.appendReply('新话术'), { ok: true });
+assert.deepEqual(realAdapter.appendReply('新话术', undefined as never), {
+  ok: false, code: 'CONTEXT_NOT_VERIFIED', message: '未识别客户昵称，未追加话术',
+});
+assert.equal(reply.value, '已有内容');
+
+assert.deepEqual(realAdapter.appendReply('新话术', {
+  expectedCustomerDisplayName: 'TK小学生',
+}), { ok: true });
 assert.equal(reply.value, '已有内容\n新话术');
 
 reply.value = '已有内容\n';
-assert.deepEqual(realAdapter.appendReply('新话术'), { ok: true });
+assert.deepEqual(realAdapter.appendReply('新话术', {
+  expectedCustomerDisplayName: 'TK小学生',
+}), { ok: true });
 assert.equal(reply.value, '已有内容\n新话术');
 
 console.log('douyin feige page adapter: ok');

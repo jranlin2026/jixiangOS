@@ -135,14 +135,17 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         : { ok: false, code: 'REPLY_EDITOR_NOT_FOUND', message: '未找到飞鸽回复输入框' };
     },
 
-    appendReply(value: string, expected?: {
+    appendReply(value: string, expected: {
       expectedOrderNo?: string;
-      expectedCustomerDisplayName?: string;
+      expectedCustomerDisplayName: string;
     }): PageWriteResult {
+      if (!expected?.expectedCustomerDisplayName.trim()) {
+        return { ok: false, code: 'CONTEXT_NOT_VERIFIED', message: '未识别客户昵称，未追加话术' };
+      }
       const currentOrderNo = text(document, selectors.orderNo);
       const currentCustomer = text(first(document, selectors.root) || document, selectors.customer);
-      if ((expected?.expectedOrderNo && currentOrderNo !== expected.expectedOrderNo)
-        || (expected?.expectedCustomerDisplayName && currentCustomer !== expected.expectedCustomerDisplayName)) {
+      if ((expected.expectedOrderNo && currentOrderNo !== expected.expectedOrderNo)
+        || currentCustomer !== expected.expectedCustomerDisplayName) {
         return { ok: false, code: 'CONTEXT_CHANGED', message: '当前飞鸽会话已切换，未填入话术' };
       }
       const editor = first(document, selectors.reply);
