@@ -272,23 +272,6 @@ function direction(element: HTMLElement): BrowserChatMessage['direction'] {
   return 'SYSTEM';
 }
 
-function consultationProductName(document: Document) {
-  const explicit = text(document, selectors.product);
-  if (explicit) return explicit;
-  const inviteButton = [...document.querySelectorAll<HTMLElement>('button')]
-    .find((element) => element.textContent?.trim() === '邀请下单');
-  if (!inviteButton) return '';
-  let panel: HTMLElement | null = inviteButton.parentElement;
-  while (panel && !/￥\s*\d/.test(panel.textContent || '')) panel = panel.parentElement;
-  if (!panel) return '';
-  const candidates = [...panel.querySelectorAll<HTMLElement>('div,span')]
-    .map((element) => element.textContent?.trim() || '')
-    .filter((value) => value.length >= 2 && value.length <= 80)
-    .filter((value) => !/[￥¥]/.test(value))
-    .filter((value) => !/^(详情|已售\d*|邀请下单|规格属性|商品视频|商品评价)$/.test(value));
-  return candidates.sort((left, right) => left.length - right.length)[0] || '';
-}
-
 function shopDisplayNameFromPage(document: Document) {
   const candidates = uniqueMatches(document, selectors.shop)
     .filter(isVisible)
@@ -314,16 +297,20 @@ function stableProductAttribute(
   orderContainer: HTMLElement,
   attributes: string[],
 ) {
-  for (const attribute of attributes) {
-    let current: HTMLElement | null = productNode;
-    while (current) {
+  const values = new Set<string>();
+  let current: HTMLElement | null = productNode;
+  while (current) {
+    for (const attribute of attributes) {
       const value = current.getAttribute(attribute)?.trim();
-      if (value) return value;
-      if (current === orderContainer) break;
-      current = current.parentElement;
+      if (value) values.add(value);
     }
+    if (current === orderContainer) break;
+    current = current.parentElement;
   }
-  return undefined;
+  return {
+    value: values.size === 1 ? [...values][0] : undefined,
+    conflict: values.size > 1,
+  };
 }
 
 function activeOrderProductFacts(orderCard: HTMLElement) {
@@ -335,18 +322,24 @@ function activeOrderProductFacts(orderCard: HTMLElement) {
       platformProductId: undefined,
       platformSkuId: undefined,
       ambiguous: productNodes.length > 1,
+      productIdConflict: false,
+      skuIdConflict: false,
     };
   }
   const productNode = productNodes[0];
+  const productId = stableProductAttribute(productNode, orderContainer, ['data-product-id', 'data-item-id']);
+  const skuId = stableProductAttribute(productNode, orderContainer, ['data-sku-id']);
   return {
     productName: productNode.textContent?.trim() || '',
-    platformProductId: stableProductAttribute(productNode, orderContainer, ['data-product-id', 'data-item-id']),
-    platformSkuId: stableProductAttribute(productNode, orderContainer, ['data-sku-id']),
+    platformProductId: productId.value,
+    platformSkuId: skuId.value,
     ambiguous: false,
+    productIdConflict: productId.conflict,
+    skuIdConflict: skuId.conflict,
   };
 }
 
-function leafLabeledElements(root: HTMLElement, label: string) {
+function semanticLabelElements(root: HTMLElement, label: string) {
   const candidates = [root, ...root.querySelectorAll<HTMLElement>('*')]
     .filter(isVisible)
     .filter((element) => (element.textContent || '').includes(label));
@@ -366,15 +359,41 @@ function textWithNodeBoundaries(node: Node): string {
   return [...node.childNodes].map(textWithNodeBoundaries).join(' ');
 }
 
+function factMatchNearUniqueLabel(
+  orderCard: HTMLElement,
+  label: string,
+  pattern: RegExp,
+): ParsedPlatformFact<RegExpMatchArray> {
+  const orderContainer = activeOrderContainer(orderCard);
+  const labels = semanticLabelElements(orderContainer, label);
+  if (!labels.length) return { status: 'ABSENT' };
+  if (labels.length > 1) return { status: 'AMBIGUOUS' };
+
+  let current: HTMLElement | null = labels[0];
+  while (current) {
+    const content = textWithNodeBoundaries(current);
+    const matches = [...content.matchAll(pattern)];
+    const contentWithoutLabel = content.replace(label, '').replace(/[\s:：-]/g, '');
+    const reachedBoundary = current === orderContainer;
+    if (matches.length || contentWithoutLabel || reachedBoundary) {
+      if (matches.length > 1) return { status: 'AMBIGUOUS' };
+      return matches.length === 1
+        ? { status: 'FOUND', value: matches[0] }
+        : { status: 'INVALID' };
+    }
+    current = current.parentElement;
+  }
+  return { status: 'INVALID' };
+}
+
 function paymentAmountFromOrderCard(orderCard: HTMLElement): ParsedPlatformFact<number> {
-  const labeled = leafLabeledElements(activeOrderContainer(orderCard), '实付金额');
-  if (!labeled.length) return { status: 'ABSENT' };
-  const matches = labeled.flatMap((element) => [...textWithNodeBoundaries(element).matchAll(
+  const match = factMatchNearUniqueLabel(
+    orderCard,
+    '实付金额',
     /[¥￥]\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?)(?![\d.,])/g,
-  )]);
-  if (matches.length > 1 || labeled.length > 1) return { status: 'AMBIGUOUS' };
-  if (matches.length !== 1) return { status: 'INVALID' };
-  const value = Number(matches[0][1].replaceAll(',', ''));
+  );
+  if (match.status !== 'FOUND') return match;
+  const value = Number(match.value[1].replaceAll(',', ''));
   return Number.isFinite(value) ? { status: 'FOUND', value } : { status: 'INVALID' };
 }
 
@@ -391,14 +410,13 @@ function validShanghaiPaymentTime(parts: RegExpMatchArray) {
 }
 
 function paymentTimeFromOrderCard(orderCard: HTMLElement): ParsedPlatformFact<string> {
-  const labeled = leafLabeledElements(activeOrderContainer(orderCard), '付款时间');
-  if (!labeled.length) return { status: 'ABSENT' };
-  const matches = labeled.flatMap((element) => [...textWithNodeBoundaries(element).matchAll(
+  const match = factMatchNearUniqueLabel(
+    orderCard,
+    '付款时间',
     /(?<!\d)(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(?!\d)/g,
-  )]);
-  if (matches.length > 1 || labeled.length > 1) return { status: 'AMBIGUOUS' };
-  if (matches.length !== 1) return { status: 'INVALID' };
-  const value = validShanghaiPaymentTime(matches[0]);
+  );
+  if (match.status !== 'FOUND') return match;
+  const value = validShanghaiPaymentTime(match.value);
   return value ? { status: 'FOUND', value } : { status: 'INVALID' };
 }
 
@@ -438,10 +456,15 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       const orderStatus = activeOrderCard ? orderStatusFromElement(activeOrderCard) : '';
       const productFacts = activeOrderCard
         ? activeOrderProductFacts(activeOrderCard)
-        : { productName: '', platformProductId: undefined, platformSkuId: undefined, ambiguous: false };
-      const productName = activeOrderCard
-        ? productFacts.productName
-        : activeOrderCards.length === 0 ? consultationProductName(document) : '';
+        : {
+          productName: '',
+          platformProductId: undefined,
+          platformSkuId: undefined,
+          ambiguous: false,
+          productIdConflict: false,
+          skuIdConflict: false,
+        };
+      const productName = productFacts.productName;
       const paymentAmountFact = activeOrderCard
         ? paymentAmountFromOrderCard(activeOrderCard)
         : { status: 'ABSENT' as const };
@@ -457,6 +480,8 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       if (!platformOrderNo) diagnostics.push('未识别平台订单号');
       if (!orderStatus) diagnostics.push('未识别订单状态');
       if (productFacts.ambiguous) diagnostics.push('当前订单商品存在歧义');
+      if (productFacts.productIdConflict) diagnostics.push('当前订单商品ID存在冲突');
+      if (productFacts.skuIdConflict) diagnostics.push('当前订单SKU ID存在冲突');
       if (paymentAmountFact.status === 'AMBIGUOUS') diagnostics.push('实付金额存在歧义');
       if (paymentAmountFact.status === 'INVALID') diagnostics.push('实付金额格式无效');
       if (paymentTimeFact.status === 'AMBIGUOUS') diagnostics.push('付款时间存在歧义');

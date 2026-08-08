@@ -67,6 +67,45 @@ const ancestorProductIdentity = createDouyinFeigeAdapter(
 assert.equal(ancestorProductIdentity.platformProductId, 'ITEM-100', '商品 ID 可从当前商品节点的稳定属性祖先读取');
 assert.equal(ancestorProductIdentity.platformSkuId, 'SKU-RED', 'SKU 只从当前商品节点或祖先读取');
 
+const siblingPaymentFacts = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-SIBLING-PAYMENT</span>
+    <span data-btm="d5834">淘金AI</span>
+    <div><span>实付金额</span><strong>¥299.00</strong></div>
+    <div><span>付款时间</span><strong>2026/08/08 19:34:20 (抖音月付)</strong></div>
+  </section>
+`);
+assert.equal(siblingPaymentFacts.paymentAmount, 299, '实付值是语义标签的同级节点时仍必须读取');
+assert.equal(siblingPaymentFacts.paymentAt, '2026-08-08T19:34:20+08:00', '付款时间是标签同级节点时仍必须读取');
+
+const ambiguousPaymentRows = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-AMBIGUOUS-PAYMENT-ROWS</span>
+    <span data-btm="d5834">淘金AI</span>
+    <div><span>实付金额</span><strong>¥299.00</strong></div>
+    <div><span>实付金额</span><strong>¥399.00</strong></div>
+    <div><span>付款时间</span><strong>2026/08/08 19:34:20</strong></div>
+    <div><span>付款时间</span><strong>2026/08/08 20:34:20</strong></div>
+  </section>
+`);
+assert.equal(ambiguousPaymentRows.paymentAmount, undefined, '多个实付语义行时必须失败关闭');
+assert.ok(ambiguousPaymentRows.diagnostics.includes('实付金额存在歧义'));
+assert.equal(ambiguousPaymentRows.paymentAt, undefined, '多个付款时间语义行时必须失败关闭');
+assert.ok(ambiguousPaymentRows.diagnostics.includes('付款时间存在歧义'));
+
+const conflictingProductIdentity = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-CONFLICTING-PRODUCT-ID</span>
+    <div data-item-id="ITEM-ANCESTOR" data-sku-id="SKU-ANCESTOR">
+      <span data-btm="d5834" data-product-id="PRODUCT-NODE" data-sku-id="SKU-NODE">淘金AI</span>
+    </div>
+  </section>
+`);
+assert.equal(conflictingProductIdentity.platformProductId, undefined, '商品节点与祖先的稳定商品 ID 冲突时不得选首值');
+assert.ok(conflictingProductIdentity.diagnostics.includes('当前订单商品ID存在冲突'));
+assert.equal(conflictingProductIdentity.platformSkuId, undefined, '商品节点与祖先的 SKU ID 冲突时不得选首值');
+assert.ok(conflictingProductIdentity.diagnostics.includes('当前订单SKU ID存在冲突'));
+
 function readOrderFactsFixture(orderMarkup: string, pageMarkup = '') {
   const fixture = new JSDOM(`<!doctype html><html><body>
     <main data-jx-feige-conversation><span data-jx-customer-name>顾客昵称</span></main>
@@ -173,7 +212,7 @@ assert.equal(realContext.supported, true);
 assert.equal(realContext.customerDisplayName, 'TK小学生');
 assert.equal(realContext.orderStatus, '');
 assert.ok(realContext.diagnostics.includes('未识别订单状态'));
-assert.equal(realContext.productName, 'N哥IP口播智能体');
+assert.equal(realContext.productName, '', '没有唯一活动订单卡时，推荐商品不得填入订单商品事实');
 assert.deepEqual(realContext.messages, [
   { direction: 'INBOUND', text: '1117' },
   { direction: 'OUTBOUND', text: '1' },
