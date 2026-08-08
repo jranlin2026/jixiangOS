@@ -1,5 +1,6 @@
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
 import { buildOsRemarkLines, isPaidOrderStatus } from '../domain/orderCompletion';
+import { normalizePhoneForComparison } from '../../../../src/shared/utils/phoneNumber';
 import type {
   ApiEnvelope,
   CompleteOsOrderInput,
@@ -69,9 +70,15 @@ function duplicateContactMismatch(input: OrderCompletionInput, intake: LeadIntak
   const nickname = input.expectedCustomerDisplayName.trim();
   const phone = input.phone?.trim() || '';
   const wechat = input.wechat?.trim() || '';
+  const storedPhone = snapshot?.phone?.trim() || '';
+  const storedWechat = snapshot?.wechat?.trim() || '';
   const chosenContactMatches = phone
-    ? snapshot?.phone?.trim() === phone
-    : Boolean(wechat) && snapshot?.wechat?.trim() === wechat;
+    ? Boolean(storedPhone)
+      && Boolean(normalizePhoneForComparison(phone))
+      && normalizePhoneForComparison(storedPhone) === normalizePhoneForComparison(phone)
+    : Boolean(wechat)
+      && Boolean(storedWechat)
+      && storedWechat.toLowerCase() === wechat.toLowerCase();
   if (snapshot?.nickname?.trim() === nickname && chosenContactMatches) return '';
   const contactLabel = phone ? '手机号' : '微信号';
   return `极享OS已有资料与本次提交不一致（抖音昵称或用于订单备注的${contactLabel}不一致），请先在极享OS核对并统一资料后重试；未操作飞鸽订单`;

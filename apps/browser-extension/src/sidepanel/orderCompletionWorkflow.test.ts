@@ -309,6 +309,46 @@ for (const matchingContact of [
   assert.equal(matchingPageCalls, 1, '已有线索的昵称与备注联系方式一致时才可继续');
 }
 
+for (const normalizedContact of [
+  {
+    label: '手机号按极享OS存储格式归一化',
+    input: { phone: '13826459812' },
+    storedContact: { nickname: '悠然一刻', phone: '+8613826459812' },
+  },
+  {
+    label: '微信号忽略大小写',
+    input: { wechat: 'Wx_User88' },
+    storedContact: { nickname: '悠然一刻', wechat: 'wx_user88' },
+  },
+] as const) {
+  let normalizedPageCalls = 0;
+  const normalizedResult = await runOrderCompletion({
+    expectedOrderNo: currentContext.platformOrderNo,
+    expectedCustomerDisplayName: currentContext.customerDisplayName,
+    ...normalizedContact.input,
+    intakeInput: { platform: 'DOUYIN' },
+  }, {
+    readContext: async () => currentContext,
+    intake: async () => ({
+      code: 0,
+      data: { ...intakeResult, outcome: 'ALREADY_CREATED', storedContact: normalizedContact.storedContact },
+      message: 'success',
+    }),
+    completePage: async (pageInput) => {
+      normalizedPageCalls += 1;
+      return {
+        ok: true,
+        remarkText: `#悠然一刻/${pageInput.phone || pageInput.wechat}\n#入OS`,
+        remarkStatus: 'SUCCEEDED',
+        greenFlagStatus: 'SUCCEEDED',
+      };
+    },
+    report: async () => ({ code: 0, data: completionResult, message: 'success' }),
+  });
+  assert.equal(normalizedResult.stage, 'COMPLETED', `${normalizedContact.label}后应继续完成订单`);
+  assert.equal(normalizedPageCalls, 1, `${normalizedContact.label}后应操作飞鸽页面`);
+}
+
 for (const changedContext of [
   { ...currentContext, platformOrderNo: 'ORDER-CHANGED' },
   { ...currentContext, customerDisplayName: '已切换客户' },
