@@ -122,6 +122,46 @@ export async function runOrderCompletion(
   };
   emit(deps, initial);
 
+  if (input.existingIntake) {
+    const reconciliationMessage = duplicateContactMismatch(input, input.existingIntake);
+    if (reconciliationMessage) {
+      return emit(deps, {
+        ...initial,
+        stage: 'PLATFORM_FAILED',
+        message: reconciliationMessage,
+      });
+    }
+    if (input.existingIntake.orderRemarkStatus === 'SUCCEEDED'
+      && input.existingIntake.greenFlagStatus === 'SUCCEEDED') {
+      const osCompleted: OrderCompletionState = {
+        ...initial,
+        stage: 'OS_COMPLETED',
+      };
+      emit(deps, osCompleted);
+      emit(deps, { ...osCompleted, stage: 'PLATFORM_COMPLETING' });
+      const report = await reportCompletion(deps, {
+        syncId: input.existingIntake.syncId,
+        orderRemarkStatus: 'SUCCEEDED',
+        greenFlagStatus: 'SUCCEEDED',
+      });
+      if (report.code !== 0 || !report.data) {
+        return emit(deps, {
+          ...osCompleted,
+          stage: 'PLATFORM_FAILED',
+          message: report.message || '平台完成结果上报失败',
+        });
+      }
+      return emit(deps, {
+        ...osCompleted,
+        stage: report.data.orderRemarkStatus === 'SUCCEEDED' && report.data.greenFlagStatus === 'SUCCEEDED'
+          ? 'COMPLETED'
+          : 'PLATFORM_FAILED',
+        orderRemarkStatus: report.data.orderRemarkStatus,
+        greenFlagStatus: report.data.greenFlagStatus,
+      });
+    }
+  }
+
   const stopForContext = async (message: string) => {
     if (!input.existingIntake) return emit(deps, { ...initial, message });
     const report = await reportCompletion(deps, {
@@ -202,32 +242,6 @@ export async function runOrderCompletion(
       message: report.code === 0
         ? reconciliationMessage
         : `${reconciliationMessage}；${report.message}`,
-    });
-  }
-
-  if (input.existingIntake
-    && intakeResult.orderRemarkStatus === 'SUCCEEDED'
-    && intakeResult.greenFlagStatus === 'SUCCEEDED') {
-    emit(deps, { ...osCompleted, stage: 'PLATFORM_COMPLETING' });
-    const report = await reportCompletion(deps, {
-      syncId: intakeResult.syncId,
-      orderRemarkStatus: 'SUCCEEDED',
-      greenFlagStatus: 'SUCCEEDED',
-    });
-    if (report.code !== 0 || !report.data) {
-      return emit(deps, {
-        ...osCompleted,
-        stage: 'PLATFORM_FAILED',
-        message: report.message || '平台完成结果上报失败',
-      });
-    }
-    return emit(deps, {
-      ...osCompleted,
-      stage: report.data.orderRemarkStatus === 'SUCCEEDED' && report.data.greenFlagStatus === 'SUCCEEDED'
-        ? 'COMPLETED'
-        : 'PLATFORM_FAILED',
-      orderRemarkStatus: report.data.orderRemarkStatus,
-      greenFlagStatus: report.data.greenFlagStatus,
     });
   }
 

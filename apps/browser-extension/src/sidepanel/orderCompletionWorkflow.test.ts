@@ -492,6 +492,75 @@ assert.equal(reportOnlyRetry.stage, 'COMPLETED');
 assert.equal(reportOnlyPageCalls, 0, '页面成功、仅上报失败的重试不得重复页面操作');
 assert.equal(reportOnlyReportCalls, 1, '只重试一次平台结果上报');
 
+let reportOnlyWithoutPageContextReadCalls = 0;
+let reportOnlyWithoutPageContextReportCalls = 0;
+const reportOnlyWithoutPageContext = await runOrderCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13826459812',
+  intakeInput: { platform: 'DOUYIN' },
+  existingIntake: {
+    ...intakeResult,
+    outcome: 'ALREADY_CREATED',
+    orderRemarkStatus: 'SUCCEEDED',
+    greenFlagStatus: 'SUCCEEDED',
+  },
+}, {
+  readContext: async () => {
+    reportOnlyWithoutPageContextReadCalls += 1;
+    throw new Error('只重试上报时不得读取飞鸽页面');
+  },
+  intake: async () => {
+    throw new Error('只重试上报时不得重新入库');
+  },
+  completePage: async () => {
+    throw new Error('只重试上报时不得操作飞鸽页面');
+  },
+  report: async () => {
+    reportOnlyWithoutPageContextReportCalls += 1;
+    return { code: 0, data: completionResult, message: 'success' };
+  },
+});
+assert.equal(reportOnlyWithoutPageContextReadCalls, 0, '仅上报重试不得读取飞鸽页面');
+assert.equal(reportOnlyWithoutPageContextReportCalls, 1, '仅上报重试只上报一次');
+assert.equal(reportOnlyWithoutPageContext.stage, 'COMPLETED');
+
+let reportOnlyMismatchReadCalls = 0;
+let reportOnlyMismatchReportCalls = 0;
+const reportOnlyMismatch = await runOrderCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13900139000',
+  intakeInput: { platform: 'DOUYIN' },
+  existingIntake: {
+    ...intakeResult,
+    outcome: 'ALREADY_CREATED',
+    orderRemarkStatus: 'SUCCEEDED',
+    greenFlagStatus: 'SUCCEEDED',
+  },
+}, {
+  readContext: async () => {
+    reportOnlyMismatchReadCalls += 1;
+    throw new Error('资料不一致时不得读取飞鸽页面');
+  },
+  intake: async () => {
+    throw new Error('资料不一致时不得重新入库');
+  },
+  completePage: async () => {
+    throw new Error('资料不一致时不得操作飞鸽页面');
+  },
+  report: async () => {
+    reportOnlyMismatchReportCalls += 1;
+    throw new Error('资料不一致时不得上报成功');
+  },
+});
+assert.equal(reportOnlyMismatchReadCalls, 0, '资料不一致时不得读取飞鸽页面');
+assert.equal(reportOnlyMismatchReportCalls, 0, '资料不一致时不得上报成功');
+assert.equal(reportOnlyMismatch.stage, 'PLATFORM_FAILED');
+assert.equal(reportOnlyMismatch.orderRemarkStatus, 'SUCCEEDED', '资料不一致不得回退已成功的备注状态');
+assert.equal(reportOnlyMismatch.greenFlagStatus, 'SUCCEEDED', '资料不一致不得回退已成功的绿旗状态');
+assert.match(reportOnlyMismatch.message || '', /极享OS已有资料与本次提交不一致/);
+
 let exceptionReportCalls = 0;
 const pageException = await runOrderCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
