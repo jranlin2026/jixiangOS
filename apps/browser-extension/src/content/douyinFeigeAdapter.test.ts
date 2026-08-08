@@ -8,8 +8,8 @@ const dom = new JSDOM(`<!doctype html><html><body>
     <section data-testid="order-card">
       <div data-jx-order-no>DY-20260808-001</div>
       <div data-jx-order-status>已付款</div>
+      <div data-jx-product-name>AI口播智能体</div>
     </section>
-    <div data-jx-product-name>AI口播智能体</div>
     <div data-jx-message data-direction="OUTBOUND">老师您好，请留下联系方式。</div>
     <div data-jx-message data-direction="INBOUND">我姓张，13800138000</div>
     <textarea data-jx-reply-input></textarea>
@@ -26,6 +26,118 @@ assert.equal(context.platformOrderNo, 'DY-20260808-001');
 assert.equal(context.orderStatus, '已付款');
 assert.equal(context.productName, 'AI口播智能体');
 assert.deepEqual(context.messages.map((message) => message.direction), ['OUTBOUND', 'INBOUND']);
+
+const realOrderFactsDom = new JSDOM(`<!doctype html><html><body>
+  <main data-jx-feige-conversation>
+    <span data-jx-customer-name>海盗船长</span>
+  </main>
+  <div data-testid="shop-name">极享智能体</div>
+  <div role="button" aria-expanded="true" data-testid="order-card">
+    <span data-jx-order-status>已发货</span>
+    <span data-jx-order-no>6955070819967571696</span>
+    <span data-btm="d5834" data-product-id="DY-TAOJIN-100">淘金AI 多模态创作智能体 读书卡</span>
+    <div>实付金额 <strong>¥299.00</strong></div>
+    <div>付款时间 <strong>2026/08/08 19:34:20 (抖音月付)</strong></div>
+  </div>
+</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+const realOrderFacts = createDouyinFeigeAdapter(
+  realOrderFactsDom.window.document,
+  realOrderFactsDom.window.location.href,
+).readContext();
+assert.equal(realOrderFacts.shopDisplayName, '极享智能体', '店铺名必须来自明确的页面店铺区域');
+assert.equal(realOrderFacts.productName, '淘金AI 多模态创作智能体 读书卡');
+assert.equal(realOrderFacts.platformProductId, 'DY-TAOJIN-100');
+assert.equal(realOrderFacts.platformSkuId, undefined);
+assert.equal(realOrderFacts.paymentAmount, 299, '实付金额必须保留平台展示事实');
+assert.equal(realOrderFacts.paymentAt, '2026-08-08T19:34:20+08:00');
+
+const ancestorProductIdentityDom = new JSDOM(`<!doctype html><html><body>
+  <main data-jx-feige-conversation><span data-jx-customer-name>海盗船长</span></main>
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-ANCESTOR-ID</span>
+    <div data-item-id="ITEM-100" data-sku-id="SKU-RED">
+      <span data-btm="d5834">淘金AI 红色读书卡</span>
+    </div>
+  </section>
+</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+const ancestorProductIdentity = createDouyinFeigeAdapter(
+  ancestorProductIdentityDom.window.document,
+  ancestorProductIdentityDom.window.location.href,
+).readContext();
+assert.equal(ancestorProductIdentity.platformProductId, 'ITEM-100', '商品 ID 可从当前商品节点的稳定属性祖先读取');
+assert.equal(ancestorProductIdentity.platformSkuId, 'SKU-RED', 'SKU 只从当前商品节点或祖先读取');
+
+function readOrderFactsFixture(orderMarkup: string, pageMarkup = '') {
+  const fixture = new JSDOM(`<!doctype html><html><body>
+    <main data-jx-feige-conversation><span data-jx-customer-name>顾客昵称</span></main>
+    ${pageMarkup}
+    ${orderMarkup}
+  </body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+  return createDouyinFeigeAdapter(fixture.window.document, fixture.window.location.href).readContext();
+}
+
+const ambiguousPaymentAmount = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-MULTI-AMOUNT</span>
+    <span data-btm="d5834">淘金AI</span>
+    <div>实付金额 <strong>¥299.00</strong><del>¥399.00</del></div>
+  </section>
+`);
+assert.equal(ambiguousPaymentAmount.paymentAmount, undefined, '实付标签附近多个金额时必须拒绝猜测');
+assert.ok(ambiguousPaymentAmount.diagnostics.includes('实付金额存在歧义'));
+
+const ambiguousPaymentTime = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-MULTI-TIME</span>
+    <span data-btm="d5834">淘金AI</span>
+    <div>付款时间 <strong>2026/08/08 19:34:20</strong><del>2026/08/08 19:35:20</del></div>
+  </section>
+`);
+assert.equal(ambiguousPaymentTime.paymentAt, undefined, '付款标签附近多个时间时必须拒绝猜测');
+assert.ok(ambiguousPaymentTime.diagnostics.includes('付款时间存在歧义'));
+
+const invalidPaymentFacts = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-INVALID-PAYMENT</span>
+    <span data-btm="d5834">淘金AI</span>
+    <div>实付金额 <strong>299.00</strong></div>
+    <div>付款时间 <strong>2026/02/30 19:34:20</strong></div>
+  </section>
+`);
+assert.equal(invalidPaymentFacts.paymentAmount, undefined, '无人民币符号的数字不得当作实付金额');
+assert.ok(invalidPaymentFacts.diagnostics.includes('实付金额格式无效'));
+assert.equal(invalidPaymentFacts.paymentAt, undefined, '无效日历日期不得转换为付款时间');
+assert.ok(invalidPaymentFacts.diagnostics.includes('付款时间格式无效'));
+
+const ambiguousOrderFacts = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-A</span>
+    <span data-btm="d5834" data-product-id="PRODUCT-A">商品A</span>
+    <div>实付金额 <strong>¥299.00</strong></div>
+    <div>付款时间 <strong>2026/08/08 19:34:20</strong></div>
+  </section>
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-B</span>
+    <span data-btm="d5834" data-product-id="PRODUCT-B">商品B</span>
+    <div>实付金额 <strong>¥399.00</strong></div>
+    <div>付款时间 <strong>2026/08/08 20:34:20</strong></div>
+  </section>
+`, '<div data-testid="shop-name">极享智能体</div><div data-jx-product-name>文档外的商品</div>');
+assert.equal(ambiguousOrderFacts.productName, '', '多张活动订单卡时不得回退到页面其他商品');
+assert.equal(ambiguousOrderFacts.platformProductId, undefined);
+assert.equal(ambiguousOrderFacts.platformSkuId, undefined);
+assert.equal(ambiguousOrderFacts.paymentAmount, undefined);
+assert.equal(ambiguousOrderFacts.paymentAt, undefined);
+assert.ok(ambiguousOrderFacts.diagnostics.includes('当前存在多张可见活动订单卡'));
+
+const unprovenShop = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-NO-SHOP</span>
+    <span data-btm="d5834">商品品牌</span>
+  </section>
+`, '<div data-testid="operator-name">客服小王</div>');
+assert.equal(unprovenShop.shopDisplayName, '', '客户、商品和客服姓名都不能充当店铺名');
+assert.ok(unprovenShop.diagnostics.includes('未识别页面店铺'));
 
 assert.deepEqual(adapter.fillReply('已收到，我们尽快联系您。'), { ok: true });
 assert.equal((dom.window.document.querySelector('[data-jx-reply-input]') as HTMLTextAreaElement).value, '已收到，我们尽快联系您。');

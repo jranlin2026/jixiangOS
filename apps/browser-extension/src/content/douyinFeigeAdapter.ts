@@ -1,27 +1,19 @@
-import type { BrowserChatMessage } from '../domain/contactDetection';
 import { isPaidOrderStatus, mergeOsOrderRemark } from '../domain/orderCompletion';
-import type { CompleteOsOrderInput, CompleteOsOrderResult } from '../shared/contracts';
+import type {
+  CompleteOsOrderInput,
+  CompleteOsOrderResult,
+  FeigePageContext,
+  PageWriteResult,
+  SafeReplyFillResult,
+} from '../shared/contracts';
+import type { BrowserChatMessage } from '../domain/contactDetection';
 
-export type FeigePageContext = {
-  supported: boolean;
-  pageUrl: string;
-  customerDisplayName: string;
-  platformOrderNo: string;
-  orderStatus: string;
-  productName: string;
-  messages: BrowserChatMessage[];
-  diagnostics: string[];
-};
-
-export type PageWriteResult = { ok: true } | { ok: false; code: string; message: string };
-export type SafeReplyFillResult =
-  | { ok: true; filled: true }
-  | { ok: true; filled: false; reason: 'NOT_EMPTY' }
-  | { ok: false; code: string; message: string };
+export type { FeigePageContext, PageWriteResult, SafeReplyFillResult } from '../shared/contracts';
 
 const selectors = {
   root: ['[data-jx-feige-conversation]', '#workspace-chat', '[data-testid="conversation-panel"]', '[class*="conversation"]'],
   customer: ['[data-jx-customer-name]', '#topbar-left-info span', '[data-testid="conversation-customer-name"]', '[class*="customer-name"]'],
+  shop: ['[data-jx-shop-name]', '[data-testid="shop-name"]', '[data-shop-name]'],
   orderNo: ['[data-jx-order-no]', '[data-testid="order-no"]', '[data-order-no]'],
   orderStatus: ['[data-jx-order-status]', '[data-testid="order-status"]'],
   product: ['[data-jx-product-name]', '[data-testid="product-name"]', '[class*="product-name"]'],
@@ -297,9 +289,117 @@ function consultationProductName(document: Document) {
   return candidates.sort((left, right) => left.length - right.length)[0] || '';
 }
 
-function activeOrderProductName(orderCard: HTMLElement) {
-  const orderContainer = orderCard.closest<HTMLElement>('.ecom-collapse-item') || orderCard;
-  return text(orderContainer, [...selectors.product, '[data-btm="d5834"]']);
+function shopDisplayNameFromPage(document: Document) {
+  const candidates = uniqueMatches(document, selectors.shop)
+    .filter(isVisible)
+    .filter((element) => Boolean(element.textContent?.trim()));
+  return candidates.length === 1 ? candidates[0].textContent?.trim() || '' : '';
+}
+
+function activeOrderContainer(orderCard: HTMLElement) {
+  return orderCard.closest<HTMLElement>('.ecom-collapse-item') || orderCard;
+}
+
+function visibleProductNodes(orderCard: HTMLElement) {
+  const orderContainer = activeOrderContainer(orderCard);
+  const candidates = uniqueMatches(orderContainer, [...selectors.product, '[data-btm="d5834"]'])
+    .filter(isVisible);
+  return candidates.filter((candidate) => !candidates.some((other) => (
+    other !== candidate && candidate.contains(other)
+  )));
+}
+
+function stableProductAttribute(
+  productNode: HTMLElement,
+  orderContainer: HTMLElement,
+  attributes: string[],
+) {
+  for (const attribute of attributes) {
+    let current: HTMLElement | null = productNode;
+    while (current) {
+      const value = current.getAttribute(attribute)?.trim();
+      if (value) return value;
+      if (current === orderContainer) break;
+      current = current.parentElement;
+    }
+  }
+  return undefined;
+}
+
+function activeOrderProductFacts(orderCard: HTMLElement) {
+  const orderContainer = activeOrderContainer(orderCard);
+  const productNodes = visibleProductNodes(orderCard);
+  if (productNodes.length !== 1) {
+    return {
+      productName: '',
+      platformProductId: undefined,
+      platformSkuId: undefined,
+      ambiguous: productNodes.length > 1,
+    };
+  }
+  const productNode = productNodes[0];
+  return {
+    productName: productNode.textContent?.trim() || '',
+    platformProductId: stableProductAttribute(productNode, orderContainer, ['data-product-id', 'data-item-id']),
+    platformSkuId: stableProductAttribute(productNode, orderContainer, ['data-sku-id']),
+    ambiguous: false,
+  };
+}
+
+function leafLabeledElements(root: HTMLElement, label: string) {
+  const candidates = [root, ...root.querySelectorAll<HTMLElement>('*')]
+    .filter(isVisible)
+    .filter((element) => (element.textContent || '').includes(label));
+  return candidates.filter((candidate) => !candidates.some((other) => (
+    other !== candidate && candidate.contains(other)
+  )));
+}
+
+type ParsedPlatformFact<T> =
+  | { status: 'ABSENT' }
+  | { status: 'INVALID' }
+  | { status: 'AMBIGUOUS' }
+  | { status: 'FOUND'; value: T };
+
+function textWithNodeBoundaries(node: Node): string {
+  if (node.nodeType === 3) return node.textContent || '';
+  return [...node.childNodes].map(textWithNodeBoundaries).join(' ');
+}
+
+function paymentAmountFromOrderCard(orderCard: HTMLElement): ParsedPlatformFact<number> {
+  const labeled = leafLabeledElements(activeOrderContainer(orderCard), '实付金额');
+  if (!labeled.length) return { status: 'ABSENT' };
+  const matches = labeled.flatMap((element) => [...textWithNodeBoundaries(element).matchAll(
+    /[¥￥]\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?)(?![\d.,])/g,
+  )]);
+  if (matches.length > 1 || labeled.length > 1) return { status: 'AMBIGUOUS' };
+  if (matches.length !== 1) return { status: 'INVALID' };
+  const value = Number(matches[0][1].replaceAll(',', ''));
+  return Number.isFinite(value) ? { status: 'FOUND', value } : { status: 'INVALID' };
+}
+
+function validShanghaiPaymentTime(parts: RegExpMatchArray) {
+  const [year, month, day, hour, minute, second] = parts.slice(1).map(Number);
+  const candidate = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  if (candidate.getUTCFullYear() !== year
+    || candidate.getUTCMonth() !== month - 1
+    || candidate.getUTCDate() !== day
+    || candidate.getUTCHours() !== hour
+    || candidate.getUTCMinutes() !== minute
+    || candidate.getUTCSeconds() !== second) return undefined;
+  return `${parts[1]}-${parts[2]}-${parts[3]}T${parts[4]}:${parts[5]}:${parts[6]}+08:00`;
+}
+
+function paymentTimeFromOrderCard(orderCard: HTMLElement): ParsedPlatformFact<string> {
+  const labeled = leafLabeledElements(activeOrderContainer(orderCard), '付款时间');
+  if (!labeled.length) return { status: 'ABSENT' };
+  const matches = labeled.flatMap((element) => [...textWithNodeBoundaries(element).matchAll(
+    /(?<!\d)(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(?!\d)/g,
+  )]);
+  if (matches.length > 1 || labeled.length > 1) return { status: 'AMBIGUOUS' };
+  if (matches.length !== 1) return { status: 'INVALID' };
+  const value = validShanghaiPaymentTime(matches[0]);
+  return value ? { status: 'FOUND', value } : { status: 'INVALID' };
 }
 
 function setEditableValue(element: HTMLElement, value: string): PageWriteResult {
@@ -331,25 +431,49 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       if (!root) diagnostics.push('未找到飞鸽会话区域');
       const scope: ParentNode = root || document;
       const customerDisplayName = text(scope, selectors.customer);
-      const activeOrderCard = uniqueActiveOrderCard(document);
+      const shopDisplayName = shopDisplayNameFromPage(document);
+      const activeOrderCards = visibleActiveOrderCards(document);
+      const activeOrderCard = activeOrderCards.length === 1 ? activeOrderCards[0] : null;
       const platformOrderNo = activeOrderCard ? orderNoFromElement(activeOrderCard) : '';
       const orderStatus = activeOrderCard ? orderStatusFromElement(activeOrderCard) : '';
-      const productName = (activeOrderCard && activeOrderProductName(activeOrderCard))
-        || consultationProductName(document);
+      const productFacts = activeOrderCard
+        ? activeOrderProductFacts(activeOrderCard)
+        : { productName: '', platformProductId: undefined, platformSkuId: undefined, ambiguous: false };
+      const productName = activeOrderCard
+        ? productFacts.productName
+        : activeOrderCards.length === 0 ? consultationProductName(document) : '';
+      const paymentAmountFact = activeOrderCard
+        ? paymentAmountFromOrderCard(activeOrderCard)
+        : { status: 'ABSENT' as const };
+      const paymentTimeFact = activeOrderCard
+        ? paymentTimeFromOrderCard(activeOrderCard)
+        : { status: 'ABSENT' as const };
       const messages = all(scope, selectors.message)
         .map((element) => ({ direction: direction(element), text: element.textContent?.trim() || '' }))
         .filter((message) => message.text);
       if (!customerDisplayName) diagnostics.push('未识别客户昵称');
+      if (!shopDisplayName) diagnostics.push('未识别页面店铺');
+      if (activeOrderCards.length > 1) diagnostics.push('当前存在多张可见活动订单卡');
       if (!platformOrderNo) diagnostics.push('未识别平台订单号');
       if (!orderStatus) diagnostics.push('未识别订单状态');
+      if (productFacts.ambiguous) diagnostics.push('当前订单商品存在歧义');
+      if (paymentAmountFact.status === 'AMBIGUOUS') diagnostics.push('实付金额存在歧义');
+      if (paymentAmountFact.status === 'INVALID') diagnostics.push('实付金额格式无效');
+      if (paymentTimeFact.status === 'AMBIGUOUS') diagnostics.push('付款时间存在歧义');
+      if (paymentTimeFact.status === 'INVALID') diagnostics.push('付款时间格式无效');
       if (!messages.length) diagnostics.push('未识别会话消息');
       return {
         supported: Boolean(root),
         pageUrl,
         customerDisplayName,
+        shopDisplayName,
         platformOrderNo,
         orderStatus,
+        platformProductId: productFacts.platformProductId,
+        platformSkuId: productFacts.platformSkuId,
         productName,
+        paymentAmount: paymentAmountFact.status === 'FOUND' ? paymentAmountFact.value : undefined,
+        paymentAt: paymentTimeFact.status === 'FOUND' ? paymentTimeFact.value : undefined,
         messages,
         diagnostics,
       };

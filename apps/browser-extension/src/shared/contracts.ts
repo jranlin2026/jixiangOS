@@ -1,6 +1,27 @@
-import type { DetectedContact } from '../domain/contactDetection';
-import type { FeigePageContext, PageWriteResult, SafeReplyFillResult } from '../content/douyinFeigeAdapter';
+import type { BrowserChatMessage, DetectedContact } from '../domain/contactDetection';
 import type { ScriptLibrary } from '../domain/scriptLibrary';
+
+export type FeigePageContext = {
+  supported: boolean;
+  pageUrl: string;
+  customerDisplayName: string;
+  shopDisplayName?: string;
+  platformOrderNo: string;
+  orderStatus: string;
+  platformProductId?: string;
+  platformSkuId?: string;
+  productName: string;
+  paymentAmount?: number;
+  paymentAt?: string;
+  messages: BrowserChatMessage[];
+  diagnostics: string[];
+};
+
+export type PageWriteResult = { ok: true } | { ok: false; code: string; message: string };
+export type SafeReplyFillResult =
+  | { ok: true; filled: true }
+  | { ok: true; filled: false; reason: 'NOT_EMPTY' }
+  | { ok: false; code: string; message: string };
 
 export type ExtensionConfig = {
   apiBaseUrl: string;
