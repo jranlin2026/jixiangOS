@@ -64,8 +64,12 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-function duplicateContactMismatch(input: OrderCompletionInput, intake: LeadIntakeResponse) {
-  if (intake.outcome !== 'ALREADY_CREATED') return '';
+function duplicateContactMismatch(
+  input: OrderCompletionInput,
+  intake: LeadIntakeResponse,
+  shouldReconcileStoredContact = intake.outcome === 'ALREADY_CREATED',
+) {
+  if (!shouldReconcileStoredContact) return '';
   const snapshot = intake.storedContact;
   const nickname = input.expectedCustomerDisplayName.trim();
   const phone = input.phone?.trim() || '';
@@ -123,7 +127,7 @@ export async function runOrderCompletion(
   emit(deps, initial);
 
   if (input.existingIntake) {
-    const reconciliationMessage = duplicateContactMismatch(input, input.existingIntake);
+    const reconciliationMessage = duplicateContactMismatch(input, input.existingIntake, true);
     if (reconciliationMessage) {
       return emit(deps, {
         ...initial,
