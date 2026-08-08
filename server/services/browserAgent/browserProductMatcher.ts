@@ -26,6 +26,10 @@ function normalizedId(value: string | null | undefined) {
   return String(value || '').trim();
 }
 
+function mappingReferences(mappings: BrowserStoreProductMapping[]) {
+  return mappings.map((mapping) => `店铺/映射 ${mapping.shopBindingId}/${mapping.id}`).join('、');
+}
+
 function resolutionFromMappings(
   mappings: BrowserStoreProductMapping[],
   productsById: Map<string, BrowserCatalogProduct>,
@@ -37,7 +41,10 @@ function resolutionFromMappings(
 
   if (productIds.length === 0) return undefined;
   if (productIds.length > 1) {
-    return { status: 'CONFIG_CONFLICT', message: `匹配到多个 OS 商品映射：${productIds.join(', ')}` };
+    return {
+      status: 'CONFIG_CONFLICT',
+      message: `商品映射配置冲突：${mappingReferences(mappings)} 指向不同 OS 商品（${productIds.join(', ')}）。请在极享OS修正冲突映射后重试。`,
+    };
   }
 
   const product = productsById.get(productIds[0]);
@@ -63,9 +70,14 @@ function mappingResolution(
 export function resolveBrowserProduct(input: ResolveBrowserProductInput): BrowserProductResolution {
   const rawProductName = input.facts.platformProductName || '';
   const productsById = new Map(input.products.map((product) => [product.id, product]));
-  const currentShopMappings = input.shopBindingId
-    ? input.mappings.filter((mapping) => mapping.shopBindingId === input.shopBindingId)
-    : input.mappings;
+  const shopBindingId = normalizedId(input.shopBindingId);
+  if (!shopBindingId && input.mappings.length > 0) {
+    return {
+      status: 'CONFIG_CONFLICT',
+      message: `缺少店铺绑定，无法安全选择商品映射（受影响映射：${mappingReferences(input.mappings)}）。请补充店铺绑定并修正冲突映射后重试。`,
+    };
+  }
+  const currentShopMappings = input.mappings.filter((mapping) => mapping.shopBindingId === shopBindingId);
   const platformProductId = normalizedId(input.facts.platformProductId);
   const platformSkuId = normalizedId(input.facts.platformSkuId);
 
