@@ -1,19 +1,22 @@
 import { failure, success, type ApiResponse } from '../../api/response';
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import type { Lead } from '../../../src/types/lead';
+import type { BrowserCatalogErrorCode, BrowserCatalogService } from './browserCatalogService';
 
 export type BrowserLeadIntakeInput = {
   platform: 'DOUYIN';
-  shopKey: string;
+  shopBindingId: string;
+  pageShopDisplayName?: string;
   platformOrderNo: string;
   contactName: string;
   contactSource: 'CHAT' | 'OFF_PLATFORM';
   contactPhone?: string;
   contactWechat?: string;
-  sourceProductId?: string;
-  sourceProductName?: string;
-  sourcePaymentAmount?: number;
-  sourcePaymentAt?: string;
+  platformProductId?: string;
+  platformSkuId?: string;
+  platformProductName?: string;
+  paymentAmount?: number;
+  paymentAt?: string;
 };
 
 export type BrowserLeadSyncRecord = {
@@ -115,8 +118,24 @@ export type BrowserLeadIntakeResult = {
     intakeStatus?: string | null;
   };
   storedContact: StoredLeadContactSnapshot;
+  productResolution: BrowserLeadProductResolutionAudit;
   orderRemarkStatus: BrowserLeadSyncRecord['orderRemarkStatus'];
   greenFlagStatus: BrowserLeadSyncRecord['greenFlagStatus'];
+};
+
+export type BrowserLeadProductResolutionAudit = {
+  status: 'MATCHED';
+  method?: string;
+  osProductId?: string;
+  osProductName?: string;
+  rawProductName?: string;
+} | {
+  status: 'UNMATCHED';
+  rawProductName: string;
+};
+
+export type BrowserLeadIntakeResponse = ApiResponse<BrowserLeadIntakeResult | null> & {
+  errorCode?: BrowserCatalogErrorCode;
 };
 
 function normalizedContactSnapshot(input: { name?: unknown; phone?: unknown; wechat?: unknown }) {
@@ -146,19 +165,34 @@ function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadInt
       intakeStatus: record.intakeStatus,
     },
     storedContact: record.storedContact,
+    productResolution: productResolutionFromRecord(record),
     orderRemarkStatus: record.orderRemarkStatus,
     greenFlagStatus: record.greenFlagStatus,
   });
 }
 
+function productResolutionFromRecord(record: BrowserLeadSyncRecord): BrowserLeadProductResolutionAudit {
+  if (record.matchedProductId || record.matchedProductName) {
+    return {
+      status: 'MATCHED',
+      ...(record.productMatchMethod ? { method: record.productMatchMethod } : {}),
+      ...(record.matchedProductId ? { osProductId: record.matchedProductId } : {}),
+      ...(record.matchedProductName ? { osProductName: record.matchedProductName } : {}),
+      ...(record.sourceProductName ? { rawProductName: record.sourceProductName } : {}),
+    };
+  }
+  return { status: 'UNMATCHED', rawProductName: record.sourceProductName || '' };
+}
+
 export function createBrowserLeadIntakeService(deps: {
   repository: BrowserLeadSyncRepository;
+  catalog: Pick<BrowserCatalogService, 'resolveForIntake'>;
   createLead: LeadCreator;
 }) {
   return {
-    async intake(input: BrowserLeadIntakeInput, actor: AuthenticatedUser) {
+    async intake(input: BrowserLeadIntakeInput, actor: AuthenticatedUser): Promise<BrowserLeadIntakeResponse> {
       if (input.platform !== 'DOUYIN') return failure<BrowserLeadIntakeResult>('当前仅支持抖音平台', 400);
-      if (!String(input.shopKey || '').trim()) return failure<BrowserLeadIntakeResult>('店铺标识不能为空', 400);
+      if (!String(input.shopBindingId || '').trim()) return failure<BrowserLeadIntakeResult>('店铺绑定不能为空', 400);
       if (!String(input.platformOrderNo || '').trim()) return failure<BrowserLeadIntakeResult>('平台订单号不能为空', 400);
       if (!String(input.contactName || '').trim()) return failure<BrowserLeadIntakeResult>('客户姓名不能为空', 400);
       if (!['CHAT', 'OFF_PLATFORM'].includes(input.contactSource)) {
@@ -167,21 +201,63 @@ export function createBrowserLeadIntakeService(deps: {
       if (!String(input.contactPhone || '').trim() && !String(input.contactWechat || '').trim()) {
         return failure<BrowserLeadIntakeResult>('手机号或微信至少填写一项', 400);
       }
+      if (input.paymentAmount !== undefined
+        && (typeof input.paymentAmount !== 'number' || !Number.isFinite(input.paymentAmount))) {
+        return failure<BrowserLeadIntakeResult>('实付金额格式不正确', 400);
+      }
+      const paymentAt = String(input.paymentAt || '').trim() || undefined;
+      const paymentAtDate = paymentAt ? new Date(paymentAt) : undefined;
+      if (paymentAtDate && Number.isNaN(paymentAtDate.getTime())) {
+        return failure<BrowserLeadIntakeResult>('付款时间格式不正确', 400);
+      }
       const normalized = {
         ...input,
-        shopKey: input.shopKey.trim(),
+        shopBindingId: input.shopBindingId.trim(),
+        pageShopDisplayName: input.pageShopDisplayName?.trim() || undefined,
         platformOrderNo: input.platformOrderNo.trim(),
         contactName: input.contactName.trim(),
         contactPhone: input.contactPhone?.trim() || undefined,
         contactWechat: input.contactWechat?.trim() || undefined,
-        sourceProductId: input.sourceProductId?.trim() || undefined,
-        sourceProductName: input.sourceProductName?.trim() || undefined,
+        platformProductId: input.platformProductId?.trim() || undefined,
+        platformSkuId: input.platformSkuId?.trim() || undefined,
+        platformProductName: input.platformProductName?.trim() || undefined,
+        paymentAt,
       };
+      const catalogResolution = await deps.catalog.resolveForIntake({
+        shopBindingId: normalized.shopBindingId,
+        pageShopDisplayName: normalized.pageShopDisplayName,
+        facts: {
+          platformProductId: normalized.platformProductId,
+          platformSkuId: normalized.platformSkuId,
+          platformProductName: normalized.platformProductName,
+          paymentAmount: normalized.paymentAmount,
+        },
+      });
+      if (catalogResolution.code !== 0 || !catalogResolution.data) {
+        return {
+          code: catalogResolution.code || 500,
+          data: null,
+          message: catalogResolution.message || '店铺与商品配置解析失败',
+          ...(catalogResolution.errorCode ? { errorCode: catalogResolution.errorCode } : {}),
+        };
+      }
+      const { binding, resolution } = catalogResolution.data;
       const reservation = await deps.repository.reserve({
         platform: normalized.platform,
-        shopKey: normalized.shopKey,
+        shopKey: binding.shopKey,
         platformOrderNo: normalized.platformOrderNo,
-        sourceProductName: normalized.sourceProductName,
+        shopBindingId: binding.id,
+        shopDisplayName: binding.displayName,
+        platformProductId: normalized.platformProductId,
+        platformSkuId: normalized.platformSkuId,
+        sourceProductName: normalized.platformProductName,
+        ...(resolution.status === 'MATCHED' ? {
+          matchedProductId: resolution.osProductId,
+          matchedProductName: resolution.osProductName,
+          productMatchMethod: resolution.method,
+        } : {}),
+        ...(normalized.paymentAmount !== undefined ? { sourcePaymentAmount: normalized.paymentAmount } : {}),
+        ...(paymentAtDate ? { sourcePaymentAt: paymentAtDate } : {}),
         operatorId: actor.id,
         operatorName: actor.name,
         contactSource: input.contactSource,
@@ -204,19 +280,23 @@ export function createBrowserLeadIntakeService(deps: {
           ? [{ number: normalized.contactPhone, isPrimary: true as const, label: '主手机号' as const }]
           : [],
         wechat: normalized.contactWechat,
-        source: '抖音电商',
-        sourceName: '飞鸽客服',
-        sourceType: '公司资源' as const,
-        sourcePlatformId: input.platform,
+        source: binding.source,
+        sourceName: binding.sourceName,
+        sourceType: binding.sourceType,
+        sourcePlatformId: 'DOUYIN',
         sourcePlatformName: '抖音',
-        sourceShopId: normalized.shopKey,
+        sourceShopId: binding.shopKey,
+        sourceShopName: binding.displayName,
         platformOrderNo: normalized.platformOrderNo,
-        ...(normalized.sourceProductId && normalized.sourceProductName
-          ? { sourceProductId: normalized.sourceProductId, sourceProductName: normalized.sourceProductName }
-          : {}),
-        ...(input.sourcePaymentAmount !== undefined ? { sourcePaymentAmount: input.sourcePaymentAmount } : {}),
-        ...(input.sourcePaymentAt ? { sourcePaymentAt: input.sourcePaymentAt } : {}),
-        remark: `由极享AI浏览器员工从飞鸽客服录入${normalized.sourceProductName ? `；平台商品：${normalized.sourceProductName}` : ''}`,
+        ...(resolution.status === 'MATCHED' ? {
+          sourceProductId: resolution.osProductId,
+          sourceProductName: resolution.osProductName,
+        } : {}),
+        ...(normalized.paymentAmount !== undefined ? { sourcePaymentAmount: normalized.paymentAmount } : {}),
+        ...(normalized.paymentAt ? { sourcePaymentAt: normalized.paymentAt } : {}),
+        remark: resolution.status === 'MATCHED'
+          ? `由极享AI浏览器员工从飞鸽客服录入；店铺：${binding.displayName}；平台商品：${normalized.platformProductName || '未识别'}；匹配OS产品：${resolution.osProductName}`
+          : `由极享AI浏览器员工从飞鸽客服录入；店铺：${binding.displayName}；平台商品待匹配：${normalized.platformProductName || '未识别'}`,
         status: '新线索',
       } as Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followUpRecords'>;
 

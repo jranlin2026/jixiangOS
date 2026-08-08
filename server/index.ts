@@ -221,12 +221,13 @@ const notificationWorker = createNotificationWorker({
 const notificationBootstrapService = createNotificationBootstrapService(prisma, notificationWorkflow);
 const customerListService = createCustomerListService(prisma, { contactIdentityCrypto });
 const customerCommandService = createCustomerCommandService(prisma, { contactIdentityCrypto, notificationWorkflow });
-const browserLeadIntakeService = createBrowserLeadIntakeService({
-  repository: createPrismaBrowserLeadSyncRepository(prisma),
-  createLead: (input, actor) => customerCommandService.createLead(input, actor),
-});
 const browserCatalogService = createBrowserCatalogService({
   repository: createPrismaBrowserCatalogRepository(prisma),
+});
+const browserLeadIntakeService = createBrowserLeadIntakeService({
+  repository: createPrismaBrowserLeadSyncRepository(prisma),
+  catalog: browserCatalogService,
+  createLead: (input, actor) => customerCommandService.createLead(input, actor),
 });
 const browserScriptLibraryService = createBrowserScriptLibraryService(prisma);
 // Transfer/release/delete use the shared atomic command engine. Profile,

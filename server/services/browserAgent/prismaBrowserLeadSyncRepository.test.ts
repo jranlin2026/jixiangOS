@@ -196,6 +196,29 @@ assert.equal(recoveredSuccess.completedAt?.getTime(), completedAt?.getTime(), '�
 const duplicate = await repository.reserve(reservationInput);
 assert.equal(duplicate.acquired, false);
 assert.equal(duplicate.record.id, first.record.id);
+assert.deepEqual({
+  shopBindingId: duplicate.record.shopBindingId,
+  shopDisplayName: duplicate.record.shopDisplayName,
+  platformProductId: duplicate.record.platformProductId,
+  platformSkuId: duplicate.record.platformSkuId,
+  sourceProductName: duplicate.record.sourceProductName,
+  matchedProductId: duplicate.record.matchedProductId,
+  matchedProductName: duplicate.record.matchedProductName,
+  productMatchMethod: duplicate.record.productMatchMethod,
+  sourcePaymentAmount: duplicate.record.sourcePaymentAmount,
+  sourcePaymentAt: duplicate.record.sourcePaymentAt,
+}, {
+  shopBindingId: 'binding-1',
+  shopDisplayName: '极享抖音旗舰店',
+  platformProductId: 'DY-100',
+  platformSkuId: 'SKU-100-A',
+  sourceProductName: '淘金AI 多模态创作智能体',
+  matchedProductId: 'product-taojin',
+  matchedProductName: '淘金AI',
+  productMatchMethod: 'PLATFORM_PRODUCT_ID',
+  sourcePaymentAmount: '123456789012.34',
+  sourcePaymentAt: new Date('2026-08-08T09:00:00.000Z'),
+}, '重复入库从Prisma读回时必须保留完整商品解析审计和精确实付快照');
 
 await repository.markFailed(first.record.id, '极享OS暂时不可用');
 const retry = await repository.reserve(reservationInput);

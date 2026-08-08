@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createBrowserCatalogService, type BrowserCatalogRepository } from './browserCatalogService';
 import { createBrowserLeadIntakeService } from './browserLeadIntakeService';
 
 const actor = {
@@ -13,6 +14,62 @@ const actor = {
   createdAt: '2026-08-08T00:00:00.000Z',
   updatedAt: '2026-08-08T00:00:00.000Z',
 } as any;
+
+const shops = [
+  {
+    id: 'binding-a', platform: 'DOUYIN', shopKey: 'jixiang-a', platformShopId: 'dy-a',
+    displayName: '极享官方旗舰店', aliases: ['极享官方店'], source: '抖音电商', sourceName: '飞鸽客服',
+    sourceType: '公司资源', active: true, createdById: 'admin-1', createdByName: '管理员',
+  },
+  {
+    id: 'binding-b', platform: 'DOUYIN', shopKey: 'jixiang-b', platformShopId: 'dy-b',
+    displayName: '极享AI实验室', aliases: ['极享实验店'], source: '抖音电商', sourceName: '飞鸽客服',
+    sourceType: '公司资源', active: true, createdById: 'admin-1', createdByName: '管理员',
+  },
+  {
+    id: 'binding-off', platform: 'DOUYIN', shopKey: 'jixiang-off', platformShopId: null,
+    displayName: '已停用店铺', aliases: [], source: '抖音电商', sourceName: '飞鸽客服',
+    sourceType: '公司资源', active: false, createdById: 'admin-1', createdByName: '管理员',
+  },
+];
+const products = [{ id: 'prod-taojin', name: '淘金AI', price: 299, isActive: true }];
+const mappings = [
+  {
+    id: 'map-a', shopBindingId: 'binding-a', platformIdentityKey: 'product:DY-A-100',
+    platformProductId: 'DY-A-100', platformSkuId: null,
+    platformProductName: '淘金AI 多模态创作智能体 读书卡', aliases: ['淘金ai 多模态创作智能体 读书卡'],
+    osProductId: 'prod-taojin', osProductName: '淘金AI', active: true,
+    confirmedById: 'admin-1', confirmedByName: '管理员', confirmedAt: new Date(),
+  },
+  {
+    id: 'map-b', shopBindingId: 'binding-b', platformIdentityKey: 'sku:DY-B-SKU',
+    platformProductId: null, platformSkuId: 'DY-B-SKU',
+    platformProductName: 'AI创业者陪跑卡', aliases: ['ai创业者陪跑卡'],
+    osProductId: 'prod-taojin', osProductName: '淘金AI', active: true,
+    confirmedById: 'admin-1', confirmedByName: '管理员', confirmedAt: new Date(),
+  },
+];
+
+const catalogRepository: BrowserCatalogRepository = {
+  async listShops() { return structuredClone(shops); },
+  async findShopById(id) { return structuredClone(shops.find((shop) => shop.id === id) || null); },
+  async findShopByPlatformAndKey(platform, shopKey) {
+    return structuredClone(shops.find((shop) => shop.platform === platform && shop.shopKey === shopKey) || null);
+  },
+  async createShop() { throw new Error('not used'); },
+  async updateShop() { throw new Error('not used'); },
+  async deleteShop() { throw new Error('not used'); },
+  async listMappings(shopBindingId) {
+    return structuredClone(mappings.filter((mapping) => !shopBindingId || mapping.shopBindingId === shopBindingId));
+  },
+  async findMappingById() { throw new Error('not used'); },
+  async createMapping() { throw new Error('not used'); },
+  async updateMapping() { throw new Error('not used'); },
+  async listProducts() { return structuredClone(products); },
+  async findProductById(id) { return structuredClone(products.find((product) => product.id === id) || null); },
+  async hasShopAuditReferences() { return false; },
+  async withShopMappingLock() { throw new Error('not used'); },
+};
 
 const records = new Map<string, any>();
 const createLeadCalls: any[] = [];
@@ -71,12 +128,13 @@ const repository = {
 
 const service = createBrowserLeadIntakeService({
   repository,
+  catalog: createBrowserCatalogService({ repository: catalogRepository }),
   async createLead(input, currentUser) {
     createLeadCalls.push({ input, currentUser });
     return {
       code: 0,
       data: {
-        id: 'lead-1',
+        id: `lead-${createLeadCalls.length}`,
         name: input.name,
         phone: input.phone,
         wechat: input.wechat,
@@ -89,26 +147,39 @@ const service = createBrowserLeadIntakeService({
   },
 });
 
-const input = {
+const shopAInput = {
   platform: 'DOUYIN' as const,
-  shopKey: 'jixiang-douyin',
-  platformOrderNo: 'DY-20260808-001',
+  shopBindingId: 'binding-a',
+  pageShopDisplayName: '极享官方旗舰店',
+  platformOrderNo: 'DY-20260808-A001',
   contactName: '张先生',
   contactSource: 'CHAT' as const,
   contactPhone: '13800138000',
   contactWechat: 'wx_original_88',
-  sourceProductName: 'AI口播智能体',
+  platformProductId: 'DY-A-100',
+  platformProductName: '淘金AI 多模态创作智能体 读书卡',
+  paymentAmount: 299,
+  paymentAt: '2026-08-08T09:00:00+08:00',
 };
 
-const first = await service.intake(input, actor);
+const first = await service.intake({
+  ...shopAInput,
+  source: '插件伪造来源',
+  sourceName: '插件伪造客服',
+  sourceType: '个人资源',
+  sourceProductId: 'plugin-product',
+  sourceProductName: '插件伪造OS产品',
+} as typeof shopAInput, actor);
 assert.equal(first.code, 0);
 assert.equal(first.data?.outcome, 'CREATED');
-assert.equal(first.data?.syncId, 'browser-sync-1');
-assert.equal(first.data?.lead.id, 'lead-1');
 assert.equal(first.data?.lead.assignedTo, '销售小王');
-assert.equal(first.data?.greenFlagStatus, 'NOT_ATTEMPTED');
+assert.equal(first.data?.lead.assignedToId, 'sales-1');
+assert.equal(first.data?.lead.intakeStatus, '入库成功');
+assert.deepEqual(first.data?.productResolution, {
+  status: 'MATCHED', method: 'PLATFORM_PRODUCT_ID', osProductId: 'prod-taojin', osProductName: '淘金AI',
+  rawProductName: '淘金AI 多模态创作智能体 读书卡',
+});
 assert.equal(createLeadCalls.length, 1);
-assert.equal([...records.values()][0].sourceProductName, 'AI口播智能体');
 assert.deepEqual(createLeadCalls[0].input, {
   externalIntakeKey: 'browser-sync-1',
   name: '张先生',
@@ -120,16 +191,111 @@ assert.deepEqual(createLeadCalls[0].input, {
   sourceType: '公司资源',
   sourcePlatformId: 'DOUYIN',
   sourcePlatformName: '抖音',
-  sourceShopId: 'jixiang-douyin',
-  platformOrderNo: 'DY-20260808-001',
-  remark: '由极享AI浏览器员工从飞鸽客服录入；平台商品：AI口播智能体',
+  sourceShopId: 'jixiang-a',
+  sourceShopName: '极享官方旗舰店',
+  platformOrderNo: 'DY-20260808-A001',
+  sourceProductId: 'prod-taojin',
+  sourceProductName: '淘金AI',
+  sourcePaymentAmount: 299,
+  sourcePaymentAt: '2026-08-08T09:00:00+08:00',
+  remark: '由极享AI浏览器员工从飞鸽客服录入；店铺：极享官方旗舰店；平台商品：淘金AI 多模态创作智能体 读书卡；匹配OS产品：淘金AI',
   status: '新线索',
 });
+assert.deepEqual({
+  shopBindingId: records.get('DOUYIN:jixiang-a:DY-20260808-A001').shopBindingId,
+  shopDisplayName: records.get('DOUYIN:jixiang-a:DY-20260808-A001').shopDisplayName,
+  platformProductId: records.get('DOUYIN:jixiang-a:DY-20260808-A001').platformProductId,
+  sourceProductName: records.get('DOUYIN:jixiang-a:DY-20260808-A001').sourceProductName,
+  matchedProductId: records.get('DOUYIN:jixiang-a:DY-20260808-A001').matchedProductId,
+  matchedProductName: records.get('DOUYIN:jixiang-a:DY-20260808-A001').matchedProductName,
+  productMatchMethod: records.get('DOUYIN:jixiang-a:DY-20260808-A001').productMatchMethod,
+  sourcePaymentAmount: records.get('DOUYIN:jixiang-a:DY-20260808-A001').sourcePaymentAmount,
+  sourcePaymentAt: records.get('DOUYIN:jixiang-a:DY-20260808-A001').sourcePaymentAt,
+}, {
+  shopBindingId: 'binding-a',
+  shopDisplayName: '极享官方旗舰店',
+  platformProductId: 'DY-A-100',
+  sourceProductName: '淘金AI 多模态创作智能体 读书卡',
+  matchedProductId: 'prod-taojin',
+  matchedProductName: '淘金AI',
+  productMatchMethod: 'PLATFORM_PRODUCT_ID',
+  sourcePaymentAmount: 299,
+  sourcePaymentAt: new Date('2026-08-08T09:00:00+08:00'),
+});
+
+const shopB = await service.intake({
+  ...shopAInput,
+  shopBindingId: 'binding-b',
+  pageShopDisplayName: '极享实验店',
+  platformOrderNo: 'DY-20260808-B001',
+  platformProductId: undefined,
+  platformSkuId: 'DY-B-SKU',
+  platformProductName: 'AI创业者陪跑卡',
+  paymentAmount: 399,
+}, actor);
+assert.equal(shopB.code, 0);
+assert.equal(createLeadCalls[1].input.sourceProductName, '淘金AI');
+assert.equal(createLeadCalls[1].input.sourcePaymentAmount, 399, '飞鸽实付不得被OS参考价299覆盖');
+assert.equal(createLeadCalls[1].input.sourceShopId, 'jixiang-b');
+assert.equal(createLeadCalls[1].input.sourceShopName, '极享AI实验室');
+
+const unmatched = await service.intake({
+  ...shopAInput,
+  platformOrderNo: 'DY-20260808-A002',
+  platformProductId: undefined,
+  platformProductName: '完全未配置的平台商品',
+  paymentAmount: 188,
+}, actor);
+assert.equal(unmatched.code, 0, '未匹配商品仍必须创建线索');
+assert.equal(Object.hasOwn(createLeadCalls[2].input, 'sourceProductId'), false);
+assert.equal(Object.hasOwn(createLeadCalls[2].input, 'sourceProductName'), false);
+assert.match(createLeadCalls[2].input.remark, /平台商品待匹配：完全未配置的平台商品/);
+assert.deepEqual(unmatched.data?.productResolution, {
+  status: 'UNMATCHED', rawProductName: '完全未配置的平台商品',
+});
+
+for (const shopBindingId of ['binding-off', 'binding-missing']) {
+  const unavailable = await service.intake({
+    ...shopAInput,
+    shopBindingId,
+    platformOrderNo: `DY-20260808-${shopBindingId}`,
+  }, actor);
+  assert.equal(unavailable.code, 409);
+  assert.equal(unavailable.errorCode, 'SHOP_BINDING_UNAVAILABLE');
+}
+assert.equal(createLeadCalls.length, 3, '停用或不存在店铺不得创建线索');
+
+const mismatch = await service.intake({
+  ...shopAInput,
+  platformOrderNo: 'DY-20260808-MISMATCH',
+  pageShopDisplayName: '完全不相关的店铺',
+}, actor);
+assert.equal(mismatch.code, 409);
+assert.equal(mismatch.errorCode, 'SHOP_CONTEXT_MISMATCH');
+assert.equal(createLeadCalls.length, 3, '页面店铺不匹配时不得创建线索');
+
+products.push({ id: 'prod-conflict', name: '冲突产品', price: 699, isActive: true });
+mappings.push({
+  ...mappings[0],
+  id: 'map-conflict',
+  osProductId: 'prod-conflict',
+  osProductName: '冲突产品',
+});
+const configConflict = await service.intake({
+  ...shopAInput,
+  platformOrderNo: 'DY-20260808-CONFLICT',
+}, actor);
+assert.equal(configConflict.code, 409);
+assert.equal(configConflict.errorCode, 'PRODUCT_MAPPING_CONFIG_CONFLICT');
+assert.match(configConflict.message, /请在极享OS修正冲突映射后重试/);
+assert.equal(createLeadCalls.length, 3, '商品映射冲突必须在创建线索前失败关闭');
+mappings.pop();
+products.pop();
 
 const duplicate = await service.intake({
-  ...input,
-  shopKey: ` ${input.shopKey} `,
-  platformOrderNo: ` ${input.platformOrderNo} `,
+  ...shopAInput,
+  shopBindingId: ` ${shopAInput.shopBindingId} `,
+  platformOrderNo: ` ${shopAInput.platformOrderNo} `,
   contactName: ' 另一个昵称 ',
   contactPhone: ' 13900139000 ',
   contactWechat: ' wx_other_99 ',
@@ -141,19 +307,20 @@ assert.deepEqual(duplicate.data?.storedContact, {
   nickname: '张先生',
   phone: '13800138000',
   wechat: 'wx_original_88',
-}, '重复入库必须返回已关联线索的实际联系快照，不得回显本次提交的分歧资料');
-assert.equal(createLeadCalls.length, 1, '重复点击不能再创建线索');
-assert.equal(records.size, 1, '业务幂等键必须先规范化再持久化');
+}, '重复入库必须返回已关联线索的实际联系快照');
+assert.deepEqual(duplicate.data?.productResolution, first.data?.productResolution);
+assert.equal(createLeadCalls.length, 3, '重复点击不能再创建线索');
+assert.equal(records.size, 3, '业务幂等键必须先规范化再持久化');
 
 const invalid = await service.intake({
-  ...input,
-  platformOrderNo: 'DY-20260808-002',
+  ...shopAInput,
+  platformOrderNo: 'DY-20260808-INVALID',
   contactPhone: undefined,
   contactWechat: undefined,
 }, actor);
 assert.equal(invalid.code, 400);
 assert.equal(invalid.message, '手机号或微信至少填写一项');
-assert.equal(createLeadCalls.length, 1, '无效联系方式不能进入线索创建');
+assert.equal(createLeadCalls.length, 3, '无效联系方式不能进入线索创建');
 
 const remark = await service.reportOrderRemark('browser-sync-1', { status: 'SUBMITTED' }, actor);
 assert.equal(remark.code, 0);
@@ -163,7 +330,7 @@ const colleagueRemark = await service.reportOrderRemark(
   { status: 'FAILED', errorMessage: '备注按钮未找到' },
   { ...actor, id: 'user-customer-service-2', name: '客服小周' },
 );
-assert.equal(colleagueRemark.code, 0, '同一订单由另一位有线索录入权限的客服接手时仍可回报备注');
+assert.equal(colleagueRemark.code, 0, '另一位有权限的客服接手时仍可回报备注');
 
 const completion = await service.reportPlatformCompletion('browser-sync-1', {
   orderRemarkStatus: 'SUCCEEDED',
@@ -187,17 +354,21 @@ assert.equal(invalidGreenFlagCompletion.code, 400);
 
 const throwingService = createBrowserLeadIntakeService({
   repository,
+  catalog: createBrowserCatalogService({ repository: catalogRepository }),
   async createLead() {
     throw new Error('数据库连接中断');
   },
 });
-const thrown = await throwingService.intake({ ...input, platformOrderNo: 'DY-20260808-003' }, actor);
+const thrown = await throwingService.intake({
+  ...shopAInput,
+  platformOrderNo: 'DY-20260808-THROW',
+}, actor);
 assert.equal(thrown.code, 500);
 assert.match(thrown.message, /数据库连接中断/);
 assert.equal(
-  [...records.values()].find((item) => item.platformOrderNo === 'DY-20260808-003')?.status,
+  [...records.values()].find((item) => item.platformOrderNo === 'DY-20260808-THROW')?.status,
   'FAILED',
   '意外异常不能让订单永久停留在入库中',
 );
 
-console.log('browser lead intake idempotency: ok');
+console.log('browser lead intake mapped products: ok');
