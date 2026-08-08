@@ -29,7 +29,7 @@ export type BrowserLeadSyncRecord = {
   matchedProductId?: string | null;
   matchedProductName?: string | null;
   productMatchMethod?: string | null;
-  sourcePaymentAmount?: number | null;
+  sourcePaymentAmount?: string | null;
   sourcePaymentAt?: Date | null;
   operatorId: string;
   operatorName: string;
@@ -68,7 +68,7 @@ type BrowserLeadSyncRepository = {
     matchedProductId?: string;
     matchedProductName?: string;
     productMatchMethod?: string;
-    sourcePaymentAmount?: number;
+    sourcePaymentAmount?: string | number;
     sourcePaymentAt?: Date;
     operatorId: string;
     operatorName: string;

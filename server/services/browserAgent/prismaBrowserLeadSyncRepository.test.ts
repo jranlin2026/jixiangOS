@@ -1,10 +1,51 @@
 import assert from 'node:assert/strict';
+import { Prisma } from '@prisma/client';
 import { createPrismaBrowserLeadSyncRepository } from './prismaBrowserLeadSyncRepository';
 
 let row: any = null;
 let leadRow: any = null;
 let beforeUpdateMany: ((where: any, data: any) => void | Promise<void>) | null = null;
 const updateManyCalls: Array<{ where: any; data: any }> = [];
+
+const browserLeadSyncFields = new Set([
+  'id', 'platform', 'shopKey', 'platformOrderNo', 'shopBindingId', 'shopDisplayName',
+  'platformProductId', 'platformSkuId', 'sourceProductName', 'matchedProductId',
+  'matchedProductName', 'productMatchMethod', 'sourcePaymentAmount', 'sourcePaymentAt',
+  'operatorId', 'operatorName', 'contactSource', 'status', 'leadId', 'leadName',
+  'assignedTo', 'assignedToId', 'intakeStatus', 'orderRemarkStatus', 'orderRemarkError',
+  'greenFlagStatus', 'greenFlagError', 'remarkOperatorId', 'remarkOperatorName',
+  'attemptCount', 'lastError', 'completedAt', 'orderRemarkedAt', 'greenFlaggedAt',
+  'createdAt', 'updatedAt',
+]);
+
+function assertKnownBrowserLeadSyncFields(data: Record<string, unknown>) {
+  for (const field of Object.keys(data)) {
+    assert.ok(browserLeadSyncFields.has(field), `BrowserLeadSync 不存在字段 ${field}`);
+  }
+}
+
+function materialize(value: any, field?: string): any {
+  if (value instanceof Date) return new Date(value.getTime());
+  if (field === 'sourcePaymentAmount' && value !== null && value !== undefined) {
+    return new Prisma.Decimal(value);
+  }
+  return value;
+}
+
+function materializeRow(source: Record<string, any>) {
+  return Object.fromEntries(Object.entries(source).map(([field, value]) => [field, materialize(value, field)]));
+}
+
+function applyData(current: Record<string, any>, data: Record<string, any>) {
+  assertKnownBrowserLeadSyncFields(data);
+  const { attemptCount, ...patch } = data;
+  return materializeRow({
+    ...current,
+    ...patch,
+    ...(attemptCount ? { attemptCount: current.attemptCount + (attemptCount.increment || 0) } : {}),
+    updatedAt: new Date(),
+  });
+}
 
 function matchesWhere(current: any, where: any) {
   return Object.entries(where).every(([field, expected]: [string, any]) => {
@@ -21,7 +62,8 @@ function matchesWhere(current: any, where: any) {
 const delegate = {
   async create({ data }: any) {
     if (row) throw Object.assign(new Error('duplicate'), { code: 'P2002' });
-    row = {
+    assertKnownBrowserLeadSyncFields(data);
+    row = materializeRow({
       ...data,
       updatedAt: new Date(),
       leadId: null,
@@ -36,25 +78,29 @@ const delegate = {
       orderRemarkedAt: null,
       greenFlaggedAt: null,
       completedAt: null,
-    };
-    return row;
+    });
+    return materializeRow(row);
   },
-  async findUnique() {
-    return row;
+  async findUnique({ where }: any) {
+    if (!row) return null;
+    if (where.id) return row.id === where.id ? materializeRow(row) : null;
+    const key = where.platform_shopKey_platformOrderNo;
+    if (key) {
+      return row.platform === key.platform && row.shopKey === key.shopKey && row.platformOrderNo === key.platformOrderNo
+        ? materializeRow(row)
+        : null;
+    }
+    return null;
   },
   async update({ data }: any) {
-    row = { ...row, ...data };
-    return row;
+    row = applyData(row, data);
+    return materializeRow(row);
   },
   async updateMany({ where, data }: any) {
     updateManyCalls.push({ where, data });
     if (beforeUpdateMany) await beforeUpdateMany(where, data);
     if (!row || !matchesWhere(row, where)) return { count: 0 };
-    row = {
-      ...row,
-      ...data,
-      attemptCount: row.attemptCount + (data.attemptCount?.increment || 0),
-    };
+    row = applyData(row, data);
     return { count: 1 };
   },
 };
@@ -69,7 +115,14 @@ const leadDelegate = {
   },
 };
 
-const repository = createPrismaBrowserLeadSyncRepository({ browserLeadSync: delegate, leadRecord: leadDelegate } as any);
+const prisma = {
+  browserLeadSync: delegate,
+  leadRecord: leadDelegate,
+  async $transaction(callback: (transaction: { browserLeadSync: typeof delegate; leadRecord: typeof leadDelegate }) => Promise<any>) {
+    return callback({ browserLeadSync: delegate, leadRecord: leadDelegate });
+  },
+};
+const repository = createPrismaBrowserLeadSyncRepository(prisma as any);
 const reservationInput = {
   platform: 'DOUYIN', shopKey: 'shop-1', platformOrderNo: 'order-1',
   shopBindingId: 'binding-1', shopDisplayName: '极享抖音旗舰店',
@@ -77,7 +130,7 @@ const reservationInput = {
   sourceProductName: '淘金AI 多模态创作智能体',
   matchedProductId: 'product-taojin', matchedProductName: '淘金AI',
   productMatchMethod: 'PLATFORM_PRODUCT_ID',
-  sourcePaymentAmount: 299, sourcePaymentAt: new Date('2026-08-08T09:00:00.000Z'),
+  sourcePaymentAmount: '123456789012.34', sourcePaymentAt: new Date('2026-08-08T09:00:00.000Z'),
   operatorId: 'user-1', operatorName: '客服小李',
   contactSource: 'CHAT' as const,
 };
@@ -106,7 +159,7 @@ assert.deepEqual({
   matchedProductId: 'product-taojin',
   matchedProductName: '淘金AI',
   productMatchMethod: 'PLATFORM_PRODUCT_ID',
-  sourcePaymentAmount: 299,
+  sourcePaymentAmount: '123456789012.34',
   sourcePaymentAt: new Date('2026-08-08T09:00:00.000Z'),
 }, '创建同步记录必须保留店铺、商品匹配和付款审计事实');
 
@@ -118,7 +171,27 @@ const completedAt = succeededOnce.completedAt;
 const succeededAgain = await repository.markSucceeded(first.record.id, {
   leadId: 'lead-1', leadName: '首次入库客户', storedContact: { nickname: '首次入库客户', phone: '13800138000' },
 });
-assert.equal(succeededAgain.completedAt, completedAt, '重复标记成功不得重写首次完成时间');
+assert.equal(succeededAgain.completedAt?.getTime(), completedAt?.getTime(), '重复标记成功不得重写首次完成时间');
+
+row = {
+  ...row,
+  status: 'FAILED',
+  leadId: 'lead-stale',
+  leadName: '过期线索',
+  assignedTo: null,
+  assignedToId: null,
+  intakeStatus: null,
+  lastError: '上次回写中断',
+};
+const recoveredSuccess = await repository.markSucceeded(first.record.id, {
+  leadId: 'lead-repaired', leadName: '修复后的线索', assignedTo: '销售小王', assignedToId: 'sales-1', intakeStatus: '已入库',
+  storedContact: { nickname: '修复后的线索', phone: '13800138000' },
+});
+assert.equal(recoveredSuccess.status, 'SUCCEEDED', '已有完成时间的记录仍必须恢复成功状态');
+assert.equal(recoveredSuccess.leadId, 'lead-repaired', '已有完成时间的记录仍必须修复线索快照');
+assert.equal(recoveredSuccess.assignedToId, 'sales-1');
+assert.equal(recoveredSuccess.lastError, null);
+assert.equal(recoveredSuccess.completedAt?.getTime(), completedAt?.getTime(), '恢复成功不得覆盖首次完成时间');
 
 const duplicate = await repository.reserve(reservationInput);
 assert.equal(duplicate.acquired, false);

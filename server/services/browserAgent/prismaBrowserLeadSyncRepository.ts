@@ -5,13 +5,24 @@ import type {
   StoredLeadContactSnapshot,
 } from './browserLeadIntakeService';
 
-type BrowserLeadSyncPrisma = Pick<PrismaClient, 'browserLeadSync' | 'leadRecord'>;
+type BrowserLeadSyncPrisma = Pick<PrismaClient, 'browserLeadSync' | 'leadRecord' | '$transaction'>;
 
 const PENDING_LEASE_MS = 10 * 60 * 1000;
 
+function auditDecimal(value: unknown): string | null | undefined {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string' || typeof value === 'number') return value.toString();
+  if (typeof value === 'object' && typeof (value as { toString?: unknown }).toString === 'function') {
+    return (value as { toString(): string }).toString();
+  }
+  throw new Error('浏览器线索同步付款金额格式无效');
+}
+
 function record(row: any, storedContact?: StoredLeadContactSnapshot): BrowserLeadSyncRecord {
+  const { sourcePaymentAmount, ...rest } = row;
   return {
-    ...row,
+    ...rest,
+    ...(sourcePaymentAmount === undefined ? {} : { sourcePaymentAmount: auditDecimal(sourcePaymentAmount) }),
     status: row.status as BrowserLeadSyncRecord['status'],
     orderRemarkStatus: row.orderRemarkStatus as BrowserLeadSyncRecord['orderRemarkStatus'],
     greenFlagStatus: row.greenFlagStatus as BrowserLeadSyncRecord['greenFlagStatus'],
@@ -105,7 +116,7 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       matchedProductId?: string;
       matchedProductName?: string;
       productMatchMethod?: string;
-      sourcePaymentAmount?: number;
+      sourcePaymentAmount?: string | number;
       sourcePaymentAt?: Date;
       operatorId: string;
       operatorName: string;
@@ -192,12 +203,16 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       storedContact: StoredLeadContactSnapshot;
     }) {
       const { storedContact, ...syncInput } = input;
-      await prisma.browserLeadSync.updateMany({
-        where: { id, completedAt: null },
-        data: { ...syncInput, status: 'SUCCEEDED', lastError: null, completedAt: new Date() },
+      const current = await prisma.$transaction(async (transaction) => {
+        await transaction.browserLeadSync.updateMany({
+          where: { id, completedAt: null },
+          data: { completedAt: new Date() },
+        });
+        return transaction.browserLeadSync.update({
+          where: { id },
+          data: { ...syncInput, status: 'SUCCEEDED', lastError: null },
+        });
       });
-      const current = await prisma.browserLeadSync.findUnique({ where: { id } });
-      if (!current) throw new Error('浏览器线索同步成功记录未找到');
       return record(current, storedContact);
     },
 
