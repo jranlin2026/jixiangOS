@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type {
   BrowserLeadSyncRecord,
+  ExistingLeadState,
   StoredLeadContactSnapshot,
 } from './browserLeadIntakeService';
 
@@ -44,6 +45,13 @@ function leadFromRow(row: any) {
     assignedToId: data.assignedToId || null,
     intakeStatus: data.intakeStatus || null,
   };
+}
+
+function isRecycledLeadRow(row: any) {
+  const data = row?.data && typeof row.data === 'object' ? row.data : {};
+  const deletedAt = data.deletedAt;
+  if (deletedAt instanceof Date) return !Number.isNaN(deletedAt.getTime());
+  return typeof deletedAt === 'string' && Boolean(deletedAt.trim());
 }
 
 function storedContactFromLeadRow(row: any): StoredLeadContactSnapshot {
@@ -167,16 +175,25 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       });
       if (!existing) throw new Error('浏览器线索同步保留记录未找到');
 
-      const persistedContact = storedContactFromSyncRow(existing);
-      if (existing.status === 'SUCCEEDED' && persistedContact) {
-        return { acquired: false as const, record: record(existing, persistedContact) };
-      }
-
       let createdLead = await prisma.leadRecord.findUnique({ where: { externalIntakeKey: existing.id } });
       if (!createdLead && existing.leadId) {
         createdLead = await prisma.leadRecord.findUnique({ where: { id: existing.leadId } });
       }
+      const existingLeadState: ExistingLeadState = !createdLead
+        ? 'MISSING'
+        : isRecycledLeadRow(createdLead) ? 'RECYCLED' : 'ACTIVE';
+      if (existingLeadState === 'RECYCLED') {
+        return { acquired: false as const, record: record(existing), existingLeadState };
+      }
       if (createdLead) {
+        const persistedContact = storedContactFromSyncRow(existing);
+        if (existing.status === 'SUCCEEDED' && persistedContact) {
+          return {
+            acquired: false as const,
+            record: record(existing, persistedContact),
+            existingLeadState,
+          };
+        }
         const leadSnapshot = storedContactFromLeadRow(createdLead);
         if (existing.status === 'SUCCEEDED') {
           await prisma.browserLeadSync.updateMany({
@@ -193,6 +210,7 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
           return {
             acquired: false as const,
             record: record(reconciled),
+            existingLeadState,
           };
         }
         const lead = leadFromRow(createdLead);
@@ -224,13 +242,14 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
         return {
           acquired: false as const,
           record: record(reconciled),
+          existingLeadState,
         };
       }
 
       const stalePending = existing.status === 'PENDING'
         && existing.updatedAt.getTime() <= Date.now() - PENDING_LEASE_MS;
       if (existing.status !== 'FAILED' && !stalePending) {
-        return { acquired: false as const, record: record(existing) };
+        return { acquired: false as const, record: record(existing), existingLeadState };
       }
 
       const claimed = await prisma.browserLeadSync.updateMany({
@@ -263,7 +282,7 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       });
       const refreshed = await prisma.browserLeadSync.findUnique({ where: { id: existing.id } });
       if (!refreshed) throw new Error('浏览器线索同步重试记录未找到');
-      return { acquired: claimed.count === 1, record: record(refreshed) };
+      return { acquired: claimed.count === 1, record: record(refreshed), existingLeadState };
     },
 
     async markSucceeded(id: string, input: {

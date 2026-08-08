@@ -1,8 +1,11 @@
 import { failure, success, type ApiResponse } from '../../api/response';
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import type { Lead } from '../../../src/types/lead';
+import { normalizePhoneForComparison } from '../../../src/shared/utils/phoneNumber';
 import type { BrowserCatalogErrorCode, BrowserCatalogService } from './browserCatalogService';
 import { buildBrowserOrderRemark } from './browserOrderRemark';
+
+export type ExistingLeadState = 'ACTIVE' | 'RECYCLED' | 'MISSING';
 
 export type BrowserLeadIntakeInput = {
   platform: 'DOUYIN';
@@ -77,7 +80,11 @@ type BrowserLeadSyncRepository = {
     operatorId: string;
     operatorName: string;
     contactSource: 'CHAT' | 'OFF_PLATFORM';
-  }): Promise<{ acquired: boolean; record: BrowserLeadSyncRecord }>;
+  }): Promise<{
+    acquired: boolean;
+    record: BrowserLeadSyncRecord;
+    existingLeadState?: ExistingLeadState;
+  }>;
   markSucceeded(id: string, input: {
     leadId: string;
     leadName: string;
@@ -143,8 +150,20 @@ export type BrowserLeadProductResolutionAudit = {
 };
 
 export type BrowserLeadIntakeResponse = ApiResponse<BrowserLeadIntakeResult | null> & {
-  errorCode?: BrowserCatalogErrorCode;
+  errorCode?: BrowserCatalogErrorCode | BrowserLeadIntakeErrorCode;
 };
+
+export type BrowserLeadIntakeErrorCode =
+  | 'LEAD_IN_RECYCLE_BIN'
+  | 'LEAD_SYNC_RECORD_ORPHANED'
+  | 'ORDER_CONTACT_CONFLICT';
+
+function intakeFailure(
+  message: string,
+  errorCode: BrowserLeadIntakeErrorCode,
+): BrowserLeadIntakeResponse {
+  return { code: 409, data: null, message, errorCode };
+}
 
 function normalizedContactSnapshot(input: { name?: unknown; phone?: unknown; wechat?: unknown }) {
   return {
@@ -152,6 +171,25 @@ function normalizedContactSnapshot(input: { name?: unknown; phone?: unknown; wec
     phone: String(input.phone || '').trim() || undefined,
     wechat: String(input.wechat || '').trim() || undefined,
   } satisfies StoredLeadContactSnapshot;
+}
+
+function contactConflictLabels(
+  submitted: { contactName: string; contactPhone?: string; contactWechat?: string },
+  stored?: StoredLeadContactSnapshot,
+) {
+  const labels: string[] = [];
+  if (!stored || stored.nickname.trim() !== submitted.contactName.trim()) labels.push('昵称不一致');
+  if (submitted.contactPhone) {
+    const submittedPhone = normalizePhoneForComparison(submitted.contactPhone);
+    const storedPhone = normalizePhoneForComparison(stored?.phone);
+    if (!submittedPhone || !storedPhone || submittedPhone !== storedPhone) labels.push('手机号不一致');
+  }
+  if (submitted.contactWechat) {
+    const submittedWechat = submitted.contactWechat.trim().toLocaleLowerCase('zh-CN');
+    const storedWechat = stored?.wechat?.trim().toLocaleLowerCase('zh-CN') || '';
+    if (!submittedWechat || !storedWechat || submittedWechat !== storedWechat) labels.push('微信号不一致');
+  }
+  return labels;
 }
 
 function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadIntakeResult['outcome']) {
@@ -311,8 +349,29 @@ export function createBrowserLeadIntakeService(deps: {
         contactSource: input.contactSource,
       });
       if (!reservation.acquired) {
+        if (reservation.existingLeadState === 'RECYCLED') {
+          return intakeFailure(
+            '该订单已录入极享OS，但原线索已在业务回收站。请先恢复原线索，或由管理员彻底清理该订单的同步记录后再重试；本次不会修改飞鸽订单。',
+            'LEAD_IN_RECYCLE_BIN',
+          );
+        }
+        if (reservation.existingLeadState === 'MISSING' && reservation.record.status === 'SUCCEEDED') {
+          return intakeFailure(
+            '该订单的同步记录显示已录入，但原线索已不存在。请由管理员彻底清理该订单的同步记录后再重试；本次不会修改飞鸽订单。',
+            'LEAD_SYNC_RECORD_ORPHANED',
+          );
+        }
         if (reservation.record.status === 'SUCCEEDED' && reservation.record.leadId) {
-          return resultFromRecord(reservation.record, 'ALREADY_CREATED');
+          const existingResult = resultFromRecord(reservation.record, 'ALREADY_CREATED');
+          if (existingResult.code !== 0) return existingResult;
+          const differences = contactConflictLabels(normalized, reservation.record.storedContact);
+          if (differences.length) {
+            return intakeFailure(
+              `该订单已录入极享OS，但本次提交资料存在冲突（${differences.join('、')}）。请先在极享OS核对并统一资料后重试；本次不会修改飞鸽订单。`,
+              'ORDER_CONTACT_CONFLICT',
+            );
+          }
+          return existingResult;
         }
         return failure<BrowserLeadIntakeResult>(
           reservation.record.status === 'PENDING' ? '该订单正在入库，请勿重复操作' : '该订单上次入库失败，请稍后重试',

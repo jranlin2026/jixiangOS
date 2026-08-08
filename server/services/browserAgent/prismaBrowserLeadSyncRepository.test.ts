@@ -218,8 +218,16 @@ assert.equal(recoveredSuccess.assignedToId, 'sales-first', '恢复成功状态�
 assert.equal(recoveredSuccess.lastError, null);
 assert.equal(recoveredSuccess.completedAt?.getTime(), completedAt?.getTime(), '恢复成功不得覆盖首次完成时间');
 
+leadRow = {
+  id: 'lead-repaired',
+  externalIntakeKey: first.record.id,
+  name: '修复后的线索',
+  phone: '13800138000',
+  data: {},
+};
 const duplicate = await repository.reserve(reservationInput);
 assert.equal(duplicate.acquired, false);
+assert.equal(duplicate.existingLeadState, 'ACTIVE');
 assert.equal(duplicate.record.id, first.record.id);
 assert.deepEqual({
   shopBindingId: duplicate.record.shopBindingId,
@@ -260,6 +268,68 @@ assert.equal(
   new Date('2026-08-08T09:00:00.000Z').getTime(),
   '成功重复记录必须保持首次商品与实付审计不变',
 );
+
+leadRow = {
+  id: 'lead-repaired',
+  externalIntakeKey: first.record.id,
+  name: '回收站中的线索',
+  data: { deletedAt: new Date('2026-08-09T00:00:00.000Z') },
+};
+const recycledDuplicate = await repository.reserve({
+  ...reservationInput,
+  matchedProductId: 'product-should-not-overwrite-recycled',
+  sourcePaymentAmount: '888.88',
+});
+assert.equal(recycledDuplicate.acquired, false);
+assert.equal(recycledDuplicate.existingLeadState, 'RECYCLED');
+assert.equal(recycledDuplicate.record.status, 'SUCCEEDED');
+assert.equal(recycledDuplicate.record.matchedProductId, 'product-taojin');
+assert.equal(recycledDuplicate.record.sourcePaymentAmount, '123456789012.34');
+assert.equal(recycledDuplicate.record.completedAt?.getTime(), completedAt?.getTime());
+
+leadRow = {
+  ...leadRow,
+  data: { archivedAt: '2026-08-09T00:00:00.000Z' },
+};
+const activeWithUnrelatedMarker = await repository.reserve(reservationInput);
+assert.equal(activeWithUnrelatedMarker.existingLeadState, 'ACTIVE', '只有 data.deletedAt 才能标记回收站线索');
+
+for (const invalidDeletedAt of [false, true, 1, '', new Date('invalid')]) {
+  leadRow = { ...leadRow, data: { deletedAt: invalidDeletedAt } };
+  const activeWithInvalidMarker = await repository.reserve(reservationInput);
+  assert.equal(
+    activeWithInvalidMarker.existingLeadState,
+    'ACTIVE',
+    'deletedAt 只有有效 Date 或非空字符串才是回收站标记',
+  );
+}
+
+leadRow = {
+  ...leadRow,
+  data: { deletedAt: '2026-08-09T00:00:00.000Z' },
+};
+const recycledWithStringMarker = await repository.reserve(reservationInput);
+assert.equal(recycledWithStringMarker.existingLeadState, 'RECYCLED', 'JSON 日期字符串也必须识别为回收站标记');
+
+row = { ...row, status: 'FAILED', lastError: '回收站线索不能自动重建' };
+const recycledFailedRetry = await repository.reserve({
+  ...reservationInput,
+  matchedProductId: 'product-retry-must-not-overwrite-recycled',
+});
+assert.equal(recycledFailedRetry.acquired, false, '失败同步关联回收站线索时也不得自动重建');
+assert.equal(recycledFailedRetry.existingLeadState, 'RECYCLED');
+assert.equal(recycledFailedRetry.record.matchedProductId, 'product-taojin');
+row = { ...row, status: 'SUCCEEDED', lastError: null };
+
+leadRow = null;
+const missingSuccessfulLead = await repository.reserve({
+  ...reservationInput,
+  sourcePaymentAmount: '777.77',
+});
+assert.equal(missingSuccessfulLead.acquired, false);
+assert.equal(missingSuccessfulLead.existingLeadState, 'MISSING');
+assert.equal(missingSuccessfulLead.record.status, 'SUCCEEDED');
+assert.equal(missingSuccessfulLead.record.sourcePaymentAmount, '123456789012.34');
 
 await repository.markFailed(first.record.id, '极享OS暂时不可用');
 const correctedReservationInput = {

@@ -86,6 +86,51 @@ const osFailure = await runOrderCompletion({
 assert.equal(osFailure.osStatus, 'FAILED');
 assert.equal(pageCallsAfterOsFailure, 0);
 
+for (const terminalErrorCode of [
+  'LEAD_IN_RECYCLE_BIN',
+  'ORDER_CONTACT_CONFLICT',
+  'SHOP_CONTEXT_MISMATCH',
+  'PRODUCT_CONFIG_CONFLICT',
+  'PRODUCT_MAPPING_CONFIG_CONFLICT',
+] as const) {
+  let terminalPageCalls = 0;
+  let terminalReportCalls = 0;
+  const terminalStates: string[] = [];
+  const terminalResult = await runOrderCompletion({
+    expectedOrderNo: currentContext.platformOrderNo,
+    expectedCustomerDisplayName: currentContext.customerDisplayName,
+    phone: '13826459812',
+    intakeInput: { platform: 'DOUYIN' },
+  }, {
+    readContext: async () => currentContext,
+    intake: async () => ({
+      code: 409,
+      data: null,
+      errorCode: terminalErrorCode,
+      message: `终止错误：${terminalErrorCode}`,
+    }),
+    completePage: async () => {
+      terminalPageCalls += 1;
+      throw new Error('OS终止失败后不得写备注或设置绿旗');
+    },
+    report: async () => {
+      terminalReportCalls += 1;
+      throw new Error('OS终止失败后不得上报平台完成结果');
+    },
+    onState: (state) => { terminalStates.push(state.stage); },
+  });
+  assert.equal(terminalResult.stage, 'OS_FAILED');
+  assert.equal(terminalResult.osStatus, 'FAILED');
+  assert.equal(terminalResult.orderRemarkStatus, 'NOT_ATTEMPTED');
+  assert.equal(terminalResult.greenFlagStatus, 'NOT_ATTEMPTED');
+  assert.equal(terminalResult.errorCode, terminalErrorCode);
+  assert.equal(terminalResult.message, `终止错误：${terminalErrorCode}`);
+  assert.equal(terminalPageCalls, 0, `${terminalErrorCode} 不得写备注或设置绿旗`);
+  assert.equal(terminalReportCalls, 0, `${terminalErrorCode} 不得上报平台完成结果`);
+  assert.equal(terminalStates.includes('OS_COMPLETED'), false);
+  assert.equal(terminalStates.includes('PLATFORM_COMPLETING'), false);
+}
+
 const osException = await runOrderCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,

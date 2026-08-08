@@ -11,6 +11,7 @@ import type {
 export type OrderCompletionStage =
   | 'READY'
   | 'INTAKING'
+  | 'OS_FAILED'
   | 'OS_COMPLETED'
   | 'PLATFORM_COMPLETING'
   | 'PLATFORM_FAILED'
@@ -33,6 +34,7 @@ export type OrderCompletionState = {
   intakeResult?: LeadIntakeResponse;
   remarkText?: string;
   message?: string;
+  errorCode?: string;
 };
 
 export type OrderCompletionInput = {
@@ -53,7 +55,7 @@ type ReportInput = {
 
 export type OrderCompletionDependencies = {
   readContext(): Promise<Pick<FeigePageContext, 'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus'>>;
-  intake(input: Record<string, unknown>): Promise<ApiEnvelope<LeadIntakeResponse>>;
+  intake(input: Record<string, unknown>): Promise<ApiEnvelope<LeadIntakeResponse> & { errorCode?: string }>;
   completePage(input: CompleteOsOrderInput): Promise<CompleteOsOrderResult>;
   report(input: ReportInput): Promise<ApiEnvelope<PlatformCompletionReport>>;
   onState?(state: OrderCompletionState): void;
@@ -205,12 +207,13 @@ export async function runOrderCompletion(
   let intakeResult = input.existingIntake;
   if (!intakeResult) {
     emit(deps, { ...initial, stage: 'INTAKING', osStatus: 'IN_PROGRESS' });
-    let intake: ApiEnvelope<LeadIntakeResponse>;
+    let intake: ApiEnvelope<LeadIntakeResponse> & { errorCode?: string };
     try {
       intake = await deps.intake(input.intakeInput);
     } catch (error) {
       return emit(deps, {
         ...initial,
+        stage: 'OS_FAILED',
         osStatus: 'FAILED',
         message: errorMessage(error, '线索入库失败'),
       });
@@ -218,7 +221,9 @@ export async function runOrderCompletion(
     if (intake.code !== 0 || !intake.data) {
       return emit(deps, {
         ...initial,
+        stage: 'OS_FAILED',
         osStatus: 'FAILED',
+        ...(intake.errorCode ? { errorCode: intake.errorCode } : {}),
         message: intake.message || '线索入库失败',
       });
     }

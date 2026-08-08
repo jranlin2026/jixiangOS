@@ -95,7 +95,13 @@ const repository = {
     const key = `${input.platform}:${input.shopKey}:${input.platformOrderNo}`;
     const existing = records.get(key);
     if (existing) {
-      if (existing.status !== 'FAILED') return { acquired: false as const, record: existing };
+      if (existing.status !== 'FAILED') {
+        return {
+          acquired: false as const,
+          record: existing,
+          existingLeadState: existing.existingLeadState || 'ACTIVE',
+        };
+      }
       Object.assign(existing, prismaAuditSnapshot(input), {
         status: 'PENDING',
         lastError: null,
@@ -340,13 +346,25 @@ assert.equal(createLeadCalls.length, 3, '商品映射冲突必须在创建线索
 mappings.pop();
 products.pop();
 
+const firstSyncRecord = records.get('DOUYIN:jixiang-a:DY-20260808-A001');
+firstSyncRecord.existingLeadState = 'RECYCLED';
+const recycled = await service.intake(shopAInput, actor);
+assert.deepEqual(recycled, {
+  code: 409,
+  data: null,
+  errorCode: 'LEAD_IN_RECYCLE_BIN',
+  message: '该订单已录入极享OS，但原线索已在业务回收站。请先恢复原线索，或由管理员彻底清理该订单的同步记录后再重试；本次不会修改飞鸽订单。',
+});
+assert.equal(createLeadCalls.length, 3, '回收站线索不得自动创建第二条线索');
+firstSyncRecord.existingLeadState = 'ACTIVE';
+
 const duplicate = await service.intake({
   ...shopAInput,
   shopBindingId: ` ${shopAInput.shopBindingId} `,
   platformOrderNo: ` ${shopAInput.platformOrderNo} `,
-  contactName: ' 另一个昵称 ',
-  contactPhone: ' 13900139000 ',
-  contactWechat: ' wx_other_99 ',
+  contactName: ' 张先生 ',
+  contactPhone: ' 13800138000 ',
+  contactWechat: ' WX_ORIGINAL_88 ',
 }, actor);
 assert.equal(duplicate.code, 0);
 assert.equal(duplicate.data?.outcome, 'ALREADY_CREATED');
@@ -363,7 +381,57 @@ assert.deepEqual(duplicate.data?.shop, first.data?.shop);
 assert.equal(createLeadCalls.length, 3, '重复点击不能再创建线索');
 assert.equal(records.size, 3, '业务幂等键必须先规范化再持久化');
 
-const firstSyncRecord = records.get('DOUYIN:jixiang-a:DY-20260808-A001');
+const contactConflict = await service.intake({
+  ...shopAInput,
+  contactName: '另一个昵称',
+  contactPhone: '13900139000',
+  contactWechat: 'wx_other_99',
+}, actor);
+assert.equal(contactConflict.code, 409);
+assert.equal(contactConflict.errorCode, 'ORDER_CONTACT_CONFLICT');
+assert.match(contactConflict.message, /昵称不一致、手机号不一致、微信号不一致/);
+assert.doesNotMatch(contactConflict.message, /另一个昵称|13900139000|wx_other_99|张先生|13800138000|wx_original_88/i);
+assert.equal(createLeadCalls.length, 3, '资料冲突不得自动创建第二条线索');
+
+for (const conflict of [
+  {
+    input: { ...shopAInput, contactName: '另一个昵称' },
+    expected: '昵称不一致',
+    unexpected: /手机号不一致|微信号不一致/,
+  },
+  {
+    input: { ...shopAInput, contactPhone: '13900139000' },
+    expected: '手机号不一致',
+    unexpected: /昵称不一致|微信号不一致/,
+  },
+  {
+    input: { ...shopAInput, contactWechat: 'wx_other_99' },
+    expected: '微信号不一致',
+    unexpected: /昵称不一致|手机号不一致/,
+  },
+] as const) {
+  const actualConflict = await service.intake(conflict.input, actor);
+  assert.equal(actualConflict.errorCode, 'ORDER_CONTACT_CONFLICT');
+  assert.match(actualConflict.message, new RegExp(conflict.expected));
+  assert.doesNotMatch(actualConflict.message, conflict.unexpected, '冲突提示只能列出实际差异字段');
+}
+
+firstSyncRecord.storedContact.phone = '+8613800138000';
+const normalizedPhoneDuplicate = await service.intake(shopAInput, actor);
+assert.equal(normalizedPhoneDuplicate.code, 0, '手机号比较必须复用极享OS号码归一化规则');
+firstSyncRecord.storedContact.phone = '13800138000';
+
+firstSyncRecord.existingLeadState = 'MISSING';
+const missingSuccessfulLead = await service.intake(shopAInput, actor);
+assert.deepEqual(missingSuccessfulLead, {
+  code: 409,
+  data: null,
+  errorCode: 'LEAD_SYNC_RECORD_ORPHANED',
+  message: '该订单的同步记录显示已录入，但原线索已不存在。请由管理员彻底清理该订单的同步记录后再重试；本次不会修改飞鸽订单。',
+});
+assert.equal(createLeadCalls.length, 3, '成功同步关联线索消失时不得静默创建第二条线索');
+firstSyncRecord.existingLeadState = 'ACTIVE';
+
 const originalStoredContact = firstSyncRecord.storedContact;
 firstSyncRecord.storedContact = { ...originalStoredContact, nickname: '张\n先生' };
 const malformedStoredContact = await service.intake(shopAInput, actor);
