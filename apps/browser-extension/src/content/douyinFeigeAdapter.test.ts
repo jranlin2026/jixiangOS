@@ -77,4 +77,12 @@ reply.value = '';
 assert.deepEqual(realAdapter.fillReplyIfEmpty('系统推荐'), { ok: true, filled: true });
 assert.equal(reply.value, '系统推荐');
 
+reply.value = '已有内容';
+assert.deepEqual(realAdapter.appendReply('新话术'), { ok: true });
+assert.equal(reply.value, '已有内容\n新话术');
+
+reply.value = '已有内容\n';
+assert.deepEqual(realAdapter.appendReply('新话术'), { ok: true });
+assert.equal(reply.value, '已有内容\n新话术');
+
 console.log('douyin feige page adapter: ok');
