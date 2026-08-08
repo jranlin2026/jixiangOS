@@ -118,6 +118,17 @@ const PERMISSION_TREE: RolePermissionNode[] = [
       { label: '查看敏感知识', key: PERMISSION_KEYS.ENABLEMENT_SENSITIVE },
     ],
   },
+  {
+    label: '极享商学院',
+    children: [
+      { label: '查看工作台', key: PERMISSION_KEYS.ACADEMY_VIEW },
+      { label: '课程计划', key: PERMISSION_KEYS.ACADEMY_PLAN_MANAGE },
+      { label: '课程管理', key: PERMISSION_KEYS.ACADEMY_COURSE_MANAGE },
+      { label: '场次运营', key: PERMISSION_KEYS.ACADEMY_SESSION_MANAGE },
+      { label: '学员与转化', key: PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE },
+      { label: '经营复盘', key: PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE },
+    ],
+  },
   corePermissionNode('系统设置'),
 ];
 
@@ -130,6 +141,7 @@ const defaultDataScopes: NormalizedRoleDataScopes = {
   orderApplications: 'self',
   recoveryOrders: 'self',
   recoveryOrderApplications: 'self',
+  academy: 'self',
   assets: 'self',
 };
 const emptyForm: RoleForm = {

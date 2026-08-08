@@ -19,6 +19,7 @@ export const CORE_DATA_SCOPE_DOMAINS: DataScopeDomain[] = [
   'deliveries',
   'recoveryOrders',
   'recoveryOrderApplications',
+  'academy',
 ];
 
 export type RoleDataScopeRow = {
@@ -36,6 +37,7 @@ const CORE_DATA_SCOPE_ROWS: RoleDataScopeRow[] = [
   { domain: 'deliveries', label: '交付数据', description: '控制交付中心列表、详情、统计和可操作交付卡片的数据范围', permissionKeys: [PERMISSION_KEYS.DELIVERY, PERMISSION_KEYS.DELIVERY_CENTER, PERMISSION_KEYS.DELIVERY_MOVE_CARD, PERMISSION_KEYS.DELIVERY_STAGE_CONFIG] },
   { domain: 'recoveryOrders', label: '售后挽回订单数据', description: '控制售后挽回订单列表、分账、导出和统计的数据范围', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EXPORT, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, PERMISSION_KEYS.RECOVERY_SETTLEMENT_EXPORT] },
   { domain: 'recoveryOrderApplications', label: '售后挽回订单审核台数据', description: '控制售后挽回审核台能看到哪些挽回订单；审核列表权限控制入口，审核操作权限控制通过、退回和驳回', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW] },
+  { domain: 'academy', label: '商学院数据', description: '控制课程、场次、执行任务、学员转化和经营复盘的数据范围', permissionKeys: [PERMISSION_KEYS.ACADEMY_VIEW, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE] },
 ];
 
 export function getCoreDataScopeRows(): RoleDataScopeRow[] {

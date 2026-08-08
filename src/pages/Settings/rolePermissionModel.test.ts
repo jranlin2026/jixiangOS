@@ -29,6 +29,7 @@ assert.deepEqual(sparseFinanceScopes, {
   orderApplications: 'all',
   recoveryOrders: 'all',
   recoveryOrderApplications: 'all',
+  academy: 'self',
   assets: 'self',
 });
 assert.deepEqual(
@@ -49,6 +50,7 @@ assert.deepEqual(sparseSalesManagerScopes, {
   orderApplications: 'department',
   recoveryOrders: 'department',
   recoveryOrderApplications: 'department',
+  academy: 'department',
   assets: 'all',
 });
 assert.deepEqual(
