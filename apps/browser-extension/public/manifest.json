@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "极享AI浏览器员工",
+  "description": "连接抖店飞鸽与极享OS，辅助客服完成话术、联系方式确认、线索入库和订单备注。",
+  "version": "0.1.0",
+  "minimum_chrome_version": "116",
+  "permissions": ["activeTab", "scripting", "sidePanel", "storage", "tabs"],
+  "host_permissions": [
+    "https://*.jinritemai.com/*",
+    "https://*.douyinec.com/*"
+  ],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "打开极享AI浏览器员工"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.jinritemai.com/*",
+        "https://*.douyinec.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

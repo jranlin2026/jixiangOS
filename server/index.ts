@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   getAllowedCorsOrigins,
+  isCorsOriginAllowed,
   getApiJsonBodyLimit,
   getApiListenHost,
   getEnablementPrivateStorageDir,
@@ -115,6 +116,12 @@ import { createPrismaEnterpriseAiRepository } from './services/enterpriseBrain/p
 import { createEnterpriseCockpitService } from './services/enterpriseBrain/cockpitService';
 import { createPrismaEnterpriseCockpitRepository } from './services/enterpriseBrain/prismaCockpitRepository';
 import { createCoCreationRouter } from './routes/coCreationRoutes';
+import { createBrowserAgentRouter } from './routes/browserAgentRoutes';
+import { createBrowserLeadIntakeService } from './services/browserAgent/browserLeadIntakeService';
+import { createPrismaBrowserLeadSyncRepository } from './services/browserAgent/prismaBrowserLeadSyncRepository';
+import { createBrowserCatalogService } from './services/browserAgent/browserCatalogService';
+import { createPrismaBrowserCatalogRepository } from './services/browserAgent/prismaBrowserCatalogRepository';
+import { createBrowserScriptLibraryService } from './services/browserAgent/scriptLibraryService';
 import { createRuntimeStorageGetHandler } from './routes/runtimeStorageRoutes';
 import { createDisabledCrmCustomerImportHandler } from './routes/crmMigrationRoutes';
 import { createCustomerFollowUpHandler } from './routes/customerFollowUpRoutes';
@@ -218,6 +225,15 @@ const notificationWorker = createNotificationWorker({
 const notificationBootstrapService = createNotificationBootstrapService(prisma, notificationWorkflow);
 const customerListService = createCustomerListService(prisma, { contactIdentityCrypto });
 const customerCommandService = createCustomerCommandService(prisma, { contactIdentityCrypto, notificationWorkflow });
+const browserCatalogService = createBrowserCatalogService({
+  repository: createPrismaBrowserCatalogRepository(prisma),
+});
+const browserLeadIntakeService = createBrowserLeadIntakeService({
+  repository: createPrismaBrowserLeadSyncRepository(prisma),
+  catalog: browserCatalogService,
+  createLead: (input, actor) => customerCommandService.createLead(input, actor),
+});
+const browserScriptLibraryService = createBrowserScriptLibraryService(prisma);
 // Transfer/release/delete use the shared atomic command engine. Profile,
 // todo, claim, creation, and follow-up services retain their dedicated
 // request contracts, but each appends its audit event in the same transaction.
@@ -367,6 +383,8 @@ const requireRoleDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.S
 const requireOrderTypeWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ORDER_TYPES, 'write');
 const requireAiConfigReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
 const requireAiConfigWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG, 'write');
+const requireBrowserCatalogRead = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_PRODUCTS, 'read');
+const requireBrowserCatalogWrite = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_PRODUCTS, 'write');
 const requireDataMaintenanceDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'delete');
 const requireDataMaintenanceWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'write');
 const requireDataMaintenanceReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'read');
@@ -517,7 +535,7 @@ app.use((_req, res, next) => {
 });
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedCorsOrigins.includes(origin)) {
+    if (isCorsOriginAllowed(origin, allowedCorsOrigins)) {
       callback(null, true);
       return;
     }
@@ -555,6 +573,15 @@ app.use('/api/enterprise-brain', createEnterpriseBrainRouter({
   cockpit: enterpriseCockpitService,
 }));
 app.use('/api/co-creation', createCoCreationRouter({ service: coCreationService, requireAuth: requireCoCreationAccess }));
+app.use('/api/browser-agent', createBrowserAgentRouter({
+  service: browserLeadIntakeService,
+  scriptLibrary: browserScriptLibraryService,
+  catalog: browserCatalogService,
+  requireAuthenticated,
+  requireLeadCreate: requireLeadCreateAccess,
+  requireBrowserCatalogRead,
+  requireBrowserCatalogWrite,
+}));
 
 function routeParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || '' : value || '';

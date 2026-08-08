@@ -53,6 +53,8 @@ export interface LeadChangeLog {
 /** 线索 */
 export interface Lead {
   id: ID;
+  /** 外部录入流程的唯一键，用于跨事务中断后的幂等对账。 */
+  externalIntakeKey?: string;
   customerId?: ID;
   name: string;
   company?: string;

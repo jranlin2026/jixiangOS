@@ -36,7 +36,10 @@
     "clone:sanitize": "tsx scripts/sanitize-production-clone.ts",
     "clone:restore-verify": "bash scripts/mysql/verify-clone-restore.sh",
     "clone:attachments-report": "tsx scripts/report-clone-missing-attachments.ts",
-    "test-data:reset-business": "tsx scripts/reset-business-test-data.ts"
+    "test-data:reset-business": "tsx scripts/reset-business-test-data.ts",
+    "browser-employee:build": "npm --prefix apps/browser-extension run build",
+    "browser-employee:test": "npm --prefix apps/browser-extension test",
+    "browser-employee:typecheck": "npm --prefix apps/browser-extension run typecheck"
   },
   "overrides": {
     "effect": "3.21.0"
@@ -78,10 +81,13 @@
     "@types/uuid": "^9.0.0",
     "@vitejs/plugin-react": "^4.2.0",
     "autoprefixer": "^10.4.0",
+    "jsdom": "^30.0.1",
     "postcss": "^8.4.0",
     "prisma": "6.19.3",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.4.0",
-    "vite": "^5.4.0"
+    "vite": "^5.4.0",
+    "vitest": "^2.1.9",
+    "yaml": "^2.9.0"
   }
 }

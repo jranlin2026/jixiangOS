@@ -5,6 +5,7 @@ import { createCustomerPermissionMigrationManifestAuthenticatorFromEnv } from '.
 import { createCustomerMergeSnapshotKeyringFromEnv } from '../services/customerMergeSnapshotCrypto';
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+const CHROME_EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-z]{32}$/;
 const LOCALHOST_LISTEN_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 const EXAMPLE_ORIGIN = /^https:\/\/([a-z0-9-]+\.)*example\.com(?::\d+)?$/i;
 const PLACEHOLDER_VALUES = new Set([
@@ -39,6 +40,15 @@ export function getAllowedCorsOrigins(env: NodeJS.ProcessEnv = process.env): str
     'http://127.0.0.1:3002',
     'http://localhost:3002',
   ];
+}
+
+export function isCorsOriginAllowed(
+  origin: string | undefined,
+  allowedOrigins: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!origin || allowedOrigins.includes(origin)) return true;
+  return !isProductionRuntime(env) && CHROME_EXTENSION_ORIGIN.test(origin);
 }
 
 export function getApiListenHost(env: NodeJS.ProcessEnv = process.env): string {
@@ -132,13 +142,18 @@ function assertProductionOrigins(origins: string[]): void {
   if (!origins.length) {
     throw new Error('CORS_ORIGINS must include the production HTTPS origin, for example https://crm.example.com.');
   }
-  const insecure = origins.find((origin) => !origin.startsWith('https://') && !LOCALHOST_ORIGIN.test(origin));
+  const insecure = origins.find((origin) => (
+    !origin.startsWith('https://') && !LOCALHOST_ORIGIN.test(origin) && !CHROME_EXTENSION_ORIGIN.test(origin)
+  ));
   if (insecure) {
     throw new Error(`CORS_ORIGINS contains an insecure production origin: ${insecure}`);
   }
   const example = origins.find((origin) => EXAMPLE_ORIGIN.test(origin));
   if (example) {
     throw new Error(`CORS_ORIGINS still contains the example domain: ${example}`);
+  }
+  if (!origins.some((origin) => origin.startsWith('https://') || LOCALHOST_ORIGIN.test(origin))) {
+    throw new Error('CORS_ORIGINS must include the production HTTPS web origin in addition to any Chrome extension origin.');
   }
 }
 

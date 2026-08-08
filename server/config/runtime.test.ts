@@ -4,6 +4,7 @@ import {
   getApiJsonBodyLimit,
   getApiListenHost,
   getAllowedCorsOrigins,
+  isCorsOriginAllowed,
   getEnablementPrivateStorageDir,
   getCustomerDataExchangeSecret,
   parseCorsOrigins,
@@ -16,6 +17,11 @@ assert.deepEqual(parseCorsOrigins({ CORS_ORIGINS: 'https://crm.example.com, http
 ]);
 
 assert.ok(getAllowedCorsOrigins({ NODE_ENV: 'development' }).includes('http://127.0.0.1:3000'));
+const localExtensionOrigin = `chrome-extension://${'a'.repeat(32)}`;
+const publishedExtensionOrigin = `chrome-extension://${'b'.repeat(32)}`;
+assert.equal(isCorsOriginAllowed(localExtensionOrigin, [], { NODE_ENV: 'development' }), true);
+assert.equal(isCorsOriginAllowed(localExtensionOrigin, [], { NODE_ENV: 'production' }), false);
+assert.equal(isCorsOriginAllowed(publishedExtensionOrigin, [publishedExtensionOrigin], { NODE_ENV: 'production' }), true);
 assert.equal(getApiListenHost({}), '127.0.0.1');
 assert.equal(getApiJsonBodyLimit({}), '50mb');
 assert.equal(getApiJsonBodyLimit({ API_JSON_BODY_LIMIT: '100mb' }), '100mb');
