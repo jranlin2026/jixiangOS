@@ -508,7 +508,7 @@ function createCalibratedPaidOrderFixture(options: { includeConfirm?: boolean } 
     <main id="workspace-chat">
       <div id="topbar-left-info"><span>悠然一刻</span><span>添加备注</span></div>
     </main>
-    <div class="ecom-collapse-item ecom-collapse-item-active generated-order-card-hash">
+    <div class="ecom-collapse-item ecom-collapse-item-active generated-collapse-hash">
       <div role="button" aria-expanded="true" tabindex="0" class="ecom-collapse-header">
         <div class="generated-order-number-hash">6925095897028853458</div>
         <div data-testid="order-remark-summary">#悠然一刻/13826459812\n#入EC\n#直接退群</div>
@@ -535,6 +535,11 @@ function createCalibratedPaidOrderFixture(options: { includeConfirm?: boolean } 
     </div>
   </body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
   const fixtureDocument = fixture.window.document;
+  assert.equal(
+    fixtureDocument.querySelector('[data-testid="order-card"],[class*="order-card"],[class*="orderItem"]'),
+    null,
+    '真实校准 fixture 不得意外命中旧订单卡候选',
+  );
   const drawer = fixtureDocument.querySelector('.ecom-drawer-wrapper-body') as HTMLElement;
   const summary = fixtureDocument.querySelector('[data-testid="order-remark-summary"]') as HTMLElement;
   const input = fixtureDocument.querySelector('#textareaID') as HTMLTextAreaElement;
