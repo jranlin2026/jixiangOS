@@ -15,6 +15,7 @@ function routeParam(value: string | string[] | undefined) {
 export function createBrowserAgentRouter(deps: {
   service: BrowserLeadIntakeService;
   scriptLibrary: BrowserScriptLibraryService;
+  requireAuthenticated: express.RequestHandler;
   requireLeadCreate: express.RequestHandler;
 }) {
   const router = express.Router();
@@ -38,12 +39,12 @@ export function createBrowserAgentRouter(deps: {
     },
   );
 
-  router.get('/script-library', deps.requireLeadCreate, async (req: AuthenticatedRequest, res) => {
+  router.get('/script-library', deps.requireAuthenticated, async (req: AuthenticatedRequest, res) => {
     const result = await deps.scriptLibrary.get(req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
 
-  router.put('/script-library', deps.requireLeadCreate, async (req: AuthenticatedRequest, res) => {
+  router.put('/script-library', deps.requireAuthenticated, async (req: AuthenticatedRequest, res) => {
     const result = await deps.scriptLibrary.update(req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });

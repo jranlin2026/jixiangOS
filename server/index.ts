@@ -538,6 +538,7 @@ app.use('/api/co-creation', createCoCreationRouter({ service: coCreationService,
 app.use('/api/browser-agent', createBrowserAgentRouter({
   service: browserLeadIntakeService,
   scriptLibrary: browserScriptLibraryService,
+  requireAuthenticated,
   requireLeadCreate: requireLeadCreateAccess,
 }));
 
