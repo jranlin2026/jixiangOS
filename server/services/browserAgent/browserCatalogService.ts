@@ -49,6 +49,13 @@ export type BrowserProductMappingInput = {
   active: boolean;
 };
 
+export type BrowserShopMappingRepository = {
+  listMappings(shopBindingId?: string): Promise<BrowserStoredProductMapping[]>;
+  findMappingById(id: string): Promise<BrowserStoredProductMapping | null>;
+  createMapping(input: Omit<BrowserStoredProductMapping, 'id'> & { id?: string }): Promise<BrowserStoredProductMapping>;
+  updateMapping(id: string, input: Partial<BrowserStoredProductMapping>): Promise<BrowserStoredProductMapping | null>;
+};
+
 export type BrowserCatalogRepository = {
   listShops(): Promise<BrowserShopBinding[]>;
   findShopById(id: string): Promise<BrowserShopBinding | null>;
@@ -56,15 +63,17 @@ export type BrowserCatalogRepository = {
   createShop(input: Omit<BrowserShopBinding, 'id'> & { id?: string }): Promise<BrowserShopBinding>;
   updateShop(id: string, input: Partial<BrowserShopBinding>): Promise<BrowserShopBinding | null>;
   deleteShop(id: string): Promise<boolean>;
-  listMappings(shopBindingId?: string): Promise<BrowserStoredProductMapping[]>;
-  findMappingById(id: string): Promise<BrowserStoredProductMapping | null>;
-  createMapping(input: Omit<BrowserStoredProductMapping, 'id'> & { id?: string }): Promise<BrowserStoredProductMapping>;
-  updateMapping(id: string, input: Partial<BrowserStoredProductMapping>): Promise<BrowserStoredProductMapping | null>;
-  deleteMapping(id: string): Promise<boolean>;
+  listMappings: BrowserShopMappingRepository['listMappings'];
+  findMappingById: BrowserShopMappingRepository['findMappingById'];
+  createMapping: BrowserShopMappingRepository['createMapping'];
+  updateMapping: BrowserShopMappingRepository['updateMapping'];
   listProducts(): Promise<BrowserCatalogProduct[]>;
   findProductById(id: string): Promise<BrowserCatalogProduct | null>;
   hasShopAuditReferences(id: string): Promise<boolean>;
-  hasMappingAuditReferences(id: string): Promise<boolean>;
+  withShopMappingLock<T>(
+    shopBindingId: string,
+    callback: (repository: BrowserShopMappingRepository) => Promise<T>,
+  ): Promise<T>;
 };
 
 export type BrowserCatalogErrorCode =
@@ -142,11 +151,6 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     if (!shopBindingId || !platformProductName || !osProductId) {
       return catalogFailure('店铺、平台商品名称和OS标准产品不能为空', 400, 'INVALID_INPUT');
     }
-    const existing = mappingId ? await repository.findMappingById(mappingId) : null;
-    if (mappingId && !existing) return catalogFailure('商品映射不存在', 404, 'PRODUCT_MAPPING_NOT_FOUND');
-    if (existing && existing.shopBindingId !== shopBindingId) {
-      return catalogFailure('商品映射创建后不能修改所属店铺', 409, 'PRODUCT_MAPPING_CONFLICT');
-    }
     if (!await repository.findShopById(shopBindingId)) {
       return catalogFailure('店铺绑定不存在', 404, 'SHOP_BINDING_NOT_FOUND');
     }
@@ -155,23 +159,6 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     if (!product.isActive) return catalogFailure('OS标准产品已停用', 409, 'OS_PRODUCT_INACTIVE');
 
     const aliases = normalizedAliases(platformProductName, uniqueTexts(input.aliases));
-    if (input.active) {
-      const aliasSet = new Set(aliases);
-      const conflict = (await repository.listMappings(shopBindingId)).find((mapping) => (
-        mapping.id !== mappingId
-        && mapping.active
-        && mapping.osProductId !== product.id
-        && mapping.aliases.some((alias) => aliasSet.has(normalizePlatformProductName(alias)))
-      ));
-      if (conflict) {
-        return catalogFailure(
-          `平台商品别名已指向OS产品“${conflict.osProductName}”，请先修正冲突映射`,
-          409,
-          'PRODUCT_ALIAS_CONFLICT',
-        );
-      }
-    }
-
     const now = new Date();
     const values = {
       shopBindingId,
@@ -187,19 +174,42 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       confirmedByName: actor.name,
       confirmedAt: now,
     };
-    try {
-      const saved = mappingId
-        ? await repository.updateMapping(mappingId, values)
-        : await repository.createMapping({ id: randomUUID(), ...values });
-      return saved
-        ? success(saved)
-        : catalogFailure('商品映射不存在', 404, 'PRODUCT_MAPPING_NOT_FOUND');
-    } catch (error) {
-      if (uniqueConflict(error)) {
-        return catalogFailure('当前店铺已存在相同平台商品身份的映射', 409, 'PRODUCT_MAPPING_CONFLICT');
+    return repository.withShopMappingLock(shopBindingId, async (mappingRepository) => {
+      const existing = mappingId ? await mappingRepository.findMappingById(mappingId) : null;
+      if (mappingId && !existing) return catalogFailure('商品映射不存在', 404, 'PRODUCT_MAPPING_NOT_FOUND');
+      if (existing && existing.shopBindingId !== shopBindingId) {
+        return catalogFailure('商品映射创建后不能修改所属店铺', 409, 'PRODUCT_MAPPING_CONFLICT');
       }
-      throw error;
-    }
+      if (input.active) {
+        const aliasSet = new Set(aliases);
+        const conflict = (await mappingRepository.listMappings(shopBindingId)).find((mapping) => (
+          mapping.id !== mappingId
+          && mapping.active
+          && mapping.osProductId !== product.id
+          && mapping.aliases.some((alias) => aliasSet.has(normalizePlatformProductName(alias)))
+        ));
+        if (conflict) {
+          return catalogFailure(
+            `平台商品别名已指向OS产品“${conflict.osProductName}”，请先修正冲突映射`,
+            409,
+            'PRODUCT_ALIAS_CONFLICT',
+          );
+        }
+      }
+      try {
+        const saved = mappingId
+          ? await mappingRepository.updateMapping(mappingId, values)
+          : await mappingRepository.createMapping({ id: randomUUID(), ...values });
+        return saved
+          ? success(saved)
+          : catalogFailure('商品映射不存在', 404, 'PRODUCT_MAPPING_NOT_FOUND');
+      } catch (error) {
+        if (uniqueConflict(error)) {
+          return catalogFailure('当前店铺已存在相同平台商品身份的映射', 409, 'PRODUCT_MAPPING_CONFLICT');
+        }
+        throw error;
+      }
+    });
   }
 
   return {
@@ -285,15 +295,16 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       return saveMapping(input, actor, id);
     },
 
-    async deleteMapping(id: string, _actor: AuthenticatedUser): Promise<BrowserCatalogResponse<BrowserStoredProductMapping & { deleted?: boolean }>> {
+    async deleteMapping(id: string, _actor: AuthenticatedUser): Promise<BrowserCatalogResponse<BrowserStoredProductMapping>> {
       const existing = await repository.findMappingById(id);
       if (!existing) return catalogFailure('商品映射不存在', 404, 'PRODUCT_MAPPING_NOT_FOUND');
-      if (await repository.hasMappingAuditReferences(id)) {
-        const retired = await repository.updateMapping(id, { active: false });
+      return repository.withShopMappingLock(existing.shopBindingId, async (mappingRepository) => {
+        if (!await mappingRepository.findMappingById(id)) {
+          return catalogFailure('商品映射不存在', 404, 'PRODUCT_MAPPING_NOT_FOUND');
+        }
+        const retired = await mappingRepository.updateMapping(id, { active: false });
         return retired ? success(retired) : catalogFailure('商品映射不存在', 404, 'PRODUCT_MAPPING_NOT_FOUND');
-      }
-      await repository.deleteMapping(id);
-      return success({ ...existing, active: false, deleted: true });
+      });
     },
 
     async resolveForIntake(input: {

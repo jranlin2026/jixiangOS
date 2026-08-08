@@ -19,7 +19,23 @@ const products = [
   { id: 'prod-taojin', name: '淘金AI', price: 299, isActive: true },
   { id: 'prod-off', name: '停用产品', price: 99, isActive: false },
 ];
-const deletedMappings: string[] = [];
+let mappingScanRaceEnabled = false;
+let mappingScanWaiters: Array<() => void> = [];
+let mappingLockTail = Promise.resolve();
+let mappingLockEntries = 0;
+let activeMappingLocks = 0;
+let maxActiveMappingLocks = 0;
+
+async function waitForConcurrentMappingScans() {
+  await new Promise<void>((resolve) => {
+    mappingScanWaiters.push(resolve);
+    if (mappingScanWaiters.length === 2) {
+      const waiters = mappingScanWaiters;
+      mappingScanWaiters = [];
+      waiters.forEach((release) => release());
+    }
+  });
+}
 
 const repository: BrowserCatalogRepository = {
   async listShops() { return structuredClone(shops); },
@@ -45,6 +61,7 @@ const repository: BrowserCatalogRepository = {
     return true;
   },
   async listMappings(shopBindingId) {
+    if (mappingScanRaceEnabled && activeMappingLocks === 0) await waitForConcurrentMappingScans();
     return structuredClone(mappings.filter((mapping) => !shopBindingId || mapping.shopBindingId === shopBindingId));
   },
   async findMappingById(id) {
@@ -61,17 +78,25 @@ const repository: BrowserCatalogRepository = {
     mappings[index] = { ...mappings[index], ...input };
     return structuredClone(mappings[index]);
   },
-  async deleteMapping(id) {
-    const index = mappings.findIndex((mapping) => mapping.id === id);
-    if (index < 0) return false;
-    deletedMappings.push(id);
-    mappings.splice(index, 1);
-    return true;
-  },
   async listProducts() { return structuredClone(products); },
   async findProductById(id) { return structuredClone(products.find((product) => product.id === id) || null); },
   async hasShopAuditReferences(id) { return id === 'shop-1'; },
-  async hasMappingAuditReferences(id) { return id === 'map-audited'; },
+  async withShopMappingLock(_shopBindingId, callback) {
+    mappingLockEntries += 1;
+    const previous = mappingLockTail;
+    let release!: () => void;
+    mappingLockTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    activeMappingLocks += 1;
+    maxActiveMappingLocks = Math.max(maxActiveMappingLocks, activeMappingLocks);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    try {
+      return await callback(repository);
+    } finally {
+      activeMappingLocks -= 1;
+      release();
+    }
+  },
 };
 
 const service = createBrowserCatalogService({ repository });
@@ -124,16 +149,71 @@ const normalizedConflict = await service.saveMapping({
 assert.equal(normalizedConflict.code, 409);
 assert.equal(normalizedConflict.errorCode, 'PRODUCT_ALIAS_CONFLICT');
 
+const mappingLockEntriesBeforeRace = mappingLockEntries;
+mappingScanRaceEnabled = true;
+const concurrentAliasResults = await Promise.all([
+  service.saveMapping({
+    shopBindingId: 'shop-1', platformProductId: 'DY-RACE-1', platformProductName: '并发商品A',
+    aliases: ['  并发　同款  '], osProductId: 'prod-taojin', active: true,
+  }, actor),
+  service.saveMapping({
+    shopBindingId: 'shop-1', platformProductId: 'DY-RACE-2', platformProductName: '并发商品B',
+    aliases: ['并发 同款'], osProductId: 'prod-other', active: true,
+  }, actor),
+]);
+mappingScanRaceEnabled = false;
+assert.deepEqual(
+  concurrentAliasResults.map((result) => result.code).sort((left, right) => left - right),
+  [0, 409],
+  '同店铺并发写入相同规范化别名时必须串行化校验与写入',
+);
+assert.equal(concurrentAliasResults.find((result) => result.code === 409)?.errorCode, 'PRODUCT_ALIAS_CONFLICT');
+assert.equal(mappingLockEntries - mappingLockEntriesBeforeRace, 2, '每个映射保存路径都必须进入店铺数据库锁');
+assert.equal(maxActiveMappingLocks, 1, '测试双必须真正串行执行同店铺写入');
+
 mappings.push({
   id: 'map-audited', shopBindingId: 'shop-1', platformIdentityKey: 'product:AUDIT',
   platformProductId: 'AUDIT', platformSkuId: null, platformProductName: '历史商品', aliases: ['历史商品'],
   osProductId: 'prod-taojin', osProductName: '淘金AI', active: true,
   confirmedById: 'admin-1', confirmedByName: '管理员', confirmedAt: new Date(),
 });
+const mappingLockEntriesBeforeDeletes = mappingLockEntries;
 const retired = await service.deleteMapping('map-audited', actor);
 assert.equal(retired.code, 0);
 assert.equal(retired.data?.active, false);
-assert.equal(deletedMappings.includes('map-audited'), false, '已被审计记录引用的映射不得物理删除');
+assert.ok(
+  mappings.some((mapping) => mapping.id === 'map-audited' && mapping.active === false),
+  '已被审计记录引用的映射必须保留并软删除',
+);
+
+for (const historicalMapping of [
+  {
+    id: 'map-alias-only-history', platformIdentityKey: 'name:历史别名',
+    platformProductId: null, platformSkuId: null, platformProductName: '当前名称', aliases: ['当前别名'],
+  },
+  {
+    id: 'map-changed-after-intake', platformIdentityKey: 'product:CHANGED',
+    platformProductId: 'CHANGED', platformSkuId: null, platformProductName: '映射已改名', aliases: ['映射已改名'],
+  },
+]) {
+  mappings.push({
+    ...historicalMapping,
+    shopBindingId: 'shop-1', osProductId: 'prod-taojin', osProductName: '淘金AI', active: true,
+    confirmedById: 'admin-1', confirmedByName: '管理员', confirmedAt: new Date(),
+  });
+  const result = await service.deleteMapping(historicalMapping.id, actor);
+  assert.equal(result.code, 0);
+  assert.equal(result.data?.active, false);
+  assert.ok(
+    mappings.some((mapping) => mapping.id === historicalMapping.id && mapping.active === false),
+    '别名历史命中或入库后被改动的映射无法安全证明未被审计引用，必须保留并软删除',
+  );
+}
+assert.equal(
+  mappingLockEntries - mappingLockEntriesBeforeDeletes,
+  3,
+  '软删除也是映射写路径，必须使用同一店铺事务锁',
+);
 
 const retiredShop = await service.deleteShop('shop-1', actor);
 assert.equal(retiredShop.code, 0);

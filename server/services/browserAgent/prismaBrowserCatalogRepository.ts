@@ -1,15 +1,17 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { STORAGE_KEYS } from '../../../src/shared/utils/constants';
 import type {
   BrowserCatalogRepository,
+  BrowserShopMappingRepository,
   BrowserShopBinding,
   BrowserStoredProductMapping,
 } from './browserCatalogService';
 
-type BrowserCatalogPrisma = Pick<
-  PrismaClient,
+type BrowserCatalogDataClient = Pick<
+  Prisma.TransactionClient,
   'browserShopBinding' | 'browserProductMapping' | 'browserLeadSync' | 'businessRecord'
 >;
+type BrowserCatalogPrisma = BrowserCatalogDataClient & Pick<PrismaClient, '$transaction'>;
 
 function stringArray(value: unknown) {
   return Array.isArray(value) ? value.map((entry) => String(entry)).filter(Boolean) : [];
@@ -33,7 +35,32 @@ function product(row: any) {
   };
 }
 
+function createMappingRepository(prisma: BrowserCatalogDataClient): BrowserShopMappingRepository {
+  return {
+    async listMappings(shopBindingId) {
+      return (await prisma.browserProductMapping.findMany({
+        where: shopBindingId ? { shopBindingId } : undefined,
+        orderBy: [{ active: 'desc' }, { updatedAt: 'desc' }],
+      })).map(mapping);
+    },
+    async findMappingById(id) {
+      const row = await prisma.browserProductMapping.findUnique({ where: { id } });
+      return row ? mapping(row) : null;
+    },
+    async createMapping(input) {
+      return mapping(await prisma.browserProductMapping.create({ data: input as any }));
+    },
+    async updateMapping(id, input) {
+      const updated = await prisma.browserProductMapping.updateMany({ where: { id }, data: input as any });
+      if (updated.count !== 1) return null;
+      const row = await prisma.browserProductMapping.findUnique({ where: { id } });
+      return row ? mapping(row) : null;
+    },
+  };
+}
+
 export function createPrismaBrowserCatalogRepository(prisma: BrowserCatalogPrisma): BrowserCatalogRepository {
+  const mappingRepository = createMappingRepository(prisma);
   return {
     async listShops() {
       return (await prisma.browserShopBinding.findMany({ orderBy: [{ active: 'desc' }, { updatedAt: 'desc' }] })).map(shop);
@@ -62,29 +89,7 @@ export function createPrismaBrowserCatalogRepository(prisma: BrowserCatalogPrism
       const deleted = await prisma.browserShopBinding.deleteMany({ where: { id } });
       return deleted.count === 1;
     },
-    async listMappings(shopBindingId) {
-      return (await prisma.browserProductMapping.findMany({
-        where: shopBindingId ? { shopBindingId } : undefined,
-        orderBy: [{ active: 'desc' }, { updatedAt: 'desc' }],
-      })).map(mapping);
-    },
-    async findMappingById(id) {
-      const row = await prisma.browserProductMapping.findUnique({ where: { id } });
-      return row ? mapping(row) : null;
-    },
-    async createMapping(input) {
-      return mapping(await prisma.browserProductMapping.create({ data: input as any }));
-    },
-    async updateMapping(id, input) {
-      const updated = await prisma.browserProductMapping.updateMany({ where: { id }, data: input as any });
-      if (updated.count !== 1) return null;
-      const row = await prisma.browserProductMapping.findUnique({ where: { id } });
-      return row ? mapping(row) : null;
-    },
-    async deleteMapping(id) {
-      const deleted = await prisma.browserProductMapping.deleteMany({ where: { id } });
-      return deleted.count === 1;
-    },
+    ...mappingRepository,
     async listProducts() {
       return (await prisma.businessRecord.findMany({
         where: { domain: STORAGE_KEYS.PRODUCTS },
@@ -100,20 +105,13 @@ export function createPrismaBrowserCatalogRepository(prisma: BrowserCatalogPrism
     async hasShopAuditReferences(id) {
       return await prisma.browserLeadSync.count({ where: { shopBindingId: id } }) > 0;
     },
-    async hasMappingAuditReferences(id) {
-      const row = await prisma.browserProductMapping.findUnique({ where: { id } });
-      if (!row) return false;
-      return await prisma.browserLeadSync.count({
-        where: {
-          shopBindingId: row.shopBindingId,
-          matchedProductId: row.osProductId,
-          OR: [
-            ...(row.platformProductId ? [{ platformProductId: row.platformProductId }] : []),
-            ...(row.platformSkuId ? [{ platformSkuId: row.platformSkuId }] : []),
-            { sourceProductName: row.platformProductName },
-          ],
-        },
-      }) > 0;
+    async withShopMappingLock(shopBindingId, callback) {
+      return prisma.$transaction(async (transaction) => {
+        await transaction.$queryRaw(
+          Prisma.sql`SELECT id FROM browser_shop_bindings WHERE id = ${shopBindingId} FOR UPDATE`,
+        );
+        return callback(createMappingRepository(transaction));
+      });
     },
   };
 }
