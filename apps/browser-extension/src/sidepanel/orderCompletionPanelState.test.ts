@@ -7,7 +7,7 @@ import {
   isCompletionFormLocked,
   productPreviewForPanel,
 } from './orderCompletionPanelState';
-import type { BrowserRuntimeConfig } from '../shared/contracts';
+import type { BrowserProductPreviewResponse, BrowserRuntimeConfig } from '../shared/contracts';
 
 const oldContext = {
   supported: true,
@@ -67,17 +67,18 @@ const runtimeConfig: BrowserRuntimeConfig = {
       sourceType: '公司资源',
     },
   ],
-  products: [{ id: 'prod-taojin', name: '淘金AI', referencePrice: 299 }],
-  productMappings: [{
-    id: 'mapping-taojin',
-    shopBindingId: 'shop-new',
-    platformProductId: 'DY-TAOJIN-100',
-    platformProductName: '淘金AI 多模态创作智能体 读书卡',
-    aliases: [],
-    osProductId: 'prod-taojin',
-    osProductName: '淘金AI',
-    active: true,
-  }],
+};
+const matchedPreview: BrowserProductPreviewResponse = {
+  shop: runtimeConfig.shops[1],
+  productResolution: {
+    status: 'MATCHED', method: 'PLATFORM_PRODUCT_ID', osProductId: 'prod-taojin',
+    osProductName: '淘金AI', osReferencePrice: 299,
+  },
+  facts: {
+    platformProductId: 'DY-TAOJIN-100', platformProductName: '旧商品',
+    paymentAmount: 399, paymentAt: '2026-08-08T11:34:20.000Z',
+  },
+  priceDifference: { paymentAmount: 399, osReferencePrice: 299, amount: 100, differs: true },
 };
 
 let state = createCompletionPanelState();
@@ -121,6 +122,14 @@ assert.equal(completionPanelReducer(state, {
 assert.equal(completionPanelReducer(state, {
   type: 'SET_CONTACT_CONFIRMED', value: false,
 }).contactConfirmed, true, '已有 syncId 时确认快照应锁定');
+
+const sameOrderPreflightRefresh = completionPanelReducer(state, {
+  type: 'RECOGNIZE_CONTEXT',
+  context: { ...oldContext, shopDisplayName: '旧店铺别名', paymentAmount: 399 },
+  detectedContact: { phone: '13826459812' },
+});
+assert.equal(sameOrderPreflightRefresh.sync?.syncId, 'sync-old', '同一订单已入库后的预检刷新不得擦除持久化同步结果');
+assert.equal(sameOrderPreflightRefresh.completion?.stage, 'PLATFORM_FAILED');
 
 const lockedOldConversation = state;
 state = completionPanelReducer(state, {
@@ -187,14 +196,16 @@ assert.equal(shopState.sync, null, '切换绑定店铺必须清空旧入库结�
 assert.equal(shopState.completion, null, '切换绑定店铺必须清空旧完成状态');
 assert.equal(shopState.remarkText, '', '切换绑定店铺必须清空旧备注预览');
 assert.equal(shopState.activeAttempt, null, '店铺切换必须使旧异步尝试失效');
-assert.deepEqual(productPreviewForPanel(shopState), {
-  status: 'MATCHED',
-  method: 'PLATFORM_PRODUCT_ID',
-  osProductId: 'prod-taojin',
-  osProductName: '淘金AI',
-  osReferencePrice: 299,
-  rawProductName: '旧商品',
-}, '无入库结果时可使用运行时目录做非权威预览');
+assert.equal(productPreviewForPanel(shopState), null, '运行时店铺目录不得冒充权威商品预览');
+shopState = completionPanelReducer(shopState, {
+  type: 'START_PRODUCT_PREVIEW', generation: 10, requestKey: 'shop-new:order-old',
+});
+assert.equal(shopState.productPreviewStatus, 'LOADING');
+shopState = completionPanelReducer(shopState, {
+  type: 'APPLY_PRODUCT_PREVIEW', generation: 10, requestKey: 'shop-new:order-old', preview: matchedPreview,
+});
+assert.equal(shopState.productPreviewStatus, 'READY');
+assert.deepEqual(productPreviewForPanel(shopState), matchedPreview.productResolution);
 
 const disabledSelection = completionPanelReducer(shopState, {
   type: 'APPLY_RUNTIME_CONFIG',
@@ -205,19 +216,71 @@ assert.equal(disabledSelection.shopBindingId, '', '已选店铺停用或缺失�
 assert.equal(disabledSelection.sync, null);
 assert.equal(productPreviewForPanel(disabledSelection), null, '清空店铺后不得保留商品解析');
 
-let catalogUnmatchedState = completionPanelReducer(createCompletionPanelState(), {
-  type: 'APPLY_RUNTIME_CONFIG',
-  runtimeConfig: { ...runtimeConfig, productMappings: [] },
-  selectedShopBindingId: 'shop-old',
+let previewRaceState = completionPanelReducer(createCompletionPanelState(), {
+  type: 'APPLY_RUNTIME_CONFIG', runtimeConfig, selectedShopBindingId: 'shop-old',
 });
-catalogUnmatchedState = completionPanelReducer(catalogUnmatchedState, {
+previewRaceState = completionPanelReducer(previewRaceState, {
+  type: 'RECOGNIZE_CONTEXT', context: oldContext, detectedContact: { phone: '13826459812' },
+});
+previewRaceState = completionPanelReducer(previewRaceState, {
+  type: 'START_PRODUCT_PREVIEW', generation: 21, requestKey: 'shop-old:order-old',
+});
+previewRaceState = completionPanelReducer(previewRaceState, {
+  type: 'RECOGNIZE_CONTEXT', context: newContext, detectedContact: { phone: '13826459812' },
+});
+assert.equal(previewRaceState.productPreviewStatus, 'IDLE', '会话切换必须立即使旧预览失效');
+previewRaceState = completionPanelReducer(previewRaceState, {
+  type: 'START_PRODUCT_PREVIEW', generation: 22, requestKey: 'shop-old:order-new',
+});
+const newPreview: BrowserProductPreviewResponse = {
+  ...matchedPreview,
+  shop: runtimeConfig.shops[0],
+  productResolution: { status: 'UNMATCHED', rawProductName: '新商品' },
+  facts: { platformProductName: '新商品' },
+  priceDifference: null,
+};
+const beforeLatePreview = structuredClone(previewRaceState);
+previewRaceState = completionPanelReducer(previewRaceState, {
+  type: 'APPLY_PRODUCT_PREVIEW', generation: 21, requestKey: 'shop-old:order-old', preview: matchedPreview,
+});
+assert.deepEqual(previewRaceState, beforeLatePreview, '旧会话晚到的预览响应不得覆盖新会话');
+previewRaceState = completionPanelReducer(previewRaceState, {
+  type: 'APPLY_PRODUCT_PREVIEW', generation: 22, requestKey: 'shop-old:order-new', preview: newPreview,
+});
+assert.deepEqual(productPreviewForPanel(previewRaceState), newPreview.productResolution);
+
+let sameOrderFactsRace = completionPanelReducer(createCompletionPanelState(), {
+  type: 'APPLY_RUNTIME_CONFIG', runtimeConfig, selectedShopBindingId: 'shop-old',
+});
+sameOrderFactsRace = completionPanelReducer(sameOrderFactsRace, {
+  type: 'RECOGNIZE_CONTEXT', context: oldContext, detectedContact: { phone: '13826459812' },
+});
+sameOrderFactsRace = completionPanelReducer(sameOrderFactsRace, {
+  type: 'START_PRODUCT_PREVIEW', generation: 25, requestKey: 'shop-old:old-product',
+});
+sameOrderFactsRace = completionPanelReducer(sameOrderFactsRace, {
   type: 'RECOGNIZE_CONTEXT',
-  context: { ...oldContext, productName: '完全未配置的平台商品' },
+  context: { ...oldContext, platformProductId: 'PRODUCT-CHANGED', productName: '变更后商品' },
   detectedContact: { phone: '13826459812' },
 });
-assert.deepEqual(productPreviewForPanel(catalogUnmatchedState), {
-  status: 'UNMATCHED', rawProductName: '完全未配置的平台商品',
-}, '运行时目录明确提供空映射时应预览为未匹配，不应冒充目录未加载');
+assert.equal(sameOrderFactsRace.productPreviewStatus, 'IDLE', '同订单商品事实变化也必须使旧预览失效');
+
+let shopPreviewRaceState = completionPanelReducer(createCompletionPanelState(), {
+  type: 'APPLY_RUNTIME_CONFIG', runtimeConfig, selectedShopBindingId: 'shop-old',
+});
+shopPreviewRaceState = completionPanelReducer(shopPreviewRaceState, {
+  type: 'RECOGNIZE_CONTEXT', context: oldContext, detectedContact: { phone: '13826459812' },
+});
+shopPreviewRaceState = completionPanelReducer(shopPreviewRaceState, {
+  type: 'START_PRODUCT_PREVIEW', generation: 31, requestKey: 'shop-old:order-old',
+});
+shopPreviewRaceState = completionPanelReducer(shopPreviewRaceState, {
+  type: 'SELECT_SHOP_BINDING', shopBindingId: 'shop-new',
+});
+shopPreviewRaceState = completionPanelReducer(shopPreviewRaceState, {
+  type: 'APPLY_PRODUCT_PREVIEW', generation: 31, requestKey: 'shop-old:order-old', preview: matchedPreview,
+});
+assert.equal(productPreviewForPanel(shopPreviewRaceState), null, '切换店铺后旧店铺的晚到预览必须被忽略');
 
 const detectedReset = completionPanelReducer(lockedOldConversation, {
   type: 'RECOGNIZE_CONTEXT',

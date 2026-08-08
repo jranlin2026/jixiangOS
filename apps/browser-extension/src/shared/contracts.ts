@@ -42,30 +42,8 @@ export type BrowserRuntimeShop = {
   sourceType: string;
 };
 
-export type BrowserRuntimeProduct = {
-  id: string;
-  name: string;
-  referencePrice?: number;
-};
-
-export type BrowserRuntimeProductMapping = {
-  id: string;
-  shopBindingId: string;
-  platformProductId?: string | null;
-  platformSkuId?: string | null;
-  platformProductName?: string | null;
-  aliases: string[];
-  osProductId: string;
-  osProductName: string;
-  osReferencePrice?: number;
-  active: boolean;
-};
-
 export type BrowserRuntimeConfig = {
   shops: BrowserRuntimeShop[];
-  /** Optional forward-compatible preview catalog; current backend may omit it. */
-  products?: BrowserRuntimeProduct[];
-  productMappings?: BrowserRuntimeProductMapping[];
 };
 
 export type BrowserRuntimeSelection = BrowserRuntimeConfig & {
@@ -86,6 +64,35 @@ export type BrowserLeadProductResolutionAudit = {
 } | {
   status: 'UNMATCHED';
   rawProductName: string;
+};
+
+export type BrowserProductPreviewInput = {
+  platform: 'DOUYIN';
+  shopBindingId: string;
+  pageShopDisplayName: string;
+  platformProductId?: string;
+  platformSkuId?: string;
+  platformProductName?: string;
+  paymentAmount?: number;
+  paymentAt?: string;
+};
+
+export type BrowserProductPreviewResponse = {
+  shop: BrowserRuntimeShop;
+  productResolution: BrowserLeadProductResolutionAudit;
+  facts: {
+    platformProductId?: string;
+    platformSkuId?: string;
+    platformProductName?: string;
+    paymentAmount?: number;
+    paymentAt?: string;
+  };
+  priceDifference: {
+    paymentAmount: number;
+    osReferencePrice: number;
+    amount: number;
+    differs: boolean;
+  } | null;
 };
 
 export type LeadIntakeResponse = {
@@ -146,6 +153,7 @@ export type WorkerCommand =
   | { type: 'LOGIN'; config: ExtensionConfig; account: string; password: string }
   | { type: 'LOGOUT' }
   | { type: 'GET_RUNTIME_CONFIG' }
+  | { type: 'PREVIEW_PRODUCT_MAPPING'; input: BrowserProductPreviewInput }
   | { type: 'SAVE_CONFIG'; config: ExtensionConfig }
   | { type: 'GET_SCRIPT_LIBRARY' }
   | { type: 'SAVE_SCRIPT_LIBRARY'; library: ScriptLibrary }

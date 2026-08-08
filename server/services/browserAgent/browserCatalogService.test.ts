@@ -239,4 +239,70 @@ assert.equal(unmatched.code, 0, '未匹配商品仍允许继续入库');
 assert.equal(unmatched.data?.resolution.status, 'UNMATCHED');
 assert.equal(unmatched.data?.product, null);
 
+const authoritativePreview = await service.previewProductMapping({
+  platform: 'DOUYIN',
+  shopBindingId: 'shop-1',
+  pageShopDisplayName: ' 极享官方店 ',
+  platformProductId: ' DY-100 ',
+  platformProductName: ' 淘金AI 多模态 ',
+  paymentAmount: 349,
+  paymentAt: '2026-08-08T19:34:20+08:00',
+});
+assert.equal(authoritativePreview.code, 0);
+assert.deepEqual(authoritativePreview.data, {
+  shop: {
+    id: 'shop-1', platform: 'DOUYIN', shopKey: 'jx-main', platformShopId: 'dy-shop-1',
+    displayName: '极享智能体', aliases: ['极享官方店'], source: '抖音电商', sourceName: '飞鸽客服',
+    sourceType: '公司资源',
+  },
+  productResolution: {
+    status: 'MATCHED', method: 'PLATFORM_PRODUCT_ID', osProductId: 'prod-taojin',
+    osProductName: '淘金AI', osReferencePrice: 299,
+  },
+  facts: {
+    platformProductId: 'DY-100',
+    platformProductName: '淘金AI 多模态',
+    paymentAmount: 349,
+    paymentAt: '2026-08-08T11:34:20.000Z',
+  },
+  priceDifference: { paymentAmount: 349, osReferencePrice: 299, amount: 50, differs: true },
+}, '权威预览必须复用店铺校验和确定性匹配，并在入库前返回参考价');
+
+const authoritativeUnmatched = await service.previewProductMapping({
+  platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
+  platformProductName: '完全未配置商品', paymentAmount: 188,
+});
+assert.equal(authoritativeUnmatched.code, 0);
+assert.deepEqual(authoritativeUnmatched.data?.productResolution, {
+  status: 'UNMATCHED', rawProductName: '完全未配置商品',
+});
+
+const previewMismatch = await service.previewProductMapping({
+  platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '其他店铺',
+  platformProductName: '淘金AI 多模态',
+});
+assert.equal(previewMismatch.code, 409);
+assert.equal(previewMismatch.errorCode, 'SHOP_CONTEXT_MISMATCH');
+
+const previewUnavailable = await service.previewProductMapping({
+  platform: 'DOUYIN', shopBindingId: 'shop-off', pageShopDisplayName: '旧店铺',
+  platformProductName: '淘金AI 多模态',
+});
+assert.equal(previewUnavailable.code, 409);
+assert.equal(previewUnavailable.errorCode, 'SHOP_BINDING_UNAVAILABLE');
+
+mappings.push({
+  id: 'map-preview-conflict', shopBindingId: 'shop-1', platformIdentityKey: 'product:DY-100',
+  platformProductId: 'DY-100', platformSkuId: null, platformProductName: '冲突映射', aliases: ['冲突映射'],
+  osProductId: 'prod-other', osProductName: '其他产品', active: true,
+  confirmedById: 'admin-1', confirmedByName: '管理员', confirmedAt: new Date(),
+});
+const previewConflict = await service.previewProductMapping({
+  platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
+  platformProductId: 'DY-100', platformProductName: '淘金AI 多模态',
+});
+assert.equal(previewConflict.code, 409);
+assert.equal(previewConflict.errorCode, 'PRODUCT_CONFIG_CONFLICT');
+mappings.splice(mappings.findIndex((mapping) => mapping.id === 'map-preview-conflict'), 1);
+
 console.log('browser catalog service: ok');

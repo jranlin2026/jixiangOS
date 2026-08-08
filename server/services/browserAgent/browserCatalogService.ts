@@ -88,7 +88,26 @@ export type BrowserCatalogErrorCode =
   | 'PRODUCT_ALIAS_CONFLICT'
   | 'PRODUCT_MAPPING_CONFLICT'
   | 'PRODUCT_MAPPING_NOT_FOUND'
-  | 'PRODUCT_MAPPING_CONFIG_CONFLICT';
+  | 'PRODUCT_MAPPING_CONFIG_CONFLICT'
+  | 'PRODUCT_CONFIG_CONFLICT';
+
+export type BrowserProductPreviewInput = {
+  platform?: string;
+  shopBindingId?: string;
+  pageShopDisplayName?: string;
+  platformProductId?: string;
+  platformSkuId?: string;
+  platformProductName?: string;
+  paymentAmount?: number;
+  paymentAt?: string;
+};
+
+export type BrowserProductPreview = {
+  shop: ReturnType<typeof runtimeShop>;
+  productResolution: Exclude<BrowserProductResolution, { status: 'CONFIG_CONFLICT' }>;
+  facts: BrowserPlatformProductFacts & { paymentAt?: string };
+  priceDifference: { paymentAmount: number; osReferencePrice: number; amount: number; differs: boolean } | null;
+};
 
 export type BrowserCatalogResponse<T> = ApiResponse<T | null> & { errorCode?: BrowserCatalogErrorCode };
 
@@ -212,11 +231,109 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     });
   }
 
+  async function resolveForIntake(input: {
+    shopBindingId: string;
+    pageShopDisplayName?: string;
+    facts: BrowserPlatformProductFacts;
+  }): Promise<BrowserCatalogResponse<{
+    binding: ReturnType<typeof runtimeShop>;
+    resolution: BrowserProductResolution;
+    product: { id: string; name: string; referencePrice: number } | null;
+    priceDifference: { paymentAmount: number; osReferencePrice: number; amount: number; differs: boolean } | null;
+  }>> {
+    const binding = await repository.findShopById(cleanText(input.shopBindingId));
+    if (!binding || !binding.active) {
+      return catalogFailure('店铺绑定不存在或已停用', 409, 'SHOP_BINDING_UNAVAILABLE');
+    }
+    const pageShopName = normalizePlatformProductName(cleanText(input.pageShopDisplayName));
+    const acceptedShopNames = [binding.displayName, ...binding.aliases].map(normalizePlatformProductName);
+    if (pageShopName && !acceptedShopNames.includes(pageShopName)) {
+      return catalogFailure('当前页面店铺与已选店铺绑定不一致', 409, 'SHOP_CONTEXT_MISMATCH');
+    }
+    const [products, mappings] = await Promise.all([
+      repository.listProducts(), repository.listMappings(binding.id),
+    ]);
+    const resolution = resolveBrowserProduct({
+      shopBindingId: binding.id,
+      facts: input.facts,
+      products,
+      mappings,
+    });
+    if (resolution.status === 'CONFIG_CONFLICT') {
+      return catalogFailure(resolution.message, 409, 'PRODUCT_MAPPING_CONFIG_CONFLICT');
+    }
+    const product = resolution.status === 'MATCHED'
+      ? { id: resolution.osProductId, name: resolution.osProductName, referencePrice: resolution.osReferencePrice }
+      : null;
+    const paymentAmount = input.facts.paymentAmount;
+    const priceDifference = product && typeof paymentAmount === 'number' && Number.isFinite(paymentAmount)
+      ? {
+          paymentAmount,
+          osReferencePrice: product.referencePrice,
+          amount: Number((paymentAmount - product.referencePrice).toFixed(2)),
+          differs: paymentAmount !== product.referencePrice,
+        }
+      : null;
+    return success({ binding: runtimeShop(binding), resolution, product, priceDifference });
+  }
+
+  async function previewProductMapping(
+    input: BrowserProductPreviewInput,
+  ): Promise<BrowserCatalogResponse<BrowserProductPreview>> {
+    if (cleanText(input.platform).toUpperCase() !== 'DOUYIN') {
+      return catalogFailure('当前仅支持抖音平台', 400, 'INVALID_INPUT');
+    }
+    const shopBindingId = cleanText(input.shopBindingId);
+    if (!shopBindingId) return catalogFailure('店铺绑定不能为空', 400, 'INVALID_INPUT');
+    if (input.paymentAmount !== undefined
+      && (typeof input.paymentAmount !== 'number' || !Number.isFinite(input.paymentAmount))) {
+      return catalogFailure('实付金额格式不正确', 400, 'INVALID_INPUT');
+    }
+    const paymentAt = cleanText(input.paymentAt);
+    const paymentAtDate = paymentAt ? new Date(paymentAt) : undefined;
+    if (paymentAtDate && Number.isNaN(paymentAtDate.getTime())) {
+      return catalogFailure('付款时间格式不正确', 400, 'INVALID_INPUT');
+    }
+    const facts = {
+      ...(cleanText(input.platformProductId) ? { platformProductId: cleanText(input.platformProductId) } : {}),
+      ...(cleanText(input.platformSkuId) ? { platformSkuId: cleanText(input.platformSkuId) } : {}),
+      ...(cleanText(input.platformProductName) ? { platformProductName: cleanText(input.platformProductName) } : {}),
+      ...(input.paymentAmount !== undefined ? { paymentAmount: input.paymentAmount } : {}),
+    };
+    const resolved = await resolveForIntake({
+      shopBindingId,
+      pageShopDisplayName: cleanText(input.pageShopDisplayName) || undefined,
+      facts,
+    });
+    if (resolved.code !== 0 || !resolved.data) {
+      const errorCode = resolved.errorCode === 'PRODUCT_MAPPING_CONFIG_CONFLICT'
+        ? 'PRODUCT_CONFIG_CONFLICT' as const
+        : resolved.errorCode;
+      return {
+        code: resolved.code,
+        data: null,
+        message: resolved.message,
+        ...(errorCode ? { errorCode } : {}),
+      };
+    }
+    return success<BrowserProductPreview>({
+      shop: resolved.data.binding,
+      productResolution: resolved.data.resolution as BrowserProductPreview['productResolution'],
+      facts: {
+        ...facts,
+        ...(paymentAtDate ? { paymentAt: paymentAtDate.toISOString() } : {}),
+      },
+      priceDifference: resolved.data.priceDifference,
+    });
+  }
+
   return {
     async listRuntimeShops() {
       const shops = (await repository.listShops()).filter((shop) => shop.active).map(runtimeShop);
       return success({ shops });
     },
+
+    previewProductMapping,
 
     async listCatalog() {
       const [shops, mappings, products] = await Promise.all([
@@ -307,51 +424,7 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       });
     },
 
-    async resolveForIntake(input: {
-      shopBindingId: string;
-      pageShopDisplayName?: string;
-      facts: BrowserPlatformProductFacts;
-    }): Promise<BrowserCatalogResponse<{
-      binding: ReturnType<typeof runtimeShop>;
-      resolution: BrowserProductResolution;
-      product: { id: string; name: string; referencePrice: number } | null;
-      priceDifference: { paymentAmount: number; osReferencePrice: number; amount: number; differs: boolean } | null;
-    }>> {
-      const binding = await repository.findShopById(cleanText(input.shopBindingId));
-      if (!binding || !binding.active) {
-        return catalogFailure('店铺绑定不存在或已停用', 409, 'SHOP_BINDING_UNAVAILABLE');
-      }
-      const pageShopName = normalizePlatformProductName(cleanText(input.pageShopDisplayName));
-      const acceptedShopNames = [binding.displayName, ...binding.aliases].map(normalizePlatformProductName);
-      if (pageShopName && !acceptedShopNames.includes(pageShopName)) {
-        return catalogFailure('当前页面店铺与已选店铺绑定不一致', 409, 'SHOP_CONTEXT_MISMATCH');
-      }
-      const [products, mappings] = await Promise.all([
-        repository.listProducts(), repository.listMappings(binding.id),
-      ]);
-      const resolution = resolveBrowserProduct({
-        shopBindingId: binding.id,
-        facts: input.facts,
-        products,
-        mappings,
-      });
-      if (resolution.status === 'CONFIG_CONFLICT') {
-        return catalogFailure(resolution.message, 409, 'PRODUCT_MAPPING_CONFIG_CONFLICT');
-      }
-      const product = resolution.status === 'MATCHED'
-        ? { id: resolution.osProductId, name: resolution.osProductName, referencePrice: resolution.osReferencePrice }
-        : null;
-      const paymentAmount = input.facts.paymentAmount;
-      const priceDifference = product && typeof paymentAmount === 'number' && Number.isFinite(paymentAmount)
-        ? {
-            paymentAmount,
-            osReferencePrice: product.referencePrice,
-            amount: Number((paymentAmount - product.referencePrice).toFixed(2)),
-            differs: paymentAmount !== product.referencePrice,
-          }
-        : null;
-      return success({ binding: runtimeShop(binding), resolution, product, priceDifference });
-    },
+    resolveForIntake,
   };
 }
 

@@ -46,6 +46,7 @@ let localValues: Record<string, unknown> = {
   },
 } as unknown as typeof chrome;
 const originalFetch = globalThis.fetch;
+let previewRequestBody: unknown;
 let runtimeConfig = {
   shops: [
     {
@@ -58,7 +59,7 @@ let runtimeConfig = {
     },
   ],
 };
-globalThis.fetch = async (input) => {
+globalThis.fetch = async (input, init) => {
   const url = String(input);
   if (url.endsWith('/auth/login')) {
     return new Response(JSON.stringify({
@@ -72,6 +73,22 @@ globalThis.fetch = async (input) => {
       status: 200,
       headers: { 'content-type': 'application/json' },
     });
+  }
+  if (url.endsWith('/browser-agent/product-preview')) {
+    previewRequestBody = JSON.parse(String(init?.body || '{}'));
+    return new Response(JSON.stringify({
+      code: 0,
+      data: {
+        shop: runtimeConfig.shops[0],
+        productResolution: {
+          status: 'MATCHED', method: 'PLATFORM_PRODUCT_ID', osProductId: 'prod-taojin',
+          osProductName: '淘金AI', osReferencePrice: 299,
+        },
+        facts: { platformProductId: 'DY-100', paymentAmount: 399, paymentAt: '2026-08-08T11:34:20.000Z' },
+        priceDifference: { paymentAmount: 399, osReferencePrice: 299, amount: 100, differs: true },
+      },
+      message: 'success',
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
   return new Response(JSON.stringify(httpConflict), {
     status: 409,
@@ -165,6 +182,18 @@ try {
     apiBaseUrl: 'https://os.example.com',
     shopBindingId: 'shop-gold',
   });
+
+  const previewInput = {
+    platform: 'DOUYIN', shopBindingId: 'shop-gold', pageShopDisplayName: 'Gold 商城',
+    platformProductId: 'DY-100', platformProductName: '淘金AI 多模态',
+    paymentAmount: 399, paymentAt: '2026-08-08T19:34:20+08:00',
+  };
+  const previewResponse = await new Promise<any>((resolve) => {
+    assert.equal(workerListener?.({ type: 'PREVIEW_PRODUCT_MAPPING', input: previewInput }, {}, resolve), true);
+  });
+  assert.equal(previewResponse.code, 0);
+  assert.equal(previewResponse.data.productResolution.osReferencePrice, 299);
+  assert.deepEqual(previewRequestBody, previewInput, '商品预览请求必须原样穿过 service worker 边界');
 } finally {
   globalThis.fetch = originalFetch;
 }

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import type {
   ApiEnvelope,
   AuthenticatedOperator,
+  BrowserProductPreviewResponse,
   BrowserRuntimeSelection,
   BrowserRuntimeShop,
   CompleteOsOrderResult,
@@ -94,6 +95,8 @@ function App() {
     contactConfirmed,
     runtimeConfig,
     shopBindingId,
+    productPreview: authoritativePreview,
+    productPreviewStatus,
   } = panel;
   const [scriptView, setScriptView] = useState<ScriptLibraryView | null>(null);
   const [scriptLibraryError, setScriptLibraryError] = useState('');
@@ -108,25 +111,31 @@ function App() {
   const evaluatedRecognition = useRef(0);
   const attemptSequence = useRef(0);
   const activeAttempt = useRef<{ id: number; conversationKey: string } | null>(null);
+  const productPreviewSequence = useRef(0);
+  const activeProductPreview = useRef<{ generation: number; requestKey: string } | null>(null);
 
   const paidOrderRecognized = Boolean(context && isPaidOrderStatus(context.orderStatus));
   const completionFormLocked = isCompletionFormLocked(panel);
   const selectedShop = selectedRuntimeShop(runtimeConfig?.shops || [], shopBindingId);
   const productPreview = productPreviewForPanel(panel);
-  const runtimeReferencePrice = productPreview?.status === 'MATCHED'
-    ? runtimeConfig?.products?.find((product) => product.id === productPreview.osProductId)?.referencePrice
-    : undefined;
+  const previewResolution = authoritativePreview?.productResolution;
   const referencePrice = productPreview?.status === 'MATCHED'
-    ? productPreview.osReferencePrice ?? runtimeReferencePrice
+    ? productPreview.osReferencePrice ?? (
+        previewResolution?.status === 'MATCHED'
+        && (!productPreview.osProductId || previewResolution.osProductId === productPreview.osProductId)
+          ? previewResolution.osReferencePrice
+          : undefined
+      )
     : undefined;
-  const priceDiffers = typeof referencePrice === 'number'
+  const priceDiffers = authoritativePreview?.priceDifference?.differs === true
+    && typeof referencePrice === 'number'
     && typeof context?.paymentAmount === 'number'
     && referencePrice !== context.paymentAmount;
   const pageShopMismatch = Boolean(context?.shopDisplayName && selectedShop
     && !pageShopMatchesBinding(context.shopDisplayName, selectedShop));
   const canIntake = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
     && (form.phone.trim() || form.wechat.trim()) && selectedShop && contactConfirmed
-    && paidOrderRecognized && !pageShopMismatch);
+    && paidOrderRecognized && !pageShopMismatch && productPreviewStatus === 'READY');
   const workflowLabel = useMemo(() => {
     if (completion?.stage === 'COMPLETED') return '订单闭环已完成';
     if (sync) return '线索已入库，待完成订单';
@@ -177,6 +186,86 @@ function App() {
       .catch((caught) => setRecommendationMessage(`已推荐话术，自动填入失败：${caught instanceof Error ? caught.message : '执行失败'}`));
   }, [recognition, scriptView]);
 
+  useEffect(() => {
+    const operatorId = auth.operator?.id;
+    const selectedShopId = selectedShop?.id;
+    const orderNo = context?.platformOrderNo.trim() || '';
+    const customerName = context?.customerDisplayName.trim() || '';
+    const pageShopDisplayName = context?.shopDisplayName?.trim() || '';
+    if (!operatorId || !selectedShopId || !context?.supported || !orderNo || !customerName
+      || !pageShopDisplayName || pageShopMismatch) {
+      activeProductPreview.current = null;
+      return;
+    }
+    const requestKey = JSON.stringify([
+      selectedShopId,
+      orderNo,
+      customerName,
+      pageShopDisplayName,
+      context.platformProductId?.trim() || '',
+      context.platformSkuId?.trim() || '',
+      context.productName.trim(),
+      context.paymentAmount ?? null,
+      context.paymentAt?.trim() || '',
+    ]);
+    const generation = ++productPreviewSequence.current;
+    activeProductPreview.current = { generation, requestKey };
+    dispatchPanel({ type: 'START_PRODUCT_PREVIEW', generation, requestKey });
+    void worker<BrowserProductPreviewResponse>({
+      type: 'PREVIEW_PRODUCT_MAPPING',
+      input: {
+        platform: 'DOUYIN',
+        shopBindingId: selectedShopId,
+        pageShopDisplayName,
+        platformProductId: context.platformProductId?.trim() || undefined,
+        platformSkuId: context.platformSkuId?.trim() || undefined,
+        platformProductName: context.productName.trim() || undefined,
+        paymentAmount: context.paymentAmount,
+        paymentAt: context.paymentAt?.trim() || undefined,
+      },
+    }).then((result) => {
+      if (result.code === 0 && result.data) {
+        dispatchPanel({ type: 'APPLY_PRODUCT_PREVIEW', generation, requestKey, preview: result.data });
+        if (activeProductPreview.current?.generation === generation
+          && activeProductPreview.current.requestKey === requestKey) activeProductPreview.current = null;
+        return;
+      }
+      const message = result.message || '商品匹配预览失败';
+      dispatchPanel({ type: 'FAIL_PRODUCT_PREVIEW', generation, requestKey, message });
+      if (result.errorCode === 'SHOP_BINDING_UNAVAILABLE') {
+        dispatchPanel({ type: 'SELECT_SHOP_BINDING', shopBindingId: '' });
+        void worker<ExtensionConfig>({ type: 'SAVE_CONFIG', config: { apiBaseUrl } });
+      }
+      if (activeProductPreview.current?.generation === generation
+        && activeProductPreview.current.requestKey === requestKey) {
+        activeProductPreview.current = null;
+        setError(message);
+      }
+    }).catch((caught) => {
+      const message = caught instanceof Error ? caught.message : '商品匹配预览失败';
+      dispatchPanel({ type: 'FAIL_PRODUCT_PREVIEW', generation, requestKey, message });
+      if (activeProductPreview.current?.generation === generation
+        && activeProductPreview.current.requestKey === requestKey) {
+        activeProductPreview.current = null;
+        setError(message);
+      }
+    });
+  }, [
+    apiBaseUrl,
+    auth.operator?.id,
+    selectedShop?.id,
+    context?.supported,
+    context?.platformOrderNo,
+    context?.customerDisplayName,
+    context?.shopDisplayName,
+    context?.platformProductId,
+    context?.platformSkuId,
+    context?.productName,
+    context?.paymentAmount,
+    context?.paymentAt,
+    pageShopMismatch,
+  ]);
+
   const refreshContext = async () => {
     setError('');
     setNotice('');
@@ -188,6 +277,7 @@ function App() {
       const detectedHasContact = Boolean(result.detectedContact?.phone || result.detectedContact?.wechat);
       const recognizedConversationKey = conversationKey(result.context);
       if (activeAttempt.current?.conversationKey !== recognizedConversationKey) activeAttempt.current = null;
+      activeProductPreview.current = null;
       dispatchPanel({ type: 'RECOGNIZE_CONTEXT', context: result.context, detectedContact: result.detectedContact });
       setRecognition({
         id: ++recognitionSequence.current,
@@ -278,12 +368,13 @@ function App() {
   const logout = async () => {
     await worker({ type: 'LOGOUT' });
     setAuth((current) => ({ config: current.config }));
-    activeAttempt.current = null; dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
+    activeAttempt.current = null; activeProductPreview.current = null; dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
     setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
   };
 
   const selectShop = async (nextShopBindingId: string) => {
     setBusy(true); setError(''); setNotice('');
+    activeProductPreview.current = null;
     try {
       const config: ExtensionConfig = {
         apiBaseUrl,
@@ -349,10 +440,6 @@ function App() {
   };
 
   const completeOrder = async () => {
-    if (productPreview?.status === 'CONFIG_CONFLICT') {
-      setError(productPreview.message);
-      return;
-    }
     const attempt = completionAttemptSnapshot(panel);
     const attemptShop = runtimeConfig?.shops.find((shop) => shop.id === attempt?.shopBindingId);
     if (!context || !attempt || !attemptShop || !canIntake) return;
@@ -495,16 +582,16 @@ function App() {
         <div><span>订单</span><strong>{context.platformOrderNo || '未识别'}</strong></div>
         <div><span>订单状态</span><strong>{context.orderStatus || '未识别'}</strong></div>
         <div><span>绑定店铺</span><strong>{selectedShop?.displayName || '未选择'}</strong></div>
-        <div><span>页面店铺</span><strong>{context.shopDisplayName || '未识别（按绑定店铺处理）'}</strong></div>
+        <div><span>页面店铺</span><strong>{context.shopDisplayName || '未识别'}</strong></div>
         <div><span>平台商品</span><strong>{context.productName || '未识别'}</strong></div>
         <div><span>匹配产品</span><strong>{productPreview?.status === 'MATCHED'
           ? productPreview.osProductName || '待后端确认'
           : productPreview?.status === 'UNMATCHED'
             ? '待匹配（本次仍可录入，平台原名会写入OS备注）'
-            : productPreview?.status === 'CONFIG_CONFLICT'
-              ? '配置冲突'
-              : '待后端确认'}</strong></div>
-        <div><span>匹配方式</span><strong>{productPreview?.status === 'MATCHED' ? matchMethodLabel(productPreview.method) : '未匹配'}</strong></div>
+            : productPreviewStatus === 'LOADING' ? '正在匹配…' : '待匹配预览'}</strong></div>
+        <div><span>匹配方式</span><strong>{productPreview?.status === 'MATCHED'
+          ? matchMethodLabel(productPreview.method)
+          : productPreviewStatus === 'LOADING' ? '正在匹配…' : '未匹配'}</strong></div>
         <div><span>OS参考价</span><strong>{typeof referencePrice === 'number' ? formatMoney(referencePrice) : '暂未提供'}</strong></div>
         <div><span>实付金额</span><strong>{formatMoney(context.paymentAmount)}</strong></div>
         <div><span>付款时间</span><strong>{context.paymentAt || '未识别'}</strong></div>
@@ -515,6 +602,8 @@ function App() {
         ? <div className="alert warning">当前有多个启用店铺，请手工选择后再入库。</div> : null}
       {pageShopMismatch
         ? <div className="alert warning">当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试。</div> : null}
+      {context && selectedShop && !context.shopDisplayName?.trim()
+        ? <div className="alert warning">当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别。</div> : null}
       {productPreview?.status === 'UNMATCHED'
         ? <div className="alert warning">商品尚未匹配OS标准产品，本次仍可录入；平台原名“{productPreview.rawProductName || context?.productName || '未识别'}”将写入OS备注。</div> : null}
       {priceDiffers

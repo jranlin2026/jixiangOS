@@ -121,6 +121,12 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
       sendResponse({ ...result, data });
       return;
     }
+    if (message.type === 'PREVIEW_PRODUCT_MAPPING') {
+      sendResponse(await request('/browser-agent/product-preview', {
+        method: 'POST', body: JSON.stringify(message.input),
+      }));
+      return;
+    }
     if (message.type === 'GET_SCRIPT_LIBRARY') {
       sendResponse(await request('/browser-agent/script-library'));
       return;

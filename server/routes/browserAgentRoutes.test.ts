@@ -72,6 +72,31 @@ const catalog = {
     calls.push({ method: 'catalog:list' });
     return { code: 0, data: { shops: [], mappings: [], products: [] }, message: 'success' };
   },
+  async previewProductMapping(input: any) {
+    calls.push({ method: 'catalog:preview', input });
+    if (input.platformProductName === '冲突商品') {
+      return {
+        code: 409, data: null, message: '当前店铺商品映射存在冲突', errorCode: 'PRODUCT_CONFIG_CONFLICT',
+      };
+    }
+    return {
+      code: 0,
+      data: {
+        shop: { id: input.shopBindingId, shopKey: 'jx-main', displayName: '极享智能体' },
+        productResolution: {
+          status: 'MATCHED', method: 'PLATFORM_PRODUCT_ID', osProductId: 'prod-taojin',
+          osProductName: '淘金AI', osReferencePrice: 299,
+        },
+        facts: {
+          platformProductId: input.platformProductId,
+          platformProductName: input.platformProductName,
+          paymentAmount: input.paymentAmount,
+          paymentAt: input.paymentAt,
+        },
+      },
+      message: 'success',
+    };
+  },
   async createShop(input: any, actor: any) {
     calls.push({ method: 'catalog:create-shop', input, actor });
     return { code: 0, data: { id: 'shop-2', ...input }, message: 'success' };
@@ -204,6 +229,34 @@ try {
   assert.equal(runtimeConfig.status, 200, '已认证客服应能读取只含启用店铺的运行时配置');
   assert.equal((await runtimeConfig.json()).data.shops[0].source, '抖音电商');
 
+  const preview = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/product-preview`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-test-no-product-read': '1',
+      'x-test-no-lead-create': '1',
+    },
+    body: JSON.stringify({
+      platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
+      platformProductId: 'DY-100', platformProductName: '淘金AI 多模态',
+      paymentAmount: 349, paymentAt: '2026-08-08T19:34:20+08:00',
+    }),
+  });
+  assert.equal(preview.status, 200, '商品预览只需已认证，不应要求线索创建或产品设置权限');
+  const previewPayload = await preview.json();
+  assert.equal(previewPayload.data.productResolution.osReferencePrice, 299);
+  assert.equal(calls.filter((call) => call.method === 'intake').length, 1, '只读预览不得触发线索入库');
+
+  const previewConflict = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/product-preview`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
+      platformProductName: '冲突商品',
+    }),
+  });
+  assert.equal(previewConflict.status, 409);
+  assert.equal((await previewConflict.json()).errorCode, 'PRODUCT_CONFIG_CONFLICT');
+
   const deniedCatalog = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog`, {
     headers: { 'x-test-no-product-read': '1' },
   });
@@ -265,7 +318,7 @@ try {
   assert.equal(deniedCompletion.status, 403, '平台完成上报必须校验线索录入权限');
   assert.deepEqual(calls.map((call) => call.method), [
     'intake', 'remark', 'platform-completion', 'script-library:get', 'script-library:update', 'script-library:get',
-    'catalog:runtime', 'catalog:create-shop', 'catalog:update-shop',
+    'catalog:runtime', 'catalog:preview', 'catalog:preview', 'catalog:create-shop', 'catalog:update-shop',
     'catalog:create-mapping', 'catalog:create-mapping', 'catalog:delete-mapping',
   ]);
 } finally {

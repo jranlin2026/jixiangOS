@@ -71,6 +71,11 @@ export function createBrowserAgentRouter(deps: {
     res.status(statusFor(result.code)).json(result);
   });
 
+  router.post('/product-preview', deps.requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.catalog.previewProductMapping(req.body || {});
+    res.status(statusFor(result.code)).json(result);
+  });
+
   router.get('/catalog', deps.requireBrowserCatalogRead, async (_req: AuthenticatedRequest, res) => {
     const result = await deps.catalog.listCatalog();
     res.status(statusFor(result.code)).json(result);

@@ -29,6 +29,7 @@ const context = {
   messages: [],
   diagnostics: [],
 };
+let pageContext = context;
 const shops = [
   {
     id: 'shop-1', platform: 'DOUYIN', shopKey: 'jx-main', platformShopId: 'DY-SHOP-1',
@@ -58,12 +59,16 @@ const intakeResult = {
 
 let intakeSucceeds = false;
 const intakeInputs: Record<string, unknown>[] = [];
+const previewInputs: Record<string, unknown>[] = [];
 let completeInput: unknown;
 const savedConfigs: unknown[] = [];
 const scriptView = {
   library: { schemaVersion: 1, revision: 1, groups: [], updatedAt: '', updatedBy: { id: 'u1', name: '客服甲' } },
   canManage: false,
 };
+let releaseInitialPreview!: () => void;
+const initialPreviewGate = new Promise<void>((resolve) => { releaseInitialPreview = resolve; });
+let holdInitialPreview = true;
 
 const chromeMock = {
   permissions: { request: async () => true },
@@ -85,14 +90,42 @@ const chromeMock = {
       if (message.type === 'GET_RUNTIME_CONFIG') {
         return {
           code: 0,
+          data: { shops },
+          message: 'success',
+        };
+      }
+      if (message.type === 'PREVIEW_PRODUCT_MAPPING') {
+        previewInputs.push(message.input);
+        if (holdInitialPreview) await initialPreviewGate;
+        holdInitialPreview = false;
+        if (message.input.platformProductId === 'DY-CONFLICT') {
+          return {
+            code: 409,
+            data: null,
+            errorCode: 'PRODUCT_CONFIG_CONFLICT',
+            message: '当前店铺商品映射存在冲突，请联系管理员修正后重试',
+          };
+        }
+        const unmatched = message.input.platformProductId === 'DY-UNKNOWN';
+        return {
+          code: 0,
           data: {
-            shops,
-            products: [{ id: 'prod-taojin', name: '淘金AI', referencePrice: 299 }],
-            productMappings: [{
-              id: 'map-1', shopBindingId: 'shop-1', platformProductId: 'DY-TAOJIN-100',
-              platformProductName: context.productName, aliases: [], osProductId: 'prod-taojin',
-              osProductName: '淘金AI', active: true,
-            }],
+            shop: shops[0],
+            productResolution: unmatched
+              ? { status: 'UNMATCHED', rawProductName: message.input.platformProductName }
+              : {
+                  status: 'MATCHED', method: 'PLATFORM_PRODUCT_ID', osProductId: 'prod-taojin',
+                  osProductName: '淘金AI', osReferencePrice: 299,
+                },
+            facts: {
+              platformProductId: message.input.platformProductId,
+              platformProductName: message.input.platformProductName,
+              paymentAmount: message.input.paymentAmount,
+              paymentAt: message.input.paymentAt,
+            },
+            priceDifference: unmatched ? null : {
+              paymentAmount: 399, osReferencePrice: 299, amount: 100, differs: true,
+            },
           },
           message: 'success',
         };
@@ -105,7 +138,16 @@ const chromeMock = {
       if (message.type === 'CREATE_LEAD_INTAKE') {
         intakeInputs.push(message.input);
         return intakeSucceeds
-          ? { code: 0, data: intakeResult, message: 'success' }
+          ? {
+              code: 0,
+              data: {
+                ...intakeResult,
+                productResolution: {
+                  status: 'UNMATCHED', rawProductName: message.input.platformProductName,
+                },
+              },
+              message: 'success',
+            }
           : { code: 409, data: null, errorCode: 'ORDER_CONTACT_CONFLICT', message: '昵称与首次入库快照不一致，请先在极享OS核对' };
       }
       if (message.type === 'REPORT_PLATFORM_COMPLETION') {
@@ -122,7 +164,7 @@ const chromeMock = {
     query: async () => [{ id: 1, url: context.pageUrl }],
     sendMessage: async (_tabId: number, message: any) => {
       if (message.type === 'READ_FEIGE_CONTEXT') {
-        return { ok: true, context, detectedContact: { phone: '13800138000' } };
+        return { ok: true, context: pageContext, detectedContact: { phone: '13800138000' } };
       }
       if (message.type === 'COMPLETE_FEIGE_OS_ORDER') {
         completeInput = message.input;
@@ -174,14 +216,47 @@ shopSelect.value = 'shop-1';
 shopSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
 await waitFor('select[aria-label="绑定店铺"]', (node) => (node as HTMLSelectElement).value === 'shop-1');
 assert.deepEqual(savedConfigs.at(-1), { apiBaseUrl: 'https://os.example.com/api', shopBindingId: 'shop-1' });
+await waitFor('.context-card', (node) => (node.textContent || '').includes('正在匹配…'));
+assert.equal(completeButton.disabled, true, '权威预览加载中必须禁用最终操作');
+assert.equal(intakeInputs.length, 0);
+releaseInitialPreview();
 assert.match(document.body.textContent || '', /绑定店铺极享官方店/);
 assert.match(document.body.textContent || '', /页面店铺极享官方店/);
 assert.match(document.body.textContent || '', /平台商品淘金AI 多模态创作智能体 读书卡/);
+await waitFor('.context-card', (node) => (node.textContent || '').includes('匹配产品淘金AI'));
 assert.match(document.body.textContent || '', /匹配产品淘金AI/);
 assert.match(document.body.textContent || '', /匹配方式店铺商品映射/);
 assert.match(document.body.textContent || '', /OS参考价¥299\.00/);
 assert.match(document.body.textContent || '', /实付金额¥399\.00/);
 assert.match(document.body.textContent || '', /OS参考价 ¥299\.00，仅供参考；本次按飞鸽实付 ¥399\.00 录入/);
+assert.equal(intakeInputs.length, 0, '权威匹配预览必须发生在线索创建之前');
+assert.equal(previewInputs.length > 0, true);
+
+pageContext = {
+  ...context,
+  platformOrderNo: 'ORDER-RENDER-2',
+  platformProductId: 'DY-CONFLICT',
+  productName: '冲突商品',
+};
+document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+const previewErrorDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('当前店铺商品映射存在冲突')
+));
+assert.equal(completeButton.disabled, true, '预览错误或配置冲突时必须禁用最终操作');
+assert.equal(intakeInputs.length, 0);
+previewErrorDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+await new Promise((resolve) => setTimeout(resolve, 10));
+
+pageContext = {
+  ...context,
+  platformOrderNo: 'ORDER-RENDER-3',
+  platformProductId: 'DY-UNKNOWN',
+  productName: '完全未配置的平台商品',
+  paymentAmount: 188,
+};
+document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+await waitFor('.context-card', (node) => (node.textContent || '').includes('平台原名“完全未配置的平台商品”将写入OS备注'));
+assert.equal(intakeInputs.length, 0, '未匹配警告必须在客服点击入库前出现');
 
 document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
 await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
@@ -200,26 +275,26 @@ assert.match(successDialog.textContent || '', /线索编号：lead-render-1/);
 assert.match(successDialog.textContent || '', /分配销售：销售小王/);
 assert.match(successDialog.textContent || '', /订单备注、绿色旗帜均已验证/);
 assert.match(document.body.textContent || '', /匹配产品待匹配（本次仍可录入，平台原名会写入OS备注）/);
-assert.match(document.body.textContent || '', /平台原名“淘金AI 多模态创作智能体 读书卡”将写入OS备注/);
+assert.match(document.body.textContent || '', /平台原名“完全未配置的平台商品”将写入OS备注/);
 assert.match(document.body.textContent || '', /OS参考价暂未提供/);
 assert.equal(intakeInputs.length, 2);
 assert.deepEqual(intakeInputs.at(-1), {
   platform: 'DOUYIN',
   shopBindingId: 'shop-1',
   pageShopDisplayName: '极享官方店',
-  platformOrderNo: 'ORDER-RENDER-1',
+  platformOrderNo: 'ORDER-RENDER-3',
   contactName: '海盗船长',
   contactPhone: '13800138000',
   contactWechat: undefined,
   contactSource: 'CHAT',
-  platformProductId: 'DY-TAOJIN-100',
+  platformProductId: 'DY-UNKNOWN',
   platformSkuId: undefined,
-  platformProductName: '淘金AI 多模态创作智能体 读书卡',
-  paymentAmount: 399,
+  platformProductName: '完全未配置的平台商品',
+  paymentAmount: 188,
   paymentAt: '2026-08-08T19:34:20+08:00',
 }, '入库只提交绑定ID与飞鸽原始事实，不得提交自由 shopKey 或OS产品名');
 assert.deepEqual(completeInput, {
-  expectedOrderNo: context.platformOrderNo,
+  expectedOrderNo: 'ORDER-RENDER-3',
   expectedCustomerDisplayName: context.customerDisplayName,
   remarkLines: backendRemarkLines,
 });

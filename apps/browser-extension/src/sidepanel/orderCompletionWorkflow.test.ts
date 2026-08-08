@@ -50,16 +50,20 @@ const completionResult = {
 };
 
 let firstPageInput: unknown;
+let firstIntakeInput: unknown;
 const result = await runOrderCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
   shop: selectedShop,
-  pageShopDisplayName: currentContext.shopDisplayName,
+  pageShopDisplayName: '极享官方旗舰店',
   intakeInput: { platform: 'DOUYIN' },
 }, {
   readContext: async () => currentContext,
-  intake: async () => ({ code: 0, data: intakeResult, message: 'success' }),
+  intake: async (input) => {
+    firstIntakeInput = input;
+    return { code: 0, data: intakeResult, message: 'success' };
+  },
   completePage: async (pageInput) => {
     firstPageInput = pageInput;
     return {
@@ -77,6 +81,10 @@ assert.equal(result.osStatus, 'SUCCEEDED');
 assert.equal(result.orderRemarkStatus, 'SUCCEEDED');
 assert.equal(result.greenFlagStatus, 'SUCCEEDED');
 assert.equal(result.remarkText, backendRemarkText);
+assert.deepEqual(firstIntakeInput, {
+  platform: 'DOUYIN',
+  pageShopDisplayName: '极享官方店',
+}, '入库必须使用预检重读的当前页面店铺，不得沿用缓存名称');
 assert.deepEqual(firstPageInput, {
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
@@ -114,6 +122,37 @@ assert.deepEqual(
   [0, 0, 0, 0],
   '已识别的页面店铺不一致时必须在任何网络或页面动作前终止',
 );
+
+for (const latestShopContext of [
+  { label: '预检时店铺已切换', context: { ...currentContext, shopDisplayName: '其他店铺' }, code: 'SHOP_CONTEXT_MISMATCH' },
+  { label: '预检时店铺缺失或歧义', context: { ...currentContext, shopDisplayName: '' }, code: 'SHOP_CONTEXT_UNAVAILABLE' },
+] as const) {
+  let latestIntakeCalls = 0;
+  let latestPageCalls = 0;
+  let latestReportCalls = 0;
+  const latestResult = await runOrderCompletion({
+    expectedOrderNo: currentContext.platformOrderNo,
+    expectedCustomerDisplayName: currentContext.customerDisplayName,
+    phone: '13826459812',
+    shop: selectedShop,
+    pageShopDisplayName: currentContext.shopDisplayName,
+    intakeInput: { platform: 'DOUYIN', shopBindingId: selectedShop.id, pageShopDisplayName: currentContext.shopDisplayName },
+  }, {
+    readContext: async () => latestShopContext.context,
+    intake: async () => { latestIntakeCalls += 1; return { code: 0, data: intakeResult, message: 'success' }; },
+    completePage: async () => {
+      latestPageCalls += 1;
+      throw new Error('店铺预检失败后不得操作页面');
+    },
+    report: async () => {
+      latestReportCalls += 1;
+      return { code: 0, data: completionResult, message: 'success' };
+    },
+  });
+  assert.equal(latestResult.stage, 'OS_FAILED', latestShopContext.label);
+  assert.equal(latestResult.errorCode, latestShopContext.code, latestShopContext.label);
+  assert.deepEqual([latestIntakeCalls, latestPageCalls, latestReportCalls], [0, 0, 0], latestShopContext.label);
+}
 
 let pageCallsAfterOsFailure = 0;
 const osFailure = await runOrderCompletion({

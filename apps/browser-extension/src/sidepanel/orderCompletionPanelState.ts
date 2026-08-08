@@ -2,6 +2,7 @@ import type { FeigePageContext } from '../content/douyinFeigeAdapter';
 import type { DetectedContact } from '../domain/contactDetection';
 import type {
   BrowserLeadProductResolutionAudit,
+  BrowserProductPreviewResponse,
   BrowserRuntimeConfig,
   LeadIntakeResponse,
 } from '../shared/contracts';
@@ -17,6 +18,10 @@ export type ContactForm = {
 export type CompletionPanelState = {
   runtimeConfig: BrowserRuntimeConfig | null;
   shopBindingId: string;
+  productPreview: BrowserProductPreviewResponse | null;
+  productPreviewStatus: 'IDLE' | 'LOADING' | 'READY' | 'FAILED';
+  productPreviewMessage: string;
+  activeProductPreview: { generation: number; requestKey: string } | null;
   context: FeigePageContext | null;
   form: ContactForm;
   contactConfirmed: boolean;
@@ -31,6 +36,14 @@ type RecognizedContact = Pick<DetectedContact, 'phone' | 'wechat'> | null;
 export type CompletionPanelAction =
   | { type: 'APPLY_RUNTIME_CONFIG'; runtimeConfig: BrowserRuntimeConfig; selectedShopBindingId: string }
   | { type: 'SELECT_SHOP_BINDING'; shopBindingId: string }
+  | { type: 'START_PRODUCT_PREVIEW'; generation: number; requestKey: string }
+  | {
+      type: 'APPLY_PRODUCT_PREVIEW';
+      generation: number;
+      requestKey: string;
+      preview: BrowserProductPreviewResponse;
+    }
+  | { type: 'FAIL_PRODUCT_PREVIEW'; generation: number; requestKey: string; message: string }
   | { type: 'RECOGNIZE_CONTEXT'; context: FeigePageContext; detectedContact: RecognizedContact }
   | {
       type: 'RECOGNIZE_ATTEMPT_CONTEXT';
@@ -57,6 +70,10 @@ export function createCompletionPanelState(): CompletionPanelState {
   return {
     runtimeConfig: null,
     shopBindingId: '',
+    productPreview: null,
+    productPreviewStatus: 'IDLE',
+    productPreviewMessage: '',
+    activeProductPreview: null,
     context: null,
     form: { ...emptyForm },
     contactConfirmed: false,
@@ -88,93 +105,42 @@ export function completionAttemptSnapshot(state: CompletionPanelState) {
   };
 }
 
-function normalized(value: string) {
-  return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('zh-CN');
+export function productPreviewForPanel(state: CompletionPanelState): BrowserLeadProductResolutionAudit | null {
+  return state.sync?.productResolution || state.productPreview?.productResolution || null;
 }
 
-export type BrowserProductPreview = BrowserLeadProductResolutionAudit | {
-  status: 'CONFIG_CONFLICT';
-  message: string;
-};
-
-function runtimeProductPreview(state: CompletionPanelState): BrowserProductPreview | null {
-  const context = state.context;
-  const runtime = state.runtimeConfig;
-  if (!context || !runtime || !state.shopBindingId || runtime.productMappings === undefined) return null;
-  const mappings = runtime.productMappings.filter((mapping) => (
-    mapping.active && mapping.shopBindingId === state.shopBindingId
-  ));
-  const priorities: Array<{ method: string; matches: typeof mappings }> = [
-    {
-      method: 'PLATFORM_PRODUCT_ID',
-      matches: context.platformProductId
-        ? mappings.filter((mapping) => mapping.platformProductId === context.platformProductId)
-        : [],
-    },
-    {
-      method: 'PLATFORM_SKU_ID',
-      matches: context.platformSkuId
-        ? mappings.filter((mapping) => mapping.platformSkuId === context.platformSkuId)
-        : [],
-    },
-    {
-      method: 'SHOP_ALIAS',
-      matches: normalized(context.productName)
-        ? mappings.filter((mapping) => [mapping.platformProductName || '', ...mapping.aliases]
-          .some((candidate) => normalized(candidate) === normalized(context.productName)))
-        : [],
-    },
-  ];
-  for (const priority of priorities) {
-    if (!priority.matches.length) continue;
-    const productIds = new Set(priority.matches.map((mapping) => mapping.osProductId));
-    if (productIds.size !== 1) {
-      return { status: 'CONFIG_CONFLICT', message: '当前店铺商品映射存在冲突，请联系管理员修正后重试' };
-    }
-    const mapping = priority.matches[0];
-    const product = runtime.products?.find((item) => item.id === mapping.osProductId);
-    const referencePrice = mapping.osReferencePrice ?? product?.referencePrice;
-    return {
-      status: 'MATCHED',
-      method: priority.method,
-      osProductId: mapping.osProductId,
-      osProductName: mapping.osProductName || product?.name,
-      ...(typeof referencePrice === 'number' && Number.isFinite(referencePrice)
-        ? { osReferencePrice: referencePrice }
-        : {}),
-      rawProductName: context.productName,
-    };
-  }
-  const exactProducts = (runtime.products || [])
-    .filter((product) => normalized(product.name) === normalized(context.productName));
-  if (exactProducts.length === 1) {
-    const product = exactProducts[0];
-    return {
-      status: 'MATCHED',
-      method: 'EXACT_OS_NAME',
-      osProductId: product.id,
-      osProductName: product.name,
-      ...(typeof product.referencePrice === 'number' && Number.isFinite(product.referencePrice)
-        ? { osReferencePrice: product.referencePrice }
-        : {}),
-      rawProductName: context.productName,
-    };
-  }
-  return { status: 'UNMATCHED', rawProductName: context.productName };
+function clearProductPreview(state: CompletionPanelState): CompletionPanelState {
+  return {
+    ...state,
+    productPreview: null,
+    productPreviewStatus: 'IDLE',
+    productPreviewMessage: '',
+    activeProductPreview: null,
+  };
 }
 
-export function productPreviewForPanel(state: CompletionPanelState): BrowserProductPreview | null {
-  return state.sync?.productResolution || runtimeProductPreview(state);
+function productPreviewContextKey(context: FeigePageContext | null) {
+  if (!context) return '';
+  return JSON.stringify([
+    context.platformOrderNo.trim(),
+    context.customerDisplayName.trim(),
+    context.shopDisplayName?.trim() || '',
+    context.platformProductId?.trim() || '',
+    context.platformSkuId?.trim() || '',
+    context.productName.trim(),
+    context.paymentAmount ?? null,
+    context.paymentAt?.trim() || '',
+  ]);
 }
 
 function clearOrderResult(state: CompletionPanelState): CompletionPanelState {
-  return {
+  return clearProductPreview({
     ...state,
     sync: null,
     completion: null,
     remarkText: '',
     activeAttempt: null,
-  };
+  });
 }
 
 function synchronizedIntake(completion: OrderCompletionState) {
@@ -219,6 +185,35 @@ export function completionPanelReducer(
     if (shopBindingId === state.shopBindingId) return state;
     return clearOrderResult({ ...state, shopBindingId });
   }
+  if (action.type === 'START_PRODUCT_PREVIEW') {
+    return {
+      ...state,
+      productPreview: null,
+      productPreviewStatus: 'LOADING',
+      productPreviewMessage: '',
+      activeProductPreview: { generation: action.generation, requestKey: action.requestKey },
+    };
+  }
+  if (action.type === 'APPLY_PRODUCT_PREVIEW' || action.type === 'FAIL_PRODUCT_PREVIEW') {
+    if (state.activeProductPreview?.generation !== action.generation
+      || state.activeProductPreview.requestKey !== action.requestKey) return state;
+    if (action.type === 'FAIL_PRODUCT_PREVIEW') {
+      return {
+        ...state,
+        productPreview: null,
+        productPreviewStatus: 'FAILED',
+        productPreviewMessage: action.message,
+        activeProductPreview: null,
+      };
+    }
+    return {
+      ...state,
+      productPreview: action.preview,
+      productPreviewStatus: 'READY',
+      productPreviewMessage: '',
+      activeProductPreview: null,
+    };
+  }
   if (action.type === 'RECOGNIZE_ATTEMPT_CONTEXT') {
     if (!state.context
       || state.activeAttempt?.id !== action.attemptId
@@ -237,6 +232,10 @@ export function completionPanelReducer(
       return {
         runtimeConfig: state.runtimeConfig,
         shopBindingId: state.shopBindingId,
+        productPreview: null,
+        productPreviewStatus: 'IDLE',
+        productPreviewMessage: '',
+        activeProductPreview: null,
         context: action.context,
         form: {
           name: action.context.customerDisplayName,
@@ -252,6 +251,20 @@ export function completionPanelReducer(
       };
     }
     if (state.sync) return { ...state, context: action.context };
+    if (productPreviewContextKey(state.context) !== productPreviewContextKey(action.context)) {
+      return clearOrderResult({
+        ...state,
+        context: action.context,
+        form: {
+          ...state.form,
+          name: action.context.customerDisplayName,
+          phone: action.detectedContact?.phone || state.form.phone,
+          wechat: action.detectedContact?.wechat || state.form.wechat,
+          source: action.detectedContact ? 'CHAT' : state.form.source,
+        },
+        contactConfirmed: false,
+      });
+    }
     return {
       ...state,
       context: action.context,

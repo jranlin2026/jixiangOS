@@ -57,7 +57,10 @@ type ReportInput = {
 };
 
 export type OrderCompletionDependencies = {
-  readContext(): Promise<Pick<FeigePageContext, 'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus'>>;
+  readContext(): Promise<Pick<
+    FeigePageContext,
+    'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus' | 'shopDisplayName'
+  >>;
   intake(input: Record<string, unknown>): Promise<ApiEnvelope<LeadIntakeResponse>>;
   completePage(input: CompleteOsOrderInput): Promise<CompleteOsOrderResult>;
   report(input: ReportInput): Promise<ApiEnvelope<PlatformCompletionReport>>;
@@ -213,7 +216,10 @@ export async function runOrderCompletion(
     });
   };
 
-  let current: Pick<FeigePageContext, 'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus'>;
+  let current: Pick<
+    FeigePageContext,
+    'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus' | 'shopDisplayName'
+  >;
   try {
     current = await deps.readContext();
   } catch (error) {
@@ -227,13 +233,34 @@ export async function runOrderCompletion(
   if (!isPaidOrderStatus(current.orderStatus)) {
     return stopForContext('请先确认当前订单为已付款有效订单');
   }
+  if (input.shop && !current.shopDisplayName?.trim()) {
+    return emit(deps, {
+      ...initial,
+      stage: 'OS_FAILED',
+      osStatus: 'FAILED',
+      errorCode: 'SHOP_CONTEXT_UNAVAILABLE',
+      message: '当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别后重试',
+    });
+  }
+  if (input.shop && !pageShopMatchesBinding(current.shopDisplayName, input.shop)) {
+    return emit(deps, {
+      ...initial,
+      stage: 'OS_FAILED',
+      osStatus: 'FAILED',
+      errorCode: 'SHOP_CONTEXT_MISMATCH',
+      message: '当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试',
+    });
+  }
 
   let intakeResult = input.existingIntake;
   if (!intakeResult) {
     emit(deps, { ...initial, stage: 'INTAKING', osStatus: 'IN_PROGRESS' });
     let intake: ApiEnvelope<LeadIntakeResponse>;
     try {
-      intake = await deps.intake(input.intakeInput);
+      intake = await deps.intake({
+        ...input.intakeInput,
+        ...(input.shop ? { pageShopDisplayName: current.shopDisplayName?.trim() } : {}),
+      });
     } catch (error) {
       return emit(deps, {
         ...initial,
