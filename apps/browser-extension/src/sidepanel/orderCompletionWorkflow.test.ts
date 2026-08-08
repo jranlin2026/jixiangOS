@@ -814,4 +814,131 @@ assert.equal(reportException.stage, 'PLATFORM_FAILED');
 assert.equal(reportException.intakeResult?.syncId, 'sync-1', '上报失败也必须保留 syncId 以便重试');
 assert.equal(reportException.message, '上报网络中断');
 
+let readAttemptActive = true;
+let releaseCancelledRead!: () => void;
+const cancelledReadGate = new Promise<void>((resolve) => { releaseCancelledRead = resolve; });
+let cancelledReadIntakeCalls = 0;
+let cancelledReadPageCalls = 0;
+let cancelledReadReportCalls = 0;
+const cancelledDuringReadPromise = runOrderCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13826459812',
+  intakeInput: { platform: 'DOUYIN' },
+}, {
+  isAttemptActive: () => readAttemptActive,
+  readContext: async () => { await cancelledReadGate; return currentContext; },
+  intake: async () => { cancelledReadIntakeCalls += 1; return { code: 0, data: intakeResult, message: 'success' }; },
+  completePage: async () => {
+    cancelledReadPageCalls += 1;
+    throw new Error('读取上下文期间取消后不得操作页面');
+  },
+  report: async () => {
+    cancelledReadReportCalls += 1;
+    return { code: 0, data: completionResult, message: 'success' };
+  },
+});
+readAttemptActive = false;
+releaseCancelledRead();
+const cancelledDuringRead = await cancelledDuringReadPromise;
+assert.equal(cancelledDuringRead.stage, 'ABORTED');
+assert.deepEqual(
+  [cancelledReadIntakeCalls, cancelledReadPageCalls, cancelledReadReportCalls],
+  [0, 0, 0],
+  '读取上下文等待期间取消后不得进入任何后续阶段',
+);
+
+let intakeAttemptActive = true;
+let releaseCancelledIntake!: () => void;
+const cancelledIntakeGate = new Promise<void>((resolve) => { releaseCancelledIntake = resolve; });
+let cancelledIntakePageCalls = 0;
+let cancelledIntakeReportCalls = 0;
+const cancelledDuringIntakePromise = runOrderCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13826459812',
+  intakeInput: { platform: 'DOUYIN' },
+}, {
+  isAttemptActive: () => intakeAttemptActive,
+  readContext: async () => currentContext,
+  intake: async () => { await cancelledIntakeGate; return { code: 0, data: intakeResult, message: 'success' }; },
+  completePage: async () => {
+    cancelledIntakePageCalls += 1;
+    throw new Error('入库等待期间取消后不得操作页面');
+  },
+  report: async () => {
+    cancelledIntakeReportCalls += 1;
+    return { code: 0, data: completionResult, message: 'success' };
+  },
+});
+await new Promise((resolve) => setImmediate(resolve));
+intakeAttemptActive = false;
+releaseCancelledIntake();
+const cancelledDuringIntake = await cancelledDuringIntakePromise;
+assert.equal(cancelledDuringIntake.stage, 'ABORTED');
+assert.deepEqual([cancelledIntakePageCalls, cancelledIntakeReportCalls], [0, 0]);
+
+let pageAttemptActive = true;
+let releaseCancelledPage!: () => void;
+const cancelledPageGate = new Promise<void>((resolve) => { releaseCancelledPage = resolve; });
+let cancelledPageReportCalls = 0;
+const cancelledDuringPagePromise = runOrderCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13826459812',
+  intakeInput: { platform: 'DOUYIN' },
+}, {
+  isAttemptActive: () => pageAttemptActive,
+  readContext: async () => currentContext,
+  intake: async () => ({ code: 0, data: intakeResult, message: 'success' }),
+  completePage: async () => {
+    await cancelledPageGate;
+    return {
+      ok: true,
+      remarkText: backendRemarkText,
+      remarkStatus: 'SUCCEEDED',
+      greenFlagStatus: 'SUCCEEDED',
+    };
+  },
+  report: async () => {
+    cancelledPageReportCalls += 1;
+    return { code: 0, data: completionResult, message: 'success' };
+  },
+});
+await new Promise((resolve) => setImmediate(resolve));
+pageAttemptActive = false;
+releaseCancelledPage();
+const cancelledDuringPage = await cancelledDuringPagePromise;
+assert.equal(cancelledDuringPage.stage, 'ABORTED');
+assert.equal(cancelledPageReportCalls, 0, '页面操作已开始后取消无法撤回页面动作，但不得再上报成功');
+
+let reportAttemptActive = true;
+let releaseCancelledReport!: () => void;
+const cancelledReportGate = new Promise<void>((resolve) => { releaseCancelledReport = resolve; });
+const cancelledReportStates: string[] = [];
+const cancelledDuringReportPromise = runOrderCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13826459812',
+  intakeInput: { platform: 'DOUYIN' },
+}, {
+  isAttemptActive: () => reportAttemptActive,
+  readContext: async () => currentContext,
+  intake: async () => ({ code: 0, data: intakeResult, message: 'success' }),
+  completePage: async () => ({
+    ok: true,
+    remarkText: backendRemarkText,
+    remarkStatus: 'SUCCEEDED',
+    greenFlagStatus: 'SUCCEEDED',
+  }),
+  report: async () => { await cancelledReportGate; return { code: 0, data: completionResult, message: 'success' }; },
+  onState: (state) => { cancelledReportStates.push(state.stage); },
+});
+await new Promise((resolve) => setImmediate(resolve));
+reportAttemptActive = false;
+releaseCancelledReport();
+const cancelledDuringReport = await cancelledDuringReportPromise;
+assert.equal(cancelledDuringReport.stage, 'ABORTED');
+assert.equal(cancelledReportStates.includes('COMPLETED'), false, '上报等待期间取消后不得再浮现成功状态');
+
 console.log('order completion workflow: ok');

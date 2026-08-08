@@ -11,6 +11,7 @@ import type {
 
 export type OrderCompletionStage =
   | 'READY'
+  | 'ABORTED'
   | 'INTAKING'
   | 'OS_FAILED'
   | 'OS_COMPLETED'
@@ -57,6 +58,7 @@ type ReportInput = {
 };
 
 export type OrderCompletionDependencies = {
+  isAttemptActive?(): boolean;
   readContext(): Promise<Pick<
     FeigePageContext,
     'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus' | 'shopDisplayName'
@@ -147,6 +149,14 @@ export async function runOrderCompletion(
     greenFlagStatus: input.existingIntake?.greenFlagStatus || 'NOT_ATTEMPTED',
     intakeResult: input.existingIntake,
   };
+  const isAttemptActive = deps.isAttemptActive || (() => true);
+  const aborted = (): OrderCompletionState => ({ ...initial, stage: 'ABORTED', message: '操作已取消' });
+  const guardedReport = async (reportInput: ReportInput) => {
+    if (!isAttemptActive()) return null;
+    const result = await reportCompletion(deps, reportInput);
+    return isAttemptActive() ? result : null;
+  };
+  if (!isAttemptActive()) return aborted();
   emit(deps, initial);
 
   if (input.existingIntake) {
@@ -166,11 +176,12 @@ export async function runOrderCompletion(
       };
       emit(deps, osCompleted);
       emit(deps, { ...osCompleted, stage: 'PLATFORM_COMPLETING' });
-      const report = await reportCompletion(deps, {
+      const report = await guardedReport({
         syncId: input.existingIntake.syncId,
         orderRemarkStatus: 'SUCCEEDED',
         greenFlagStatus: 'SUCCEEDED',
       });
+      if (!report) return aborted();
       if (report.code !== 0 || !report.data) {
         return emit(deps, {
           ...osCompleted,
@@ -191,12 +202,13 @@ export async function runOrderCompletion(
 
   const stopForContext = async (message: string) => {
     if (!input.existingIntake) return emit(deps, { ...initial, message });
-    const report = await reportCompletion(deps, {
+    const report = await guardedReport({
       syncId: input.existingIntake.syncId,
       orderRemarkStatus: 'FAILED',
       greenFlagStatus: 'NOT_ATTEMPTED',
       errorMessage: message,
     });
+    if (!report) return aborted();
     return emit(deps, {
       ...initial,
       stage: 'PLATFORM_FAILED',
@@ -210,11 +222,14 @@ export async function runOrderCompletion(
     FeigePageContext,
     'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus' | 'shopDisplayName'
   >;
+  if (!isAttemptActive()) return aborted();
   try {
     current = await deps.readContext();
   } catch (error) {
+    if (!isAttemptActive()) return aborted();
     return stopForContext(errorMessage(error, '无法核对当前飞鸽客户和订单'));
   }
+  if (!isAttemptActive()) return aborted();
   if (!current.supported
     || current.platformOrderNo.trim() !== input.expectedOrderNo.trim()
     || current.customerDisplayName.trim() !== input.expectedCustomerDisplayName.trim()) {
@@ -244,6 +259,7 @@ export async function runOrderCompletion(
 
   let intakeResult = input.existingIntake;
   if (!intakeResult) {
+    if (!isAttemptActive()) return aborted();
     emit(deps, { ...initial, stage: 'INTAKING', osStatus: 'IN_PROGRESS' });
     let intake: ApiEnvelope<LeadIntakeResponse>;
     try {
@@ -252,6 +268,7 @@ export async function runOrderCompletion(
         ...(input.shop ? { pageShopDisplayName: current.shopDisplayName?.trim() } : {}),
       });
     } catch (error) {
+      if (!isAttemptActive()) return aborted();
       return emit(deps, {
         ...initial,
         stage: 'OS_FAILED',
@@ -259,6 +276,7 @@ export async function runOrderCompletion(
         message: errorMessage(error, '线索入库失败'),
       });
     }
+    if (!isAttemptActive()) return aborted();
     if (intake.code !== 0 || !intake.data) {
       return emit(deps, {
         ...initial,
@@ -282,12 +300,13 @@ export async function runOrderCompletion(
 
   const reconciliationMessage = duplicateContactMismatch(input, intakeResult);
   if (reconciliationMessage) {
-    const report = await reportCompletion(deps, {
+    const report = await guardedReport({
       syncId: intakeResult.syncId,
       orderRemarkStatus: 'FAILED',
       greenFlagStatus: 'NOT_ATTEMPTED',
       errorMessage: reconciliationMessage,
     });
+    if (!report) return aborted();
     return emit(deps, {
       ...osCompleted,
       stage: 'PLATFORM_FAILED',
@@ -300,6 +319,7 @@ export async function runOrderCompletion(
   }
 
   const remarkText = intakeResult.remarkLines.join('\n');
+  if (!isAttemptActive()) return aborted();
   emit(deps, {
     ...osCompleted,
     stage: 'PLATFORM_COMPLETING',
@@ -309,6 +329,7 @@ export async function runOrderCompletion(
   });
 
   let pageResult: CompleteOsOrderResult;
+  if (!isAttemptActive()) return aborted();
   try {
     pageResult = await deps.completePage({
       expectedOrderNo: input.expectedOrderNo,
@@ -316,13 +337,15 @@ export async function runOrderCompletion(
       remarkLines: intakeResult.remarkLines,
     });
   } catch (error) {
+    if (!isAttemptActive()) return aborted();
     const message = errorMessage(error, '订单备注和绿色旗帜处理失败');
-    const report = await reportCompletion(deps, {
+    const report = await guardedReport({
       syncId: intakeResult.syncId,
       orderRemarkStatus: 'FAILED',
       greenFlagStatus: 'NOT_ATTEMPTED',
       errorMessage: message,
     });
+    if (!report) return aborted();
     return emit(deps, {
       ...osCompleted,
       stage: 'PLATFORM_FAILED',
@@ -332,13 +355,15 @@ export async function runOrderCompletion(
       message: report.code === 0 ? message : `${message}；${report.message}`,
     });
   }
+  if (!isAttemptActive()) return aborted();
   if (!pageResult.ok) {
     const failedStatuses = failedPageStatuses(pageResult.stage);
-    const report = await reportCompletion(deps, {
+    const report = await guardedReport({
       syncId: intakeResult.syncId,
       ...failedStatuses,
       errorMessage: pageResult.message,
     });
+    if (!report) return aborted();
     return emit(deps, {
       ...osCompleted,
       stage: 'PLATFORM_FAILED',
@@ -349,11 +374,12 @@ export async function runOrderCompletion(
     });
   }
 
-  const report = await reportCompletion(deps, {
+  const report = await guardedReport({
     syncId: intakeResult.syncId,
     orderRemarkStatus: pageResult.remarkStatus,
     greenFlagStatus: pageResult.greenFlagStatus,
   });
+  if (!report) return aborted();
   if (report.code !== 0 || !report.data) {
     return emit(deps, {
       ...osCompleted,

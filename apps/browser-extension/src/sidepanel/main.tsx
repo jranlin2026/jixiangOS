@@ -110,16 +110,29 @@ function App() {
   const recognitionSequence = useRef(0);
   const evaluatedRecognition = useRef(0);
   const attemptSequence = useRef(0);
-  const activeAttempt = useRef<{ id: number; conversationKey: string } | null>(null);
+  const activeAttempt = useRef<{
+    id: number;
+    conversationKey: string;
+    operatorId: string;
+    shopBindingId: string;
+  } | null>(null);
   const productPreviewSequence = useRef(0);
   const activeProductPreview = useRef<{ generation: number; requestKey: string } | null>(null);
   const mounted = useRef(false);
   const activeOperatorId = useRef<string>();
+  const currentShopBindingId = useRef(shopBindingId);
+  const currentConversationKey = useRef(context ? conversationKey(context) : '');
   activeOperatorId.current = auth.operator?.id;
+  currentShopBindingId.current = shopBindingId;
+  currentConversationKey.current = context ? conversationKey(context) : '';
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+      activeAttempt.current = null;
+      activeProductPreview.current = null;
+    };
   }, []);
 
   const paidOrderRecognized = Boolean(context && isPaidOrderStatus(context.orderStatus));
@@ -386,6 +399,7 @@ function App() {
 
   const selectShop = async (nextShopBindingId: string) => {
     setBusy(true); setError(''); setNotice('');
+    activeAttempt.current = null;
     activeProductPreview.current = null;
     try {
       const config: ExtensionConfig = {
@@ -454,13 +468,30 @@ function App() {
   const completeOrder = async () => {
     const attempt = completionAttemptSnapshot(panel);
     const attemptShop = runtimeConfig?.shops.find((shop) => shop.id === attempt?.shopBindingId);
-    if (!context || !attempt || !attemptShop || !canIntake) return;
+    const operatorId = auth.operator?.id;
+    if (!context || !attempt || !attemptShop || !operatorId || !canIntake) return;
     const attemptId = ++attemptSequence.current;
     const expectedConversationKey = conversationKey({
       platformOrderNo: attempt.expectedOrderNo,
       customerDisplayName: attempt.expectedCustomerDisplayName,
     });
-    activeAttempt.current = { id: attemptId, conversationKey: expectedConversationKey };
+    activeAttempt.current = {
+      id: attemptId,
+      conversationKey: expectedConversationKey,
+      operatorId,
+      shopBindingId: attempt.shopBindingId,
+    };
+    const isAttemptActive = () => mounted.current
+      && activeOperatorId.current === operatorId
+      && activeAttempt.current?.id === attemptId
+      && activeAttempt.current.conversationKey === expectedConversationKey
+      && activeAttempt.current.operatorId === operatorId
+      && activeAttempt.current.shopBindingId === attempt.shopBindingId
+      && currentShopBindingId.current === attempt.shopBindingId
+      && currentConversationKey.current === expectedConversationKey;
+    const assertAttemptActive = () => {
+      if (!isAttemptActive()) throw new Error('操作已取消');
+    };
     dispatchPanel({ type: 'START_ATTEMPT', attemptId, conversationKey: expectedConversationKey });
     setBusy(true); setError(''); setNotice('');
     const latestRecognitionRef: { value: {
@@ -489,6 +520,7 @@ function App() {
           paymentAt: context.paymentAt,
         },
       }, {
+        isAttemptActive,
         readContext: async () => {
           const latest = await activeTabCommand({ type: 'READ_FEIGE_CONTEXT' });
           if (!('context' in latest)) throw new Error('当前页面未返回飞鸽会话信息');
@@ -496,6 +528,7 @@ function App() {
           return latest.context;
         },
         intake: async (input) => {
+          assertAttemptActive();
           if (pageShopMismatch) {
             const refreshedPreview = await worker<BrowserProductPreviewResponse>({
               type: 'PREVIEW_PRODUCT_MAPPING',
@@ -510,6 +543,7 @@ function App() {
                 paymentAt: typeof input.paymentAt === 'string' ? input.paymentAt : undefined,
               },
             });
+            assertAttemptActive();
             if (refreshedPreview.code !== 0 || !refreshedPreview.data) {
               return {
                 code: refreshedPreview.code,
@@ -519,7 +553,10 @@ function App() {
               };
             }
           }
-          return worker<LeadIntakeResponse>({ type: 'CREATE_LEAD_INTAKE', input });
+          assertAttemptActive();
+          const intakeResult = await worker<LeadIntakeResponse>({ type: 'CREATE_LEAD_INTAKE', input });
+          assertAttemptActive();
+          return intakeResult;
         },
         completePage: async (input) => {
           const completed = await activeTabCommand({ type: 'COMPLETE_FEIGE_OS_ORDER', input });
@@ -529,17 +566,19 @@ function App() {
           return completed as CompleteOsOrderResult;
         },
         report: (input) => worker<PlatformCompletionReport>({ type: 'REPORT_PLATFORM_COMPLETION', ...input }),
-        onState: (state) => dispatchPanel({
-          type: 'APPLY_COMPLETION',
-          attemptId,
-          conversationKey: expectedConversationKey,
-          completion: state,
-        }),
+        onState: (state) => {
+          if (!isAttemptActive()) return;
+          dispatchPanel({
+            type: 'APPLY_COMPLETION',
+            attemptId,
+            conversationKey: expectedConversationKey,
+            completion: state,
+          });
+        },
       });
-      const ownsAttemptAtReturn = activeAttempt.current?.id === attemptId
-        && activeAttempt.current.conversationKey === expectedConversationKey;
+      if (!isAttemptActive() || result.stage === 'ABORTED') return;
       const latestRecognition = latestRecognitionRef.value;
-      if (latestRecognition && ownsAttemptAtReturn) {
+      if (latestRecognition) {
         dispatchPanel({
           type: 'RECOGNIZE_ATTEMPT_CONTEXT',
           attemptId,
@@ -557,17 +596,18 @@ function App() {
         });
         if (conversationChanged) activeAttempt.current = null;
       }
-      if (!ownsAttemptAtReturn) return;
+      if (!isAttemptActive()) return;
       if (result.stage === 'COMPLETED') {
         const completedIntake = result.intakeResult;
         setNotice(`线索编号：${completedIntake?.lead.id || '未知'}；分配销售：${completedIntake?.lead.assignedTo || '暂未分配'}；订单备注、绿色旗帜均已验证`);
       } else if (result.message) setError(result.message);
     } catch (caught) {
-      if (activeAttempt.current?.id === attemptId
-        && activeAttempt.current.conversationKey === expectedConversationKey) {
+      if (isAttemptActive()) {
         setError(caught instanceof Error ? caught.message : '线索入库失败');
       }
-    } finally { setBusy(false); }
+    } finally {
+      if (mounted.current && (isAttemptActive() || !activeOperatorId.current)) setBusy(false);
+    }
   };
 
   const feedbackDialog = <FeedbackDialog
@@ -693,4 +733,5 @@ function App() {
   </main>;
 }
 
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
+export const sidepanelRoot = createRoot(document.getElementById('root')!);
+sidepanelRoot.render(<React.StrictMode><App /></React.StrictMode>);
