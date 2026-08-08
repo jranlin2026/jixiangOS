@@ -503,4 +503,103 @@ assert.equal(visibleOpenedDialogResult.ok, false, '本次打开的弹窗仍可�
 assert.equal(visibleOpenedDialogResult.ok ? '' : visibleOpenedDialogResult.code, 'ORDER_COMPLETION_NOT_VERIFIED');
 assert.equal(visibleOpenedDialogFixture.getSaveClicks(), 1);
 
+function createCalibratedPaidOrderFixture(options: { includeConfirm?: boolean } = {}) {
+  const fixture = new JSDOM(`<!doctype html><html><body>
+    <main id="workspace-chat">
+      <div id="topbar-left-info"><span>悠然一刻</span><span>添加备注</span></div>
+    </main>
+    <div class="ecom-collapse-item ecom-collapse-item-active generated-order-card-hash">
+      <div role="button" aria-expanded="true" tabindex="0" class="ecom-collapse-header">
+        <div class="generated-order-number-hash">6925095897028853458</div>
+        <div data-testid="order-remark-summary">#悠然一刻/13826459812\n#入EC\n#直接退群</div>
+        <button type="button" render_type="feature_button" is_disabled="false">修改</button>
+        <span data-testid="current-order-flag" data-current-flag="red"></span>
+      </div>
+    </div>
+    <div class="ecom-drawer-wrapper-body" hidden>
+      <div>订单备注</div>
+      <div>订单标记</div>
+      <label><input type="radio" value="4"></label>
+      <label><input type="radio" value="1" checked></label>
+      <label><input type="radio" value="2"></label>
+      <label><input type="radio" value="3"></label>
+      <label><input type="radio" value="5"></label>
+      <label><input type="radio" value="0"></label>
+      <textarea
+        class="ecom-input"
+        id="textareaID"
+        placeholder="请输入备注信息，使用Enter保存，使用⌘+Enter换行"
+      ></textarea>
+      ${options.includeConfirm === false ? '' : '<button type="button" class="ecom-btn ecom-btn-primary">确定</button>'}
+      <button type="button" class="ecom-btn">取消</button>
+    </div>
+  </body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+  const fixtureDocument = fixture.window.document;
+  const drawer = fixtureDocument.querySelector('.ecom-drawer-wrapper-body') as HTMLElement;
+  const summary = fixtureDocument.querySelector('[data-testid="order-remark-summary"]') as HTMLElement;
+  const input = fixtureDocument.querySelector('#textareaID') as HTMLTextAreaElement;
+  const currentFlag = fixtureDocument.querySelector('[data-testid="current-order-flag"]') as HTMLElement;
+  let editClicks = 0;
+  let confirmClicks = 0;
+  fixtureDocument.querySelector('button[render_type="feature_button"]')?.addEventListener('click', () => {
+    editClicks += 1;
+    drawer.hidden = false;
+    input.value = summary.textContent || '';
+  });
+  [...drawer.querySelectorAll('button')]
+    .find((button) => button.textContent?.trim() === '确定')
+    ?.addEventListener('click', () => {
+      confirmClicks += 1;
+      summary.textContent = input.value;
+      currentFlag.dataset.currentFlag = 'green';
+      drawer.hidden = true;
+    });
+  return {
+    adapter: createDouyinFeigeAdapter(fixtureDocument, fixture.window.location.href),
+    input,
+    drawer,
+    getEditClicks: () => editClicks,
+    getConfirmClicks: () => confirmClicks,
+  };
+}
+
+const calibratedPaidOrderFixture = createCalibratedPaidOrderFixture();
+const calibratedPaidContext = calibratedPaidOrderFixture.adapter.readContext();
+assert.equal(
+  calibratedPaidContext.platformOrderNo,
+  '6925095897028853458',
+  '应从当前展开的真实订单卡片语义中识别 19 位订单号',
+);
+assert.equal(calibratedPaidContext.orderStatus, '', '未校准的真实订单状态必须保持未识别');
+assert.ok(calibratedPaidContext.diagnostics.includes('未识别订单状态'));
+const calibratedMissingGreenResult = await calibratedPaidOrderFixture.adapter.completeOsOrder({
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  phone: '13826459812',
+});
+assert.equal(calibratedMissingGreenResult.ok, false);
+assert.equal(
+  calibratedMissingGreenResult.ok ? '' : calibratedMissingGreenResult.code,
+  'GREEN_FLAG_NOT_FOUND',
+  '真实抽屉的无标签数字 radio 不得被按下标或 value 猜测为绿旗',
+);
+assert.equal(calibratedPaidOrderFixture.getEditClicks(), 1, '应通过展开订单卡片内的“修改”打开抽屉');
+assert.equal(calibratedPaidOrderFixture.input.value, '#悠然一刻/13826459812\n#入EC\n#直接退群');
+assert.equal(calibratedPaidOrderFixture.getConfirmClicks(), 0, '绿旗语义缺失时不得点击“确定”');
+
+const calibratedMissingConfirmFixture = createCalibratedPaidOrderFixture({ includeConfirm: false });
+const calibratedMissingConfirmResult = await calibratedMissingConfirmFixture.adapter.completeOsOrder({
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  phone: '13826459812',
+});
+assert.equal(calibratedMissingConfirmResult.ok, false);
+assert.equal(
+  calibratedMissingConfirmResult.ok ? '' : calibratedMissingConfirmResult.code,
+  'ORDER_REMARK_SAVE_NOT_FOUND',
+  '去掉真实“确定”文案后必须区分为提交控件缺失',
+);
+assert.equal(calibratedMissingConfirmFixture.getConfirmClicks(), 0);
+assert.equal(calibratedMissingConfirmFixture.input.value, '#悠然一刻/13826459812\n#入EC\n#直接退群');
+
 console.log('douyin feige page adapter: ok');

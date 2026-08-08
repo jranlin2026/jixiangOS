@@ -27,9 +27,19 @@ const selectors = {
   product: ['[data-jx-product-name]', '[data-testid="product-name"]', '[class*="product-name"]'],
   message: ['[data-jx-message]', '.leaveMessage', '[data-testid="message-item"]', '[data-message-direction]'],
   reply: ['[data-jx-reply-input]', '[data-qa-id="qa-send-message-textarea"]', 'textarea[placeholder*="消息"]', '[contenteditable="true"][role="textbox"]'],
-  orderRemark: ['[data-jx-order-remark]', '[data-testid="order-remark-input"]', 'textarea[placeholder*="订单备注"]'],
+  orderRemark: [
+    '[data-jx-order-remark]',
+    '[data-testid="order-remark-input"]',
+    'textarea[placeholder*="订单备注"]',
+    'textarea[placeholder^="请输入备注信息"]',
+  ],
   orderRemarkSave: ['[data-jx-order-remark-save]', '[data-testid="order-remark-save"]', 'button[aria-label*="保存备注"]'],
-  orderCard: ['[data-testid="order-card"]', '[class*="order-card"]', '[class*="orderItem"]'],
+  orderCard: [
+    '[data-testid="order-card"]',
+    '[class*="order-card"]',
+    '[class*="orderItem"]',
+    '[role="button"][aria-expanded="true"]',
+  ],
   orderRemarkSummary: ['[data-testid="order-remark-summary"]', '[class*="remark-content"]'],
   orderRemarkEdit: ['[data-testid="edit-order-remark"]'],
   orderRemarkDialog: ['[role="dialog"][aria-label*="备注"]', '[role="dialog"]'],
@@ -60,6 +70,26 @@ function text(root: ParentNode, candidates: string[]) {
 function findButtonByText(root: ParentNode, labels: string[]): HTMLElement | null {
   return [...root.querySelectorAll<HTMLElement>('button,[role="button"]')]
     .find((element) => labels.includes(element.textContent?.trim() || '')) || null;
+}
+
+function orderNoFromElement(root: ParentNode) {
+  const explicit = text(root, selectors.orderNo);
+  if (explicit) return explicit;
+  const candidates = [...String(root.textContent || '').matchAll(/(?:^|\D)(\d{19})(?!\d)/g)]
+    .map((match) => match[1]);
+  const unique = [...new Set(candidates)];
+  return unique.length === 1 ? unique[0] : '';
+}
+
+function currentOrderNo(document: Document) {
+  const explicit = text(document, selectors.orderNo);
+  if (explicit) return explicit;
+  const candidates = all(document, selectors.orderCard)
+    .filter(isVisible)
+    .map(orderNoFromElement)
+    .filter(Boolean);
+  const unique = [...new Set(candidates)];
+  return unique.length === 1 ? unique[0] : '';
 }
 
 function isVisible(element: HTMLElement | null): element is HTMLElement {
@@ -110,20 +140,38 @@ function findUniqueGreenFlag(dialog: HTMLElement) {
 function findUniqueSave(dialog: HTMLElement) {
   const semantic = uniqueMatches(dialog, selectors.orderRemarkSave);
   const byText = [...dialog.querySelectorAll<HTMLElement>('button,[role="button"]')]
-    .filter((element) => element.textContent?.trim() === '保存');
+    .filter((element) => ['保存', '确定'].includes(element.textContent?.trim() || ''));
   const candidates = [...new Set([...semantic, ...byText])]
     .filter((element) => isVisible(element) && isEnabled(element));
   return candidates.length === 1 ? candidates[0] : null;
 }
 
+function closestSemanticRemarkContainer(editor: HTMLElement) {
+  let current = editor.parentElement;
+  while (current && current !== editor.ownerDocument.body) {
+    const content = current.textContent || '';
+    const hasCancel = Boolean(findButtonByText(current, ['取消']));
+    if (content.includes('订单备注') && content.includes('订单标记') && hasCancel) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
 function visibleRemarkDialogs(document: Document) {
-  return [...document.querySelectorAll<HTMLElement>('[role="dialog"]')]
+  const roleDialogs = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')]
     .filter(isVisible)
     .filter((dialog) => {
       const label = dialog.getAttribute('aria-label')?.trim() || '';
       const hasRemarkSemantics = label.includes('备注') || (dialog.textContent || '').includes('订单标记');
       return hasRemarkSemantics && Boolean(first(dialog, selectors.orderRemark));
     });
+  const semanticDrawers = all(document, selectors.orderRemark)
+    .filter(isVisible)
+    .map(closestSemanticRemarkContainer)
+    .filter((element): element is HTMLElement => Boolean(element));
+  return [...new Set([...roleDialogs, ...semanticDrawers])];
 }
 
 function findUniqueRemarkDialog(document: Document) {
@@ -226,7 +274,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       if (!root) diagnostics.push('未找到飞鸽会话区域');
       const scope: ParentNode = root || document;
       const customerDisplayName = text(scope, selectors.customer);
-      const platformOrderNo = text(document, selectors.orderNo);
+      const platformOrderNo = currentOrderNo(document);
       const orderStatus = text(document, selectors.orderStatus);
       const productName = consultationProductName(document);
       const messages = all(scope, selectors.message)
@@ -310,11 +358,11 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       const expectedOrderNo = input.expectedOrderNo.trim();
       const expectedCustomer = input.expectedCustomerDisplayName.trim();
       const readCurrentContext = () => ({
-        orderNo: text(document, selectors.orderNo),
+        orderNo: currentOrderNo(document),
         customer: text(first(document, selectors.root) || document, selectors.customer),
       });
       const findExpectedOrderCard = () => all(document, selectors.orderCard)
-        .find((card) => text(card, selectors.orderNo) === expectedOrderNo) || null;
+        .find((card) => orderNoFromElement(card) === expectedOrderNo) || null;
       const current = readCurrentContext();
       if (!expectedOrderNo || !expectedCustomer || !current.orderNo || !current.customer) {
         return {
@@ -403,15 +451,6 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       }
 
       const greenFlag = findUniqueGreenFlag(dialog);
-      if (!greenFlag) {
-        return {
-          ok: false,
-          code: 'GREEN_FLAG_NOT_FOUND',
-          message: '未找到语义明确的绿色旗帜，请人工确认',
-          stage: 'GREEN_FLAG',
-          remarkText,
-        };
-      }
       const save = findUniqueSave(dialog);
       if (!save) {
         return {
@@ -419,6 +458,15 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           code: 'ORDER_REMARK_SAVE_NOT_FOUND',
           message: '未找到备注保存按钮，请人工确认',
           stage: 'SAVE',
+          remarkText,
+        };
+      }
+      if (!greenFlag) {
+        return {
+          ok: false,
+          code: 'GREEN_FLAG_NOT_FOUND',
+          message: '未找到语义明确的绿色旗帜，请人工确认',
+          stage: 'GREEN_FLAG',
           remarkText,
         };
       }
