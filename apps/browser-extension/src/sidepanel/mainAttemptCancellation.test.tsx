@@ -44,6 +44,10 @@ let previewMode: 'IMMEDIATE' | 'PENDING' = 'IMMEDIATE';
 let previewGate = deferred();
 let intakeMode: 'IMMEDIATE' | 'PENDING' = 'IMMEDIATE';
 let intakeGate = deferred();
+let logoutMode: 'IMMEDIATE' | 'PENDING' = 'IMMEDIATE';
+let logoutGate = deferred();
+let reportMode: 'IMMEDIATE' | 'PENDING' = 'IMMEDIATE';
+let reportGate = deferred();
 let previewCalls = 0;
 let intakeCalls = 0;
 let completePageCalls = 0;
@@ -79,7 +83,10 @@ const chromeMock = {
           message: 'success',
         };
       }
-      if (message.type === 'LOGOUT') return { code: 0, data: null, message: 'success' };
+      if (message.type === 'LOGOUT') {
+        if (logoutMode === 'PENDING') await logoutGate.promise;
+        return { code: 0, data: null, message: 'success' };
+      }
       if (message.type === 'GET_RUNTIME_CONFIG') {
         return { code: 0, data: { shops: [shop], selectedShopBindingId: shop.id }, message: 'success' };
       }
@@ -114,6 +121,7 @@ const chromeMock = {
       }
       if (message.type === 'REPORT_PLATFORM_COMPLETION') {
         reportCalls += 1;
+        if (reportMode === 'PENDING') await reportGate.promise;
         return {
           code: 0,
           data: { syncId: message.syncId, orderRemarkStatus: 'SUCCEEDED', greenFlagStatus: 'SUCCEEDED' },
@@ -176,6 +184,24 @@ async function loginAndPrepare(orderNo: string) {
 }
 
 const module = await import('./main');
+await loginAndPrepare('ORDER-AUTHORITATIVE-A');
+pageContext = {
+  ...pageContext,
+  platformOrderNo: 'ORDER-AUTHORITATIVE-B',
+  shopDisplayName: shop.displayName,
+};
+document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
+const changedConversationDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('当前飞鸽客户或订单已切换')
+));
+assert.match(changedConversationDialog.textContent || '', /操作未完成/);
+assert.deepEqual([previewCalls, intakeCalls, completePageCalls, reportCalls], [0, 0, 0, 0]);
+assert.equal(document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.disabled, false, '权威重读安全失败后必须释放 busy');
+assert.equal(document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.disabled, false, '当前尝试的正常安全失败不得把操作永久卡死');
+changedConversationDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+await waitFor('.login-card');
+
 await loginAndPrepare('ORDER-CANCEL-PREVIEW-LOGOUT');
 previewMode = 'PENDING';
 previewGate = deferred();
@@ -192,16 +218,81 @@ previewMode = 'IMMEDIATE';
 await loginAndPrepare('ORDER-CANCEL-INTAKE-LOGOUT');
 intakeMode = 'PENDING';
 intakeGate = deferred();
+logoutMode = 'PENDING';
+logoutGate = deferred();
 document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
 await waitFor('button[data-action="complete-order"]', () => intakeCalls === 1);
 document.querySelector<HTMLButtonElement>('header .text-button')?.click();
-await waitFor('.login-card');
 intakeGate.release();
 await new Promise((resolve) => setTimeout(resolve, 15));
+const createCallsWhileLogoutPending = intakeCalls;
+document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
+await new Promise((resolve) => setTimeout(resolve, 15));
+assert.equal(intakeCalls, createCallsWhileLogoutPending, '退出请求未完成时，旧尝试重渲染不得恢复第二次入库');
 assert.deepEqual([completePageCalls, reportCalls], [0, 0], '入库请求已发出时无法撤回，但退出后不得继续页面动作或上报');
 assert.equal(document.querySelector('[role="dialog"]'), null);
+logoutGate.release();
+await waitFor('.login-card');
 
 intakeMode = 'IMMEDIATE';
+logoutMode = 'PENDING';
+logoutGate = deferred();
+await loginAndPrepare('ORDER-CANCEL-IDLE-LOGOUT');
+const previewCallsBeforeIdleLogout = previewCalls;
+const intakeCallsBeforeIdleLogout = intakeCalls;
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
+await new Promise((resolve) => setTimeout(resolve, 10));
+document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
+await new Promise((resolve) => setTimeout(resolve, 10));
+assert.equal(previewCalls, previewCallsBeforeIdleLogout, '延迟退出从点击开始必须立即禁止新权威预览');
+assert.equal(intakeCalls, intakeCallsBeforeIdleLogout, '延迟退出从点击开始必须立即禁止新入库');
+logoutGate.release();
+await waitFor('.login-card');
+
+logoutMode = 'IMMEDIATE';
+await loginAndPrepare('ORDER-CANCEL-REPORT');
+reportMode = 'PENDING';
+reportGate = deferred();
+logoutMode = 'PENDING';
+logoutGate = deferred();
+const reportCallsBeforeCancellation = reportCalls;
+document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
+await waitFor('button[data-action="complete-order"]', () => reportCalls === reportCallsBeforeCancellation + 1);
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+reportGate.release();
+await new Promise((resolve) => setTimeout(resolve, 15));
+assert.equal(document.querySelector('[role="dialog"]'), null, '上报等待期间退出后不得复活成功反馈');
+assert.doesNotMatch(document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.textContent || '', /正在处理/, '取消后原尝试的 busy owner 必须释放');
+logoutGate.release();
+await waitFor('.login-card');
+reportMode = 'IMMEDIATE';
+logoutMode = 'IMMEDIATE';
+
+await loginAndPrepare('ORDER-CANCEL-SUPERSEDED');
+previewMode = 'PENDING';
+const supersededPreviewGate = deferred();
+previewGate = supersededPreviewGate;
+const previewsBeforeSupersededAttempts = previewCalls;
+document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
+await waitFor('button[data-action="complete-order"]', () => previewCalls === previewsBeforeSupersededAttempts + 1);
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+await waitFor('.login-card');
+await loginAndPrepare('ORDER-CANCEL-NEWER-BUSY');
+const newerPreviewGate = deferred();
+previewGate = newerPreviewGate;
+const supersededButton = document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')!;
+supersededButton.click();
+await waitFor('button[data-action="complete-order"]', () => previewCalls === previewsBeforeSupersededAttempts + 2);
+supersededPreviewGate.release();
+await new Promise((resolve) => setTimeout(resolve, 15));
+assert.equal(supersededButton.disabled, true, '旧尝试的 finally 不得释放新尝试持有的 busy');
+assert.match(supersededButton.textContent || '', /正在处理/);
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+await waitFor('.login-card');
+newerPreviewGate.release();
+await new Promise((resolve) => setTimeout(resolve, 10));
+
 await loginAndPrepare('ORDER-CANCEL-PREVIEW-UNMOUNT');
 previewMode = 'PENDING';
 previewGate = deferred();
@@ -209,11 +300,13 @@ const previewCallsBeforeUnmount = previewCalls;
 document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
 await waitFor('button[data-action="complete-order"]', () => previewCalls === previewCallsBeforeUnmount + 1);
 const intakeCallsBeforeUnmount = intakeCalls;
+const completePageCallsBeforeUnmount = completePageCalls;
+const reportCallsBeforeUnmount = reportCalls;
 module.sidepanelRoot.unmount();
 previewGate.release();
 await new Promise((resolve) => setTimeout(resolve, 15));
 assert.equal(intakeCalls, intakeCallsBeforeUnmount, '卸载时预览在等待则不得继续入库');
-assert.deepEqual([completePageCalls, reportCalls], [0, 0]);
+assert.deepEqual([completePageCalls, reportCalls], [completePageCallsBeforeUnmount, reportCallsBeforeUnmount]);
 assert.equal(document.querySelector('[role="dialog"]'), null);
 
 dom.window.close();

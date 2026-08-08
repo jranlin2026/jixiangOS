@@ -79,6 +79,7 @@ function selectedRuntimeShop(shops: BrowserRuntimeShop[], shopBindingId: string)
 function App() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [auth, setAuth] = useState<AuthState>({});
@@ -115,14 +116,17 @@ function App() {
     conversationKey: string;
     operatorId: string;
     shopBindingId: string;
+    cancellationReason: 'LOGOUT' | 'UNMOUNT' | 'SHOP_CHANGE' | 'SESSION_CHANGE' | 'SUPERSEDED' | null;
   } | null>(null);
+  const busyAttemptId = useRef<number | null>(null);
   const productPreviewSequence = useRef(0);
   const activeProductPreview = useRef<{ generation: number; requestKey: string } | null>(null);
   const mounted = useRef(false);
+  const loggingOutRef = useRef(false);
   const activeOperatorId = useRef<string>();
   const currentShopBindingId = useRef(shopBindingId);
   const currentConversationKey = useRef(context ? conversationKey(context) : '');
-  activeOperatorId.current = auth.operator?.id;
+  activeOperatorId.current = loggingOutRef.current ? undefined : auth.operator?.id;
   currentShopBindingId.current = shopBindingId;
   currentConversationKey.current = context ? conversationKey(context) : '';
 
@@ -130,6 +134,7 @@ function App() {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      if (activeAttempt.current) activeAttempt.current.cancellationReason = 'UNMOUNT';
       activeAttempt.current = null;
       activeProductPreview.current = null;
     };
@@ -156,7 +161,7 @@ function App() {
     && !pageShopMatchesBinding(context.shopDisplayName, selectedShop));
   const canRunAuthoritativePreflight = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
     && (form.phone.trim() || form.wechat.trim()) && selectedShop && contactConfirmed
-    && paidOrderRecognized && context.shopDisplayName?.trim());
+    && paidOrderRecognized && context.shopDisplayName?.trim() && !loggingOut);
   const canIntake = canRunAuthoritativePreflight
     && (productPreviewStatus === 'READY' || pageShopMismatch);
   const workflowLabel = useMemo(() => {
@@ -215,7 +220,7 @@ function App() {
     const orderNo = context?.platformOrderNo.trim() || '';
     const customerName = context?.customerDisplayName.trim() || '';
     const pageShopDisplayName = context?.shopDisplayName?.trim() || '';
-    if (!operatorId || !selectedShopId || !context?.supported || !orderNo || !customerName
+    if (loggingOut || !operatorId || !selectedShopId || !context?.supported || !orderNo || !customerName
       || !pageShopDisplayName || pageShopMismatch) {
       activeProductPreview.current = null;
       return;
@@ -286,9 +291,13 @@ function App() {
     context?.paymentAmount,
     context?.paymentAt,
     pageShopMismatch,
+    loggingOut,
   ]);
 
   const refreshContext = async () => {
+    if (loggingOutRef.current) return;
+    if (activeAttempt.current) activeAttempt.current.cancellationReason = 'SESSION_CHANGE';
+    activeAttempt.current = null;
     setError('');
     setNotice('');
     try {
@@ -297,8 +306,6 @@ function App() {
       const conversationChanged = context?.platformOrderNo !== result.context.platformOrderNo
         || context?.customerDisplayName !== result.context.customerDisplayName;
       const detectedHasContact = Boolean(result.detectedContact?.phone || result.detectedContact?.wechat);
-      const recognizedConversationKey = conversationKey(result.context);
-      if (activeAttempt.current?.conversationKey !== recognizedConversationKey) activeAttempt.current = null;
       activeProductPreview.current = null;
       dispatchPanel({ type: 'RECOGNIZE_CONTEXT', context: result.context, detectedContact: result.detectedContact });
       setRecognition({
@@ -364,6 +371,7 @@ function App() {
   }, []);
 
   const login = async () => {
+    if (loggingOutRef.current) return;
     setBusy(true); setError(''); setNotice('');
     try {
       const origin = permissionPattern(apiBaseUrl);
@@ -378,6 +386,7 @@ function App() {
         type: 'LOGIN', config, account, password,
       });
       if (result.code !== 0 || !result.data) throw new Error(result.message);
+      loggingOutRef.current = false;
       setAuth(result.data);
       setPassword('');
       setNotice(`已以${result.data.operator.name}登录`);
@@ -388,17 +397,35 @@ function App() {
   };
 
   const logout = async () => {
-    activeAttempt.current = null;
-    activeProductPreview.current = null;
+    if (loggingOutRef.current) return;
+    const operatorId = auth.operator?.id;
+    loggingOutRef.current = true;
     activeOperatorId.current = undefined;
-    await worker({ type: 'LOGOUT' });
-    setAuth((current) => ({ config: current.config }));
-    dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
-    setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
+    setLoggingOut(true);
+    if (activeAttempt.current) activeAttempt.current.cancellationReason = 'LOGOUT';
+    activeAttempt.current = null;
+    busyAttemptId.current = null;
+    setBusy(false);
+    activeProductPreview.current = null;
+    try {
+      await worker({ type: 'LOGOUT' });
+      setAuth((current) => ({ config: current.config }));
+      dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
+      setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
+      loggingOutRef.current = false;
+      setLoggingOut(false);
+    } catch (caught) {
+      loggingOutRef.current = false;
+      activeOperatorId.current = operatorId;
+      setLoggingOut(false);
+      setError(caught instanceof Error ? `退出失败：${caught.message}` : '退出失败，请重试');
+    }
   };
 
   const selectShop = async (nextShopBindingId: string) => {
+    if (loggingOutRef.current) return;
     setBusy(true); setError(''); setNotice('');
+    if (activeAttempt.current) activeAttempt.current.cancellationReason = 'SHOP_CHANGE';
     activeAttempt.current = null;
     activeProductPreview.current = null;
     try {
@@ -466,6 +493,7 @@ function App() {
   };
 
   const completeOrder = async () => {
+    if (loggingOutRef.current) return;
     const attempt = completionAttemptSnapshot(panel);
     const attemptShop = runtimeConfig?.shops.find((shop) => shop.id === attempt?.shopBindingId);
     const operatorId = auth.operator?.id;
@@ -475,18 +503,20 @@ function App() {
       platformOrderNo: attempt.expectedOrderNo,
       customerDisplayName: attempt.expectedCustomerDisplayName,
     });
-    activeAttempt.current = {
+    if (activeAttempt.current) activeAttempt.current.cancellationReason = 'SUPERSEDED';
+    const attemptToken = {
       id: attemptId,
       conversationKey: expectedConversationKey,
       operatorId,
       shopBindingId: attempt.shopBindingId,
+      cancellationReason: null,
     };
+    activeAttempt.current = attemptToken;
+    busyAttemptId.current = attemptId;
     const isAttemptActive = () => mounted.current
       && activeOperatorId.current === operatorId
-      && activeAttempt.current?.id === attemptId
-      && activeAttempt.current.conversationKey === expectedConversationKey
-      && activeAttempt.current.operatorId === operatorId
-      && activeAttempt.current.shopBindingId === attempt.shopBindingId
+      && activeAttempt.current === attemptToken
+      && attemptToken.cancellationReason === null
       && currentShopBindingId.current === attempt.shopBindingId
       && currentConversationKey.current === expectedConversationKey;
     const assertAttemptActive = () => {
@@ -578,7 +608,10 @@ function App() {
       });
       if (!isAttemptActive() || result.stage === 'ABORTED') return;
       const latestRecognition = latestRecognitionRef.value;
-      if (latestRecognition) {
+      const conversationChanged = Boolean(latestRecognition
+        && (attempt.expectedOrderNo !== latestRecognition.context.platformOrderNo
+          || attempt.expectedCustomerDisplayName !== latestRecognition.context.customerDisplayName));
+      if (latestRecognition && !conversationChanged) {
         dispatchPanel({
           type: 'RECOGNIZE_ATTEMPT_CONTEXT',
           attemptId,
@@ -586,27 +619,28 @@ function App() {
           context: latestRecognition.context,
           detectedContact: latestRecognition.detectedContact,
         });
-        const conversationChanged = attempt.expectedOrderNo !== latestRecognition.context.platformOrderNo
-          || attempt.expectedCustomerDisplayName !== latestRecognition.context.customerDisplayName;
         setRecognition({
           id: ++recognitionSequence.current,
           context: latestRecognition.context,
           hasContact: Boolean(latestRecognition.detectedContact?.phone || latestRecognition.detectedContact?.wechat)
             || (!conversationChanged && Boolean(form.phone.trim() || form.wechat.trim())),
         });
-        if (conversationChanged) activeAttempt.current = null;
       }
-      if (!isAttemptActive()) return;
       if (result.stage === 'COMPLETED') {
         const completedIntake = result.intakeResult;
         setNotice(`线索编号：${completedIntake?.lead.id || '未知'}；分配销售：${completedIntake?.lead.assignedTo || '暂未分配'}；订单备注、绿色旗帜均已验证`);
       } else if (result.message) setError(result.message);
+      if (activeAttempt.current === attemptToken) activeAttempt.current = null;
     } catch (caught) {
       if (isAttemptActive()) {
         setError(caught instanceof Error ? caught.message : '线索入库失败');
+        activeAttempt.current = null;
       }
     } finally {
-      if (mounted.current && (isAttemptActive() || !activeOperatorId.current)) setBusy(false);
+      if (busyAttemptId.current === attemptId) {
+        busyAttemptId.current = null;
+        if (mounted.current) setBusy(false);
+      }
     }
   };
 
@@ -638,15 +672,15 @@ function App() {
   </main>;
 
   return <main className="shell">
-    <header><span className="brand-mark">JX</span><div><h1>飞鸽客服副驾驶</h1><p>{auth.operator.name}·{workflowLabel}</p></div><button className="text-button" onClick={() => void logout()}>退出</button></header>
+    <header><span className="brand-mark">JX</span><div><h1>飞鸽客服副驾驶</h1><p>{auth.operator.name}·{workflowLabel}</p></div><button className="text-button" disabled={loggingOut} onClick={() => void logout()}>{loggingOut ? '正在退出…' : '退出'}</button></header>
     {feedbackDialog}
 
     <section className="card context-card">
-      <div className="section-title"><h2>当前会话</h2><button className="secondary compact" disabled={busy} onClick={() => void refreshContext()}>刷新识别</button></div>
+      <div className="section-title"><h2>当前会话</h2><button className="secondary compact" disabled={busy || loggingOut} onClick={() => void refreshContext()}>刷新识别</button></div>
       {runtimeConfig && runtimeConfig.shops.length > 1 ? <label>绑定店铺
         <select
           aria-label="绑定店铺"
-          disabled={busy || completionFormLocked}
+          disabled={busy || loggingOut || completionFormLocked}
           value={shopBindingId}
           onChange={(event) => void selectShop(event.target.value)}
         >
@@ -708,7 +742,7 @@ function App() {
       <label>微信号<input disabled={completionFormLocked} value={form.wechat} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'wechat', value: event.target.value })} placeholder="可选" /></label>
       <label className="confirm-row"><input disabled={completionFormLocked} type="checkbox" checked={contactConfirmed} onChange={(event) => dispatchPanel({ type: 'SET_CONTACT_CONFIRMED', value: event.target.checked })} /> 我已确认昵称和联系方式属于当前订单</label>
       {context && !paidOrderRecognized && <div className="alert warning">请先确认当前订单为已付款有效订单</div>}
-      <button data-action="complete-order" className="primary" disabled={busy || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '一键入OS并完成订单'}</button>
+      <button data-action="complete-order" className="primary" disabled={busy || loggingOut || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '一键入OS并完成订单'}</button>
     </section>
 
     {(completion || sync) && <section className="card result-card">
@@ -727,7 +761,7 @@ function App() {
       {remarkText && <pre className="remark-preview">{remarkText}</pre>}
       {completion?.stage === 'PLATFORM_FAILED' && sync && <div className="result-actions">
         <button className="secondary" onClick={() => void navigator.clipboard.writeText(remarkText)}>复制备注</button>
-        <button className="secondary" disabled={busy || !canIntake} onClick={() => void completeOrder()}>{busy ? '正在重试…' : '重试订单备注和绿旗'}</button>
+        <button className="secondary" disabled={busy || loggingOut || !canIntake} onClick={() => void completeOrder()}>{busy ? '正在重试…' : '重试订单备注和绿旗'}</button>
       </div>}
     </section>}
   </main>;
