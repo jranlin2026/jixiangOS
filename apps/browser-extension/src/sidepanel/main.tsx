@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import type {
   ApiEnvelope,
   AuthenticatedOperator,
+  CompleteOsOrderResult,
   ExtensionConfig,
   LeadIntakeResponse,
   WorkerCommand,
@@ -18,12 +19,26 @@ import {
   type ScriptLibraryView,
   type ScriptMatch,
 } from '../domain/scriptLibrary';
+import { isPaidOrderStatus } from '../domain/orderCompletion';
 import { ScriptLibraryEditor } from './ScriptLibraryEditor';
 import { ScriptLibrarySection } from './ScriptLibrarySection';
+import {
+  runOrderCompletion,
+  type OrderCompletionState,
+  type PlatformCompletionReport,
+} from './orderCompletionWorkflow';
 
 type AuthState = { config?: ExtensionConfig; operator?: AuthenticatedOperator };
 type ContactForm = { name: string; phone: string; wechat: string; source: 'CHAT' | 'OFF_PLATFORM' };
 type RecognitionSnapshot = { id: number; context: FeigePageContext; hasContact: boolean };
+
+function completionStatus(status: string) {
+  if (status === 'SUCCEEDED') return { className: 'success', label: '已完成' };
+  if (status === 'FAILED') return { className: 'error', label: '失败' };
+  if (status === 'IN_PROGRESS') return { className: 'warning', label: '处理中' };
+  if (status === 'SUBMITTED') return { className: 'warning', label: '已提交' };
+  return { className: 'warning', label: '待处理' };
+}
 
 async function worker<T>(message: WorkerCommand): Promise<ApiEnvelope<T>> {
   return withWorkerTimeout(chrome.runtime.sendMessage(message));
@@ -32,11 +47,6 @@ async function worker<T>(message: WorkerCommand): Promise<ApiEnvelope<T>> {
 function permissionPattern(apiBaseUrl: string) {
   const url = new URL(apiBaseUrl);
   return `${url.origin}/*`;
-}
-
-function orderRemarkText(form: ContactForm, result: LeadIntakeResponse, operator?: AuthenticatedOperator) {
-  const contact = form.phone ? form.phone : `微信：${form.wechat}`;
-  return `【极享OS已录入】客户：${form.name}；联系：${contact}；线索：${result.lead.id}；录入：${operator?.name || '-'}；`;
 }
 
 function App() {
@@ -52,8 +62,8 @@ function App() {
   const [context, setContext] = useState<FeigePageContext | null>(null);
   const [form, setForm] = useState<ContactForm>({ name: '', phone: '', wechat: '', source: 'CHAT' });
   const [sync, setSync] = useState<LeadIntakeResponse | null>(null);
+  const [completion, setCompletion] = useState<OrderCompletionState | null>(null);
   const [remarkText, setRemarkText] = useState('');
-  const [remarkMessage, setRemarkMessage] = useState('');
   const [contactConfirmed, setContactConfirmed] = useState(false);
   const [scriptView, setScriptView] = useState<ScriptLibraryView | null>(null);
   const [scriptLibraryError, setScriptLibraryError] = useState('');
@@ -67,16 +77,36 @@ function App() {
   const recognitionSequence = useRef(0);
   const evaluatedRecognition = useRef(0);
 
+  const paidOrderRecognized = Boolean(context && isPaidOrderStatus(context.orderStatus));
   const canIntake = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
-    && (form.phone.trim() || form.wechat.trim()) && shopKey.trim() && contactConfirmed);
+    && (form.phone.trim() || form.wechat.trim()) && shopKey.trim() && contactConfirmed
+    && paidOrderRecognized);
   const workflowLabel = useMemo(() => {
-    if (sync) return sync.orderRemarkStatus === 'SUCCEEDED' ? '已完成' : '线索已入库，待备注';
+    if (completion?.stage === 'COMPLETED') return '订单闭环已完成';
+    if (sync) return '线索已入库，待完成订单';
     if (form.phone || form.wechat) return '联系方式待确认';
     return '等待联系方式';
-  }, [form.phone, form.wechat, sync]);
+  }, [completion?.stage, form.phone, form.wechat, sync]);
+
+  const applyCompletionState = (state: OrderCompletionState) => {
+    setCompletion(state);
+    if (!state.intakeResult) return;
+    const orderRemarkStatus = state.orderRemarkStatus === 'IN_PROGRESS'
+      ? state.intakeResult.orderRemarkStatus
+      : state.orderRemarkStatus;
+    const greenFlagStatus = state.greenFlagStatus === 'IN_PROGRESS'
+      ? state.intakeResult.greenFlagStatus
+      : state.greenFlagStatus;
+    setSync({ ...state.intakeResult, orderRemarkStatus, greenFlagStatus });
+  };
   useEffect(() => {
     if (!recognition || !scriptView || evaluatedRecognition.current === recognition.id) return;
     evaluatedRecognition.current = recognition.id;
+    if (!isPaidOrderStatus(recognition.context.orderStatus)) {
+      setRecommendation(null);
+      setRecommendationMessage('请先确认当前订单为已付款有效订单');
+      return;
+    }
     const nextRecommendation = matchScript(scriptView.library, {
       orderStatus: recognition.context.orderStatus,
       productName: recognition.context.productName,
@@ -129,7 +159,7 @@ function App() {
       });
       if (conversationChanged) {
         setContactConfirmed(false);
-        setSync(null); setRemarkText(''); setRemarkMessage('');
+        setSync(null); setCompletion(null); setRemarkText('');
         setForm({
           name: result.context.customerDisplayName,
           phone: result.detectedContact?.phone || '',
@@ -205,7 +235,7 @@ function App() {
   const logout = async () => {
     await worker({ type: 'LOGOUT' });
     setAuth((current) => ({ config: current.config }));
-    setContext(null); setSync(null); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
+    setContext(null); setSync(null); setCompletion(null); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
     setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
   };
 
@@ -256,66 +286,47 @@ function App() {
     } finally { setSavingScripts(false); }
   };
 
-  const reportRemark = async (result: LeadIntakeResponse, text: string, expectedOrderNo: string) => {
-    try {
-      const current = await activeTabCommand({ type: 'READ_FEIGE_CONTEXT' });
-      if (!('context' in current) || !current.context.supported
-        || current.context.platformOrderNo !== expectedOrderNo) {
-        throw new Error('当前飞鸽会话已切换，已停止写入订单备注');
-      }
-      const pageResult = await activeTabCommand({ type: 'SAVE_ORDER_REMARK', text });
-      const status = pageResult.ok ? 'SUBMITTED' : 'FAILED';
-      const reported = await worker<{ syncId: string; orderRemarkStatus: LeadIntakeResponse['orderRemarkStatus'] }>({
-        type: 'REPORT_ORDER_REMARK', syncId: result.syncId, status,
-        ...(!pageResult.ok ? { errorMessage: pageResult.message } : {}),
-      });
-      if (reported.code !== 0) throw new Error(reported.message);
-      setSync({ ...result, orderRemarkStatus: status });
-      setRemarkMessage(pageResult.ok
-        ? '已点击平台保存，等待真实飞鸽页面校准成功信号；请客服目视确认'
-        : `${pageResult.message}，可复制下方备注手工处理`);
-    } catch (caught) {
-      const message = caught instanceof Error ? caught.message : '订单备注失败';
-      await worker({ type: 'REPORT_ORDER_REMARK', syncId: result.syncId, status: 'FAILED', errorMessage: message });
-      setSync({ ...result, orderRemarkStatus: 'FAILED' });
-      setRemarkMessage(`${message}，可复制下方备注手工处理`);
-    }
-  };
-
-  const intake = async () => {
+  const completeOrder = async (existingIntake?: LeadIntakeResponse) => {
     if (!context || !canIntake) return;
-    setBusy(true); setError(''); setNotice(''); setRemarkMessage('');
+    setBusy(true); setError(''); setNotice('');
     try {
-      const latest = await activeTabCommand({ type: 'READ_FEIGE_CONTEXT' });
-      if (!('context' in latest) || !latest.context.supported
-        || latest.context.platformOrderNo !== context.platformOrderNo) {
-        setContactConfirmed(false);
-        setSync(null);
-        throw new Error('当前飞鸽会话已切换，请刷新识别并重新确认客户资料');
-      }
-      setContext(latest.context);
-      const result = await worker<LeadIntakeResponse>({
-        type: 'CREATE_LEAD_INTAKE',
-        input: {
+      const result = await runOrderCompletion({
+        expectedOrderNo: context.platformOrderNo,
+        expectedCustomerDisplayName: context.customerDisplayName,
+        phone: form.phone.trim() || undefined,
+        wechat: form.wechat.trim() || undefined,
+        existingIntake,
+        intakeInput: {
           platform: 'DOUYIN', shopKey: shopKey.trim(), platformOrderNo: context.platformOrderNo,
           contactName: form.name.trim(), contactPhone: form.phone.trim() || undefined,
           contactWechat: form.wechat.trim() || undefined, contactSource: form.source,
           sourceProductName: context.productName || undefined,
         },
+      }, {
+        readContext: async () => {
+          const latest = await activeTabCommand({ type: 'READ_FEIGE_CONTEXT' });
+          if (!('context' in latest)) throw new Error('当前页面未返回飞鸽会话信息');
+          setContext(latest.context);
+          return latest.context;
+        },
+        intake: (input) => worker<LeadIntakeResponse>({ type: 'CREATE_LEAD_INTAKE', input }),
+        completePage: async (input) => {
+          const completed = await activeTabCommand({ type: 'COMPLETE_FEIGE_OS_ORDER', input });
+          if (!('stage' in completed) && !('remarkStatus' in completed)) {
+            throw new Error('当前页面未返回订单闭环结果');
+          }
+          return completed as CompleteOsOrderResult;
+        },
+        report: (input) => worker<PlatformCompletionReport>({ type: 'REPORT_PLATFORM_COMPLETION', ...input }),
+        onState: applyCompletionState,
       });
-      if (result.code !== 0 || !result.data) throw new Error(result.message);
-      setSync(result.data);
-      const text = orderRemarkText(form, result.data, auth.operator);
-      setRemarkText(text);
-      setNotice(result.data.outcome === 'CREATED'
-        ? `线索已入库，销售：${result.data.lead.assignedTo || '待分配'}`
-        : '该订单已入库，本次没有重复创建线索');
-      if (result.data.outcome === 'CREATED') {
-        await reportRemark(result.data, text, context.platformOrderNo);
-      } else {
-        setRemarkText('');
-        setRemarkMessage('为避免覆盖原客户资料，重复入库不会再次改写平台订单备注');
-      }
+      applyCompletionState(result);
+      if (result.remarkText) setRemarkText(result.remarkText);
+      if (result.stage === 'COMPLETED') {
+        setNotice(result.intakeResult?.outcome === 'ALREADY_CREATED'
+          ? '该订单已入库，备注和绿色旗帜已完成'
+          : `订单已完成，销售：${result.intakeResult?.lead.assignedTo || '待分配'}`);
+      } else if (result.message) setError(result.message);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '线索入库失败');
     } finally { setBusy(false); }
@@ -376,18 +387,33 @@ function App() {
     <section className="card">
       <div className="section-title"><h2>联系方式</h2><span className={`status ${form.phone || form.wechat ? 'ready' : ''}`}>{form.phone || form.wechat ? '已获取' : '待获取'}</span></div>
       <div className="source-switch"><button className={form.source === 'CHAT' ? 'active' : ''} onClick={() => { setForm({ ...form, source: 'CHAT' }); setContactConfirmed(false); }}>客户聊天提供</button><button className={form.source === 'OFF_PLATFORM' ? 'active' : ''} onClick={() => { setForm({ ...form, source: 'OFF_PLATFORM' }); setContactConfirmed(false); }}>站外已获取</button></div>
-      <label>客户姓名<input value={form.name} onChange={(event) => { setForm({ ...form, name: event.target.value }); setContactConfirmed(false); }} placeholder="请客服确认真实姓名" /></label>
+      <label>抖音昵称<input value={form.name} readOnly placeholder="请先刷新识别当前客户" /></label>
       <label>手机号<input value={form.phone} onChange={(event) => { setForm({ ...form, phone: event.target.value }); setContactConfirmed(false); }} placeholder="手机号和微信至少填一项" /></label>
       <label>微信号<input value={form.wechat} onChange={(event) => { setForm({ ...form, wechat: event.target.value }); setContactConfirmed(false); }} placeholder="可选" /></label>
-      <label className="confirm-row"><input type="checkbox" checked={contactConfirmed} onChange={(event) => setContactConfirmed(event.target.checked)} /> 我已确认姓名和联系方式属于当前订单</label>
-      <button className="primary" disabled={busy || !canIntake || Boolean(sync)} onClick={() => void intake()}>{busy ? '正在入库…' : sync ? '线索已入库' : '一键完成入库'}</button>
+      <label className="confirm-row"><input type="checkbox" checked={contactConfirmed} onChange={(event) => setContactConfirmed(event.target.checked)} /> 我已确认昵称和联系方式属于当前订单</label>
+      {context && !paidOrderRecognized && <div className="alert warning">请先确认当前订单为已付款有效订单</div>}
+      <button className="primary" disabled={busy || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '一键入OS并完成订单'}</button>
     </section>
 
-    {sync && <section className="card result-card">
+    {(completion || sync) && <section className="card result-card">
       <h2>处理结果</h2>
-      <div className="facts"><div><span>线索编号</span><strong>{sync.lead.id}</strong></div><div><span>分配销售</span><strong>{sync.lead.assignedTo || '待分配'}</strong></div><div><span>订单备注</span><strong>{sync.orderRemarkStatus === 'SUCCEEDED' ? '已确认保存' : sync.orderRemarkStatus === 'SUBMITTED' ? '已提交待确认' : '待人工确认'}</strong></div></div>
-      {remarkMessage && <div className={`alert ${sync.orderRemarkStatus === 'SUCCEEDED' ? 'success' : 'warning'}`}>{remarkMessage}</div>}
-      {remarkText && <><pre className="remark-preview">{remarkText}</pre><div className="result-actions"><button className="secondary" onClick={() => void navigator.clipboard.writeText(remarkText)}>复制备注</button>{sync.orderRemarkStatus !== 'SUCCEEDED' && context?.platformOrderNo && <button className="secondary" onClick={() => void reportRemark(sync, remarkText, context.platformOrderNo)}>重试写入</button>}</div></>}
+      {sync && <div className="facts"><div><span>线索编号</span><strong>{sync.lead.id}</strong></div><div><span>分配销售</span><strong>{sync.lead.assignedTo || '待分配'}</strong></div></div>}
+      <div className="completion-steps">
+        {([
+          ['极享OS入库', completion?.osStatus || (sync ? 'SUCCEEDED' : 'NOT_ATTEMPTED')],
+          ['订单备注', completion?.orderRemarkStatus || sync?.orderRemarkStatus || 'NOT_ATTEMPTED'],
+          ['绿色旗帜', completion?.greenFlagStatus || sync?.greenFlagStatus || 'NOT_ATTEMPTED'],
+        ] as const).map(([label, status]) => {
+          const presentation = completionStatus(status);
+          return <div key={label}><span>{label}</span><strong className={`status ${presentation.className}`}>{presentation.label}</strong></div>;
+        })}
+      </div>
+      {completion?.stage === 'PLATFORM_FAILED' && completion.message && <div className="alert warning">{completion.message}，可重试或复制备注手工处理</div>}
+      {remarkText && <pre className="remark-preview">{remarkText}</pre>}
+      {completion?.stage === 'PLATFORM_FAILED' && sync && <div className="result-actions">
+        <button className="secondary" onClick={() => void navigator.clipboard.writeText(remarkText)}>复制备注</button>
+        <button className="secondary" disabled={busy || !canIntake} onClick={() => void completeOrder(sync)}>{busy ? '正在重试…' : '重试订单备注和绿旗'}</button>
+      </div>}
     </section>}
   </main>;
 }
