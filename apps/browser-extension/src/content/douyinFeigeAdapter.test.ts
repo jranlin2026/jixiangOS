@@ -5,8 +5,10 @@ import { createDouyinFeigeAdapter } from './douyinFeigeAdapter';
 const dom = new JSDOM(`<!doctype html><html><body>
   <section data-jx-feige-conversation>
     <div data-jx-customer-name>张先生</div>
-    <div data-jx-order-no>DY-20260808-001</div>
-    <div data-jx-order-status>已付款</div>
+    <section data-testid="order-card">
+      <div data-jx-order-no>DY-20260808-001</div>
+      <div data-jx-order-status>已付款</div>
+    </section>
     <div data-jx-product-name>AI口播智能体</div>
     <div data-jx-message data-direction="OUTBOUND">老师您好，请留下联系方式。</div>
     <div data-jx-message data-direction="INBOUND">我姓张，13800138000</div>
@@ -94,12 +96,145 @@ assert.deepEqual(realAdapter.appendReply('新话术', {
 }), { ok: true });
 assert.equal(reply.value, '已有内容\n新话术');
 
+const staleDocumentContextDom = new JSDOM(`<!doctype html><html><body>
+  <main data-jx-feige-conversation><span data-jx-customer-name>悠然一刻</span></main>
+  <aside>
+    <span data-jx-order-no>STALE-ORDER</span>
+    <span data-jx-order-status>已付款</span>
+  </aside>
+  <section data-testid="order-card" hidden>
+    <span data-testid="order-no">COLLAPSED-ORDER</span>
+    <span data-testid="order-status">已付款</span>
+  </section>
+  <section data-testid="order-card">
+    <span data-testid="order-no">ACTIVE-ORDER</span>
+    <span data-testid="order-status">待付款</span>
+  </section>
+</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+const staleDocumentContext = createDouyinFeigeAdapter(
+  staleDocumentContextDom.window.document,
+  staleDocumentContextDom.window.location.href,
+).readContext();
+assert.equal(staleDocumentContext.platformOrderNo, 'ACTIVE-ORDER', '订单号必须来自唯一可见活动订单卡');
+assert.equal(staleDocumentContext.orderStatus, '待付款', '订单状态必须与订单号来自同一张卡');
+
+const ambiguousContextDom = new JSDOM(`<!doctype html><html><body>
+  <main data-jx-feige-conversation><span data-jx-customer-name>悠然一刻</span></main>
+  <section data-testid="order-card"><span data-testid="order-no">ORDER-A</span><span data-testid="order-status">已付款</span></section>
+  <section data-testid="order-card"><span data-testid="order-no">ORDER-B</span><span data-testid="order-status">已付款</span></section>
+</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+const ambiguousContext = createDouyinFeigeAdapter(
+  ambiguousContextDom.window.document,
+  ambiguousContextDom.window.location.href,
+).readContext();
+assert.equal(ambiguousContext.platformOrderNo, '', '多张可见活动订单卡时必须停止识别');
+assert.equal(ambiguousContext.orderStatus, '', '卡片歧义时不得从文档其他位置拼凑状态');
+
+function createUnsafeOrderBindingFixture(cards: string, staleDocumentMarkup = '') {
+  const fixture = new JSDOM(`<!doctype html><html><body>
+    <main data-jx-feige-conversation><span data-jx-customer-name>悠然一刻</span></main>
+    ${staleDocumentMarkup}
+    ${cards}
+    <div role="dialog" aria-label="添加备注" hidden>
+      <div>订单标记</div>
+      <button aria-label="绿色旗帜" data-flag-color="green"></button>
+      <textarea data-testid="order-remark-input"></textarea>
+      <button data-testid="order-remark-save">保存</button>
+    </div>
+  </body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+  const document = fixture.window.document;
+  const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
+  const input = document.querySelector('[data-testid="order-remark-input"]') as HTMLTextAreaElement;
+  let editClicks = 0;
+  let greenClicks = 0;
+  let saveClicks = 0;
+  document.querySelectorAll('[data-testid="edit-order-remark"]').forEach((edit) => {
+    edit.addEventListener('click', () => {
+      editClicks += 1;
+      const card = edit.closest('[data-testid="order-card"]') as HTMLElement;
+      input.value = (card.querySelector('[data-testid="order-remark-summary"]') as HTMLElement).textContent || '';
+      dialog.hidden = false;
+    });
+  });
+  document.querySelector('[data-flag-color="green"]')?.addEventListener('click', () => { greenClicks += 1; });
+  document.querySelector('[data-testid="order-remark-save"]')?.addEventListener('click', () => { saveClicks += 1; });
+  return {
+    adapter: createDouyinFeigeAdapter(document, fixture.window.location.href),
+    getEditClicks: () => editClicks,
+    getGreenClicks: () => greenClicks,
+    getSaveClicks: () => saveClicks,
+  };
+}
+
+const collapsedStaleFixture = createUnsafeOrderBindingFixture(`
+  <section data-testid="order-card" hidden>
+    <span data-testid="order-no">STALE-ORDER</span><span data-testid="order-status">已付款</span>
+    <button data-testid="edit-order-remark">修改</button><div data-testid="order-remark-summary">旧备注</div>
+    <span data-current-flag="red"></span>
+  </section>
+  <section data-testid="order-card">
+    <span data-testid="order-no">ACTIVE-ORDER</span><span data-testid="order-status">待付款</span>
+    <button data-testid="edit-order-remark">修改</button><div data-testid="order-remark-summary">当前备注</div>
+    <span data-current-flag="red"></span>
+  </section>
+`, '<span data-jx-order-no>STALE-ORDER</span><span data-jx-order-status>已付款</span>');
+const collapsedStaleResult = await collapsedStaleFixture.adapter.completeOsOrder({
+  expectedOrderNo: 'STALE-ORDER',
+  expectedCustomerDisplayName: '悠然一刻',
+  phone: '13826459812',
+});
+assert.equal(collapsedStaleResult.ok, false, '文档旧值和折叠卡片不得通过活动订单校验');
+assert.equal(collapsedStaleFixture.getEditClicks(), 0, '折叠或非当前订单的编辑入口不得点击');
+assert.equal(collapsedStaleFixture.getGreenClicks(), 0);
+assert.equal(collapsedStaleFixture.getSaveClicks(), 0);
+
+const ambiguousCardsFixture = createUnsafeOrderBindingFixture(`
+  <section data-testid="order-card">
+    <span data-testid="order-no">ORDER-A</span><span data-testid="order-status">已付款</span>
+    <button data-testid="edit-order-remark">修改</button><div data-testid="order-remark-summary">A</div><span data-current-flag="red"></span>
+  </section>
+  <section data-testid="order-card">
+    <span data-testid="order-no">ORDER-B</span><span data-testid="order-status">已付款</span>
+    <button data-testid="edit-order-remark">修改</button><div data-testid="order-remark-summary">B</div><span data-current-flag="red"></span>
+  </section>
+`);
+const ambiguousCardsResult = await ambiguousCardsFixture.adapter.completeOsOrder({
+  expectedOrderNo: 'ORDER-A',
+  expectedCustomerDisplayName: '悠然一刻',
+  phone: '13826459812',
+});
+assert.equal(ambiguousCardsResult.ok, false, '多张可见活动订单卡必须失败关闭');
+assert.equal(ambiguousCardsFixture.getEditClicks(), 0, '订单卡有歧义时不得点击任何编辑入口');
+assert.equal(ambiguousCardsFixture.getGreenClicks(), 0);
+assert.equal(ambiguousCardsFixture.getSaveClicks(), 0);
+
+const mixedSemanticCardsFixture = createUnsafeOrderBindingFixture(`
+  <section data-testid="order-card">
+    <span data-testid="order-no">ORDER-A</span><span data-testid="order-status">已付款</span>
+    <button data-testid="edit-order-remark">修改</button><div data-testid="order-remark-summary">A</div><span data-current-flag="red"></span>
+  </section>
+  <section role="button" aria-expanded="true">
+    <span data-testid="order-no">ORDER-B</span><span data-testid="order-status">已付款</span>
+    <button>修改</button><div data-testid="order-remark-summary">B</div><span data-current-flag="red"></span>
+  </section>
+`);
+const mixedSemanticCardsResult = await mixedSemanticCardsFixture.adapter.completeOsOrder({
+  expectedOrderNo: 'ORDER-A',
+  expectedCustomerDisplayName: '悠然一刻',
+  phone: '13826459812',
+});
+assert.equal(mixedSemanticCardsResult.ok, false, '不同语义选择器各命中一张可见卡时仍属歧义');
+assert.equal(mixedSemanticCardsFixture.getEditClicks(), 0, '订单卡语义混合歧义时不得点击');
+assert.equal(mixedSemanticCardsFixture.getGreenClicks(), 0);
+assert.equal(mixedSemanticCardsFixture.getSaveClicks(), 0);
+
 const completionDom = new JSDOM(`<!doctype html><html><body>
   <main data-jx-feige-conversation>
     <span data-jx-customer-name>悠然一刻</span>
   </main>
   <section data-testid="order-card">
     <span data-testid="order-no">6925095897028853458</span>
+    <span data-testid="order-status">已付款</span>
     <button data-testid="edit-order-remark">修改</button>
     <div data-testid="order-remark-summary">#入EC\n#销售：小王</div>
     <span data-testid="current-order-flag" data-current-flag="red"></span>
@@ -171,6 +306,7 @@ function createIncompleteCompletionFixture(options: { green: boolean; save: bool
     <main data-jx-feige-conversation><span data-jx-customer-name>悠然一刻</span></main>
     <section data-testid="order-card">
       <span data-testid="order-no">6925095897028853458</span>
+      <span data-testid="order-status">已付款</span>
       <button data-testid="edit-order-remark">修改</button>
       <div data-testid="order-remark-summary">#入EC\n#销售：小王</div>
       <span data-testid="current-order-flag" data-current-flag="red"></span>
@@ -247,6 +383,7 @@ function createGuardBoundaryFixture(options: {
     <main data-jx-feige-conversation><span data-jx-customer-name>悠然一刻</span></main>
     <section data-testid="order-card">
       <span data-testid="order-no">6925095897028853458</span>
+      <span data-testid="order-status">已付款</span>
       <button data-testid="edit-order-remark">修改</button>
       <div data-testid="order-remark-summary">${options.existingRemark ?? '#入EC\n#销售：小王'}</div>
       <span data-testid="current-order-flag" data-current-flag="red"></span>
@@ -325,6 +462,21 @@ assert.equal(changeContextSwitchResult.ok, false);
 assert.equal(changeContextSwitchResult.ok ? '' : changeContextSwitchResult.code, 'CONTEXT_CHANGED');
 assert.equal(changeContextSwitchFixture.getGreenClicks(), 0, '`change` 事件切换订单后不得点击绿旗');
 assert.equal(changeContextSwitchFixture.getSaveClicks(), 0, '`change` 事件切换订单后不得保存');
+
+const replacedCardFixture = createGuardBoundaryFixture({
+  onInput(document) {
+    const card = document.querySelector('[data-testid="order-card"]') as HTMLElement;
+    card.replaceWith(card.cloneNode(true));
+  },
+});
+const replacedCardResult = await replacedCardFixture.adapter.completeOsOrder({
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  phone: '13826459812',
+});
+assert.equal(replacedCardResult.ok, false, '内容相同的新卡片也不得替代本次操作已绑定的 DOM 卡片');
+assert.equal(replacedCardFixture.getGreenClicks(), 0, '已绑定卡片被替换后不得点击绿旗');
+assert.equal(replacedCardFixture.getSaveClicks(), 0, '已绑定卡片被替换后不得保存');
 
 const greenContextSwitchFixture = createGuardBoundaryFixture({
   onGreenClick(document) {
@@ -585,11 +737,11 @@ const calibratedMissingGreenResult = await calibratedPaidOrderFixture.adapter.co
 assert.equal(calibratedMissingGreenResult.ok, false);
 assert.equal(
   calibratedMissingGreenResult.ok ? '' : calibratedMissingGreenResult.code,
-  'GREEN_FLAG_NOT_FOUND',
-  '真实抽屉的无标签数字 radio 不得被按下标或 value 猜测为绿旗',
+  'CONTEXT_NOT_VERIFIED',
+  '真实卡片未校准订单状态时必须在打开抽屉前失败关闭',
 );
-assert.equal(calibratedPaidOrderFixture.getEditClicks(), 1, '应通过展开订单卡片内的“修改”打开抽屉');
-assert.equal(calibratedPaidOrderFixture.input.value, '#悠然一刻/13826459812\n#入EC\n#直接退群');
+assert.equal(calibratedPaidOrderFixture.getEditClicks(), 0, '订单状态未知时不得打开备注抽屉');
+assert.equal(calibratedPaidOrderFixture.input.value, '');
 assert.equal(calibratedPaidOrderFixture.getConfirmClicks(), 0, '绿旗语义缺失时不得点击“确定”');
 
 const calibratedMissingConfirmFixture = createCalibratedPaidOrderFixture({ includeConfirm: false });
@@ -601,10 +753,10 @@ const calibratedMissingConfirmResult = await calibratedMissingConfirmFixture.ada
 assert.equal(calibratedMissingConfirmResult.ok, false);
 assert.equal(
   calibratedMissingConfirmResult.ok ? '' : calibratedMissingConfirmResult.code,
-  'ORDER_REMARK_SAVE_NOT_FOUND',
-  '去掉真实“确定”文案后必须区分为提交控件缺失',
+  'CONTEXT_NOT_VERIFIED',
+  '订单状态未知时必须先于提交控件检查停止',
 );
 assert.equal(calibratedMissingConfirmFixture.getConfirmClicks(), 0);
-assert.equal(calibratedMissingConfirmFixture.input.value, '#悠然一刻/13826459812\n#入EC\n#直接退群');
+assert.equal(calibratedMissingConfirmFixture.input.value, '');
 
 console.log('douyin feige page adapter: ok');

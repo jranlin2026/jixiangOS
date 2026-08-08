@@ -78,6 +78,8 @@ const service = createBrowserLeadIntakeService({
       data: {
         id: 'lead-1',
         name: input.name,
+        phone: input.phone,
+        wechat: input.wechat,
         assignedTo: '销售小王',
         assignedToId: 'sales-1',
         intakeStatus: '入库成功',
@@ -94,6 +96,7 @@ const input = {
   contactName: '张先生',
   contactSource: 'CHAT' as const,
   contactPhone: '13800138000',
+  contactWechat: 'wx_original_88',
   sourceProductName: 'AI口播智能体',
 };
 
@@ -111,7 +114,7 @@ assert.deepEqual(createLeadCalls[0].input, {
   name: '张先生',
   phone: '13800138000',
   phones: [{ number: '13800138000', isPrimary: true, label: '主手机号' }],
-  wechat: undefined,
+  wechat: 'wx_original_88',
   source: '抖音电商',
   sourceName: '飞鸽客服',
   sourceType: '公司资源',
@@ -127,12 +130,18 @@ const duplicate = await service.intake({
   ...input,
   shopKey: ` ${input.shopKey} `,
   platformOrderNo: ` ${input.platformOrderNo} `,
-  contactName: ` ${input.contactName} `,
-  contactPhone: ` ${input.contactPhone} `,
+  contactName: ' 另一个昵称 ',
+  contactPhone: ' 13900139000 ',
+  contactWechat: ' wx_other_99 ',
 }, actor);
 assert.equal(duplicate.code, 0);
 assert.equal(duplicate.data?.outcome, 'ALREADY_CREATED');
 assert.equal(duplicate.data?.lead.id, 'lead-1');
+assert.deepEqual(duplicate.data?.storedContact, {
+  nickname: '张先生',
+  phone: '13800138000',
+  wechat: 'wx_original_88',
+}, '重复入库必须返回已关联线索的实际联系快照，不得回显本次提交的分歧资料');
 assert.equal(createLeadCalls.length, 1, '重复点击不能再创建线索');
 assert.equal(records.size, 1, '业务幂等键必须先规范化再持久化');
 

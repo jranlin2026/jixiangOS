@@ -59,8 +59,12 @@ const delegate = {
 };
 
 const leadDelegate = {
-  async findUnique() {
-    return leadRow;
+  async findUnique({ where }: any) {
+    if (where.externalIntakeKey) {
+      return leadRow?.externalIntakeKey === where.externalIntakeKey ? leadRow : null;
+    }
+    if (where.id) return leadRow?.id === where.id ? leadRow : null;
+    return null;
   },
 };
 
@@ -95,7 +99,10 @@ row = {
 };
 leadRow = {
   id: 'lead-recovered',
-  name: '恢复客户',
+  externalIntakeKey: 'browser-sync-recovery',
+  name: ' 恢复客户 ',
+  phone: ' 13800138000 ',
+  wechat: ' wx_recovered_88 ',
   assignedTo: '销售小王',
   data: { name: '恢复客户', assignedTo: '销售小王', assignedToId: 'sales-1', intakeStatus: '入库成功' },
 };
@@ -103,6 +110,35 @@ const reconciled = await repository.reserve(reservationInput);
 assert.equal(reconciled.acquired, false);
 assert.equal(reconciled.record.status, 'SUCCEEDED');
 assert.equal(reconciled.record.leadId, 'lead-recovered', '线索已提交但同步状态未更新时必须自动对账恢复');
+assert.deepEqual(reconciled.record.storedContact, {
+  nickname: '恢复客户',
+  phone: '13800138000',
+  wechat: 'wx_recovered_88',
+});
+
+row = {
+  ...row,
+  id: 'browser-sync-legacy',
+  status: 'SUCCEEDED',
+  leadId: 'lead-legacy',
+  leadName: '旧同步姓名',
+  updatedAt: new Date(),
+};
+leadRow = {
+  id: 'lead-legacy',
+  externalIntakeKey: null,
+  name: ' 旧线索昵称 ',
+  phone: null,
+  wechat: null,
+  data: { name: ' 旧线索昵称 ', phone: '', wechat: ' wx_legacy_66 ' },
+};
+const legacyDuplicate = await repository.reserve(reservationInput);
+assert.equal(legacyDuplicate.acquired, false);
+assert.deepEqual(legacyDuplicate.record.storedContact, {
+  nickname: '旧线索昵称',
+  phone: undefined,
+  wechat: 'wx_legacy_66',
+}, '旧同步记录必须通过 leadId 回查线索快照');
 
 leadRow = null;
 row = {

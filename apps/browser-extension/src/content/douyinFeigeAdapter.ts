@@ -1,5 +1,5 @@
 import type { BrowserChatMessage } from '../domain/contactDetection';
-import { mergeOsOrderRemark } from '../domain/orderCompletion';
+import { isPaidOrderStatus, mergeOsOrderRemark } from '../domain/orderCompletion';
 import type { CompleteOsOrderInput, CompleteOsOrderResult } from '../shared/contracts';
 
 export type FeigePageContext = {
@@ -81,17 +81,6 @@ function orderNoFromElement(root: ParentNode) {
   return unique.length === 1 ? unique[0] : '';
 }
 
-function currentOrderNo(document: Document) {
-  const explicit = text(document, selectors.orderNo);
-  if (explicit) return explicit;
-  const candidates = all(document, selectors.orderCard)
-    .filter(isVisible)
-    .map(orderNoFromElement)
-    .filter(Boolean);
-  const unique = [...new Set(candidates)];
-  return unique.length === 1 ? unique[0] : '';
-}
-
 function isVisible(element: HTMLElement | null): element is HTMLElement {
   if (!element) return false;
   let current: HTMLElement | null = element;
@@ -102,6 +91,22 @@ function isVisible(element: HTMLElement | null): element is HTMLElement {
     current = current.parentElement;
   }
   return true;
+}
+
+function visibleActiveOrderCards(document: Document) {
+  const visible = uniqueMatches(document, selectors.orderCard).filter(isVisible);
+  return visible.filter((candidate) => !visible.some((other) => (
+    other !== candidate && other.contains(candidate)
+  )));
+}
+
+function uniqueActiveOrderCard(document: Document) {
+  const cards = visibleActiveOrderCards(document);
+  return cards.length === 1 ? cards[0] : null;
+}
+
+function orderStatusFromElement(root: ParentNode) {
+  return text(root, selectors.orderStatus);
 }
 
 function isEnabled(element: HTMLElement) {
@@ -274,8 +279,9 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       if (!root) diagnostics.push('未找到飞鸽会话区域');
       const scope: ParentNode = root || document;
       const customerDisplayName = text(scope, selectors.customer);
-      const platformOrderNo = currentOrderNo(document);
-      const orderStatus = text(document, selectors.orderStatus);
+      const activeOrderCard = uniqueActiveOrderCard(document);
+      const platformOrderNo = activeOrderCard ? orderNoFromElement(activeOrderCard) : '';
+      const orderStatus = activeOrderCard ? orderStatusFromElement(activeOrderCard) : '';
       const productName = consultationProductName(document);
       const messages = all(scope, selectors.message)
         .map((element) => ({ direction: direction(element), text: element.textContent?.trim() || '' }))
@@ -357,14 +363,8 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
     async completeOsOrder(input: CompleteOsOrderInput): Promise<CompleteOsOrderResult> {
       const expectedOrderNo = input.expectedOrderNo.trim();
       const expectedCustomer = input.expectedCustomerDisplayName.trim();
-      const readCurrentContext = () => ({
-        orderNo: currentOrderNo(document),
-        customer: text(first(document, selectors.root) || document, selectors.customer),
-      });
-      const findExpectedOrderCard = () => all(document, selectors.orderCard)
-        .find((card) => orderNoFromElement(card) === expectedOrderNo) || null;
-      const current = readCurrentContext();
-      if (!expectedOrderNo || !expectedCustomer || !current.orderNo || !current.customer) {
+      const currentCustomer = () => text(first(document, selectors.root) || document, selectors.customer);
+      if (!expectedOrderNo || !expectedCustomer || !currentCustomer()) {
         return {
           ok: false,
           code: 'CONTEXT_NOT_VERIFIED',
@@ -372,7 +372,30 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           stage: 'CONTEXT',
         };
       }
-      if (current.orderNo !== expectedOrderNo || current.customer !== expectedCustomer) {
+
+      const activeCards = visibleActiveOrderCards(document);
+      if (activeCards.length !== 1) {
+        return {
+          ok: false,
+          code: activeCards.length ? 'ACTIVE_ORDER_CARD_AMBIGUOUS' : 'ORDER_CARD_NOT_FOUND',
+          message: activeCards.length
+            ? '当前存在多张可见活动订单卡，未修改订单'
+            : '未找到唯一可见活动订单卡',
+          stage: 'CONTEXT',
+        };
+      }
+      const orderCard = activeCards[0];
+      const initialOrderNo = orderNoFromElement(orderCard);
+      const initialOrderStatus = orderStatusFromElement(orderCard);
+      if (!initialOrderNo || !initialOrderStatus) {
+        return {
+          ok: false,
+          code: 'CONTEXT_NOT_VERIFIED',
+          message: '当前活动订单卡的订单号或订单状态无法校验，未修改订单',
+          stage: 'CONTEXT',
+        };
+      }
+      if (initialOrderNo !== expectedOrderNo || currentCustomer() !== expectedCustomer) {
         return {
           ok: false,
           code: 'CONTEXT_CHANGED',
@@ -380,16 +403,24 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           stage: 'CONTEXT',
         };
       }
-
-      let orderCard = findExpectedOrderCard();
-      if (!orderCard) {
+      if (!isPaidOrderStatus(initialOrderStatus)) {
         return {
           ok: false,
-          code: 'ORDER_CARD_NOT_FOUND',
-          message: '未找到与当前订单号匹配的订单卡片',
+          code: 'ORDER_STATUS_NOT_PAID',
+          message: '当前活动订单不是已付款有效订单，未修改订单',
           stage: 'CONTEXT',
         };
       }
+
+      const hasSameBoundContext = () => {
+        const currentActiveCard = uniqueActiveOrderCard(document);
+        return currentActiveCard === orderCard
+          && orderCard.isConnected
+          && isVisible(orderCard)
+          && orderNoFromElement(orderCard) === expectedOrderNo
+          && isPaidOrderStatus(orderStatusFromElement(orderCard))
+          && currentCustomer() === expectedCustomer;
+      };
 
       const edit = first(orderCard, selectors.orderRemarkEdit)
         || findButtonByText(orderCard, ['添加备注', '修改']);
@@ -399,6 +430,14 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           code: 'ORDER_REMARK_EDIT_NOT_FOUND',
           message: '未找到订单备注编辑入口',
           stage: 'REMARK',
+        };
+      }
+      if (!hasSameBoundContext()) {
+        return {
+          ok: false,
+          code: 'CONTEXT_CHANGED',
+          message: '点击备注前当前活动订单卡已变化，未修改订单',
+          stage: 'CONTEXT',
         };
       }
       edit.click();
@@ -413,9 +452,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         };
       }
 
-      const afterDialog = readCurrentContext();
-      orderCard = findExpectedOrderCard();
-      if (afterDialog.orderNo !== expectedOrderNo || afterDialog.customer !== expectedCustomer || !orderCard) {
+      if (!hasSameBoundContext()) {
         return {
           ok: false,
           code: 'CONTEXT_CHANGED',
@@ -471,8 +508,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         };
       }
 
-      const latest = readCurrentContext();
-      if (latest.orderNo !== expectedOrderNo || latest.customer !== expectedCustomer || !findExpectedOrderCard()) {
+      if (!hasSameBoundContext()) {
         return {
           ok: false,
           code: 'CONTEXT_CHANGED',
@@ -485,8 +521,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       if (!filled.ok) {
         return { ...filled, stage: 'REMARK', remarkText };
       }
-      const afterFill = readCurrentContext();
-      if (afterFill.orderNo !== expectedOrderNo || afterFill.customer !== expectedCustomer || !findExpectedOrderCard()) {
+      if (!hasSameBoundContext()) {
         return {
           ok: false,
           code: 'CONTEXT_CHANGED',
@@ -507,9 +542,17 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           remarkText,
         };
       }
+      if (!hasSameBoundContext()) {
+        return {
+          ok: false,
+          code: 'CONTEXT_CHANGED',
+          message: '点击绿色旗帜前当前活动订单卡已变化，未保存订单修改',
+          stage: 'CONTEXT',
+          remarkText,
+        };
+      }
       greenAfterFill.click();
-      const afterGreen = readCurrentContext();
-      if (afterGreen.orderNo !== expectedOrderNo || afterGreen.customer !== expectedCustomer || !findExpectedOrderCard()) {
+      if (!hasSameBoundContext()) {
         return {
           ok: false,
           code: 'CONTEXT_CHANGED',
@@ -529,10 +572,18 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           remarkText,
         };
       }
+      if (!hasSameBoundContext()) {
+        return {
+          ok: false,
+          code: 'CONTEXT_CHANGED',
+          message: '点击保存前当前活动订单卡已变化，未保存订单修改',
+          stage: 'CONTEXT',
+          remarkText,
+        };
+      }
       saveAfterGreen.click();
 
-      const afterSave = readCurrentContext();
-      if (afterSave.orderNo !== expectedOrderNo || afterSave.customer !== expectedCustomer || !findExpectedOrderCard()) {
+      if (!hasSameBoundContext()) {
         return {
           ok: false,
           code: 'CONTEXT_CHANGED',
@@ -543,13 +594,12 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       }
 
       const verified = await waitForElement(document, () => {
-        const currentOrderCard = findExpectedOrderCard();
-        if (!currentOrderCard) return null;
-        const summary = text(currentOrderCard, selectors.orderRemarkSummary);
+        if (!hasSameBoundContext()) return null;
+        const summary = text(orderCard, selectors.orderRemarkSummary);
         const closed = !dialog.isConnected || !isVisible(dialog);
         return closed && summary.replace(/\r\n/g, '\n') === remarkText.replace(/\r\n/g, '\n').trim()
-          && isGreenActive(currentOrderCard)
-          ? currentOrderCard
+          && isGreenActive(orderCard)
+          ? orderCard
           : null;
       });
       if (!verified) {
@@ -561,8 +611,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           remarkText,
         };
       }
-      const finalContext = readCurrentContext();
-      if (finalContext.orderNo !== expectedOrderNo || finalContext.customer !== expectedCustomer || !findExpectedOrderCard()) {
+      if (!hasSameBoundContext()) {
         return {
           ok: false,
           code: 'CONTEXT_CHANGED',

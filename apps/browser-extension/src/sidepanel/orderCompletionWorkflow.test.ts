@@ -15,6 +15,7 @@ const intakeResult = {
   syncId: 'sync-1',
   outcome: 'CREATED' as const,
   lead: { id: 'lead-1', name: '悠然一刻', assignedTo: '销售小陈' },
+  storedContact: { nickname: '悠然一刻', phone: '13826459812', wechat: 'wx_original_88' },
   orderRemarkStatus: 'NOT_ATTEMPTED' as const,
   greenFlagStatus: 'NOT_ATTEMPTED' as const,
 };
@@ -221,6 +222,93 @@ const alreadyCreated = await runOrderCompletion({
 assert.equal(alreadyCreated.stage, 'COMPLETED');
 assert.equal(alreadyCreatedPageCalls, 1, '已入库订单仍需继续补齐备注和绿旗');
 
+for (const mismatch of [
+  {
+    label: '手机号',
+    input: { phone: '13900139000' },
+    storedContact: { nickname: '悠然一刻', phone: '13826459812', wechat: 'wx_original_88' },
+  },
+  {
+    label: '微信号',
+    input: { wechat: 'wx_other_99' },
+    storedContact: { nickname: '悠然一刻', phone: undefined, wechat: 'wx_original_88' },
+  },
+  {
+    label: '昵称',
+    input: { phone: '13826459812' },
+    storedContact: { nickname: '另一个昵称', phone: '13826459812', wechat: undefined },
+  },
+] as const) {
+  let mismatchPageCalls = 0;
+  const mismatchResult = await runOrderCompletion({
+    expectedOrderNo: currentContext.platformOrderNo,
+    expectedCustomerDisplayName: currentContext.customerDisplayName,
+    ...mismatch.input,
+    intakeInput: { platform: 'DOUYIN' },
+  }, {
+    readContext: async () => currentContext,
+    intake: async () => ({
+      code: 0,
+      data: { ...intakeResult, outcome: 'ALREADY_CREATED', storedContact: mismatch.storedContact },
+      message: 'success',
+    }),
+    completePage: async () => {
+      mismatchPageCalls += 1;
+      throw new Error('对账不一致时不得操作飞鸽页面');
+    },
+    report: async (reportInput) => ({
+      code: 0,
+      data: {
+        syncId: reportInput.syncId,
+        orderRemarkStatus: reportInput.orderRemarkStatus,
+        greenFlagStatus: reportInput.greenFlagStatus,
+      },
+      message: 'success',
+    }),
+  });
+  assert.equal(mismatchResult.stage, 'PLATFORM_FAILED');
+  assert.equal(mismatchPageCalls, 0, `${mismatch.label}不一致时不得操作飞鸽页面`);
+  assert.match(mismatchResult.message || '', /极享OS已有资料与本次提交不一致/);
+}
+
+for (const matchingContact of [
+  { phone: '13826459812' },
+  { wechat: 'wx_original_88' },
+] as const) {
+  let matchingPageCalls = 0;
+  const matchingResult = await runOrderCompletion({
+    expectedOrderNo: currentContext.platformOrderNo,
+    expectedCustomerDisplayName: currentContext.customerDisplayName,
+    ...matchingContact,
+    intakeInput: { platform: 'DOUYIN' },
+  }, {
+    readContext: async () => currentContext,
+    intake: async () => ({
+      code: 0,
+      data: {
+        ...intakeResult,
+        outcome: 'ALREADY_CREATED',
+        storedContact: matchingContact.phone
+          ? { nickname: '悠然一刻', phone: '13826459812' }
+          : { nickname: '悠然一刻', wechat: 'wx_original_88' },
+      },
+      message: 'success',
+    }),
+    completePage: async (pageInput) => {
+      matchingPageCalls += 1;
+      return {
+        ok: true,
+        remarkText: `#悠然一刻/${pageInput.phone || pageInput.wechat}\n#入OS`,
+        remarkStatus: 'SUCCEEDED',
+        greenFlagStatus: 'SUCCEEDED',
+      };
+    },
+    report: async () => ({ code: 0, data: completionResult, message: 'success' }),
+  });
+  assert.equal(matchingResult.stage, 'COMPLETED');
+  assert.equal(matchingPageCalls, 1, '已有线索的昵称与备注联系方式一致时才可继续');
+}
+
 for (const changedContext of [
   { ...currentContext, platformOrderNo: 'ORDER-CHANGED' },
   { ...currentContext, customerDisplayName: '已切换客户' },
@@ -333,6 +421,36 @@ const retry = await runOrderCompletion({
 });
 assert.equal(retry.stage, 'COMPLETED');
 assert.equal(retryIntakeCalls, 0, '已有 syncId 的重试不得重新入库');
+
+let reportOnlyPageCalls = 0;
+let reportOnlyReportCalls = 0;
+const reportOnlyRetry = await runOrderCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13826459812',
+  intakeInput: { platform: 'DOUYIN' },
+  existingIntake: {
+    ...intakeResult,
+    orderRemarkStatus: 'SUCCEEDED',
+    greenFlagStatus: 'SUCCEEDED',
+  },
+}, {
+  readContext: async () => currentContext,
+  intake: async () => {
+    throw new Error('只重试上报时不得重新入库');
+  },
+  completePage: async () => {
+    reportOnlyPageCalls += 1;
+    throw new Error('页面已完成时不得再次点击备注或绿旗');
+  },
+  report: async () => {
+    reportOnlyReportCalls += 1;
+    return { code: 0, data: completionResult, message: 'success' };
+  },
+});
+assert.equal(reportOnlyRetry.stage, 'COMPLETED');
+assert.equal(reportOnlyPageCalls, 0, '页面成功、仅上报失败的重试不得重复页面操作');
+assert.equal(reportOnlyReportCalls, 1, '只重试一次平台结果上报');
 
 let exceptionReportCalls = 0;
 const pageException = await runOrderCompletion({

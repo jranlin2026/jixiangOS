@@ -63,6 +63,20 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function duplicateContactMismatch(input: OrderCompletionInput, intake: LeadIntakeResponse) {
+  if (intake.outcome !== 'ALREADY_CREATED') return '';
+  const snapshot = intake.storedContact;
+  const nickname = input.expectedCustomerDisplayName.trim();
+  const phone = input.phone?.trim() || '';
+  const wechat = input.wechat?.trim() || '';
+  const chosenContactMatches = phone
+    ? snapshot?.phone?.trim() === phone
+    : Boolean(wechat) && snapshot?.wechat?.trim() === wechat;
+  if (snapshot?.nickname?.trim() === nickname && chosenContactMatches) return '';
+  const contactLabel = phone ? '手机号' : '微信号';
+  return `极享OS已有资料与本次提交不一致（抖音昵称或用于订单备注的${contactLabel}不一致），请先在极享OS核对并统一资料后重试；未操作飞鸽订单`;
+}
+
 function failedPageStatuses(stage: Extract<CompleteOsOrderResult, { ok: false }>['stage']): Pick<
   ReportInput,
   'orderRemarkStatus' | 'greenFlagStatus'
@@ -164,6 +178,51 @@ export async function runOrderCompletion(
     intakeResult,
   };
   emit(deps, osCompleted);
+
+  const reconciliationMessage = duplicateContactMismatch(input, intakeResult);
+  if (reconciliationMessage) {
+    const report = await reportCompletion(deps, {
+      syncId: intakeResult.syncId,
+      orderRemarkStatus: 'FAILED',
+      greenFlagStatus: 'NOT_ATTEMPTED',
+      errorMessage: reconciliationMessage,
+    });
+    return emit(deps, {
+      ...osCompleted,
+      stage: 'PLATFORM_FAILED',
+      orderRemarkStatus: report.data?.orderRemarkStatus || 'FAILED',
+      greenFlagStatus: report.data?.greenFlagStatus || 'NOT_ATTEMPTED',
+      message: report.code === 0
+        ? reconciliationMessage
+        : `${reconciliationMessage}；${report.message}`,
+    });
+  }
+
+  if (input.existingIntake
+    && intakeResult.orderRemarkStatus === 'SUCCEEDED'
+    && intakeResult.greenFlagStatus === 'SUCCEEDED') {
+    emit(deps, { ...osCompleted, stage: 'PLATFORM_COMPLETING' });
+    const report = await reportCompletion(deps, {
+      syncId: intakeResult.syncId,
+      orderRemarkStatus: 'SUCCEEDED',
+      greenFlagStatus: 'SUCCEEDED',
+    });
+    if (report.code !== 0 || !report.data) {
+      return emit(deps, {
+        ...osCompleted,
+        stage: 'PLATFORM_FAILED',
+        message: report.message || '平台完成结果上报失败',
+      });
+    }
+    return emit(deps, {
+      ...osCompleted,
+      stage: report.data.orderRemarkStatus === 'SUCCEEDED' && report.data.greenFlagStatus === 'SUCCEEDED'
+        ? 'COMPLETED'
+        : 'PLATFORM_FAILED',
+      orderRemarkStatus: report.data.orderRemarkStatus,
+      greenFlagStatus: report.data.greenFlagStatus,
+    });
+  }
 
   let remarkText = '';
   try {

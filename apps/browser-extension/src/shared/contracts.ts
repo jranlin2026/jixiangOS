@@ -15,6 +15,7 @@ export type LeadIntakeResponse = {
   syncId: string;
   outcome: 'CREATED' | 'ALREADY_CREATED';
   lead: { id: string; name: string; assignedTo?: string; assignedToId?: string; intakeStatus?: string };
+  storedContact?: { nickname: string; phone?: string; wechat?: string };
   orderRemarkStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
   greenFlagStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
 };

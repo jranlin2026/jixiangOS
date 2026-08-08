@@ -36,6 +36,13 @@ export type BrowserLeadSyncRecord = {
   assignedToId?: string | null;
   intakeStatus?: string | null;
   lastError?: string | null;
+  storedContact?: StoredLeadContactSnapshot;
+};
+
+export type StoredLeadContactSnapshot = {
+  nickname: string;
+  phone?: string;
+  wechat?: string;
 };
 
 type BrowserLeadSyncRepository = {
@@ -54,6 +61,7 @@ type BrowserLeadSyncRepository = {
     assignedTo?: string | null;
     assignedToId?: string | null;
     intakeStatus?: string | null;
+    storedContact: StoredLeadContactSnapshot;
   }): Promise<BrowserLeadSyncRecord>;
   markFailed(id: string, errorMessage: string): Promise<BrowserLeadSyncRecord>;
   reportOrderRemark(
@@ -87,11 +95,27 @@ export type BrowserLeadIntakeResult = {
     assignedToId?: string | null;
     intakeStatus?: string | null;
   };
+  storedContact: StoredLeadContactSnapshot;
   orderRemarkStatus: BrowserLeadSyncRecord['orderRemarkStatus'];
   greenFlagStatus: BrowserLeadSyncRecord['greenFlagStatus'];
 };
 
+function normalizedContactSnapshot(input: { name?: unknown; phone?: unknown; wechat?: unknown }) {
+  return {
+    nickname: String(input.name || '').trim(),
+    phone: String(input.phone || '').trim() || undefined,
+    wechat: String(input.wechat || '').trim() || undefined,
+  } satisfies StoredLeadContactSnapshot;
+}
+
 function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadIntakeResult['outcome']) {
+  if (!record.storedContact?.nickname
+    || (!record.storedContact.phone && !record.storedContact.wechat)) {
+    return failure<BrowserLeadIntakeResult>(
+      '已入库线索的客户资料无法完整读取，请先在极享OS核对后重试',
+      409,
+    );
+  }
   return success<BrowserLeadIntakeResult>({
     syncId: record.id,
     outcome,
@@ -102,6 +126,7 @@ function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadInt
       assignedToId: record.assignedToId,
       intakeStatus: record.intakeStatus,
     },
+    storedContact: record.storedContact,
     orderRemarkStatus: record.orderRemarkStatus,
     greenFlagStatus: record.greenFlagStatus,
   });
@@ -195,6 +220,7 @@ export function createBrowserLeadIntakeService(deps: {
         assignedTo: created.data.assignedTo,
         assignedToId: created.data.assignedToId,
         intakeStatus: created.data.intakeStatus,
+        storedContact: normalizedContactSnapshot(created.data),
       });
       return resultFromRecord(completed, 'CREATED');
     },
