@@ -10,11 +10,14 @@
 
 ## Execution record (2026-08-09)
 
-- Tasks 1-9 were already implemented and reviewed on branch `codex/ai-browser-employee-mvp` through `c927004`. Their original step checkboxes remain as authored rather than being retroactively asserted by Task 10.
+- Tasks 1-9 were implemented and reviewed on branch `codex/ai-browser-employee-mvp` through `c927004`, but the final whole-branch review parked two Task 9 logout defects. Task 9 is not release-ready until those code defects are fixed and re-reviewed. Original step checkboxes remain as authored rather than being retroactively asserted by Task 10.
 - Task 10 documentation was reconciled against the final implementation, including the deliberate minimum immutable contact snapshot, controlled source/shop derivation, read-only product preview, retry/cancellation/logout behavior, and the actual single-dialog remark plus green-flag save sequence.
 - All Task 10 automated commands passed: Prisma validate/generate, six focused backend tests, extension test/typecheck/build, root build, and `git diff --check`. The built MV3 manifest was also inspected at `apps/browser-extension/dist/manifest.json`.
 - Local database preflight exposed only `mysql / 127.0.0.1 / 3306 / jixiang_os` (no credentials). `npm run db:deploy` applied `20260808090000_browser_store_product_mapping` and `20260809010000_browser_sync_contact_snapshot`; `npx prisma migrate status` then reported all 30 migrations up to date.
 - No service was listening on `127.0.0.1:3001`, so no administrator mapping was created through the UI/API. No real Feige order was opened or written. Administrator configuration and authorized paid-order acceptance remain manual release gates; this record does not claim real Feige write acceptance.
+- Parked Task 9 blocker A: side-panel logout treats only `result.code >= 400` as failure, so a nonzero application code below 400 is incorrectly accepted as success; success must require `code === 0`.
+- Parked Task 9 blocker B: an HTTP 401 clears worker session auth before the logout response reaches the UI, while the UI failure branch can restore its local authenticated display. Failed logout therefore does not guarantee a coherent preserved session. Both logout defects require a whole-branch code fix and re-review before release.
+- Task 10 documentation fix round 1 recorded both blockers, corrected green-state uncertainty and legacy snapshot semantics, and repaired Task 7/Task 10 file history. Documentation consistency greps and `git diff --check` passed; no build, database, admin mapping, or Feige write command was rerun.
 
 ## Global Constraints
 
@@ -40,15 +43,17 @@
 
 ### Backend domain and persistence
 
-- `prisma/schema.prisma`: 新增店铺绑定、平台商品映射和同步审计字段。
+- `prisma/schema.prisma`: 新增店铺绑定、平台商品映射、同步审计字段，以及首次成功联系人快照字段。
 - `prisma/migrations/20260808090000_browser_store_product_mapping/migration.sql`: 创建新表并扩展 `browser_lead_syncs`。
+- `prisma/migrations/20260809010000_browser_sync_contact_snapshot/migration.sql`: 为旧库增加可空的`contactNickname/contactPhone/contactWechat`兼容字段。
 - `server/services/browserAgent/browserCatalogTypes.ts`: 店铺、映射、解析结果和错误码的单一类型定义。
 - `server/services/browserAgent/browserProductMatcher.ts`: 无数据库依赖的确定性商品匹配规则。
 - `server/services/browserAgent/browserCatalogService.ts`: 店铺/映射管理、产品目录读取和运行时配置。
 - `server/services/browserAgent/prismaBrowserCatalogRepository.ts`: Prisma 持久化和OS标准产品读取。
 - `server/services/browserAgent/browserOrderRemark.ts`: 根据联系方式、销售和权威时间生成两行订单备注。
 - `server/services/browserAgent/browserLeadIntakeService.ts`: 绑定解析、商品匹配、来源派生、原始订单事实入库和清晰冲突提示。
-- `server/services/browserAgent/prismaBrowserLeadSyncRepository.ts`: 保存新审计字段，并区分有效线索、回收站线索和不存在的线索。
+- `server/services/browserAgent/prismaBrowserLeadSyncRepository.ts`: 保存新审计字段；原子固化新记录的首次成功联系人/销售/时间；对旧成功空快照做一次条件回填并重读；区分有效、回收站和不存在的线索。
+- `server/services/browserAgent/prismaBrowserLeadSyncRepository.test.ts`: 验证首次成功快照不可变、旧行并发回填收敛、缺失/异常数据失败关闭及同步状态单调性。
 - `server/routes/browserAgentRoutes.ts`: 运行时目录和管理员店铺/映射接口。
 - `server/index.ts`: 注入目录服务以及产品设置读写权限。
 
@@ -558,15 +563,24 @@ git commit -m "feat(browser-agent): intake mapped platform products"
 **Files:**
 - Create: `server/services/browserAgent/browserOrderRemark.ts`
 - Create: `server/services/browserAgent/browserOrderRemark.test.ts`
+- Modify: `prisma/schema.prisma`
+- Create: `prisma/migrations/20260809010000_browser_sync_contact_snapshot/migration.sql`
 - Modify: `server/services/browserAgent/browserLeadIntakeService.ts`
 - Modify: `server/services/browserAgent/browserLeadIntakeService.test.ts`
+- Modify: `server/services/browserAgent/prismaBrowserLeadSyncRepository.ts`
+- Modify: `server/services/browserAgent/prismaBrowserLeadSyncRepository.test.ts`
 - Modify: `apps/browser-extension/src/domain/orderCompletion.ts`
 - Modify: `apps/browser-extension/src/domain/orderCompletion.test.ts`
 - Modify: `apps/browser-extension/src/shared/contracts.ts`
+- Modify: `apps/browser-extension/src/shared/activeTabMessaging.test.ts`
 - Modify: `apps/browser-extension/src/content/douyinFeigeAdapter.ts`
+- Modify: `apps/browser-extension/src/content/douyinFeigeAdapter.test.ts`
+- Modify: `apps/browser-extension/src/sidepanel/orderCompletionPanelState.test.ts`
+- Modify: `apps/browser-extension/src/sidepanel/orderCompletionWorkflow.ts`
+- Modify: `apps/browser-extension/src/sidepanel/orderCompletionWorkflow.test.ts`
 
 **Interfaces:**
-- Consumes: 已存联系方式、`assignedTo` 和首次成功 `completedAt`。
+- Consumes: 同步记录中权威的联系方式快照、`assignedTo` 和首次成功 `completedAt`；旧成功行只允许受控兼容回填。
 - Produces: `remarkLines: [contactLine, intakeLine]`，插件只做保留原文的幂等合并。
 
 - [ ] **Step 1: 写后端备注生成失败测试**
@@ -593,7 +607,21 @@ Expected: FAIL。
 
 使用 `Intl.DateTimeFormat(..., { timeZone: 'Asia/Shanghai', hour12: false })` 的 `formatToParts()` 生成固定 `YYYY-MM-DD HH:mm`，不得使用插件电脑的本地时间。
 
-- [ ] **Step 3: 后端响应返回权威备注行**
+- [ ] **Step 3: 持久化不可变首次成功快照并兼容旧行**
+
+在`BrowserLeadSync`和迁移中加入可空的`contactNickname/contactPhone/contactWechat`。新记录的`markSucceeded()`必须在同一事务内、仅当`completedAt IS NULL`时一起写入首次`completedAt`、联系人快照、`assignedTo/assignedToId`；重复成功不得覆盖第一次胜者。
+
+迁移前已经`SUCCEEDED`但三个联系人字段全空的旧行，只能在关联线索仍有效时通过三个字段全为`NULL`的条件更新回填一次当前线索联系人，并立即重读数据库。这个兼容回填不能声称恢复历史首次成功联系方式。关联线索缺失/回收、快照残缺或格式不安全、首次成功时间缺失时，响应必须失败关闭并要求人工核对，禁止重建猜测性备注。
+
+Run: `npx prisma validate`
+
+Run: `npm run db:generate`
+
+Run: `npm exec -- tsx server/services/browserAgent/prismaBrowserLeadSyncRepository.test.ts`
+
+Expected: PASS；首次写入不可变，并发旧行回填收敛到同一持久化结果。
+
+- [ ] **Step 4: 后端响应返回权威备注行**
 
 `BrowserLeadIntakeResult` 增加：
 
@@ -604,9 +632,9 @@ productResolution: BrowserProductResolution;
 shop: { id: string; shopKey: string; displayName: string };
 ```
 
-首次创建和 `ALREADY_CREATED` 都必须基于同步记录保存的 `completedAt`、联系方式和销售生成同样的备注行。
+首次创建和`ALREADY_CREATED`都必须基于同步记录保存的`completedAt`、联系方式和销售生成同样的备注行。任何必要快照缺失、残缺、含换行或时间无效时都返回可操作错误，不向插件发送猜测结果。
 
-- [ ] **Step 4: 修改扩展备注合并合同**
+- [ ] **Step 5: 修改扩展备注合并合同**
 
 `CompleteOsOrderInput` 不再接收 phone/wechat，改为：
 
@@ -620,11 +648,13 @@ type CompleteOsOrderInput = {
 
 `mergeOsOrderRemark(existing, remarkLines)` 保留原备注的字符和行序，只追加缺失的完整行；同一输入重复执行结果不变。插件不得自行生成销售姓名或入库时间。
 
-- [ ] **Step 5: 运行后端和扩展测试**
+- [ ] **Step 6: 运行后端和扩展测试**
 
 Run: `npm exec -- tsx server/services/browserAgent/browserOrderRemark.test.ts`
 
 Run: `npm exec -- tsx server/services/browserAgent/browserLeadIntakeService.test.ts`
+
+Run: `npm exec -- tsx server/services/browserAgent/prismaBrowserLeadSyncRepository.test.ts`
 
 Run: `npm exec --prefix apps/browser-extension -- tsx apps/browser-extension/src/domain/orderCompletion.test.ts`
 
@@ -632,12 +662,14 @@ Run: `npm exec --prefix apps/browser-extension -- tsx apps/browser-extension/src
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 7: 提交**
 
 ```bash
-git add server/services/browserAgent/browserOrderRemark.ts server/services/browserAgent/browserOrderRemark.test.ts server/services/browserAgent/browserLeadIntakeService.ts server/services/browserAgent/browserLeadIntakeService.test.ts apps/browser-extension/src/domain/orderCompletion.ts apps/browser-extension/src/domain/orderCompletion.test.ts apps/browser-extension/src/shared/contracts.ts apps/browser-extension/src/content/douyinFeigeAdapter.ts
+git add prisma/schema.prisma prisma/migrations/20260809010000_browser_sync_contact_snapshot/migration.sql server/services/browserAgent/browserOrderRemark.ts server/services/browserAgent/browserOrderRemark.test.ts server/services/browserAgent/browserLeadIntakeService.ts server/services/browserAgent/browserLeadIntakeService.test.ts server/services/browserAgent/prismaBrowserLeadSyncRepository.ts server/services/browserAgent/prismaBrowserLeadSyncRepository.test.ts apps/browser-extension/src/domain/orderCompletion.ts apps/browser-extension/src/domain/orderCompletion.test.ts apps/browser-extension/src/shared/contracts.ts apps/browser-extension/src/shared/activeTabMessaging.test.ts apps/browser-extension/src/content/douyinFeigeAdapter.ts apps/browser-extension/src/content/douyinFeigeAdapter.test.ts apps/browser-extension/src/sidepanel/orderCompletionPanelState.test.ts apps/browser-extension/src/sidepanel/orderCompletionWorkflow.ts apps/browser-extension/src/sidepanel/orderCompletionWorkflow.test.ts
 git commit -m "feat(browser-agent): standardize assigned sales remarks"
 ```
+
+实际功能提交为`1c87997 feat(browser-agent): standardize assigned sales remarks`；随后`61a26b2 fix(browser-agent): stabilize authoritative order remarks`补齐单行校验、失败关闭和旧行原子回填并重读。
 
 ---
 
@@ -704,6 +736,8 @@ git commit -m "fix(browser-agent): explain recycled intake conflicts"
 ---
 
 ### Task 9: 在插件中完成店铺选择、匹配预览和统一反馈
+
+> **2026-08-09 release status:** 功能已实现，但最终全分支审查发现两个尚未修复的退出状态机缺陷：UI以`code < 400`误判成功，以及HTTP 401可能先清空worker认证、随后UI恢复“已登录”显示。Task 9在修复和复审前不得标记为发布就绪。
 
 **Files:**
 - Modify: `apps/browser-extension/src/shared/contracts.ts`
@@ -779,6 +813,7 @@ git commit -m "feat(browser-extension): preview controlled product mapping"
 **Files:**
 - Modify: `docs/ai-browser-employee-mvp.md`
 - Modify: `docs/superpowers/specs/2026-08-08-browser-contact-os-remark-green-flag-design.md`
+- Modify: `docs/superpowers/plans/2026-08-08-browser-store-product-mapping-and-intake.md`
 - Modify only if verification finds a real mismatch: files changed in Tasks 1-9
 
 **Interfaces:**
@@ -861,7 +896,7 @@ Run: `git status --short`
 Expected: 只出现本计划有意修改的文件，以及用户原有 `.superpowers/.../progress.md` 与未跟踪 `tmp/`；后两者不进入提交。
 
 ```bash
-git add docs/ai-browser-employee-mvp.md docs/superpowers/specs/2026-08-08-browser-contact-os-remark-green-flag-design.md
+git add docs/ai-browser-employee-mvp.md docs/superpowers/specs/2026-08-08-browser-contact-os-remark-green-flag-design.md docs/superpowers/plans/2026-08-08-browser-store-product-mapping-and-intake.md
 git commit -m "docs(browser-agent): document mapped intake workflow"
 ```
 
@@ -878,5 +913,6 @@ git commit -m "docs(browser-agent): document mapped intake workflow"
 - 未匹配商品不会阻止录入，也不会伪造OS产品。
 - 销售姓名来自OS实际分配结果；没有分配时备注明确写 `暂未分配`。
 - 重复订单、回收站线索和联系方式冲突都有不同且可操作的提示。
-- OS入库失败时不修改飞鸽；备注失败时不设置绿旗；会话切换时立即停止。
+- OS入库失败时不修改飞鸽；发生在绿旗选择前的页面失败不点击绿旗；绿旗已选后若保存/验证失败则页面状态未知，必须人工核对且系统不得报告成功；会话切换时立即停止后续动作。
 - 客服仍必须确认联系方式，插件仍不会自动发送消息。
+- 退出成功只接受`code === 0`；HTTP 401及所有失败路径必须让UI与worker认证状态一致。两个已知Task 9退出缺陷修复并重新评审前不得发布。
