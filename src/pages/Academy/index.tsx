@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Avatar,
-  Badge,
   Box,
   Button,
   Checkbox,
@@ -37,7 +35,6 @@ import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import GroupsIcon from "@mui/icons-material/Groups";
 import InsightsIcon from "@mui/icons-material/Insights";
 import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
-import NotificationsNoneIcon from "@mui/icons-material/NotificationsNone";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import SearchIcon from "@mui/icons-material/Search";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
@@ -65,6 +62,11 @@ import useAppFeedback from "../../shared/hooks/useAppFeedback";
 import ProtectedFormDialog from "../../shared/components/ProtectedFormDialog";
 import DialogCloseTitle from "../../shared/components/DialogCloseTitle";
 import TablePagination from "../../shared/components/TablePagination";
+import {
+  ModuleHeader,
+  ModulePage,
+  ModuleTabs,
+} from "../../shared/components/ModuleShell";
 
 const palette = {
   blue: "#0868F7",
@@ -550,86 +552,24 @@ const Academy: React.FC = () => {
       (task) => task.status === "BLOCKED",
     );
     return (
-      <Box
+      <ModulePage
         data-disable-column-resize="true"
-        sx={{
-          minHeight: "100%",
-          bgcolor: "#F8FAFD",
-        }}
       >
-        <Box
-          sx={{
-            bgcolor: "#fff",
-            borderBottom: `1px solid ${palette.line}`,
-            px: { xs: 1.5, md: 2.5 },
-            pt: 1.5,
-          }}
+        <ModuleHeader
+          title="极享商学院"
+          description="统一管理课程、场次执行、学员转化与经营复盘。"
+        />
+        <ModuleTabs
+          value={view}
+          onChange={(_, value: AcademyView) => navigate(viewPath[value])}
+          variant="scrollable"
+          allowScrollButtonsMobile
         >
-          <Stack
-            direction="row"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <Typography
-              component="h1"
-              sx={{
-                fontSize: { xs: 22, md: 25 },
-                fontWeight: 950,
-                color: palette.ink,
-              }}
-            >
-              极享商学院
-            </Typography>
-            <Stack direction="row" spacing={1.2} alignItems="center">
-              <IconButton size="small" aria-label="消息通知">
-                <NotificationsNoneIcon fontSize="small" />
-              </IconButton>
-              <Avatar
-                sx={{
-                  width: 32,
-                  height: 32,
-                  bgcolor: palette.blue,
-                  fontSize: 13,
-                }}
-              >
-                {(currentUser?.name || "学院").slice(0, 1)}
-              </Avatar>
-              <Box sx={{ display: { xs: "none", sm: "block" } }}>
-                <Typography fontSize={13} fontWeight={900} lineHeight={1.15}>
-                  {currentUser?.name || "学院管理员"}
-                </Typography>
-                <Typography fontSize={11} color="text.secondary">
-                  学院管理员
-                </Typography>
-              </Box>
-            </Stack>
-          </Stack>
-          <Tabs
-            value={view}
-            onChange={(_, value: AcademyView) => navigate(viewPath[value])}
-            variant="scrollable"
-            allowScrollButtonsMobile
-            sx={{
-              mt: 0.4,
-              minHeight: 48,
-              "& .MuiTab-root": {
-                minHeight: 48,
-                px: 2.3,
-                fontWeight: 800,
-                fontSize: 14,
-              },
-              "& .MuiTabs-indicator": {
-                height: 3,
-                borderRadius: "3px 3px 0 0",
-              },
-            }}
-          >
-            {visibleNavItems.map((item) => (
-              <Tab key={item.value} value={item.value} label={item.label} />
-            ))}
-          </Tabs>
-        </Box>
-        <Stack spacing={1.5} sx={{ width: "100%", p: { xs: 1.25, md: 1.75 } }}>
+          {visibleNavItems.map((item) => (
+            <Tab key={item.value} value={item.value} label={item.label} />
+          ))}
+        </ModuleTabs>
+        <Stack spacing={1.5} sx={{ width: "100%" }}>
           <Paper variant="outlined" sx={{ ...panelSx, p: 1.6 }}>
             <Stack
               direction={{ xs: "column", lg: "row" }}
@@ -1023,89 +963,29 @@ const Academy: React.FC = () => {
           </Paper>
         </Stack>
         {feedbackDialog}
-      </Box>
+      </ModulePage>
     );
   }
 
   return (
-    <Box
+    <ModulePage
       data-disable-column-resize="true"
-      sx={{ minHeight: "100%", bgcolor: "#F8FAFD" }}
     >
-      <Box
-        sx={{
-          bgcolor: "#fff",
-          borderBottom: `1px solid ${palette.line}`,
-          px: { xs: 1.5, md: 2.5 },
-          pt: 1.5,
-        }}
+      <ModuleHeader
+        title="极享商学院"
+        description="统一管理课程、场次执行、学员转化与经营复盘。"
+      />
+      <ModuleTabs
+        value={view}
+        onChange={(_, value: AcademyView) => navigate(viewPath[value])}
+        variant="scrollable"
+        allowScrollButtonsMobile
       >
-        <Stack
-          direction="row"
-          justifyContent="space-between"
-          alignItems="center"
-        >
-          <Box>
-            <Typography
-              component="h1"
-              sx={{
-                fontSize: { xs: 22, md: 25 },
-                fontWeight: 950,
-                color: palette.ink,
-              }}
-            >
-              极享商学院
-            </Typography>
-          </Box>
-          <Stack direction="row" spacing={1.2} alignItems="center">
-            <IconButton size="small" aria-label="消息通知">
-              <Badge badgeContent={0} color="error" showZero={false}>
-                <NotificationsNoneIcon fontSize="small" />
-              </Badge>
-            </IconButton>
-            <Avatar
-              sx={{
-                width: 32,
-                height: 32,
-                bgcolor: palette.blue,
-                fontSize: 13,
-              }}
-            >
-              {(currentUser?.name || "学院").slice(0, 1)}
-            </Avatar>
-            <Box sx={{ display: { xs: "none", sm: "block" } }}>
-              <Typography fontSize={13} fontWeight={900} lineHeight={1.15}>
-                {currentUser?.name || "学院管理员"}
-              </Typography>
-              <Typography fontSize={11} color="text.secondary">
-                学院管理员
-              </Typography>
-            </Box>
-          </Stack>
-        </Stack>
-        <Tabs
-          value={view}
-          onChange={(_, value: AcademyView) => navigate(viewPath[value])}
-          variant="scrollable"
-          allowScrollButtonsMobile
-          sx={{
-            mt: 0.4,
-            minHeight: 48,
-            "& .MuiTab-root": {
-              minHeight: 48,
-              px: 2.3,
-              fontWeight: 800,
-              fontSize: 14,
-            },
-            "& .MuiTabs-indicator": { height: 3, borderRadius: "3px 3px 0 0" },
-          }}
-        >
-          {visibleNavItems.map((item) => (
-            <Tab key={item.value} value={item.value} label={item.label} />
-          ))}
-        </Tabs>
-      </Box>
-      <Stack spacing={1.5} sx={{ width: "100%", p: { xs: 1.25, md: 1.75 } }}>
+        {visibleNavItems.map((item) => (
+          <Tab key={item.value} value={item.value} label={item.label} />
+        ))}
+      </ModuleTabs>
+      <Stack spacing={1.5} sx={{ width: "100%" }}>
         {loading && <LinearProgress />}
 
         {view === "overview" && (
@@ -1517,7 +1397,7 @@ const Academy: React.FC = () => {
         )}
       </ProtectedFormDialog>
       {feedbackDialog}
-    </Box>
+    </ModulePage>
   );
 };
 
