@@ -149,16 +149,6 @@ export async function runOrderCompletion(
   };
   emit(deps, initial);
 
-  if (input.shop && !pageShopMatchesBinding(input.pageShopDisplayName, input.shop)) {
-    return emit(deps, {
-      ...initial,
-      stage: 'OS_FAILED',
-      osStatus: 'FAILED',
-      errorCode: 'SHOP_CONTEXT_MISMATCH',
-      message: '当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试',
-    });
-  }
-
   if (input.existingIntake) {
     const reconciliationMessage = duplicateContactMismatch(input, input.existingIntake, true);
     if (reconciliationMessage) {

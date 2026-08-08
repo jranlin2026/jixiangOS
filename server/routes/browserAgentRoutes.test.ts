@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import express from 'express';
 import { createBrowserAgentRouter } from './browserAgentRoutes';
+import type { BrowserCatalogService } from '../services/browserAgent/browserCatalogService';
 
 assert.match(readFileSync(join(process.cwd(), 'server/index.ts'), 'utf8'), /app\.use\('\/api\/browser-agent'/);
 
@@ -59,6 +60,42 @@ const scriptLibrary = {
     };
   },
 } as any;
+const previewProductMapping: BrowserCatalogService['previewProductMapping'] = async (input) => {
+  calls.push({ method: 'catalog:preview', input });
+  if (input.platformProductName === '冲突商品') {
+    return {
+      code: 409, data: null, message: '当前店铺商品映射存在冲突', errorCode: 'PRODUCT_CONFIG_CONFLICT',
+    };
+  }
+  return {
+    code: 0,
+    data: {
+      shop: {
+        id: input.shopBindingId || '', platform: 'DOUYIN', shopKey: 'jx-main', platformShopId: null,
+        displayName: '极享智能体', aliases: [], source: '抖音电商', sourceName: '飞鸽客服', sourceType: '公司资源',
+      },
+      productResolution: {
+        status: 'MATCHED', method: 'PLATFORM_PRODUCT_ID', osProductId: 'prod-taojin',
+        osProductName: '淘金AI', osReferencePrice: 299,
+      },
+      facts: {
+        platformProductId: input.platformProductId,
+        platformSkuId: input.platformSkuId,
+        platformProductName: input.platformProductName,
+        paymentAmount: input.paymentAmount,
+        paymentAt: input.paymentAt,
+      },
+      priceDifference: input.paymentAmount === undefined ? null : {
+        paymentAmount: input.paymentAmount,
+        osReferencePrice: 299,
+        amount: input.paymentAmount - 299,
+        differs: input.paymentAmount !== 299,
+      },
+    },
+    message: 'success',
+  };
+};
+
 const catalog = {
   async listRuntimeShops() {
     calls.push({ method: 'catalog:runtime' });
@@ -72,31 +109,7 @@ const catalog = {
     calls.push({ method: 'catalog:list' });
     return { code: 0, data: { shops: [], mappings: [], products: [] }, message: 'success' };
   },
-  async previewProductMapping(input: any) {
-    calls.push({ method: 'catalog:preview', input });
-    if (input.platformProductName === '冲突商品') {
-      return {
-        code: 409, data: null, message: '当前店铺商品映射存在冲突', errorCode: 'PRODUCT_CONFIG_CONFLICT',
-      };
-    }
-    return {
-      code: 0,
-      data: {
-        shop: { id: input.shopBindingId, shopKey: 'jx-main', displayName: '极享智能体' },
-        productResolution: {
-          status: 'MATCHED', method: 'PLATFORM_PRODUCT_ID', osProductId: 'prod-taojin',
-          osProductName: '淘金AI', osReferencePrice: 299,
-        },
-        facts: {
-          platformProductId: input.platformProductId,
-          platformProductName: input.platformProductName,
-          paymentAmount: input.paymentAmount,
-          paymentAt: input.paymentAt,
-        },
-      },
-      message: 'success',
-    };
-  },
+  previewProductMapping,
   async createShop(input: any, actor: any) {
     calls.push({ method: 'catalog:create-shop', input, actor });
     return { code: 0, data: { id: 'shop-2', ...input }, message: 'success' };
@@ -122,7 +135,7 @@ const catalog = {
     calls.push({ method: 'catalog:delete-mapping', id, actor });
     return { code: 0, data: { id, active: false }, message: 'success' };
   },
-} as any;
+} as unknown as BrowserCatalogService;
 
 const authenticate: express.RequestHandler = (req: any, _res, next) => {
   req.currentUser = { id: 'user-1', name: '客服小李' };
@@ -244,7 +257,25 @@ try {
   });
   assert.equal(preview.status, 200, '商品预览只需已认证，不应要求线索创建或产品设置权限');
   const previewPayload = await preview.json();
-  assert.equal(previewPayload.data.productResolution.osReferencePrice, 299);
+  assert.deepEqual(previewPayload, {
+    code: 0,
+    data: {
+      shop: {
+        id: 'shop-1', platform: 'DOUYIN', shopKey: 'jx-main', platformShopId: null,
+        displayName: '极享智能体', aliases: [], source: '抖音电商', sourceName: '飞鸽客服', sourceType: '公司资源',
+      },
+      productResolution: {
+        status: 'MATCHED', method: 'PLATFORM_PRODUCT_ID', osProductId: 'prod-taojin',
+        osProductName: '淘金AI', osReferencePrice: 299,
+      },
+      facts: {
+        platformProductId: 'DY-100', platformProductName: '淘金AI 多模态',
+        paymentAmount: 349, paymentAt: '2026-08-08T19:34:20+08:00',
+      },
+      priceDifference: { paymentAmount: 349, osReferencePrice: 299, amount: 50, differs: true },
+    },
+    message: 'success',
+  });
   assert.equal(calls.filter((call) => call.method === 'intake').length, 1, '只读预览不得触发线索入库');
 
   const previewConflict = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/product-preview`, {
@@ -255,7 +286,12 @@ try {
     }),
   });
   assert.equal(previewConflict.status, 409);
-  assert.equal((await previewConflict.json()).errorCode, 'PRODUCT_CONFIG_CONFLICT');
+  assert.deepEqual(await previewConflict.json(), {
+    code: 409,
+    data: null,
+    message: '当前店铺商品映射存在冲突',
+    errorCode: 'PRODUCT_CONFIG_CONFLICT',
+  });
 
   const deniedCatalog = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog`, {
     headers: { 'x-test-no-product-read': '1' },

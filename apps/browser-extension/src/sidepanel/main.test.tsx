@@ -60,6 +60,7 @@ const intakeResult = {
 let intakeSucceeds = false;
 const intakeInputs: Record<string, unknown>[] = [];
 const previewInputs: Record<string, unknown>[] = [];
+const productWorkerCallOrder: string[] = [];
 let completeInput: unknown;
 const savedConfigs: unknown[] = [];
 const scriptView = {
@@ -69,6 +70,12 @@ const scriptView = {
 let releaseInitialPreview!: () => void;
 const initialPreviewGate = new Promise<void>((resolve) => { releaseInitialPreview = resolve; });
 let holdInitialPreview = true;
+let releaseStaleUnavailablePreview!: () => void;
+const staleUnavailablePreviewGate = new Promise<void>((resolve) => { releaseStaleUnavailablePreview = resolve; });
+let releaseLoggedOutPreview!: () => void;
+const loggedOutPreviewGate = new Promise<void>((resolve) => { releaseLoggedOutPreview = resolve; });
+let releaseLogout!: () => void;
+const logoutGate = new Promise<void>((resolve) => { releaseLogout = resolve; });
 
 const chromeMock = {
   permissions: { request: async () => true },
@@ -95,9 +102,28 @@ const chromeMock = {
         };
       }
       if (message.type === 'PREVIEW_PRODUCT_MAPPING') {
+        productWorkerCallOrder.push('PREVIEW_PRODUCT_MAPPING');
         previewInputs.push(message.input);
         if (holdInitialPreview) await initialPreviewGate;
         holdInitialPreview = false;
+        if (message.input.platformProductId === 'DY-STALE-A') {
+          await staleUnavailablePreviewGate;
+          return {
+            code: 409,
+            data: null,
+            errorCode: 'SHOP_BINDING_UNAVAILABLE',
+            message: '旧店铺已停用',
+          };
+        }
+        if (message.input.platformProductId === 'DY-LOGOUT-LATE') {
+          await loggedOutPreviewGate;
+          return {
+            code: 409,
+            data: null,
+            errorCode: 'SHOP_BINDING_UNAVAILABLE',
+            message: '退出前的店铺已停用',
+          };
+        }
         if (message.input.platformProductId === 'DY-CONFLICT') {
           return {
             code: 409,
@@ -107,15 +133,16 @@ const chromeMock = {
           };
         }
         const unmatched = message.input.platformProductId === 'DY-UNKNOWN';
+        const previewShop = shops.find((shop) => shop.id === message.input.shopBindingId) || shops[0];
         return {
           code: 0,
           data: {
-            shop: shops[0],
+            shop: previewShop,
             productResolution: unmatched
               ? { status: 'UNMATCHED', rawProductName: message.input.platformProductName }
               : {
                   status: 'MATCHED', method: 'PLATFORM_PRODUCT_ID', osProductId: 'prod-taojin',
-                  osProductName: '淘金AI', osReferencePrice: 299,
+                  osProductName: previewShop.id === 'shop-2' ? '二店标准产品' : '淘金AI', osReferencePrice: 299,
                 },
             facts: {
               platformProductId: message.input.platformProductId,
@@ -134,8 +161,13 @@ const chromeMock = {
         savedConfigs.push(message.config);
         return { code: 0, data: message.config, message: 'success' };
       }
+      if (message.type === 'LOGOUT') {
+        await logoutGate;
+        return { code: 0, data: null, message: 'success' };
+      }
       if (message.type === 'GET_SCRIPT_LIBRARY') return { code: 0, data: scriptView, message: 'success' };
       if (message.type === 'CREATE_LEAD_INTAKE') {
+        productWorkerCallOrder.push('CREATE_LEAD_INTAKE');
         intakeInputs.push(message.input);
         return intakeSucceeds
           ? {
@@ -234,6 +266,71 @@ assert.equal(previewInputs.length > 0, true);
 
 pageContext = {
   ...context,
+  platformOrderNo: 'ORDER-STALE-A',
+  platformProductId: 'DY-STALE-A',
+};
+document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+await waitFor('.context-card', (node) => (node.textContent || '').includes('正在匹配…'));
+pageContext = {
+  ...context,
+  shopDisplayName: '极享二店',
+  platformOrderNo: 'ORDER-CURRENT-B',
+  platformProductId: 'DY-CURRENT-B',
+};
+document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+await waitFor('.context-card', (node) => (node.textContent || '').includes('页面店铺极享二店'));
+shopSelect.value = 'shop-2';
+shopSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+await waitFor('.context-card', (node) => (node.textContent || '').includes('匹配产品二店标准产品'));
+const savedConfigCountBeforeStaleResponse = savedConfigs.length;
+releaseStaleUnavailablePreview();
+await new Promise((resolve) => setTimeout(resolve, 10));
+assert.equal(shopSelect.value, 'shop-2', '旧店铺的迟到停用响应不得清空当前店铺');
+assert.equal(savedConfigs.length, savedConfigCountBeforeStaleResponse, '迟到响应不得覆盖当前持久化配置');
+assert.match(document.body.textContent || '', /匹配产品二店标准产品/);
+
+pageContext = context;
+document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+await waitFor('.context-card', (node) => (node.textContent || '').includes('页面店铺极享官方店'));
+shopSelect.value = 'shop-1';
+shopSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+await waitFor('.context-card', (node) => (node.textContent || '').includes('匹配产品淘金AI'));
+
+pageContext = {
+  ...context,
+  shopDisplayName: '其他店铺',
+  platformOrderNo: 'ORDER-CACHED-MISMATCH',
+  platformProductId: 'DY-CACHED-MISMATCH',
+};
+document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+await waitFor('.context-card', (node) => (node.textContent || '').includes('当前页面店铺与已选店铺绑定不一致'));
+document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
+pageContext = {
+  ...context,
+  platformOrderNo: 'ORDER-CACHED-MISMATCH',
+  platformProductId: 'DY-CACHED-MISMATCH',
+};
+await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
+const previewCountBeforeCachedMismatchClick = previewInputs.length;
+const productCallCountBeforeCachedMismatchClick = productWorkerCallOrder.length;
+intakeSucceeds = true;
+completeButton.click();
+const cachedMismatchSuccess = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('操作成功')
+));
+assert.equal(previewInputs.length >= previewCountBeforeCachedMismatchClick + 1, true, '缓存店铺不一致时，最新页面预检后仍必须在创建线索前权威预览');
+assert.equal(previewInputs[previewCountBeforeCachedMismatchClick]?.pageShopDisplayName, '极享官方店');
+assert.deepEqual(productWorkerCallOrder.slice(productCallCountBeforeCachedMismatchClick, productCallCountBeforeCachedMismatchClick + 2), [
+  'PREVIEW_PRODUCT_MAPPING',
+  'CREATE_LEAD_INTAKE',
+], '缓存不一致的特殊路径也必须先用最新店铺权威预览，再创建线索');
+assert.equal(intakeInputs.at(-1)?.pageShopDisplayName, '极享官方店', '点击后必须使用最新预检店铺');
+cachedMismatchSuccess.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+intakeSucceeds = false;
+await new Promise((resolve) => setTimeout(resolve, 10));
+
+pageContext = {
+  ...context,
   platformOrderNo: 'ORDER-RENDER-2',
   platformProductId: 'DY-CONFLICT',
   productName: '冲突商品',
@@ -243,7 +340,7 @@ const previewErrorDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) 
   (node.textContent || '').includes('当前店铺商品映射存在冲突')
 ));
 assert.equal(completeButton.disabled, true, '预览错误或配置冲突时必须禁用最终操作');
-assert.equal(intakeInputs.length, 0);
+assert.equal(intakeInputs.length, 1);
 previewErrorDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
 await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -256,7 +353,7 @@ pageContext = {
 };
 document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
 await waitFor('.context-card', (node) => (node.textContent || '').includes('平台原名“完全未配置的平台商品”将写入OS备注'));
-assert.equal(intakeInputs.length, 0, '未匹配警告必须在客服点击入库前出现');
+assert.equal(intakeInputs.length, 1, '未匹配警告必须在客服点击入库前出现');
 
 document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
 await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
@@ -277,7 +374,7 @@ assert.match(successDialog.textContent || '', /订单备注、绿色旗帜均已
 assert.match(document.body.textContent || '', /匹配产品待匹配（本次仍可录入，平台原名会写入OS备注）/);
 assert.match(document.body.textContent || '', /平台原名“完全未配置的平台商品”将写入OS备注/);
 assert.match(document.body.textContent || '', /OS参考价暂未提供/);
-assert.equal(intakeInputs.length, 2);
+assert.equal(intakeInputs.length, 3);
 assert.deepEqual(intakeInputs.at(-1), {
   platform: 'DOUYIN',
   shopBindingId: 'shop-1',
@@ -298,6 +395,24 @@ assert.deepEqual(completeInput, {
   expectedCustomerDisplayName: context.customerDisplayName,
   remarkLines: backendRemarkLines,
 });
+
+successDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+pageContext = {
+  ...context,
+  platformOrderNo: 'ORDER-LOGOUT-LATE',
+  platformProductId: 'DY-LOGOUT-LATE',
+};
+document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+await waitFor('.context-card', (node) => (node.textContent || '').includes('正在匹配…'));
+const savedConfigCountBeforeLogout = savedConfigs.length;
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+await new Promise((resolve) => setTimeout(resolve, 5));
+releaseLoggedOutPreview();
+await new Promise((resolve) => setTimeout(resolve, 10));
+assert.equal(savedConfigs.length, savedConfigCountBeforeLogout, '退出后的迟到预览响应不得写入配置');
+assert.equal(document.querySelector('[role="dialog"]'), null, '退出后的迟到预览响应不得修改界面反馈');
+releaseLogout();
+await waitFor('.login-card');
 
 dom.window.close();
 console.log('browser sidepanel rendered shop and product flow: ok');

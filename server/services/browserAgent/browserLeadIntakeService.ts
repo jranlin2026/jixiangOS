@@ -2,7 +2,7 @@ import { failure, success, type ApiResponse } from '../../api/response';
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import type { Lead } from '../../../src/types/lead';
 import { normalizePhoneForComparison } from '../../../src/shared/utils/phoneNumber';
-import type { BrowserCatalogErrorCode, BrowserCatalogService } from './browserCatalogService';
+import { browserPaymentAmountInCents, type BrowserCatalogErrorCode, type BrowserCatalogService } from './browserCatalogService';
 import { buildBrowserOrderRemark } from './browserOrderRemark';
 
 export type ExistingLeadState = 'ACTIVE' | 'RECYCLED' | 'MISSING';
@@ -287,9 +287,11 @@ export function createBrowserLeadIntakeService(deps: {
       if (!String(input.contactPhone || '').trim() && !String(input.contactWechat || '').trim()) {
         return failure<BrowserLeadIntakeResult>('手机号或微信至少填写一项', 400);
       }
-      if (input.paymentAmount !== undefined
-        && (typeof input.paymentAmount !== 'number' || !Number.isFinite(input.paymentAmount))) {
-        return failure<BrowserLeadIntakeResult>('实付金额格式不正确', 400);
+      const paymentCents = input.paymentAmount === undefined
+        ? undefined
+        : browserPaymentAmountInCents(input.paymentAmount);
+      if (paymentCents === null) {
+        return failure<BrowserLeadIntakeResult>('实付金额必须为非负数且最多两位小数', 400);
       }
       const paymentAt = String(input.paymentAt || '').trim() || undefined;
       const paymentAtDate = paymentAt ? new Date(paymentAt) : undefined;
@@ -307,9 +309,11 @@ export function createBrowserLeadIntakeService(deps: {
         platformProductId: input.platformProductId?.trim() || undefined,
         platformSkuId: input.platformSkuId?.trim() || undefined,
         platformProductName: input.platformProductName?.trim() || undefined,
+        paymentAmount: paymentCents === undefined ? undefined : paymentCents / 100,
         paymentAt,
       };
       const catalogResolution = await deps.catalog.resolveForIntake({
+        platform: normalized.platform,
         shopBindingId: normalized.shopBindingId,
         pageShopDisplayName: normalized.pageShopDisplayName,
         facts: {

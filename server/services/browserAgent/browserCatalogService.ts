@@ -119,6 +119,14 @@ function cleanText(value: unknown) {
   return String(value ?? '').trim();
 }
 
+export function browserPaymentAmountInCents(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  const scaled = value * 100;
+  const cents = Math.round(scaled);
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(scaled)) * 8;
+  return Number.isSafeInteger(cents) && Math.abs(scaled - cents) <= tolerance ? cents : null;
+}
+
 function uniqueTexts(values: unknown) {
   if (!Array.isArray(values)) return [];
   return [...new Set(values.map(cleanText).filter(Boolean))];
@@ -232,6 +240,7 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
   }
 
   async function resolveForIntake(input: {
+    platform: string;
     shopBindingId: string;
     pageShopDisplayName?: string;
     facts: BrowserPlatformProductFacts;
@@ -242,12 +251,16 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     priceDifference: { paymentAmount: number; osReferencePrice: number; amount: number; differs: boolean } | null;
   }>> {
     const binding = await repository.findShopById(cleanText(input.shopBindingId));
-    if (!binding || !binding.active) {
+    const platform = cleanText(input.platform).toUpperCase();
+    if (!binding || !binding.active || cleanText(binding.platform).toUpperCase() !== platform) {
       return catalogFailure('店铺绑定不存在或已停用', 409, 'SHOP_BINDING_UNAVAILABLE');
     }
     const pageShopName = normalizePlatformProductName(cleanText(input.pageShopDisplayName));
+    if (!pageShopName) {
+      return catalogFailure('当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别后重试', 409, 'SHOP_CONTEXT_MISMATCH');
+    }
     const acceptedShopNames = [binding.displayName, ...binding.aliases].map(normalizePlatformProductName);
-    if (pageShopName && !acceptedShopNames.includes(pageShopName)) {
+    if (!acceptedShopNames.includes(pageShopName)) {
       return catalogFailure('当前页面店铺与已选店铺绑定不一致', 409, 'SHOP_CONTEXT_MISMATCH');
     }
     const [products, mappings] = await Promise.all([
@@ -266,12 +279,14 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       ? { id: resolution.osProductId, name: resolution.osProductName, referencePrice: resolution.osReferencePrice }
       : null;
     const paymentAmount = input.facts.paymentAmount;
-    const priceDifference = product && typeof paymentAmount === 'number' && Number.isFinite(paymentAmount)
+    const paymentCents = browserPaymentAmountInCents(paymentAmount);
+    const referenceCents = product ? Math.round(product.referencePrice * 100) : null;
+    const priceDifference = product && paymentCents !== null && referenceCents !== null
       ? {
-          paymentAmount,
-          osReferencePrice: product.referencePrice,
-          amount: Number((paymentAmount - product.referencePrice).toFixed(2)),
-          differs: paymentAmount !== product.referencePrice,
+          paymentAmount: paymentCents / 100,
+          osReferencePrice: referenceCents / 100,
+          amount: (paymentCents - referenceCents) / 100,
+          differs: paymentCents !== referenceCents,
         }
       : null;
     return success({ binding: runtimeShop(binding), resolution, product, priceDifference });
@@ -285,9 +300,11 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     }
     const shopBindingId = cleanText(input.shopBindingId);
     if (!shopBindingId) return catalogFailure('店铺绑定不能为空', 400, 'INVALID_INPUT');
-    if (input.paymentAmount !== undefined
-      && (typeof input.paymentAmount !== 'number' || !Number.isFinite(input.paymentAmount))) {
-      return catalogFailure('实付金额格式不正确', 400, 'INVALID_INPUT');
+    const paymentCents = input.paymentAmount === undefined
+      ? undefined
+      : browserPaymentAmountInCents(input.paymentAmount);
+    if (paymentCents === null) {
+      return catalogFailure('实付金额必须为非负数且最多两位小数', 400, 'INVALID_INPUT');
     }
     const paymentAt = cleanText(input.paymentAt);
     const paymentAtDate = paymentAt ? new Date(paymentAt) : undefined;
@@ -298,9 +315,10 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       ...(cleanText(input.platformProductId) ? { platformProductId: cleanText(input.platformProductId) } : {}),
       ...(cleanText(input.platformSkuId) ? { platformSkuId: cleanText(input.platformSkuId) } : {}),
       ...(cleanText(input.platformProductName) ? { platformProductName: cleanText(input.platformProductName) } : {}),
-      ...(input.paymentAmount !== undefined ? { paymentAmount: input.paymentAmount } : {}),
+      ...(paymentCents !== undefined ? { paymentAmount: paymentCents / 100 } : {}),
     };
     const resolved = await resolveForIntake({
+      platform: 'DOUYIN',
       shopBindingId,
       pageShopDisplayName: cleanText(input.pageShopDisplayName) || undefined,
       facts,
@@ -329,7 +347,9 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
 
   return {
     async listRuntimeShops() {
-      const shops = (await repository.listShops()).filter((shop) => shop.active).map(runtimeShop);
+      const shops = (await repository.listShops())
+        .filter((shop) => shop.active && cleanText(shop.platform).toUpperCase() === 'DOUYIN')
+        .map(runtimeShop);
       return success({ shops });
     },
 

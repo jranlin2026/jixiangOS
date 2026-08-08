@@ -107,20 +107,23 @@ const pageShopMismatch = await runOrderCompletion({
   intake: async () => { mismatchIntakeCalls += 1; return { code: 0, data: intakeResult, message: 'success' }; },
   completePage: async () => {
     mismatchPageCalls += 1;
-    throw new Error('店铺不一致时不得操作页面');
+    return {
+      ok: true,
+      remarkText: backendRemarkText,
+      remarkStatus: 'SUCCEEDED',
+      greenFlagStatus: 'SUCCEEDED',
+    };
   },
   report: async () => {
     mismatchReportCalls += 1;
     return { code: 0, data: completionResult, message: 'success' };
   },
 });
-assert.equal(pageShopMismatch.stage, 'OS_FAILED');
-assert.equal(pageShopMismatch.errorCode, 'SHOP_CONTEXT_MISMATCH');
-assert.equal(pageShopMismatch.message, '当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试');
+assert.equal(pageShopMismatch.stage, 'COMPLETED');
 assert.deepEqual(
   [mismatchReadCalls, mismatchIntakeCalls, mismatchPageCalls, mismatchReportCalls],
-  [0, 0, 0, 0],
-  '已识别的页面店铺不一致时必须在任何网络或页面动作前终止',
+  [1, 1, 1, 1],
+  '缓存店铺不一致不得跳过权威预检；最新页面已匹配时应继续',
 );
 
 for (const latestShopContext of [

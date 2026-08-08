@@ -13,6 +13,11 @@ const shops = [
     displayName: '旧店铺', aliases: [], source: '抖音电商', sourceName: '飞鸽客服', sourceType: '公司资源',
     active: false, createdById: 'admin-1', createdByName: '管理员',
   },
+  {
+    id: 'shop-other-platform', platform: 'WECHAT', shopKey: 'wx-main', platformShopId: null,
+    displayName: '微信店铺', aliases: [], source: '微信', sourceName: '微信客服', sourceType: '公司资源',
+    active: true, createdById: 'admin-1', createdByName: '管理员',
+  },
 ];
 const mappings: any[] = [];
 const products = [
@@ -25,6 +30,7 @@ let mappingLockTail = Promise.resolve();
 let mappingLockEntries = 0;
 let activeMappingLocks = 0;
 let maxActiveMappingLocks = 0;
+let catalogWriteCalls = 0;
 
 async function waitForConcurrentMappingScans() {
   await new Promise<void>((resolve) => {
@@ -44,17 +50,20 @@ const repository: BrowserCatalogRepository = {
     return structuredClone(shops.find((shop) => shop.platform === platform && shop.shopKey === shopKey) || null);
   },
   async createShop(input) {
+    catalogWriteCalls += 1;
     const saved = { ...input, id: `shop-${shops.length + 1}` };
     shops.push(saved as any);
     return structuredClone(saved as any);
   },
   async updateShop(id, input) {
+    catalogWriteCalls += 1;
     const index = shops.findIndex((shop) => shop.id === id);
     if (index < 0) return null;
     shops[index] = { ...shops[index], ...input } as any;
     return structuredClone(shops[index]);
   },
   async deleteShop(id) {
+    catalogWriteCalls += 1;
     const index = shops.findIndex((shop) => shop.id === id);
     if (index < 0) return false;
     shops.splice(index, 1);
@@ -68,11 +77,13 @@ const repository: BrowserCatalogRepository = {
     return structuredClone(mappings.find((mapping) => mapping.id === id) || null);
   },
   async createMapping(input) {
+    catalogWriteCalls += 1;
     const saved = { ...input, id: `map-${mappings.length + 1}` };
     mappings.push(saved);
     return structuredClone(saved);
   },
   async updateMapping(id, input) {
+    catalogWriteCalls += 1;
     const index = mappings.findIndex((mapping) => mapping.id === id);
     if (index < 0) return null;
     mappings[index] = { ...mappings[index], ...input };
@@ -222,7 +233,9 @@ assert.ok(shops.some((shop) => shop.id === 'shop-1'), '已被审计记录引用�
 
 await service.updateShop('shop-1', { active: true }, actor);
 const matched = await service.resolveForIntake({
+  platform: 'DOUYIN',
   shopBindingId: 'shop-1',
+  pageShopDisplayName: '极享官方店',
   facts: { platformProductId: 'DY-100', platformProductName: '淘金AI 多模态', paymentAmount: 349 },
 });
 assert.equal(matched.code, 0);
@@ -233,12 +246,15 @@ assert.deepEqual(matched.data?.priceDifference, {
 });
 
 const unmatched = await service.resolveForIntake({
-  shopBindingId: 'shop-1', facts: { platformProductName: '完全未配置商品', paymentAmount: 299 },
+  platform: 'DOUYIN', shopBindingId: 'shop-1',
+  pageShopDisplayName: '极享智能体',
+  facts: { platformProductName: '完全未配置商品', paymentAmount: 299 },
 });
 assert.equal(unmatched.code, 0, '未匹配商品仍允许继续入库');
 assert.equal(unmatched.data?.resolution.status, 'UNMATCHED');
 assert.equal(unmatched.data?.product, null);
 
+const catalogWriteCallsBeforePreview = catalogWriteCalls;
 const authoritativePreview = await service.previewProductMapping({
   platform: 'DOUYIN',
   shopBindingId: 'shop-1',
@@ -268,6 +284,24 @@ assert.deepEqual(authoritativePreview.data, {
   priceDifference: { paymentAmount: 349, osReferencePrice: 299, amount: 50, differs: true },
 }, '权威预览必须复用店铺校验和确定性匹配，并在入库前返回参考价');
 
+const excessivePaymentPrecision = await service.previewProductMapping({
+  platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享官方店',
+  platformProductId: 'DY-100', paymentAmount: 299.001,
+});
+assert.equal(excessivePaymentPrecision.code, 400);
+assert.equal(excessivePaymentPrecision.errorCode, 'INVALID_INPUT');
+assert.match(excessivePaymentPrecision.message, /最多两位小数/);
+
+const equalDisplayedCents = await service.previewProductMapping({
+  platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享官方店',
+  platformProductId: 'DY-100', paymentAmount: 298.99999999999994,
+});
+assert.equal(equalDisplayedCents.code, 0);
+assert.equal(equalDisplayedCents.data?.facts.paymentAmount, 299);
+assert.deepEqual(equalDisplayedCents.data?.priceDifference, {
+  paymentAmount: 299, osReferencePrice: 299, amount: 0, differs: false,
+}, '参考价与实付显示分相同时不得提示价差');
+
 const authoritativeUnmatched = await service.previewProductMapping({
   platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
   platformProductName: '完全未配置商品', paymentAmount: 188,
@@ -284,12 +318,29 @@ const previewMismatch = await service.previewProductMapping({
 assert.equal(previewMismatch.code, 409);
 assert.equal(previewMismatch.errorCode, 'SHOP_CONTEXT_MISMATCH');
 
+for (const pageShopDisplayName of [undefined, '   ']) {
+  const previewMissingShopContext = await service.previewProductMapping({
+    platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName,
+    platformProductName: '淘金AI 多模态',
+  });
+  assert.equal(previewMissingShopContext.code, 409);
+  assert.equal(previewMissingShopContext.errorCode, 'SHOP_CONTEXT_MISMATCH');
+  assert.match(previewMissingShopContext.message, /页面店铺未识别/);
+}
+
 const previewUnavailable = await service.previewProductMapping({
   platform: 'DOUYIN', shopBindingId: 'shop-off', pageShopDisplayName: '旧店铺',
   platformProductName: '淘金AI 多模态',
 });
 assert.equal(previewUnavailable.code, 409);
 assert.equal(previewUnavailable.errorCode, 'SHOP_BINDING_UNAVAILABLE');
+
+const previewWrongPlatformBinding = await service.previewProductMapping({
+  platform: 'DOUYIN', shopBindingId: 'shop-other-platform', pageShopDisplayName: '微信店铺',
+  platformProductName: '淘金AI 多模态',
+});
+assert.equal(previewWrongPlatformBinding.code, 409);
+assert.equal(previewWrongPlatformBinding.errorCode, 'SHOP_BINDING_UNAVAILABLE');
 
 mappings.push({
   id: 'map-preview-conflict', shopBindingId: 'shop-1', platformIdentityKey: 'product:DY-100',
@@ -304,5 +355,6 @@ const previewConflict = await service.previewProductMapping({
 assert.equal(previewConflict.code, 409);
 assert.equal(previewConflict.errorCode, 'PRODUCT_CONFIG_CONFLICT');
 mappings.splice(mappings.findIndex((mapping) => mapping.id === 'map-preview-conflict'), 1);
+assert.equal(catalogWriteCalls, catalogWriteCallsBeforePreview, '权威预览服务不得触发任何目录写操作；其依赖合同中不存在预留或线索创建能力');
 
 console.log('browser catalog service: ok');

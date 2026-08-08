@@ -31,6 +31,11 @@ const shops = [
     displayName: '已停用店铺', aliases: [], source: '抖音电商', sourceName: '飞鸽客服',
     sourceType: '公司资源', active: false, createdById: 'admin-1', createdByName: '管理员',
   },
+  {
+    id: 'binding-wechat', platform: 'WECHAT', shopKey: 'wechat-main', platformShopId: null,
+    displayName: '微信店铺', aliases: [], source: '微信', sourceName: '微信客服',
+    sourceType: '公司资源', active: true, createdById: 'admin-1', createdByName: '管理员',
+  },
 ];
 const products = [{ id: 'prod-taojin', name: '淘金AI', price: 299, isActive: true }];
 const mappings = [
@@ -309,6 +314,17 @@ for (const shopBindingId of ['binding-off', 'binding-missing']) {
   assert.equal(unavailable.errorCode, 'SHOP_BINDING_UNAVAILABLE');
 }
 assert.equal(createLeadCalls.length, 3, '停用或不存在店铺不得创建线索');
+
+const wrongPlatformBinding = await service.intake({
+  ...shopAInput,
+  shopBindingId: 'binding-wechat',
+  pageShopDisplayName: '微信店铺',
+  platformOrderNo: 'DY-20260808-WRONG-PLATFORM',
+}, actor);
+assert.equal(wrongPlatformBinding.code, 409);
+assert.equal(wrongPlatformBinding.errorCode, 'SHOP_BINDING_UNAVAILABLE');
+assert.equal(createLeadCalls.length, 3, '抖音入库不得使用其他平台的店铺绑定');
+
 const legacyShopKeyOnly = await service.intake({
   ...shopAInput,
   shopBindingId: undefined,
@@ -327,6 +343,28 @@ const mismatch = await service.intake({
 assert.equal(mismatch.code, 409);
 assert.equal(mismatch.errorCode, 'SHOP_CONTEXT_MISMATCH');
 assert.equal(createLeadCalls.length, 3, '页面店铺不匹配时不得创建线索');
+
+for (const pageShopDisplayName of [undefined, '   ']) {
+  const missingPageShop = await service.intake({
+    ...shopAInput,
+    pageShopDisplayName,
+    platformOrderNo: `DY-20260808-MISSING-SHOP-${String(pageShopDisplayName)}`,
+  }, actor);
+  assert.equal(missingPageShop.code, 409);
+  assert.equal(missingPageShop.errorCode, 'SHOP_CONTEXT_MISMATCH');
+}
+assert.equal(createLeadCalls.length, 3, '页面店铺缺失或歧义时不得预留或创建线索');
+
+for (const paymentAmount of [-0.01, 299.001]) {
+  const invalidAmount = await service.intake({
+    ...shopAInput,
+    paymentAmount,
+    platformOrderNo: `DY-20260808-AMOUNT-${paymentAmount}`,
+  }, actor);
+  assert.equal(invalidAmount.code, 400);
+  assert.match(invalidAmount.message, /非负数且最多两位小数/);
+}
+assert.equal(createLeadCalls.length, 3, '非法金额不得预留或创建线索');
 
 products.push({ id: 'prod-conflict', name: '冲突产品', price: 699, isActive: true });
 mappings.push({

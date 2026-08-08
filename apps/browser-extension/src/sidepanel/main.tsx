@@ -113,6 +113,14 @@ function App() {
   const activeAttempt = useRef<{ id: number; conversationKey: string } | null>(null);
   const productPreviewSequence = useRef(0);
   const activeProductPreview = useRef<{ generation: number; requestKey: string } | null>(null);
+  const mounted = useRef(false);
+  const activeOperatorId = useRef<string>();
+  activeOperatorId.current = auth.operator?.id;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const paidOrderRecognized = Boolean(context && isPaidOrderStatus(context.orderStatus));
   const completionFormLocked = isCompletionFormLocked(panel);
@@ -133,9 +141,11 @@ function App() {
     && referencePrice !== context.paymentAmount;
   const pageShopMismatch = Boolean(context?.shopDisplayName && selectedShop
     && !pageShopMatchesBinding(context.shopDisplayName, selectedShop));
-  const canIntake = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
+  const canRunAuthoritativePreflight = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
     && (form.phone.trim() || form.wechat.trim()) && selectedShop && contactConfirmed
-    && paidOrderRecognized && !pageShopMismatch && productPreviewStatus === 'READY');
+    && paidOrderRecognized && context.shopDisplayName?.trim());
+  const canIntake = canRunAuthoritativePreflight
+    && (productPreviewStatus === 'READY' || pageShopMismatch);
   const workflowLabel = useMemo(() => {
     if (completion?.stage === 'COMPLETED') return '订单闭环已完成';
     if (sync) return '线索已入库，待完成订单';
@@ -210,6 +220,10 @@ function App() {
     ]);
     const generation = ++productPreviewSequence.current;
     activeProductPreview.current = { generation, requestKey };
+    const requestIsActive = () => mounted.current
+      && activeOperatorId.current === operatorId
+      && activeProductPreview.current?.generation === generation
+      && activeProductPreview.current.requestKey === requestKey;
     dispatchPanel({ type: 'START_PRODUCT_PREVIEW', generation, requestKey });
     void worker<BrowserProductPreviewResponse>({
       type: 'PREVIEW_PRODUCT_MAPPING',
@@ -224,10 +238,10 @@ function App() {
         paymentAt: context.paymentAt?.trim() || undefined,
       },
     }).then((result) => {
+      if (!requestIsActive()) return;
       if (result.code === 0 && result.data) {
         dispatchPanel({ type: 'APPLY_PRODUCT_PREVIEW', generation, requestKey, preview: result.data });
-        if (activeProductPreview.current?.generation === generation
-          && activeProductPreview.current.requestKey === requestKey) activeProductPreview.current = null;
+        activeProductPreview.current = null;
         return;
       }
       const message = result.message || '商品匹配预览失败';
@@ -236,19 +250,14 @@ function App() {
         dispatchPanel({ type: 'SELECT_SHOP_BINDING', shopBindingId: '' });
         void worker<ExtensionConfig>({ type: 'SAVE_CONFIG', config: { apiBaseUrl } });
       }
-      if (activeProductPreview.current?.generation === generation
-        && activeProductPreview.current.requestKey === requestKey) {
-        activeProductPreview.current = null;
-        setError(message);
-      }
+      activeProductPreview.current = null;
+      setError(message);
     }).catch((caught) => {
+      if (!requestIsActive()) return;
       const message = caught instanceof Error ? caught.message : '商品匹配预览失败';
       dispatchPanel({ type: 'FAIL_PRODUCT_PREVIEW', generation, requestKey, message });
-      if (activeProductPreview.current?.generation === generation
-        && activeProductPreview.current.requestKey === requestKey) {
-        activeProductPreview.current = null;
-        setError(message);
-      }
+      activeProductPreview.current = null;
+      setError(message);
     });
   }, [
     apiBaseUrl,
@@ -366,9 +375,12 @@ function App() {
   };
 
   const logout = async () => {
+    activeAttempt.current = null;
+    activeProductPreview.current = null;
+    activeOperatorId.current = undefined;
     await worker({ type: 'LOGOUT' });
     setAuth((current) => ({ config: current.config }));
-    activeAttempt.current = null; activeProductPreview.current = null; dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
+    dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
     setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
   };
 
@@ -483,7 +495,32 @@ function App() {
           latestRecognitionRef.value = { context: latest.context, detectedContact: latest.detectedContact };
           return latest.context;
         },
-        intake: (input) => worker<LeadIntakeResponse>({ type: 'CREATE_LEAD_INTAKE', input }),
+        intake: async (input) => {
+          if (pageShopMismatch) {
+            const refreshedPreview = await worker<BrowserProductPreviewResponse>({
+              type: 'PREVIEW_PRODUCT_MAPPING',
+              input: {
+                platform: 'DOUYIN',
+                shopBindingId: String(input.shopBindingId || ''),
+                pageShopDisplayName: String(input.pageShopDisplayName || ''),
+                platformProductId: typeof input.platformProductId === 'string' ? input.platformProductId : undefined,
+                platformSkuId: typeof input.platformSkuId === 'string' ? input.platformSkuId : undefined,
+                platformProductName: typeof input.platformProductName === 'string' ? input.platformProductName : undefined,
+                paymentAmount: typeof input.paymentAmount === 'number' ? input.paymentAmount : undefined,
+                paymentAt: typeof input.paymentAt === 'string' ? input.paymentAt : undefined,
+              },
+            });
+            if (refreshedPreview.code !== 0 || !refreshedPreview.data) {
+              return {
+                code: refreshedPreview.code,
+                data: null,
+                message: refreshedPreview.message || '商品匹配预览失败',
+                ...(refreshedPreview.errorCode ? { errorCode: refreshedPreview.errorCode } : {}),
+              };
+            }
+          }
+          return worker<LeadIntakeResponse>({ type: 'CREATE_LEAD_INTAKE', input });
+        },
         completePage: async (input) => {
           const completed = await activeTabCommand({ type: 'COMPLETE_FEIGE_OS_ORDER', input });
           if (!('stage' in completed) && !('remarkStatus' in completed)) {
