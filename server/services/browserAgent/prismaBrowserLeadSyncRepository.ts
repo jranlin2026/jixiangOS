@@ -31,6 +31,54 @@ function leadFromRow(row: any) {
 }
 
 export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPrisma) {
+  async function updateOrderRemark(
+    id: string,
+    operator: { id: string; name: string },
+    status: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED',
+    errorMessage?: string,
+  ) {
+    await prisma.browserLeadSync.updateMany({
+      where: {
+        id,
+        status: 'SUCCEEDED',
+        orderRemarkStatus: { not: 'SUCCEEDED' },
+      },
+      data: {
+        orderRemarkStatus: status,
+        remarkOperatorId: operator.id,
+        remarkOperatorName: operator.name,
+        orderRemarkError: status === 'FAILED'
+          ? (errorMessage || '订单备注失败').slice(0, 1000)
+          : null,
+        ...(status === 'SUCCEEDED' ? { orderRemarkedAt: new Date() } : {}),
+      },
+    });
+  }
+
+  async function updateGreenFlag(
+    id: string,
+    operator: { id: string; name: string },
+    status: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED',
+    errorMessage?: string,
+  ) {
+    await prisma.browserLeadSync.updateMany({
+      where: {
+        id,
+        status: 'SUCCEEDED',
+        greenFlagStatus: { not: 'SUCCEEDED' },
+      },
+      data: {
+        greenFlagStatus: status,
+        remarkOperatorId: operator.id,
+        remarkOperatorName: operator.name,
+        greenFlagError: status === 'FAILED'
+          ? (errorMessage || '绿色旗帜设置失败').slice(0, 1000)
+          : null,
+        ...(status === 'SUCCEEDED' ? { greenFlaggedAt: new Date() } : {}),
+      },
+    });
+  }
+
   return {
     async reserve(input: {
       platform: string;
@@ -132,20 +180,9 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       operator: { id: string; name: string },
       input: { status: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED'; errorMessage?: string },
     ) {
-      const existing = await prisma.browserLeadSync.findUnique({ where: { id } });
-      if (!existing || existing.status !== 'SUCCEEDED') return null;
-      return record(await prisma.browserLeadSync.update({
-        where: { id },
-        data: {
-          orderRemarkStatus: input.status,
-          remarkOperatorId: operator.id,
-          remarkOperatorName: operator.name,
-          orderRemarkError: input.status === 'FAILED' ? (input.errorMessage || '订单备注失败').slice(0, 1000) : null,
-          orderRemarkedAt: input.status === 'SUCCEEDED'
-            ? existing.orderRemarkedAt || new Date()
-            : existing.orderRemarkedAt,
-        },
-      }));
+      await updateOrderRemark(id, operator, input.status, input.errorMessage);
+      const current = await prisma.browserLeadSync.findUnique({ where: { id } });
+      return current?.status === 'SUCCEEDED' ? record(current) : null;
     },
 
     async reportPlatformCompletion(
@@ -157,30 +194,10 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
         errorMessage?: string;
       },
     ) {
-      const existing = await prisma.browserLeadSync.findUnique({ where: { id } });
-      if (!existing || existing.status !== 'SUCCEEDED') return null;
-      const errorMessage = input.errorMessage?.slice(0, 1000);
-      return record(await prisma.browserLeadSync.update({
-        where: { id },
-        data: {
-          orderRemarkStatus: input.orderRemarkStatus,
-          greenFlagStatus: input.greenFlagStatus,
-          remarkOperatorId: operator.id,
-          remarkOperatorName: operator.name,
-          orderRemarkError: input.orderRemarkStatus === 'FAILED'
-            ? errorMessage || '订单备注失败'
-            : null,
-          greenFlagError: input.greenFlagStatus === 'FAILED'
-            ? errorMessage || '绿色旗帜设置失败'
-            : null,
-          orderRemarkedAt: input.orderRemarkStatus === 'SUCCEEDED'
-            ? existing.orderRemarkedAt || new Date()
-            : existing.orderRemarkedAt,
-          greenFlaggedAt: input.greenFlagStatus === 'SUCCEEDED'
-            ? existing.greenFlaggedAt || new Date()
-            : existing.greenFlaggedAt,
-        },
-      }));
+      await updateOrderRemark(id, operator, input.orderRemarkStatus, input.errorMessage);
+      await updateGreenFlag(id, operator, input.greenFlagStatus, input.errorMessage);
+      const current = await prisma.browserLeadSync.findUnique({ where: { id } });
+      return current?.status === 'SUCCEEDED' ? record(current) : null;
     },
   };
 }

@@ -3,6 +3,21 @@ import { createPrismaBrowserLeadSyncRepository } from './prismaBrowserLeadSyncRe
 
 let row: any = null;
 let leadRow: any = null;
+let beforeUpdateMany: ((where: any, data: any) => void | Promise<void>) | null = null;
+const updateManyCalls: Array<{ where: any; data: any }> = [];
+
+function matchesWhere(current: any, where: any) {
+  return Object.entries(where).every(([field, expected]: [string, any]) => {
+    if (expected && typeof expected === 'object' && 'not' in expected) {
+      return current[field] !== expected.not;
+    }
+    if (expected && typeof expected === 'object' && 'lte' in expected) {
+      return current[field] <= expected.lte;
+    }
+    return current[field] === expected;
+  });
+}
+
 const delegate = {
   async create({ data }: any) {
     if (row) throw Object.assign(new Error('duplicate'), { code: 'P2002' });
@@ -31,7 +46,9 @@ const delegate = {
     return row;
   },
   async updateMany({ where, data }: any) {
-    if (!row || row.id !== where.id || row.status !== where.status) return { count: 0 };
+    updateManyCalls.push({ where, data });
+    if (beforeUpdateMany) await beforeUpdateMany(where, data);
+    if (!row || !matchesWhere(row, where)) return { count: 0 };
     row = {
       ...row,
       ...data,
@@ -110,6 +127,19 @@ row = {
   orderRemarkedAt: null,
   greenFlaggedAt: null,
 };
+const longError = 'x'.repeat(1200);
+const failed = await repository.reportPlatformCompletion(
+  row.id,
+  { id: 'user-1', name: '客服小李' },
+  { orderRemarkStatus: 'FAILED', greenFlagStatus: 'FAILED', errorMessage: longError },
+);
+assert.equal(failed?.orderRemarkStatus, 'FAILED');
+assert.equal(failed?.greenFlagStatus, 'FAILED');
+assert.equal(row.orderRemarkError.length, 1000);
+assert.equal(row.greenFlagError.length, 1000);
+assert.equal(row.orderRemarkedAt, null);
+assert.equal(row.greenFlaggedAt, null);
+
 const completed = await repository.reportPlatformCompletion(
   row.id,
   { id: 'user-1', name: '客服小李' },
@@ -122,17 +152,99 @@ assert.ok(row.greenFlaggedAt instanceof Date);
 const firstOrderRemarkedAt = row.orderRemarkedAt;
 const firstGreenFlaggedAt = row.greenFlaggedAt;
 
-const longError = 'x'.repeat(1200);
 const retried = await repository.reportPlatformCompletion(
   row.id,
   { id: 'user-2', name: '客服小周' },
   { orderRemarkStatus: 'FAILED', greenFlagStatus: 'FAILED', errorMessage: longError },
 );
-assert.equal(retried?.orderRemarkStatus, 'FAILED');
-assert.equal(retried?.greenFlagStatus, 'FAILED');
+assert.equal(retried?.orderRemarkStatus, 'SUCCEEDED', '备注成功后不得被失败重试降级');
+assert.equal(retried?.greenFlagStatus, 'SUCCEEDED', '绿旗成功后不得被失败重试降级');
 assert.equal(row.orderRemarkedAt, firstOrderRemarkedAt, '备注重试失败不得清空历史成功时间');
 assert.equal(row.greenFlaggedAt, firstGreenFlaggedAt, '绿旗重试失败不得清空历史成功时间');
-assert.equal(row.orderRemarkError.length, 1000);
-assert.equal(row.greenFlagError.length, 1000);
+assert.equal(row.orderRemarkError, null, '备注成功后不得被重试错误覆盖');
+assert.equal(row.greenFlagError, null, '绿旗成功后不得被重试错误覆盖');
+
+const legacyRetried = await repository.reportOrderRemark(
+  row.id,
+  { id: 'user-3', name: '客服小陈' },
+  { status: 'SUBMITTED' },
+);
+assert.equal(legacyRetried?.orderRemarkStatus, 'SUCCEEDED', '旧备注上报路径也必须保持成功单调');
+assert.equal(row.orderRemarkedAt, firstOrderRemarkedAt);
+assert.equal(row.orderRemarkError, null);
+
+row = {
+  ...row,
+  id: 'browser-sync-legacy-race',
+  status: 'SUCCEEDED',
+  orderRemarkStatus: 'SUBMITTED',
+  orderRemarkError: null,
+  orderRemarkedAt: null,
+};
+const concurrentLegacySucceededAt = new Date('2026-08-08T09:29:00.000Z');
+beforeUpdateMany = (where) => {
+  if (!where.orderRemarkStatus) return;
+  row = {
+    ...row,
+    orderRemarkStatus: 'SUCCEEDED',
+    orderRemarkError: null,
+    orderRemarkedAt: concurrentLegacySucceededAt,
+  };
+  beforeUpdateMany = null;
+};
+const legacyRaced = await repository.reportOrderRemark(
+  row.id,
+  { id: 'user-legacy-race', name: '客服小孙' },
+  { status: 'FAILED', errorMessage: longError },
+);
+assert.equal(legacyRaced?.orderRemarkStatus, 'SUCCEEDED');
+assert.equal(row.orderRemarkedAt, concurrentLegacySucceededAt);
+assert.equal(row.orderRemarkError, null);
+
+row = {
+  ...row,
+  id: 'browser-sync-race',
+  status: 'SUCCEEDED',
+  orderRemarkStatus: 'SUBMITTED',
+  greenFlagStatus: 'SUBMITTED',
+  orderRemarkError: null,
+  greenFlagError: null,
+  orderRemarkedAt: null,
+  greenFlaggedAt: null,
+};
+const concurrentSucceededAt = new Date('2026-08-08T09:30:00.000Z');
+beforeUpdateMany = (where) => {
+  if (!where.orderRemarkStatus && !where.greenFlagStatus) return;
+  row = {
+    ...row,
+    orderRemarkStatus: 'SUCCEEDED',
+    greenFlagStatus: 'SUCCEEDED',
+    orderRemarkError: null,
+    greenFlagError: null,
+    orderRemarkedAt: concurrentSucceededAt,
+    greenFlaggedAt: concurrentSucceededAt,
+  };
+  beforeUpdateMany = null;
+};
+const raced = await repository.reportPlatformCompletion(
+  row.id,
+  { id: 'user-4', name: '客服小林' },
+  { orderRemarkStatus: 'FAILED', greenFlagStatus: 'FAILED', errorMessage: longError },
+);
+assert.equal(raced?.orderRemarkStatus, 'SUCCEEDED');
+assert.equal(raced?.greenFlagStatus, 'SUCCEEDED');
+assert.equal(row.orderRemarkedAt, concurrentSucceededAt);
+assert.equal(row.greenFlaggedAt, concurrentSucceededAt);
+assert.equal(row.orderRemarkError, null);
+assert.equal(row.greenFlagError, null);
+
+assert.ok(
+  updateManyCalls.some((call) => call.where.orderRemarkStatus?.not === 'SUCCEEDED'),
+  '备注更新必须使用数据库条件守卫',
+);
+assert.ok(
+  updateManyCalls.some((call) => call.where.greenFlagStatus?.not === 'SUCCEEDED'),
+  '绿旗更新必须使用数据库条件守卫',
+);
 
 console.log('browser lead sync repository reservation: ok');
