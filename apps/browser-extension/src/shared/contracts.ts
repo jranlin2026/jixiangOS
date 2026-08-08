@@ -30,7 +30,7 @@ export type ExtensionConfig = {
 
 export type AuthenticatedOperator = { id: string; name: string; role: string };
 
-export type ApiEnvelope<T> = { code: number; data: T | null; message: string };
+export type ApiEnvelope<T> = { code: number; data: T | null; message: string; errorCode?: string };
 
 export type BrowserLeadProductResolutionAudit = {
   status: 'MATCHED';

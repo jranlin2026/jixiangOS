@@ -55,7 +55,7 @@ type ReportInput = {
 
 export type OrderCompletionDependencies = {
   readContext(): Promise<Pick<FeigePageContext, 'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus'>>;
-  intake(input: Record<string, unknown>): Promise<ApiEnvelope<LeadIntakeResponse> & { errorCode?: string }>;
+  intake(input: Record<string, unknown>): Promise<ApiEnvelope<LeadIntakeResponse>>;
   completePage(input: CompleteOsOrderInput): Promise<CompleteOsOrderResult>;
   report(input: ReportInput): Promise<ApiEnvelope<PlatformCompletionReport>>;
   onState?(state: OrderCompletionState): void;
@@ -207,7 +207,7 @@ export async function runOrderCompletion(
   let intakeResult = input.existingIntake;
   if (!intakeResult) {
     emit(deps, { ...initial, stage: 'INTAKING', osStatus: 'IN_PROGRESS' });
-    let intake: ApiEnvelope<LeadIntakeResponse> & { errorCode?: string };
+    let intake: ApiEnvelope<LeadIntakeResponse>;
     try {
       intake = await deps.intake(input.intakeInput);
     } catch (error) {

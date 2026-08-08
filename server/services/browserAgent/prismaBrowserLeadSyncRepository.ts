@@ -129,6 +129,83 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
     });
   }
 
+  async function reconcileDuplicate(existing: any) {
+    let createdLead = await prisma.leadRecord.findUnique({ where: { externalIntakeKey: existing.id } });
+    if (!createdLead && existing.leadId) {
+      createdLead = await prisma.leadRecord.findUnique({ where: { id: existing.leadId } });
+    }
+    const existingLeadState: ExistingLeadState = !createdLead
+      ? 'MISSING'
+      : isRecycledLeadRow(createdLead) ? 'RECYCLED' : 'ACTIVE';
+    if (existingLeadState === 'RECYCLED') {
+      return {
+        existingLeadState,
+        result: { acquired: false as const, record: record(existing), existingLeadState },
+      };
+    }
+    if (!createdLead) return { existingLeadState };
+
+    const persistedContact = storedContactFromSyncRow(existing);
+    if (existing.status === 'SUCCEEDED' && persistedContact) {
+      return {
+        existingLeadState,
+        result: {
+          acquired: false as const,
+          record: record(existing, persistedContact),
+          existingLeadState,
+        },
+      };
+    }
+    const leadSnapshot = storedContactFromLeadRow(createdLead);
+    if (existing.status === 'SUCCEEDED') {
+      await prisma.browserLeadSync.updateMany({
+        where: {
+          id: existing.id,
+          contactNickname: null,
+          contactPhone: null,
+          contactWechat: null,
+        },
+        data: storedContactData(leadSnapshot),
+      });
+      const reconciled = await prisma.browserLeadSync.findUnique({ where: { id: existing.id } });
+      if (!reconciled) throw new Error('浏览器线索同步联系人快照回填后未找到');
+      return {
+        existingLeadState,
+        result: { acquired: false as const, record: record(reconciled), existingLeadState },
+      };
+    }
+    const lead = leadFromRow(createdLead);
+    const reconciled = await prisma.$transaction(async (transaction) => {
+      await transaction.browserLeadSync.updateMany({
+        where: { id: existing.id, completedAt: null },
+        data: {
+          completedAt: new Date(),
+          ...storedContactData(leadSnapshot),
+          assignedTo: String(lead.assignedTo || '').trim() || null,
+          assignedToId: lead.assignedToId,
+        },
+      });
+      await transaction.browserLeadSync.updateMany({
+        where: { id: existing.id, contactNickname: null },
+        data: storedContactData(leadSnapshot),
+      });
+      return transaction.browserLeadSync.update({
+        where: { id: existing.id },
+        data: {
+          leadId: lead.leadId,
+          leadName: lead.leadName,
+          intakeStatus: lead.intakeStatus,
+          status: 'SUCCEEDED',
+          lastError: null,
+        },
+      });
+    });
+    return {
+      existingLeadState,
+      result: { acquired: false as const, record: record(reconciled), existingLeadState },
+    };
+  }
+
   return {
     async reserve(input: {
       platform: string;
@@ -175,76 +252,9 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       });
       if (!existing) throw new Error('浏览器线索同步保留记录未找到');
 
-      let createdLead = await prisma.leadRecord.findUnique({ where: { externalIntakeKey: existing.id } });
-      if (!createdLead && existing.leadId) {
-        createdLead = await prisma.leadRecord.findUnique({ where: { id: existing.leadId } });
-      }
-      const existingLeadState: ExistingLeadState = !createdLead
-        ? 'MISSING'
-        : isRecycledLeadRow(createdLead) ? 'RECYCLED' : 'ACTIVE';
-      if (existingLeadState === 'RECYCLED') {
-        return { acquired: false as const, record: record(existing), existingLeadState };
-      }
-      if (createdLead) {
-        const persistedContact = storedContactFromSyncRow(existing);
-        if (existing.status === 'SUCCEEDED' && persistedContact) {
-          return {
-            acquired: false as const,
-            record: record(existing, persistedContact),
-            existingLeadState,
-          };
-        }
-        const leadSnapshot = storedContactFromLeadRow(createdLead);
-        if (existing.status === 'SUCCEEDED') {
-          await prisma.browserLeadSync.updateMany({
-            where: {
-              id: existing.id,
-              contactNickname: null,
-              contactPhone: null,
-              contactWechat: null,
-            },
-            data: storedContactData(leadSnapshot),
-          });
-          const reconciled = await prisma.browserLeadSync.findUnique({ where: { id: existing.id } });
-          if (!reconciled) throw new Error('浏览器线索同步联系人快照回填后未找到');
-          return {
-            acquired: false as const,
-            record: record(reconciled),
-            existingLeadState,
-          };
-        }
-        const lead = leadFromRow(createdLead);
-        const reconciled = await prisma.$transaction(async (transaction) => {
-          await transaction.browserLeadSync.updateMany({
-            where: { id: existing.id, completedAt: null },
-            data: {
-              completedAt: new Date(),
-              ...storedContactData(leadSnapshot),
-              assignedTo: String(lead.assignedTo || '').trim() || null,
-              assignedToId: lead.assignedToId,
-            },
-          });
-          await transaction.browserLeadSync.updateMany({
-            where: { id: existing.id, contactNickname: null },
-            data: storedContactData(leadSnapshot),
-          });
-          return transaction.browserLeadSync.update({
-            where: { id: existing.id },
-            data: {
-              leadId: lead.leadId,
-              leadName: lead.leadName,
-              intakeStatus: lead.intakeStatus,
-              status: 'SUCCEEDED',
-              lastError: null,
-            },
-          });
-        });
-        return {
-          acquired: false as const,
-          record: record(reconciled),
-          existingLeadState,
-        };
-      }
+      const reconciliation = await reconcileDuplicate(existing);
+      if (reconciliation.result) return reconciliation.result;
+      const { existingLeadState } = reconciliation;
 
       const stalePending = existing.status === 'PENDING'
         && existing.updatedAt.getTime() <= Date.now() - PENDING_LEASE_MS;
@@ -282,7 +292,15 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       });
       const refreshed = await prisma.browserLeadSync.findUnique({ where: { id: existing.id } });
       if (!refreshed) throw new Error('浏览器线索同步重试记录未找到');
-      return { acquired: claimed.count === 1, record: record(refreshed), existingLeadState };
+      if (claimed.count === 1) return { acquired: true as const, record: record(refreshed), existingLeadState };
+
+      const winnerReconciliation = await reconcileDuplicate(refreshed);
+      if (winnerReconciliation.result) return winnerReconciliation.result;
+      return {
+        acquired: false as const,
+        record: record(refreshed),
+        existingLeadState: winnerReconciliation.existingLeadState,
+      };
     },
 
     async markSucceeded(id: string, input: {

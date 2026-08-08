@@ -368,6 +368,8 @@ const duplicate = await service.intake({
 }, actor);
 assert.equal(duplicate.code, 0);
 assert.equal(duplicate.data?.outcome, 'ALREADY_CREATED');
+assert.equal(duplicate.errorCode, undefined);
+assert.doesNotMatch(duplicate.message, /原线索已不存在|管理员彻底清理/, '并发输家读到 ACTIVE 成功记录时不得误报孤儿同步');
 assert.equal(duplicate.data?.lead.id, 'lead-1');
 assert.deepEqual(duplicate.data?.storedContact, {
   nickname: '张先生',

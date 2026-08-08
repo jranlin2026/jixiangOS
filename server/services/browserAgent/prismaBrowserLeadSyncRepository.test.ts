@@ -522,6 +522,166 @@ assert.ok(
   '持久化快照必须恰好来自一个竞争者',
 );
 
+let retryRaceRow = materializeRow({
+  ...row,
+  id: 'browser-sync-failed-retry-race',
+  platformOrderNo: 'order-failed-retry-race',
+  status: 'FAILED',
+  leadId: null,
+  leadName: null,
+  contactNickname: null,
+  contactPhone: null,
+  contactWechat: null,
+  assignedTo: null,
+  assignedToId: null,
+  completedAt: null,
+  attemptCount: 1,
+  lastError: '首次入库失败',
+  updatedAt: new Date(),
+});
+let retryRaceLead: any = null;
+let initialSyncReads = 0;
+let releaseInitialSyncReads!: () => void;
+const bothInitialSyncReads = new Promise<void>((resolve) => { releaseInitialSyncReads = resolve; });
+let initialLeadReads = 0;
+let releaseInitialLeadReads!: () => void;
+const bothInitialLeadReads = new Promise<void>((resolve) => { releaseInitialLeadReads = resolve; });
+let retryClaimCalls = 0;
+let releaseWinnerCompletion!: () => void;
+const winnerCompletion = new Promise<void>((resolve) => { releaseWinnerCompletion = resolve; });
+
+const retryRaceDelegate = {
+  async create() { throw Object.assign(new Error('duplicate'), { code: 'P2002' }); },
+  async findUnique({ where }: any) {
+    const key = where.platform_shopKey_platformOrderNo;
+    if (key && initialSyncReads < 2) {
+      const snapshot = materializeRow(retryRaceRow);
+      initialSyncReads += 1;
+      if (initialSyncReads === 2) releaseInitialSyncReads();
+      await bothInitialSyncReads;
+      return snapshot;
+    }
+    if (where.id) return where.id === retryRaceRow.id ? materializeRow(retryRaceRow) : null;
+    return key?.platform === retryRaceRow.platform
+      && key.shopKey === retryRaceRow.shopKey
+      && key.platformOrderNo === retryRaceRow.platformOrderNo
+      ? materializeRow(retryRaceRow)
+      : null;
+  },
+  async update({ data }: any) {
+    retryRaceRow = applyData(retryRaceRow, data);
+    return materializeRow(retryRaceRow);
+  },
+  async updateMany({ where, data }: any) {
+    if (data.attemptCount) {
+      retryClaimCalls += 1;
+      if (retryClaimCalls > 1) {
+        await winnerCompletion;
+        return { count: 0 };
+      }
+    }
+    if (!matchesWhere(retryRaceRow, where)) return { count: 0 };
+    retryRaceRow = applyData(retryRaceRow, data);
+    return { count: 1 };
+  },
+};
+const retryRaceLeadDelegate = {
+  async findUnique({ where }: any) {
+    if (where.externalIntakeKey && initialLeadReads < 2) {
+      const snapshot = retryRaceLead;
+      initialLeadReads += 1;
+      if (initialLeadReads === 2) releaseInitialLeadReads();
+      await bothInitialLeadReads;
+      return snapshot;
+    }
+    if (where.externalIntakeKey) {
+      return retryRaceLead?.externalIntakeKey === where.externalIntakeKey ? structuredClone(retryRaceLead) : null;
+    }
+    if (where.id) return retryRaceLead?.id === where.id ? structuredClone(retryRaceLead) : null;
+    return null;
+  },
+};
+const retryRaceRepository = createPrismaBrowserLeadSyncRepository({
+  browserLeadSync: retryRaceDelegate,
+  leadRecord: retryRaceLeadDelegate,
+  async $transaction(callback: (transaction: any) => Promise<any>) {
+    return callback({ browserLeadSync: retryRaceDelegate });
+  },
+} as any);
+const retryRaceInput = {
+  ...reservationInput,
+  platformOrderNo: 'order-failed-retry-race',
+};
+const retryAttempts = [
+  retryRaceRepository.reserve(retryRaceInput),
+  retryRaceRepository.reserve(retryRaceInput),
+];
+const winner = await Promise.race(retryAttempts.map(async (attempt, index) => ({ index, result: await attempt })));
+assert.equal(winner.result.acquired, true, '并发失败重试必须只有一个调用抢占成功');
+retryRaceLead = {
+  id: 'lead-failed-retry-race',
+  externalIntakeKey: retryRaceRow.id,
+  name: '并发重试客户',
+  phone: '13800138008',
+  wechat: 'wx_retry_race',
+  data: { assignedTo: '销售小王', assignedToId: 'sales-1', intakeStatus: '入库成功' },
+};
+await retryRaceRepository.markSucceeded(retryRaceRow.id, {
+  leadId: retryRaceLead.id,
+  leadName: retryRaceLead.name,
+  assignedTo: '销售小王',
+  assignedToId: 'sales-1',
+  intakeStatus: '入库成功',
+  storedContact: { nickname: retryRaceLead.name, phone: retryRaceLead.phone, wechat: retryRaceLead.wechat },
+});
+releaseWinnerCompletion();
+const loser = await retryAttempts[winner.index === 0 ? 1 : 0];
+assert.equal(loser.acquired, false);
+assert.equal(loser.existingLeadState, 'ACTIVE', '抢占失败后必须基于赢家刷新后的关联线索重新解析状态');
+assert.equal(loser.record.status, 'SUCCEEDED');
+assert.equal(loser.record.leadId, retryRaceLead.id);
+assert.deepEqual(loser.record.storedContact, {
+  nickname: '并发重试客户',
+  phone: '13800138008',
+  wechat: 'wx_retry_race',
+}, '输家必须返回可直接组装 ALREADY_CREATED 的赢家成功快照');
+
+const processingWinnerRow = materializeRow({
+  ...retryRaceRow,
+  id: 'browser-sync-processing-winner',
+  platformOrderNo: 'order-processing-winner',
+  status: 'PENDING',
+  leadId: null,
+  contactNickname: null,
+  contactPhone: null,
+  contactWechat: null,
+  completedAt: null,
+  updatedAt: new Date(),
+});
+let processingInitialRead = true;
+const processingRepository = createPrismaBrowserLeadSyncRepository({
+  browserLeadSync: {
+    async create() { throw Object.assign(new Error('duplicate'), { code: 'P2002' }); },
+    async findUnique({ where }: any) {
+      if (where.platform_shopKey_platformOrderNo && processingInitialRead) {
+        processingInitialRead = false;
+        return materializeRow({ ...processingWinnerRow, status: 'FAILED', lastError: '旧失败快照' });
+      }
+      return materializeRow(processingWinnerRow);
+    },
+    async updateMany() { return { count: 0 }; },
+  },
+  leadRecord: { async findUnique() { return null; } },
+  async $transaction() { throw new Error('赢家仍处理中时输家不得进入线索对账事务'); },
+} as any);
+const processingLoser = await processingRepository.reserve({
+  ...reservationInput,
+  platformOrderNo: 'order-processing-winner',
+});
+assert.equal(processingLoser.acquired, false);
+assert.equal(processingLoser.existingLeadState, 'MISSING');
+assert.equal(processingLoser.record.status, 'PENDING', '赢家仍处理中时输家必须返回处理中冲突');
+
 leadRow = null;
 row = {
   ...row,
