@@ -22,4 +22,21 @@ assert.deepEqual(detectContact([
   messageIndex: 0,
 });
 
+assert.deepEqual(detectContact([
+  { direction: 'OUTBOUND', text: '客服电话 13900000000' },
+  { direction: 'INBOUND', text: '激活电话 138 2645 9812' },
+]), { phone: '13826459812', source: 'CHAT', messageIndex: 1 });
+
+assert.equal(detectContact([
+  { direction: 'OUTBOUND', text: '微信号：service_888' },
+]), null);
+
+assert.deepEqual(detectContact([
+  { direction: 'INBOUND', text: '我的微信是 user_name88' },
+]), { wechat: 'user_name88', source: 'CHAT', messageIndex: 0 });
+
+assert.deepEqual(detectContact([
+  { direction: 'INBOUND', text: '我的微信为 user_name88' },
+]), { wechat: 'user_name88', source: 'CHAT', messageIndex: 0 });
+
 console.log('browser extension contact detection: ok');

@@ -11,7 +11,7 @@ export type DetectedContact = {
 };
 
 const phonePattern = /(?<!\d)(?:\+?86[\s-]?)?(1[3-9](?:[\s-]?\d){9})(?!\d)/;
-const wechatPattern = /微信(?:号)?\s*(?:是|[:：])?\s*([a-zA-Z][-_a-zA-Z0-9]{5,19})/i;
+const wechatPattern = /微信(?:号)?\s*(?:是|为|[:：])?\s*([a-zA-Z][-_a-zA-Z0-9]{5,19})/i;
 
 export function detectContact(messages: BrowserChatMessage[]): DetectedContact | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
