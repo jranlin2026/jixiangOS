@@ -157,6 +157,34 @@ for (const latestShopContext of [
   assert.deepEqual([latestIntakeCalls, latestPageCalls, latestReportCalls], [0, 0, 0], latestShopContext.label);
 }
 
+for (const retryShopContext of [
+  { label: '已有入库结果时权威店铺切换', context: { ...currentContext, shopDisplayName: '其他店铺' }, code: 'SHOP_CONTEXT_MISMATCH' },
+  { label: '已有入库结果时权威店铺缺失', context: { ...currentContext, shopDisplayName: '' }, code: 'SHOP_CONTEXT_UNAVAILABLE' },
+] as const) {
+  let retryShopReportCalls = 0;
+  const retryShopResult = await runOrderCompletion({
+    expectedOrderNo: currentContext.platformOrderNo,
+    expectedCustomerDisplayName: currentContext.customerDisplayName,
+    phone: '13826459812',
+    shop: selectedShop,
+    pageShopDisplayName: currentContext.shopDisplayName,
+    intakeInput: { platform: 'DOUYIN', shopBindingId: selectedShop.id },
+    existingIntake: intakeResult,
+  }, {
+    readContext: async () => retryShopContext.context,
+    intake: async () => { throw new Error('已有入库结果不得重新入库'); },
+    completePage: async () => { throw new Error('权威店铺失败不得操作页面'); },
+    report: async () => {
+      retryShopReportCalls += 1;
+      return { code: 0, data: completionResult, message: 'success' };
+    },
+  });
+  assert.equal(retryShopResult.stage, 'PLATFORM_FAILED', retryShopContext.label);
+  assert.equal(retryShopResult.osStatus, 'SUCCEEDED', retryShopContext.label);
+  assert.equal(retryShopResult.errorCode, retryShopContext.code, retryShopContext.label);
+  assert.equal(retryShopReportCalls, 0, `${retryShopContext.label}未验证当前页面，不得上报`);
+}
+
 let pageCallsAfterOsFailure = 0;
 const osFailure = await runOrderCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
@@ -559,7 +587,8 @@ const changedRetry = await runOrderCompletion({
   },
 });
 assert.equal(changedRetry.stage, 'PLATFORM_FAILED');
-assert.equal(changedRetryReports, 1, '已有 syncId 时会话变更也必须上报最终结果');
+assert.equal(changedRetry.osStatus, 'SUCCEEDED', '权威重读失败不得回退已完成的 OS 入库状态');
+assert.equal(changedRetryReports, 0, '权威重读失败未验证当前页面，已有 syncId 也不得上报平台完成结果');
 
 for (const invalidPaidStatus of ['待付款', '退款中', '已关闭']) {
   let invalidStatusIntakeCalls = 0;

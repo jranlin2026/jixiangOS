@@ -46,12 +46,16 @@ let intakeMode: 'IMMEDIATE' | 'PENDING' = 'IMMEDIATE';
 let intakeGate = deferred();
 let logoutMode: 'IMMEDIATE' | 'PENDING' = 'IMMEDIATE';
 let logoutGate = deferred();
+let logoutOutcome: 'SUCCESS' | 'RESOLVED_FAILURE' | 'REJECTED' = 'SUCCESS';
 let reportMode: 'IMMEDIATE' | 'PENDING' = 'IMMEDIATE';
 let reportGate = deferred();
+let pageCompletionMode: 'SUCCESS' | 'FAIL' = 'SUCCESS';
+let reportResponseMode: 'SUCCESS' | 'ECHO' = 'SUCCESS';
 let previewCalls = 0;
 let intakeCalls = 0;
 let completePageCalls = 0;
 let reportCalls = 0;
+let logoutCalls = 0;
 
 const intakeResult = {
   syncId: 'sync-cancel',
@@ -84,7 +88,12 @@ const chromeMock = {
         };
       }
       if (message.type === 'LOGOUT') {
+        logoutCalls += 1;
         if (logoutMode === 'PENDING') await logoutGate.promise;
+        if (logoutOutcome === 'REJECTED') throw new Error('退出网络中断');
+        if (logoutOutcome === 'RESOLVED_FAILURE') {
+          return { code: 500, data: null, message: '服务端拒绝退出，请重试' };
+        }
         return { code: 0, data: null, message: 'success' };
       }
       if (message.type === 'GET_RUNTIME_CONFIG') {
@@ -124,7 +133,11 @@ const chromeMock = {
         if (reportMode === 'PENDING') await reportGate.promise;
         return {
           code: 0,
-          data: { syncId: message.syncId, orderRemarkStatus: 'SUCCEEDED', greenFlagStatus: 'SUCCEEDED' },
+          data: {
+            syncId: message.syncId,
+            orderRemarkStatus: reportResponseMode === 'ECHO' ? message.orderRemarkStatus : 'SUCCEEDED',
+            greenFlagStatus: reportResponseMode === 'ECHO' ? message.greenFlagStatus : 'SUCCEEDED',
+          },
           message: 'success',
         };
       }
@@ -140,6 +153,14 @@ const chromeMock = {
       }
       if (message.type === 'COMPLETE_FEIGE_OS_ORDER') {
         completePageCalls += 1;
+        if (pageCompletionMode === 'FAIL') {
+          return {
+            ok: false,
+            code: 'ORDER_REMARK_NOT_FOUND',
+            message: '未找到订单备注输入框',
+            stage: 'REMARK',
+          };
+        }
         return {
           ok: true,
           remarkText: message.input.remarkLines.join('\n'),
@@ -251,6 +272,44 @@ logoutGate.release();
 await waitFor('.login-card');
 
 logoutMode = 'IMMEDIATE';
+logoutOutcome = 'RESOLVED_FAILURE';
+previewMode = 'PENDING';
+previewGate = deferred();
+await loginAndPrepare('ORDER-LOGOUT-RESOLVED-FAILURE');
+const resolvedFailureIntakeBaseline = intakeCalls;
+const resolvedFailurePreviewBaseline = previewCalls;
+document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
+await waitFor('button[data-action="complete-order"]', () => previewCalls === resolvedFailurePreviewBaseline + 1);
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+const resolvedLogoutFailureDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('服务端拒绝退出，请重试')
+));
+assert.match(resolvedLogoutFailureDialog.textContent || '', /操作未完成/);
+assert.ok(document.querySelector('.context-card'), '退出响应 code 500 时必须保留已认证界面');
+assert.equal(document.querySelector<HTMLButtonElement>('header .text-button')?.disabled, false, '退出失败后应允许重试');
+previewGate.release();
+await new Promise((resolve) => setTimeout(resolve, 15));
+assert.equal(intakeCalls, resolvedFailureIntakeBaseline, '退出失败也不得恢复被取消的旧完成尝试');
+resolvedLogoutFailureDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+logoutOutcome = 'SUCCESS';
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+await waitFor('.login-card');
+
+previewMode = 'IMMEDIATE';
+logoutOutcome = 'REJECTED';
+await loginAndPrepare('ORDER-LOGOUT-REJECTED');
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+const rejectedLogoutDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('退出网络中断')
+));
+assert.match(rejectedLogoutDialog.textContent || '', /操作未完成/);
+assert.ok(document.querySelector('.context-card'), '退出 Promise reject 时必须保留已认证界面');
+rejectedLogoutDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+logoutOutcome = 'SUCCESS';
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+await waitFor('.login-card');
+
+logoutMode = 'IMMEDIATE';
 await loginAndPrepare('ORDER-CANCEL-REPORT');
 reportMode = 'PENDING';
 reportGate = deferred();
@@ -293,20 +352,60 @@ await waitFor('.login-card');
 newerPreviewGate.release();
 await new Promise((resolve) => setTimeout(resolve, 10));
 
+previewMode = 'IMMEDIATE';
+await loginAndPrepare('ORDER-RETRY-AUTHORITATIVE-A');
+pageCompletionMode = 'FAIL';
+reportResponseMode = 'ECHO';
+document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
+const firstRetryFailureDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('未找到订单备注输入框')
+));
+firstRetryFailureDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+await waitFor<HTMLButtonElement>('.result-actions button:last-child', (node) => !node.disabled);
+const retrySafetyBaseline = [previewCalls, intakeCalls, completePageCalls, reportCalls];
+pageContext = {
+  ...pageContext,
+  platformOrderNo: 'ORDER-RETRY-AUTHORITATIVE-B',
+  shopDisplayName: shop.displayName,
+};
+document.querySelector<HTMLButtonElement>('.result-actions button:last-child')?.click();
+const retryChangedDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('当前飞鸽客户或订单已切换')
+));
+assert.match(retryChangedDialog.textContent || '', /操作未完成/);
+assert.deepEqual(
+  [previewCalls, intakeCalls, completePageCalls, reportCalls],
+  retrySafetyBaseline,
+  '已有入库结果的重试在权威会话变化时不得预览、重入库、操作页面或上报',
+);
+assert.equal(document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.disabled, false);
+assert.equal(document.querySelector<HTMLButtonElement>('.result-actions button:last-child')?.disabled, false);
+retryChangedDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+pageCompletionMode = 'SUCCESS';
+reportResponseMode = 'SUCCESS';
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+await waitFor('.login-card');
+
 await loginAndPrepare('ORDER-CANCEL-PREVIEW-UNMOUNT');
 previewMode = 'PENDING';
 previewGate = deferred();
+logoutMode = 'PENDING';
+logoutGate = deferred();
 const previewCallsBeforeUnmount = previewCalls;
 document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
 await waitFor('button[data-action="complete-order"]', () => previewCalls === previewCallsBeforeUnmount + 1);
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+const logoutCallsBeforeUnmountSettlement = logoutCalls;
 const intakeCallsBeforeUnmount = intakeCalls;
 const completePageCallsBeforeUnmount = completePageCalls;
 const reportCallsBeforeUnmount = reportCalls;
 module.sidepanelRoot.unmount();
 previewGate.release();
+logoutGate.release();
 await new Promise((resolve) => setTimeout(resolve, 15));
 assert.equal(intakeCalls, intakeCallsBeforeUnmount, '卸载时预览在等待则不得继续入库');
 assert.deepEqual([completePageCalls, reportCalls], [completePageCallsBeforeUnmount, reportCallsBeforeUnmount]);
+assert.equal(logoutCalls, logoutCallsBeforeUnmountSettlement, '卸载后退出结算不得触发新的 worker 操作');
 assert.equal(document.querySelector('[role="dialog"]'), null);
 
 dom.window.close();

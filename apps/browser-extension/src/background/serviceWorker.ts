@@ -96,9 +96,13 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
       return;
     }
     if (message.type === 'LOGOUT') {
-      await request('/auth/logout', { method: 'POST' });
+      const result = await request<boolean>('/auth/logout', { method: 'POST' });
+      if (result.code >= 400) {
+        sendResponse(result);
+        return;
+      }
       await chrome.storage.session.remove([TOKEN_KEY, OPERATOR_KEY]);
-      sendResponse({ code: 0, data: true, message: 'success' });
+      sendResponse(result);
       return;
     }
     if (message.type === 'GET_RUNTIME_CONFIG') {

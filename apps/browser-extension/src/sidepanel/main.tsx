@@ -408,17 +408,20 @@ function App() {
     setBusy(false);
     activeProductPreview.current = null;
     try {
-      await worker({ type: 'LOGOUT' });
+      const result = await worker<boolean>({ type: 'LOGOUT' });
+      if (!mounted.current) return;
+      if (result.code >= 400) throw new Error(result.message || '退出失败，请重试');
       setAuth((current) => ({ config: current.config }));
       dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
       setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
       loggingOutRef.current = false;
       setLoggingOut(false);
     } catch (caught) {
+      if (!mounted.current) return;
       loggingOutRef.current = false;
       activeOperatorId.current = operatorId;
       setLoggingOut(false);
-      setError(caught instanceof Error ? `退出失败：${caught.message}` : '退出失败，请重试');
+      setError(caught instanceof Error ? caught.message : '退出失败，请重试');
     }
   };
 

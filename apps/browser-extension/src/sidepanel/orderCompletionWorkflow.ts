@@ -200,23 +200,16 @@ export async function runOrderCompletion(
     }
   }
 
-  const stopForContext = async (message: string) => {
-    if (!input.existingIntake) return emit(deps, { ...initial, message });
-    const report = await guardedReport({
-      syncId: input.existingIntake.syncId,
-      orderRemarkStatus: 'FAILED',
-      greenFlagStatus: 'NOT_ATTEMPTED',
-      errorMessage: message,
-    });
-    if (!report) return aborted();
-    return emit(deps, {
-      ...initial,
-      stage: 'PLATFORM_FAILED',
-      orderRemarkStatus: report.data?.orderRemarkStatus || input.existingIntake.orderRemarkStatus,
-      greenFlagStatus: report.data?.greenFlagStatus || input.existingIntake.greenFlagStatus,
-      message: report.code === 0 ? message : `${message}；${report.message}`,
-    });
-  };
+  const stopForContext = (message: string, errorCode?: string) => emit(deps, {
+    ...initial,
+    ...(input.existingIntake
+      ? { stage: 'PLATFORM_FAILED' as const }
+      : errorCode
+        ? { stage: 'OS_FAILED' as const, osStatus: 'FAILED' as const }
+        : {}),
+    ...(errorCode ? { errorCode } : {}),
+    message,
+  });
 
   let current: Pick<
     FeigePageContext,
@@ -239,22 +232,16 @@ export async function runOrderCompletion(
     return stopForContext('请先确认当前订单为已付款有效订单');
   }
   if (input.shop && !current.shopDisplayName?.trim()) {
-    return emit(deps, {
-      ...initial,
-      stage: 'OS_FAILED',
-      osStatus: 'FAILED',
-      errorCode: 'SHOP_CONTEXT_UNAVAILABLE',
-      message: '当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别后重试',
-    });
+    return stopForContext(
+      '当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别后重试',
+      'SHOP_CONTEXT_UNAVAILABLE',
+    );
   }
   if (input.shop && !pageShopMatchesBinding(current.shopDisplayName, input.shop)) {
-    return emit(deps, {
-      ...initial,
-      stage: 'OS_FAILED',
-      osStatus: 'FAILED',
-      errorCode: 'SHOP_CONTEXT_MISMATCH',
-      message: '当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试',
-    });
+    return stopForContext(
+      '当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试',
+      'SHOP_CONTEXT_MISMATCH',
+    );
   }
 
   let intakeResult = input.existingIntake;

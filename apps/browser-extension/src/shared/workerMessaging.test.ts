@@ -23,8 +23,13 @@ let workerListener: ((
 ) => boolean) | undefined;
 const configKey = 'jixiang_browser_employee_config';
 const tokenKey = 'jixiang_browser_employee_token';
+const operatorKey = 'jixiang_browser_employee_operator';
 let localValues: Record<string, unknown> = {
   [configKey]: { apiBaseUrl: 'https://os.example.com', shopKey: ' Ｇｏｌｄ 商城 ' },
+};
+let sessionValues: Record<string, unknown> = {
+  [tokenKey]: 'token-1',
+  [operatorKey]: { id: 'u1', name: '客服甲', role: 'SERVICE' },
 };
 (globalThis as typeof globalThis & { chrome: typeof chrome }).chrome = {
   sidePanel: { setPanelBehavior: async () => undefined },
@@ -34,9 +39,11 @@ let localValues: Record<string, unknown> = {
       set: async (values: Record<string, unknown>) => { localValues = { ...localValues, ...values }; },
     },
     session: {
-      get: async (key: string) => ({ [key]: key === tokenKey ? 'token-1' : undefined }),
-      set: async () => undefined,
-      remove: async () => undefined,
+      get: async (key: string) => ({ [key]: sessionValues[key] }),
+      set: async (values: Record<string, unknown>) => { sessionValues = { ...sessionValues, ...values }; },
+      remove: async (keys: string[]) => {
+        for (const key of keys) delete sessionValues[key];
+      },
     },
   },
   runtime: {
@@ -47,6 +54,7 @@ let localValues: Record<string, unknown> = {
 } as unknown as typeof chrome;
 const originalFetch = globalThis.fetch;
 let previewRequestBody: unknown;
+let logoutEnvelope: ApiEnvelope<unknown> = { code: 0, data: true, message: 'success' };
 let runtimeConfig = {
   shops: [
     {
@@ -67,6 +75,12 @@ globalThis.fetch = async (input, init) => {
       data: { token: 'token-new', user: { id: 'u1', name: '客服甲', role: 'SERVICE' } },
       message: 'success',
     }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+  if (url.endsWith('/auth/logout')) {
+    return new Response(JSON.stringify(logoutEnvelope), {
+      status: logoutEnvelope.code >= 400 ? 500 : 200,
+      headers: { 'content-type': 'application/json' },
+    });
   }
   if (url.endsWith('/browser-agent/runtime-config')) {
     return new Response(JSON.stringify({ code: 0, data: runtimeConfig, message: 'success' }), {
@@ -194,6 +208,27 @@ try {
   assert.equal(previewResponse.code, 0);
   assert.equal(previewResponse.data.productResolution.osReferencePrice, 299);
   assert.deepEqual(previewRequestBody, previewInput, '商品预览请求必须原样穿过 service worker 边界');
+
+  sessionValues = {
+    [tokenKey]: 'token-before-failed-logout',
+    [operatorKey]: { id: 'u1', name: '客服甲', role: 'SERVICE' },
+  };
+  logoutEnvelope = { code: 500, data: null, message: '服务端拒绝退出，请重试' };
+  const failedLogout = await new Promise<any>((resolve) => {
+    assert.equal(workerListener?.({ type: 'LOGOUT' }, {}, resolve), true);
+  });
+  assert.equal(failedLogout.code, 500, '退出失败响应必须原样穿过 worker 边界');
+  assert.equal(sessionValues[tokenKey], 'token-before-failed-logout', '退出失败不得清除持久化 token');
+  assert.ok(sessionValues[operatorKey], '退出失败不得清除持久化 operator');
+
+  logoutEnvelope = { code: 0, data: true, message: 'success' };
+  const successfulLogout = await new Promise<any>((resolve) => {
+    assert.equal(workerListener?.({ type: 'LOGOUT' }, {}, resolve), true);
+  });
+  assert.equal(successfulLogout.code, 0);
+  assert.equal(sessionValues[tokenKey], undefined, '退出成功才清除持久化 token');
+  assert.equal(sessionValues[operatorKey], undefined, '退出成功才清除持久化 operator');
+  assert.ok(localValues[configKey], '退出成功仍保留本地 API/店铺配置');
 } finally {
   globalThis.fetch = originalFetch;
 }
