@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Box, Paper, Tab, Tabs, Typography } from '@mui/material';
 import RolePermission from './RolePermission';
 import ProductConfigPage from './ProductConfig';
+import BrowserAgentConfigPage from './BrowserAgentConfig';
 import EmployeeDepartmentManagement from './EmployeeDepartmentManagement';
 import PositionManagement from './PositionManagement';
 import PositionGovernance from './PositionGovernance';
@@ -88,6 +89,7 @@ const Settings: React.FC = () => {
       description: '产品配置和订单类型配置',
       tabs: [
         { label: '产品配置', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <ProductConfigPage /> },
+        { label: '平台商品映射', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <BrowserAgentConfigPage /> },
         { label: '订单类型', permissionKey: PERMISSION_KEYS.SETTINGS_ORDER_TYPES, component: <OrderTypeConfigPage /> },
       ],
     },
