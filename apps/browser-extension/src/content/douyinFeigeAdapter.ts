@@ -498,7 +498,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         const currentOrderCard = findExpectedOrderCard();
         if (!currentOrderCard) return null;
         const summary = text(currentOrderCard, selectors.orderRemarkSummary);
-        const closed = visibleRemarkDialogs(document).length === 0;
+        const closed = !dialog.isConnected || !isVisible(dialog);
         return closed && summary.replace(/\r\n/g, '\n') === remarkText.replace(/\r\n/g, '\n').trim()
           && isGreenActive(currentOrderCard)
           ? currentOrderCard

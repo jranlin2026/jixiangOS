@@ -240,6 +240,8 @@ function createGuardBoundaryFixture(options: {
   remarkDialogAriaLabel?: string | null;
   afterRemarkDialog?: string;
   existingRemark?: string;
+  keepDialogVisibleAfterSave?: boolean;
+  removeEditorAfterSave?: boolean;
 } = {}) {
   const fixture = new JSDOM(`<!doctype html><html><body>
     <main data-jx-feige-conversation><span data-jx-customer-name>悠然一刻</span></main>
@@ -281,7 +283,8 @@ function createGuardBoundaryFixture(options: {
     saveClicks += 1;
     summary.textContent = options.savedRemark?.(input.value) ?? input.value;
     currentFlag.dataset.currentFlag = options.savedCurrentFlag ?? 'green';
-    dialog.hidden = true;
+    if (options.removeEditorAfterSave) input.remove();
+    if (!options.keepDialogVisibleAfterSave) dialog.hidden = true;
     options.onSaveClick?.(fixtureDocument);
   });
   return {
@@ -486,5 +489,18 @@ assert.deepEqual(blankRemarkResult, {
   greenFlagStatus: 'SUCCEEDED',
 }, '空备注只能新增 OS 两行');
 assert.equal(blankRemarkResult.ok && blankRemarkResult.remarkText.includes('#入EC'), false, '空备注不得自动新增 #入EC');
+
+const visibleOpenedDialogFixture = createGuardBoundaryFixture({
+  keepDialogVisibleAfterSave: true,
+  removeEditorAfterSave: true,
+});
+const visibleOpenedDialogResult = await visibleOpenedDialogFixture.adapter.completeOsOrder({
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  phone: '13826459812',
+});
+assert.equal(visibleOpenedDialogResult.ok, false, '本次打开的弹窗仍可见时，即使 textarea 被移除也不得报告成功');
+assert.equal(visibleOpenedDialogResult.ok ? '' : visibleOpenedDialogResult.code, 'ORDER_COMPLETION_NOT_VERIFIED');
+assert.equal(visibleOpenedDialogFixture.getSaveClicks(), 1);
 
 console.log('douyin feige page adapter: ok');
