@@ -371,6 +371,87 @@ assert.deepEqual(legacyDuplicate.record.storedContact, {
   wechat: 'wx_legacy_66',
 }, '旧同步记录必须通过 leadId 回查线索快照');
 
+let concurrentLegacyRow = materializeRow({
+  ...row,
+  id: 'browser-sync-legacy-concurrent',
+  platformOrderNo: 'order-legacy-concurrent',
+  status: 'SUCCEEDED',
+  leadId: 'lead-legacy-concurrent',
+  contactNickname: null,
+  contactPhone: null,
+  contactWechat: null,
+});
+const concurrentLeadViews = [
+  {
+    id: 'lead-legacy-concurrent', externalIntakeKey: 'browser-sync-legacy-concurrent',
+    name: '并发快照甲', phone: '13800138001', wechat: 'wx_concurrent_a', data: {},
+  },
+  {
+    id: 'lead-legacy-concurrent', externalIntakeKey: 'browser-sync-legacy-concurrent',
+    name: '并发快照乙', phone: '13800138002', wechat: 'wx_concurrent_b', data: {},
+  },
+];
+let concurrentLeadReads = 0;
+let releaseConcurrentLeadReads!: () => void;
+const bothConcurrentLeadReads = new Promise<void>((resolve) => { releaseConcurrentLeadReads = resolve; });
+const concurrentDelegate = {
+  async create() { throw Object.assign(new Error('duplicate'), { code: 'P2002' }); },
+  async findUnique({ where }: any) {
+    if (where.id) return where.id === concurrentLegacyRow.id ? materializeRow(concurrentLegacyRow) : null;
+    const key = where.platform_shopKey_platformOrderNo;
+    return key?.platform === concurrentLegacyRow.platform
+      && key.shopKey === concurrentLegacyRow.shopKey
+      && key.platformOrderNo === concurrentLegacyRow.platformOrderNo
+      ? materializeRow(concurrentLegacyRow)
+      : null;
+  },
+  async update({ data }: any) {
+    concurrentLegacyRow = applyData(concurrentLegacyRow, data);
+    return materializeRow(concurrentLegacyRow);
+  },
+  async updateMany({ where, data }: any) {
+    if (!matchesWhere(concurrentLegacyRow, where)) return { count: 0 };
+    concurrentLegacyRow = applyData(concurrentLegacyRow, data);
+    return { count: 1 };
+  },
+};
+const concurrentRepository = createPrismaBrowserLeadSyncRepository({
+  browserLeadSync: concurrentDelegate,
+  leadRecord: {
+    async findUnique() {
+      const view = concurrentLeadViews[concurrentLeadReads++];
+      if (concurrentLeadReads === concurrentLeadViews.length) releaseConcurrentLeadReads();
+      await bothConcurrentLeadReads;
+      return structuredClone(view);
+    },
+  },
+  async $transaction(callback: (transaction: any) => Promise<any>) {
+    return callback({ browserLeadSync: concurrentDelegate });
+  },
+} as any);
+const concurrentReservationInput = {
+  ...reservationInput,
+  platformOrderNo: 'order-legacy-concurrent',
+};
+const [concurrentLegacyA, concurrentLegacyB] = await Promise.all([
+  concurrentRepository.reserve(concurrentReservationInput),
+  concurrentRepository.reserve(concurrentReservationInput),
+]);
+assert.deepEqual(
+  concurrentLegacyA.record.storedContact,
+  concurrentLegacyB.record.storedContact,
+  '并发 legacy 回填的两个响应必须收敛到同一持久化胜者',
+);
+assert.deepEqual(concurrentLegacyA.record.storedContact, {
+  nickname: concurrentLegacyRow.contactNickname,
+  phone: concurrentLegacyRow.contactPhone,
+  wechat: concurrentLegacyRow.contactWechat,
+}, '响应必须返回数据库中的胜者而不是各自读到的可变线索');
+assert.ok(
+  concurrentLeadViews.some((view) => view.name === concurrentLegacyRow.contactNickname),
+  '持久化快照必须恰好来自一个竞争者',
+);
+
 leadRow = null;
 row = {
   ...row,

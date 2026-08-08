@@ -175,6 +175,19 @@ function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadInt
     );
   }
   const completedAt = record.completedAt.toISOString();
+  let remarkLines: [string, string];
+  try {
+    remarkLines = buildBrowserOrderRemark({
+      ...record.storedContact,
+      assignedTo: record.assignedTo,
+      completedAt: record.completedAt,
+    });
+  } catch (error) {
+    return failure<BrowserLeadIntakeResult>(
+      error instanceof Error ? error.message : '已入库线索的订单备注资料无法安全读取，请先在极享OS核对后重试',
+      409,
+    );
+  }
   return success<BrowserLeadIntakeResult>({
     syncId: record.id,
     outcome,
@@ -187,11 +200,7 @@ function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadInt
     },
     storedContact: record.storedContact,
     completedAt,
-    remarkLines: buildBrowserOrderRemark({
-      ...record.storedContact,
-      assignedTo: record.assignedTo,
-      completedAt: record.completedAt,
-    }),
+    remarkLines,
     shop: {
       id: record.shopBindingId,
       shopKey: record.shopKey,

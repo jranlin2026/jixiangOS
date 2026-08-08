@@ -45,6 +45,20 @@ assert.equal(
 const once = mergeOsOrderRemark('#原备注\r\n', remarkLines);
 assert.equal(mergeOsOrderRemark(once, remarkLines), once);
 
+const partialOnce = mergeOsOrderRemark(`原备注\n${remarkLines[0]}`, remarkLines);
+assert.equal(mergeOsOrderRemark(partialOnce, remarkLines), partialOnce, '部分已存在的备注追加后重复合并仍必须幂等');
+
+for (const malformed of [
+  [`${remarkLines[0]}\n#注入行`, remarkLines[1]],
+  [remarkLines[0], `${remarkLines[1]}\r#注入行`],
+  ['', remarkLines[1]],
+] as unknown as Array<[string, string]>) {
+  assert.throws(
+    () => mergeOsOrderRemark('原备注', malformed),
+    /极享OS返回的订单备注格式不正确，请刷新后重试/,
+  );
+}
+
 assert.equal(isPaidOrderStatus('已付款'), true);
 assert.equal(isPaidOrderStatus('待发货'), true);
 assert.equal(isPaidOrderStatus('已关闭（售后完成）'), false);

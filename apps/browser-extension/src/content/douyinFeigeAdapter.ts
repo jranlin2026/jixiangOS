@@ -673,7 +673,17 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         };
       }
       const existing = editableValue(editor) || text(orderCard, selectors.orderRemarkSummary);
-      const remarkText = mergeOsOrderRemark(existing, input.remarkLines);
+      let remarkText: string;
+      try {
+        remarkText = mergeOsOrderRemark(existing, input.remarkLines);
+      } catch (error) {
+        return {
+          ok: false,
+          code: 'ORDER_REMARK_INVALID',
+          message: error instanceof Error ? error.message : '极享OS返回的订单备注格式不正确，请刷新后重试',
+          stage: 'REMARK',
+        };
+      }
 
       const greenFlag = findUniqueGreenFlag(dialog);
       const save = findUniqueSave(dialog);

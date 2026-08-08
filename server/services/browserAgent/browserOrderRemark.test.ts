@@ -15,6 +15,30 @@ assert.deepEqual(buildBrowserOrderRemark({
   '#入OS（2026-08-08 21:00）',
 ]);
 
+for (const invalid of [
+  { field: '客户昵称', patch: { nickname: '海盗\n船长' } },
+  { field: '手机号', patch: { phone: '1380013\r8000' } },
+  { field: '微信号', patch: { wechat: 'jx\n888' } },
+  { field: '对接销售', patch: { assignedTo: '王小\r\n明' } },
+] as const) {
+  assert.throws(() => buildBrowserOrderRemark({
+    nickname: '海盗船长',
+    phone: '13800138000',
+    wechat: 'jx888',
+    assignedTo: '王小明',
+    completedAt: new Date('2026-08-08T13:00:00.000Z'),
+    ...invalid.patch,
+  }), new RegExp(`订单备注中的${invalid.field}不能包含换行，请先在极享OS清理后重试`));
+}
+
+const physicalLines = buildBrowserOrderRemark({
+  nickname: '  海盗船长  ',
+  phone: '  13800138000  ',
+  assignedTo: '  王小明  ',
+  completedAt: new Date('2026-08-08T13:00:00.000Z'),
+});
+assert.equal(physicalLines.every((line) => !/[\r\n]/.test(line)), true, '每个 tuple 成员必须恰好是一个物理行');
+
 assert.deepEqual(buildBrowserOrderRemark({
   nickname: '海盗船长',
   wechat: '  jx888  ',

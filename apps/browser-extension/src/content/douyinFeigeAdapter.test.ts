@@ -607,6 +607,7 @@ function createGuardBoundaryFixture(options: {
   });
   return {
     adapter: createDouyinFeigeAdapter(fixtureDocument, fixture.window.location.href),
+    input,
     getGreenClicks: () => greenClicks,
     getSaveClicks: () => saveClicks,
   };
@@ -822,6 +823,19 @@ assert.deepEqual(blankRemarkResult, {
   greenFlagStatus: 'SUCCEEDED',
 }, '空备注只能新增 OS 两行');
 assert.equal(blankRemarkResult.ok && blankRemarkResult.remarkText.includes('#入EC'), false, '空备注不得自动新增 #入EC');
+
+const malformedLinesFixture = createGuardBoundaryFixture();
+const malformedLinesResult = await malformedLinesFixture.adapter.completeOsOrder({
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: [`${backendRemarkLines[0]}\n#非法追加`, backendRemarkLines[1]],
+});
+assert.equal(malformedLinesResult.ok, false, '后端备注 tuple 含换行时必须安全停止');
+assert.equal(malformedLinesResult.ok ? '' : malformedLinesResult.code, 'ORDER_REMARK_INVALID');
+assert.match(malformedLinesResult.ok ? '' : malformedLinesResult.message, /极享OS返回的订单备注格式不正确/);
+assert.equal(malformedLinesFixture.input.value, '#入EC\n#销售：小王', '畸形 tuple 不得改写备注');
+assert.equal(malformedLinesFixture.getGreenClicks(), 0, '畸形 tuple 不得点击绿旗');
+assert.equal(malformedLinesFixture.getSaveClicks(), 0, '畸形 tuple 不得保存');
 
 const visibleOpenedDialogFixture = createGuardBoundaryFixture({
   keepDialogVisibleAfterSave: true,

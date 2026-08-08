@@ -1,7 +1,16 @@
+function assertValidRemarkLines(lines: unknown): asserts lines is [string, string] {
+  if (!Array.isArray(lines)
+    || lines.length !== 2
+    || lines.some((line) => typeof line !== 'string' || !line.trim() || /[\r\n]/.test(line))) {
+    throw new Error('极享OS返回的订单备注格式不正确，请刷新后重试');
+  }
+}
+
 export function mergeOsOrderRemark(
   existing: string,
   lines: readonly [string, string],
 ): string {
+  assertValidRemarkLines(lines);
   const currentLines = existing.split(/\r\n|\n|\r/);
   const missing = lines.filter((line) => !currentLines.includes(line));
   if (!missing.length) return existing;

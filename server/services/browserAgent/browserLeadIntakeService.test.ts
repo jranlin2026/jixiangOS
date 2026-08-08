@@ -363,6 +363,18 @@ assert.deepEqual(duplicate.data?.shop, first.data?.shop);
 assert.equal(createLeadCalls.length, 3, '重复点击不能再创建线索');
 assert.equal(records.size, 3, '业务幂等键必须先规范化再持久化');
 
+const firstSyncRecord = records.get('DOUYIN:jixiang-a:DY-20260808-A001');
+const originalStoredContact = firstSyncRecord.storedContact;
+firstSyncRecord.storedContact = { ...originalStoredContact, nickname: '张\n先生' };
+const malformedStoredContact = await service.intake(shopAInput, actor);
+firstSyncRecord.storedContact = originalStoredContact;
+assert.equal(malformedStoredContact.code, 409);
+assert.equal(
+  malformedStoredContact.message,
+  '订单备注中的客户昵称不能包含换行，请先在极享OS清理后重试',
+  '已持久化的权威字段含换行时必须返回可操作错误而非写入飞鸽',
+);
+
 const invalid = await service.intake({
   ...shopAInput,
   platformOrderNo: 'DY-20260808-INVALID',

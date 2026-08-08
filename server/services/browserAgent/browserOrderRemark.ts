@@ -24,11 +24,19 @@ function formatShanghaiMinute(value: Date) {
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
+function canonicalSingleLine(value: string | null | undefined, field: string) {
+  const raw = value || '';
+  if (/[\r\n]/.test(raw)) {
+    throw new Error(`订单备注中的${field}不能包含换行，请先在极享OS清理后重试`);
+  }
+  return raw.trim();
+}
+
 export function buildBrowserOrderRemark(input: BrowserOrderRemarkInput): [string, string] {
-  const nickname = input.nickname.trim();
-  const phone = input.phone?.trim() || '';
-  const wechat = input.wechat?.trim() || '';
-  const assignedTo = input.assignedTo?.trim() || '暂未分配';
+  const nickname = canonicalSingleLine(input.nickname, '客户昵称');
+  const phone = canonicalSingleLine(input.phone, '手机号');
+  const wechat = canonicalSingleLine(input.wechat, '微信号');
+  const assignedTo = canonicalSingleLine(input.assignedTo, '对接销售') || '暂未分配';
   if (!nickname) throw new Error('客户昵称不能为空，请先核对飞鸽客户昵称');
   if (!phone && !wechat) {
     throw new Error('手机号或微信号至少填写一项，请先在极享OS核对客户资料');

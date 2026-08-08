@@ -179,13 +179,20 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       if (createdLead) {
         const leadSnapshot = storedContactFromLeadRow(createdLead);
         if (existing.status === 'SUCCEEDED') {
-          const reconciled = await prisma.browserLeadSync.update({
-            where: { id: existing.id },
+          await prisma.browserLeadSync.updateMany({
+            where: {
+              id: existing.id,
+              contactNickname: null,
+              contactPhone: null,
+              contactWechat: null,
+            },
             data: storedContactData(leadSnapshot),
           });
+          const reconciled = await prisma.browserLeadSync.findUnique({ where: { id: existing.id } });
+          if (!reconciled) throw new Error('浏览器线索同步联系人快照回填后未找到');
           return {
             acquired: false as const,
-            record: record(reconciled, leadSnapshot),
+            record: record(reconciled),
           };
         }
         const lead = leadFromRow(createdLead);
