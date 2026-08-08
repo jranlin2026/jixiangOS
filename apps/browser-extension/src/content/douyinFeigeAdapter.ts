@@ -249,8 +249,14 @@ function isGreenActive(orderCard: HTMLElement) {
     && currentFlags[0].dataset.currentFlag?.trim().toLowerCase() === 'green') return true;
   const liveGreenFlags = [...orderCard.querySelectorAll<HTMLElement>('.i-icon-flag')]
     .filter(isVisible)
-    .filter((icon) => [...icon.querySelectorAll('svg path[fill]')]
-      .some((path) => path.getAttribute('fill')?.trim().toLowerCase() === '#00c87f'));
+    .filter((icon) => {
+      const window = icon.ownerDocument.defaultView;
+      const iconColor = window?.getComputedStyle(icon).color.replace(/\s/g, '').toLowerCase();
+      const paths = [...icon.querySelectorAll<HTMLElement>('svg path[fill]')];
+      return iconColor === 'rgb(0,200,127)'
+        || paths.some((path) => path.getAttribute('fill')?.trim().toLowerCase() === '#00c87f')
+        || paths.some((path) => window?.getComputedStyle(path).fill.replace(/\s/g, '').toLowerCase() === 'rgb(0,200,127)');
+    });
   return liveGreenFlags.length === 1;
 }
 

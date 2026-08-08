@@ -723,7 +723,7 @@ function createLiveGreenFlagCompletionFixture() {
         <div>已发货</div>
         <span>6955059225013785777</span>
         <div data-real-remark-summary>
-          <span class="i-icon i-icon-flag"><svg><path data-real-current-flag fill="#FF3B52"></path></svg></span>
+          <span data-real-current-flag class="i-icon i-icon-flag" style="color: rgb(255, 59, 82)"><svg><path fill="currentColor"></path></svg></span>
           <span data-real-remark-lines>#销售：小王</span>
           <button type="button" render_type="feature_button">修改</button>
         </div>
@@ -757,7 +757,7 @@ function createLiveGreenFlagCompletionFixture() {
     .find((button) => button.textContent?.trim() === '确定')
     ?.addEventListener('click', () => {
       summaryLines.textContent = `${input.value}\n#0808/platform-generated`;
-      currentFlag.setAttribute('fill', '#00C87F');
+      currentFlag.style.color = 'rgb(0, 200, 127)';
       drawer.hidden = true;
     });
   return createDouyinFeigeAdapter(fixtureDocument, fixture.window.location.href);
