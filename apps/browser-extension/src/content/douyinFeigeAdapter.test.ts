@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { createDouyinFeigeAdapter } from './douyinFeigeAdapter';
 
+const backendRemarkLines: [string, string] = [
+  '#悠然一刻/手机号：13826459812/微信号：wx_user88（对接：销售小王）',
+  '#入OS（2026-08-08 21:00）',
+];
+
 const dom = new JSDOM(`<!doctype html><html><body>
   <section data-jx-feige-conversation>
     <div data-jx-customer-name>张先生</div>
@@ -332,7 +337,7 @@ const collapsedStaleFixture = createUnsafeOrderBindingFixture(`
 const collapsedStaleResult = await collapsedStaleFixture.adapter.completeOsOrder({
   expectedOrderNo: 'STALE-ORDER',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(collapsedStaleResult.ok, false, '文档旧值和折叠卡片不得通过活动订单校验');
 assert.equal(collapsedStaleFixture.getEditClicks(), 0, '折叠或非当前订单的编辑入口不得点击');
@@ -352,7 +357,7 @@ const ambiguousCardsFixture = createUnsafeOrderBindingFixture(`
 const ambiguousCardsResult = await ambiguousCardsFixture.adapter.completeOsOrder({
   expectedOrderNo: 'ORDER-A',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(ambiguousCardsResult.ok, false, '多张可见活动订单卡必须失败关闭');
 assert.equal(ambiguousCardsFixture.getEditClicks(), 0, '订单卡有歧义时不得点击任何编辑入口');
@@ -377,7 +382,7 @@ assert.equal(nestedAmbiguousContext.orderStatus, '', '嵌套多订单歧义时�
 const nestedAmbiguousCardsResult = await nestedAmbiguousCardsFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(nestedAmbiguousCardsResult.ok, false, '嵌套多订单卡必须失败关闭');
 assert.equal(nestedAmbiguousCardsFixture.getEditClicks(), 0, '嵌套订单卡有歧义时不得点击任何编辑入口');
@@ -397,7 +402,7 @@ const mixedSemanticCardsFixture = createUnsafeOrderBindingFixture(`
 const mixedSemanticCardsResult = await mixedSemanticCardsFixture.adapter.completeOsOrder({
   expectedOrderNo: 'ORDER-A',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(mixedSemanticCardsResult.ok, false, '不同语义选择器各命中一张可见卡时仍属歧义');
 assert.equal(mixedSemanticCardsFixture.getEditClicks(), 0, '订单卡语义混合歧义时不得点击');
@@ -447,11 +452,11 @@ const completionAdapter = createDouyinFeigeAdapter(completionDocument, completio
 const completionResult = await completionAdapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.deepEqual(completionResult, {
   ok: true,
-  remarkText: '#入EC\n#销售：小王\n#悠然一刻/13826459812\n#入OS',
+  remarkText: `#入EC\n#销售：小王\n${backendRemarkLines.join('\n')}`,
   remarkStatus: 'SUCCEEDED',
   greenFlagStatus: 'SUCCEEDED',
 });
@@ -460,18 +465,18 @@ assert.equal(selectedFlag, 'green');
 const repeatedCompletionResult = await completionAdapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.deepEqual(repeatedCompletionResult, completionResult, '重复执行应返回同一份幂等备注');
-assert.equal(completionSummary.textContent, '#入EC\n#销售：小王\n#悠然一刻/13826459812\n#入OS');
-assert.equal(completionSummary.textContent?.match(/#悠然一刻\/13826459812/g)?.length, 1);
-assert.equal(completionSummary.textContent?.match(/#入OS/g)?.length, 1);
+assert.equal(completionSummary.textContent, `#入EC\n#销售：小王\n${backendRemarkLines.join('\n')}`);
+assert.equal(completionSummary.textContent?.split('\n').filter((line) => line === backendRemarkLines[0]).length, 1);
+assert.equal(completionSummary.textContent?.split('\n').filter((line) => line === backendRemarkLines[1]).length, 1);
 
 const saveClicksBeforeMismatch = completionSaveClicks;
 const mismatchedOrderResult = await completionAdapter.completeOsOrder({
   expectedOrderNo: '6925095897028853459',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(mismatchedOrderResult.ok, false);
 assert.equal(mismatchedOrderResult.ok ? '' : mismatchedOrderResult.code, 'CONTEXT_CHANGED');
@@ -519,7 +524,7 @@ const missingGreenFixture = createIncompleteCompletionFixture({ green: false, sa
 const missingGreenResult = await missingGreenFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(missingGreenResult.ok, false);
 assert.equal(missingGreenResult.ok ? '' : missingGreenResult.code, 'GREEN_FLAG_NOT_FOUND');
@@ -531,7 +536,7 @@ const missingSaveFixture = createIncompleteCompletionFixture({ green: true, save
 const missingSaveResult = await missingSaveFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(missingSaveResult.ok, false);
 assert.equal(missingSaveResult.ok ? '' : missingSaveResult.code, 'ORDER_REMARK_SAVE_NOT_FOUND');
@@ -616,7 +621,7 @@ const inputContextSwitchFixture = createGuardBoundaryFixture({
 const inputContextSwitchResult = await inputContextSwitchFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(inputContextSwitchResult.ok, false);
 assert.equal(inputContextSwitchResult.ok ? '' : inputContextSwitchResult.code, 'CONTEXT_CHANGED');
@@ -632,7 +637,7 @@ const changeContextSwitchFixture = createGuardBoundaryFixture({
 const changeContextSwitchResult = await changeContextSwitchFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(changeContextSwitchResult.ok, false);
 assert.equal(changeContextSwitchResult.ok ? '' : changeContextSwitchResult.code, 'CONTEXT_CHANGED');
@@ -648,7 +653,7 @@ const replacedCardFixture = createGuardBoundaryFixture({
 const replacedCardResult = await replacedCardFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(replacedCardResult.ok, false, '内容相同的新卡片也不得替代本次操作已绑定的 DOM 卡片');
 assert.equal(replacedCardFixture.getGreenClicks(), 0, '已绑定卡片被替换后不得点击绿旗');
@@ -663,7 +668,7 @@ const greenContextSwitchFixture = createGuardBoundaryFixture({
 const greenContextSwitchResult = await greenContextSwitchFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(greenContextSwitchResult.ok, false);
 assert.equal(greenContextSwitchResult.ok ? '' : greenContextSwitchResult.code, 'CONTEXT_CHANGED');
@@ -679,7 +684,7 @@ const saveContextSwitchFixture = createGuardBoundaryFixture({
 const saveContextSwitchResult = await saveContextSwitchFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(saveContextSwitchResult.ok, false);
 assert.equal(saveContextSwitchResult.ok ? '' : saveContextSwitchResult.code, 'CONTEXT_CHANGED');
@@ -696,7 +701,7 @@ const finalBoundarySwitchFixture = createGuardBoundaryFixture({
 const finalBoundarySwitchResult = await finalBoundarySwitchFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(finalBoundarySwitchResult.ok, false, '保存验证的异步边界后必须再次核对上下文');
 assert.equal(finalBoundarySwitchResult.ok ? '' : finalBoundarySwitchResult.code, 'CONTEXT_CHANGED');
@@ -709,7 +714,7 @@ const droppedHistoryFixture = createGuardBoundaryFixture({
 const droppedHistoryResult = await droppedHistoryFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(droppedHistoryResult.ok, false, '平台丢失历史备注行时不得报告成功');
 assert.equal(droppedHistoryResult.ok ? '' : droppedHistoryResult.code, 'ORDER_COMPLETION_NOT_VERIFIED');
@@ -720,7 +725,7 @@ const hiddenGreenFixture = createGuardBoundaryFixture({
 const hiddenGreenResult = await hiddenGreenFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(hiddenGreenResult.ok, false, '隐藏的绿旗控件不得被选中');
 assert.equal(hiddenGreenResult.ok ? '' : hiddenGreenResult.code, 'GREEN_FLAG_NOT_FOUND');
@@ -732,7 +737,7 @@ const disabledGreenFixture = createGuardBoundaryFixture({
 const disabledGreenResult = await disabledGreenFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(disabledGreenResult.ok, false, '禁用的绿旗控件不得被选中');
 assert.equal(disabledGreenResult.ok ? '' : disabledGreenResult.code, 'GREEN_FLAG_NOT_FOUND');
@@ -744,7 +749,7 @@ const nonGreenLabelFixture = createGuardBoundaryFixture({
 const nonGreenLabelResult = await nonGreenLabelFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(nonGreenLabelResult.ok, false, '“非绿色旗帜”不得被子串误判为绿旗');
 assert.equal(nonGreenLabelFixture.getSaveClicks(), 0);
@@ -755,7 +760,7 @@ const inactiveGreenFixture = createGuardBoundaryFixture({
 const inactiveGreenResult = await inactiveGreenFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(inactiveGreenResult.ok, false, '`green-inactive` 不得通过精确绿旗语义校验');
 assert.equal(inactiveGreenFixture.getSaveClicks(), 0);
@@ -766,7 +771,7 @@ const ambiguousGreenFixture = createGuardBoundaryFixture({
 const ambiguousGreenResult = await ambiguousGreenFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(ambiguousGreenResult.ok, false, '多个合格绿旗控件时必须因歧义停止');
 assert.equal(ambiguousGreenFixture.getGreenClicks(), 0);
@@ -776,7 +781,7 @@ const inexactActiveFlagFixture = createGuardBoundaryFixture({ savedCurrentFlag: 
 const inexactActiveFlagResult = await inexactActiveFlagFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(inexactActiveFlagResult.ok, false, '`not-green` 不得通过绿旗激活状态验证');
 assert.equal(inexactActiveFlagResult.ok ? '' : inexactActiveFlagResult.code, 'ORDER_COMPLETION_NOT_VERIFIED');
@@ -788,7 +793,7 @@ const unrelatedDialogFixture = createGuardBoundaryFixture({
 const unrelatedDialogResult = await unrelatedDialogFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(unrelatedDialogResult.ok, true, '应忽略无关的可见 dialog，根据备注文本和结构找到真实弹窗');
 
@@ -798,7 +803,7 @@ const ambiguousDialogFixture = createGuardBoundaryFixture({
 const ambiguousDialogResult = await ambiguousDialogFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(ambiguousDialogResult.ok, false, '多个备注语义 dialog 同时可见时必须停止');
 assert.equal(ambiguousDialogResult.ok ? '' : ambiguousDialogResult.code, 'ORDER_REMARK_DIALOG_NOT_FOUND');
@@ -808,11 +813,11 @@ const blankRemarkFixture = createGuardBoundaryFixture({ existingRemark: '' });
 const blankRemarkResult = await blankRemarkFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.deepEqual(blankRemarkResult, {
   ok: true,
-  remarkText: '#悠然一刻/13826459812\n#入OS',
+  remarkText: backendRemarkLines.join('\n'),
   remarkStatus: 'SUCCEEDED',
   greenFlagStatus: 'SUCCEEDED',
 }, '空备注只能新增 OS 两行');
@@ -825,7 +830,7 @@ const visibleOpenedDialogFixture = createGuardBoundaryFixture({
 const visibleOpenedDialogResult = await visibleOpenedDialogFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(visibleOpenedDialogResult.ok, false, '本次打开的弹窗仍可见时，即使 textarea 被移除也不得报告成功');
 assert.equal(visibleOpenedDialogResult.ok ? '' : visibleOpenedDialogResult.code, 'ORDER_COMPLETION_NOT_VERIFIED');
@@ -917,11 +922,11 @@ function createLiveGreenFlagCompletionFixture() {
 const liveGreenFlagCompletionResult = await createLiveGreenFlagCompletionFixture().completeOsOrder({
   expectedOrderNo: '6955059225013785777',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.deepEqual(liveGreenFlagCompletionResult, {
   ok: true,
-  remarkText: '#销售：小王\n#悠然一刻/13826459812\n#入OS',
+  remarkText: `#销售：小王\n${backendRemarkLines.join('\n')}`,
   remarkStatus: 'SUCCEEDED',
   greenFlagStatus: 'SUCCEEDED',
 }, '应识别飞鸽真实绿色旗帜并允许平台在保存后追加备注人和时间行');
@@ -1003,7 +1008,7 @@ assert.ok(calibratedPaidContext.diagnostics.includes('未识别订单状态'));
 const calibratedMissingGreenResult = await calibratedPaidOrderFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(calibratedMissingGreenResult.ok, false);
 assert.equal(
@@ -1019,7 +1024,7 @@ const calibratedMissingConfirmFixture = createCalibratedPaidOrderFixture({ inclu
 const calibratedMissingConfirmResult = await calibratedMissingConfirmFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
+  remarkLines: backendRemarkLines,
 });
 assert.equal(calibratedMissingConfirmResult.ok, false);
 assert.equal(

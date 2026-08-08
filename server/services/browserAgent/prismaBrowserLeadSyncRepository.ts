@@ -20,13 +20,14 @@ function auditDecimal(value: unknown): string | null | undefined {
 
 function record(row: any, storedContact?: StoredLeadContactSnapshot): BrowserLeadSyncRecord {
   const { sourcePaymentAmount, ...rest } = row;
+  const contact = storedContact || storedContactFromSyncRow(row);
   return {
     ...rest,
     ...(sourcePaymentAmount === undefined ? {} : { sourcePaymentAmount: auditDecimal(sourcePaymentAmount) }),
     status: row.status as BrowserLeadSyncRecord['status'],
     orderRemarkStatus: row.orderRemarkStatus as BrowserLeadSyncRecord['orderRemarkStatus'],
     greenFlagStatus: row.greenFlagStatus as BrowserLeadSyncRecord['greenFlagStatus'],
-    ...(storedContact ? { storedContact } : {}),
+    ...(contact ? { storedContact: contact } : {}),
   };
 }
 
@@ -51,6 +52,23 @@ function storedContactFromLeadRow(row: any): StoredLeadContactSnapshot {
     nickname: String(row?.name || data.name || '').trim(),
     phone: String(row?.phone || data.phone || '').trim() || undefined,
     wechat: String(row?.wechat || data.wechat || '').trim() || undefined,
+  };
+}
+
+function storedContactFromSyncRow(row: any): StoredLeadContactSnapshot | undefined {
+  const contact = {
+    nickname: String(row?.contactNickname || '').trim(),
+    phone: String(row?.contactPhone || '').trim() || undefined,
+    wechat: String(row?.contactWechat || '').trim() || undefined,
+  };
+  return contact.nickname && (contact.phone || contact.wechat) ? contact : undefined;
+}
+
+function storedContactData(storedContact: StoredLeadContactSnapshot) {
+  return {
+    contactNickname: storedContact.nickname.trim(),
+    contactPhone: storedContact.phone?.trim() || null,
+    contactWechat: storedContact.wechat?.trim() || null,
   };
 }
 
@@ -149,23 +167,56 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       });
       if (!existing) throw new Error('浏览器线索同步保留记录未找到');
 
+      const persistedContact = storedContactFromSyncRow(existing);
+      if (existing.status === 'SUCCEEDED' && persistedContact) {
+        return { acquired: false as const, record: record(existing, persistedContact) };
+      }
+
       let createdLead = await prisma.leadRecord.findUnique({ where: { externalIntakeKey: existing.id } });
       if (!createdLead && existing.leadId) {
         createdLead = await prisma.leadRecord.findUnique({ where: { id: existing.leadId } });
       }
       if (createdLead) {
-        const reconciled = await prisma.browserLeadSync.update({
-          where: { id: existing.id },
-          data: {
-            ...leadFromRow(createdLead),
-            status: 'SUCCEEDED',
-            lastError: null,
-            ...(existing.completedAt ? {} : { completedAt: new Date() }),
-          },
+        const leadSnapshot = storedContactFromLeadRow(createdLead);
+        if (existing.status === 'SUCCEEDED') {
+          const reconciled = await prisma.browserLeadSync.update({
+            where: { id: existing.id },
+            data: storedContactData(leadSnapshot),
+          });
+          return {
+            acquired: false as const,
+            record: record(reconciled, leadSnapshot),
+          };
+        }
+        const lead = leadFromRow(createdLead);
+        const reconciled = await prisma.$transaction(async (transaction) => {
+          await transaction.browserLeadSync.updateMany({
+            where: { id: existing.id, completedAt: null },
+            data: {
+              completedAt: new Date(),
+              ...storedContactData(leadSnapshot),
+              assignedTo: String(lead.assignedTo || '').trim() || null,
+              assignedToId: lead.assignedToId,
+            },
+          });
+          await transaction.browserLeadSync.updateMany({
+            where: { id: existing.id, contactNickname: null },
+            data: storedContactData(leadSnapshot),
+          });
+          return transaction.browserLeadSync.update({
+            where: { id: existing.id },
+            data: {
+              leadId: lead.leadId,
+              leadName: lead.leadName,
+              intakeStatus: lead.intakeStatus,
+              status: 'SUCCEEDED',
+              lastError: null,
+            },
+          });
         });
         return {
           acquired: false as const,
-          record: record(reconciled, storedContactFromLeadRow(createdLead)),
+          record: record(reconciled),
         };
       }
 
@@ -216,18 +267,32 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       intakeStatus?: string | null;
       storedContact: StoredLeadContactSnapshot;
     }) {
-      const { storedContact, ...syncInput } = input;
+      const {
+        storedContact,
+        assignedTo,
+        assignedToId,
+        ...syncInput
+      } = input;
       const current = await prisma.$transaction(async (transaction) => {
         await transaction.browserLeadSync.updateMany({
           where: { id, completedAt: null },
-          data: { completedAt: new Date() },
+          data: {
+            completedAt: new Date(),
+            ...storedContactData(storedContact),
+            assignedTo: assignedTo?.trim() || null,
+            assignedToId: assignedToId || null,
+          },
+        });
+        await transaction.browserLeadSync.updateMany({
+          where: { id, contactNickname: null },
+          data: storedContactData(storedContact),
         });
         return transaction.browserLeadSync.update({
           where: { id },
           data: { ...syncInput, status: 'SUCCEEDED', lastError: null },
         });
       });
-      return record(current, storedContact);
+      return record(current);
     },
 
     async markFailed(id: string, errorMessage: string) {

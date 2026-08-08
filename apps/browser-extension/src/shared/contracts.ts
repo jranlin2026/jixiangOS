@@ -32,11 +32,32 @@ export type AuthenticatedOperator = { id: string; name: string; role: string };
 
 export type ApiEnvelope<T> = { code: number; data: T | null; message: string };
 
+export type BrowserLeadProductResolutionAudit = {
+  status: 'MATCHED';
+  method?: string;
+  osProductId?: string;
+  osProductName?: string;
+  rawProductName?: string;
+} | {
+  status: 'UNMATCHED';
+  rawProductName: string;
+};
+
 export type LeadIntakeResponse = {
   syncId: string;
   outcome: 'CREATED' | 'ALREADY_CREATED';
-  lead: { id: string; name: string; assignedTo?: string; assignedToId?: string; intakeStatus?: string };
-  storedContact?: { nickname: string; phone?: string; wechat?: string };
+  lead: {
+    id: string;
+    name: string;
+    assignedTo?: string | null;
+    assignedToId?: string | null;
+    intakeStatus?: string | null;
+  };
+  storedContact: { nickname: string; phone?: string; wechat?: string };
+  completedAt: string;
+  remarkLines: [string, string];
+  productResolution: BrowserLeadProductResolutionAudit;
+  shop: { id: string; shopKey: string; displayName: string };
   orderRemarkStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
   greenFlagStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
 };
@@ -44,8 +65,7 @@ export type LeadIntakeResponse = {
 export type CompleteOsOrderInput = {
   expectedOrderNo: string;
   expectedCustomerDisplayName: string;
-  phone?: string;
-  wechat?: string;
+  remarkLines: [string, string];
 };
 
 export type CompleteOsOrderResult =

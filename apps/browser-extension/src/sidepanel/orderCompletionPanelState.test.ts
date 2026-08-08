@@ -28,6 +28,14 @@ const sync = {
   syncId: 'sync-old',
   outcome: 'CREATED' as const,
   lead: { id: 'lead-old', name: '旧客户' },
+  storedContact: { nickname: '旧客户', phone: '13826459812' },
+  completedAt: '2026-08-08T13:00:00.000Z',
+  remarkLines: [
+    '#旧客户/手机号：13826459812（对接：暂未分配）',
+    '#入OS（2026-08-08 21:00）',
+  ] as [string, string],
+  productResolution: { status: 'UNMATCHED' as const, rawProductName: '旧商品' },
+  shop: { id: 'shop-old', shopKey: 'shop-old', displayName: '旧店铺' },
   orderRemarkStatus: 'FAILED' as const,
   greenFlagStatus: 'NOT_ATTEMPTED' as const,
 };

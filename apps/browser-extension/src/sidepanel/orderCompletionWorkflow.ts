@@ -1,5 +1,5 @@
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
-import { buildOsRemarkLines, isPaidOrderStatus } from '../domain/orderCompletion';
+import { isPaidOrderStatus } from '../domain/orderCompletion';
 import { normalizePhoneForComparison } from '../../../../src/shared/utils/phoneNumber';
 import type {
   ApiEnvelope,
@@ -35,7 +35,11 @@ export type OrderCompletionState = {
   message?: string;
 };
 
-export type OrderCompletionInput = CompleteOsOrderInput & {
+export type OrderCompletionInput = {
+  expectedOrderNo: string;
+  expectedCustomerDisplayName: string;
+  phone?: string;
+  wechat?: string;
   intakeInput: Record<string, unknown>;
   existingIntake?: LeadIntakeResponse;
 };
@@ -249,29 +253,7 @@ export async function runOrderCompletion(
     });
   }
 
-  let remarkText = '';
-  try {
-    remarkText = buildOsRemarkLines({
-      nickname: input.expectedCustomerDisplayName,
-      phone: input.phone,
-      wechat: input.wechat,
-    }).join('\n');
-  } catch (error) {
-    const message = errorMessage(error, '订单备注内容无效');
-    await reportCompletion(deps, {
-      syncId: intakeResult.syncId,
-      orderRemarkStatus: 'FAILED',
-      greenFlagStatus: 'NOT_ATTEMPTED',
-      errorMessage: message,
-    });
-    return emit(deps, {
-      ...osCompleted,
-      stage: 'PLATFORM_FAILED',
-      orderRemarkStatus: 'FAILED',
-      greenFlagStatus: 'NOT_ATTEMPTED',
-      message,
-    });
-  }
+  const remarkText = intakeResult.remarkLines.join('\n');
   emit(deps, {
     ...osCompleted,
     stage: 'PLATFORM_COMPLETING',
@@ -285,8 +267,7 @@ export async function runOrderCompletion(
     pageResult = await deps.completePage({
       expectedOrderNo: input.expectedOrderNo,
       expectedCustomerDisplayName: input.expectedCustomerDisplayName,
-      phone: input.phone,
-      wechat: input.wechat,
+      remarkLines: intakeResult.remarkLines,
     });
   } catch (error) {
     const message = errorMessage(error, '订单备注和绿色旗帜处理失败');

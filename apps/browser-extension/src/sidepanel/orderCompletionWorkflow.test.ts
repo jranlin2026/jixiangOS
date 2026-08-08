@@ -11,11 +11,21 @@ const currentContext = {
   diagnostics: [],
 };
 
+const backendRemarkLines: [string, string] = [
+  '#悠然一刻/手机号：13826459812/微信号：wx_original_88（对接：销售小陈）',
+  '#入OS（2026-08-08 21:00）',
+];
+const backendRemarkText = backendRemarkLines.join('\n');
+
 const intakeResult = {
   syncId: 'sync-1',
   outcome: 'CREATED' as const,
   lead: { id: 'lead-1', name: '悠然一刻', assignedTo: '销售小陈' },
   storedContact: { nickname: '悠然一刻', phone: '13826459812', wechat: 'wx_original_88' },
+  completedAt: '2026-08-08T13:00:00.000Z',
+  remarkLines: backendRemarkLines,
+  productResolution: { status: 'UNMATCHED' as const, rawProductName: '体验套餐' },
+  shop: { id: 'shop-1', shopKey: 'jixiang', displayName: '极享官方店' },
   orderRemarkStatus: 'NOT_ATTEMPTED' as const,
   greenFlagStatus: 'NOT_ATTEMPTED' as const,
 };
@@ -26,6 +36,7 @@ const completionResult = {
   greenFlagStatus: 'SUCCEEDED' as const,
 };
 
+let firstPageInput: unknown;
 const result = await runOrderCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
@@ -34,12 +45,15 @@ const result = await runOrderCompletion({
 }, {
   readContext: async () => currentContext,
   intake: async () => ({ code: 0, data: intakeResult, message: 'success' }),
-  completePage: async () => ({
-    ok: true,
-    remarkText: '#悠然一刻/13826459812\n#入OS',
-    remarkStatus: 'SUCCEEDED',
-    greenFlagStatus: 'SUCCEEDED',
-  }),
+  completePage: async (pageInput) => {
+    firstPageInput = pageInput;
+    return {
+      ok: true,
+      remarkText: pageInput.remarkLines.join('\n'),
+      remarkStatus: 'SUCCEEDED',
+      greenFlagStatus: 'SUCCEEDED',
+    };
+  },
   report: async () => ({ code: 0, data: completionResult, message: 'success' }),
 });
 
@@ -47,7 +61,12 @@ assert.equal(result.stage, 'COMPLETED');
 assert.equal(result.osStatus, 'SUCCEEDED');
 assert.equal(result.orderRemarkStatus, 'SUCCEEDED');
 assert.equal(result.greenFlagStatus, 'SUCCEEDED');
-assert.equal(result.remarkText, '#悠然一刻/13826459812\n#入OS');
+assert.equal(result.remarkText, backendRemarkText);
+assert.deepEqual(firstPageInput, {
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  remarkLines: backendRemarkLines,
+}, '工作流必须把后端备注行原样传给页面，不得自行重建销售或时间');
 
 let pageCallsAfterOsFailure = 0;
 const osFailure = await runOrderCompletion({
@@ -135,7 +154,7 @@ const greenFlagFailure = await runOrderCompletion({
     code: 'GREEN_FLAG_NOT_FOUND',
     message: '未找到绿色旗帜',
     stage: 'GREEN_FLAG',
-    remarkText: '#悠然一刻/13826459812\n#入OS',
+    remarkText: backendRemarkText,
   }),
   report: async (input) => {
     greenFlagFailureReport = input;
@@ -212,7 +231,7 @@ const alreadyCreated = await runOrderCompletion({
     alreadyCreatedPageCalls += 1;
     return {
       ok: true,
-      remarkText: '#悠然一刻/13826459812\n#入OS',
+      remarkText: backendRemarkText,
       remarkStatus: 'SUCCEEDED',
       greenFlagStatus: 'SUCCEEDED',
     };
@@ -298,7 +317,7 @@ for (const matchingContact of [
       matchingPageCalls += 1;
       return {
         ok: true,
-        remarkText: `#悠然一刻/${pageInput.phone || pageInput.wechat}\n#入OS`,
+        remarkText: pageInput.remarkLines.join('\n'),
         remarkStatus: 'SUCCEEDED',
         greenFlagStatus: 'SUCCEEDED',
       };
@@ -338,7 +357,7 @@ for (const normalizedContact of [
       normalizedPageCalls += 1;
       return {
         ok: true,
-        remarkText: `#悠然一刻/${pageInput.phone || pageInput.wechat}\n#入OS`,
+        remarkText: pageInput.remarkLines.join('\n'),
         remarkStatus: 'SUCCEEDED',
         greenFlagStatus: 'SUCCEEDED',
       };
@@ -453,7 +472,7 @@ const retry = await runOrderCompletion({
   },
   completePage: async () => ({
     ok: true,
-    remarkText: '#悠然一刻/13826459812\n#入OS',
+    remarkText: backendRemarkText,
     remarkStatus: 'SUCCEEDED',
     greenFlagStatus: 'SUCCEEDED',
   }),
@@ -649,7 +668,7 @@ const reportException = await runOrderCompletion({
   intake: async () => ({ code: 0, data: intakeResult, message: 'success' }),
   completePage: async () => ({
     ok: true,
-    remarkText: '#悠然一刻/13826459812\n#入OS',
+    remarkText: backendRemarkText,
     remarkStatus: 'SUCCEEDED',
     greenFlagStatus: 'SUCCEEDED',
   }),

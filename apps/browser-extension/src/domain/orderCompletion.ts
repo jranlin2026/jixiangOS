@@ -1,24 +1,13 @@
-export type OsRemarkInput = {
-  nickname: string;
-  phone?: string;
-  wechat?: string;
-};
-
-export function buildOsRemarkLines(input: OsRemarkInput): string[] {
-  const nickname = input.nickname.trim();
-  const contact = input.phone?.trim() || input.wechat?.trim() || '';
-  if (!nickname) throw new Error('抖音昵称不能为空');
-  if (!contact) throw new Error('手机号或微信至少填写一项');
-  return [`#${nickname}/${contact}`, '#入OS'];
-}
-
-export function mergeOsOrderRemark(existing: string, input: OsRemarkInput): string {
-  const lines = buildOsRemarkLines(input);
-  const currentLines = existing.split(/\r?\n/).map((line) => line.trim());
+export function mergeOsOrderRemark(
+  existing: string,
+  lines: readonly [string, string],
+): string {
+  const currentLines = existing.split(/\r\n|\n|\r/);
   const missing = lines.filter((line) => !currentLines.includes(line));
   if (!missing.length) return existing;
-  const separator = existing && !existing.endsWith('\n') ? '\n' : '';
-  return `${existing}${separator}${missing.join('\n')}`;
+  const newline = existing.match(/\r\n|\n|\r/)?.[0] || '\n';
+  const separator = existing && !/(?:\r\n|\n|\r)$/.test(existing) ? newline : '';
+  return `${existing}${separator}${missing.join(newline)}`;
 }
 
 export function isPaidOrderStatus(status: string): boolean {

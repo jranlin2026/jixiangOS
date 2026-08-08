@@ -118,7 +118,10 @@ const repository = {
   },
   async markSucceeded(id: string, input: any) {
     const current = [...records.values()].find((item) => item.id === id);
-    Object.assign(current, input, { status: 'SUCCEEDED' });
+    Object.assign(current, input, {
+      status: 'SUCCEEDED',
+      completedAt: current.completedAt || new Date('2026-08-08T13:00:00.000Z'),
+    });
     return current;
   },
   async markFailed(id: string, errorMessage: string) {
@@ -201,6 +204,16 @@ assert.equal(first.data?.outcome, 'CREATED');
 assert.equal(first.data?.lead.assignedTo, '销售小王');
 assert.equal(first.data?.lead.assignedToId, 'sales-1');
 assert.equal(first.data?.lead.intakeStatus, '入库成功');
+assert.equal(first.data?.completedAt, '2026-08-08T13:00:00.000Z');
+assert.deepEqual(first.data?.remarkLines, [
+  '#张先生/手机号：13800138000/微信号：wx_original_88（对接：销售小王）',
+  '#入OS（2026-08-08 21:00）',
+]);
+assert.deepEqual(first.data?.shop, {
+  id: 'binding-a',
+  shopKey: 'jixiang-a',
+  displayName: '极享官方旗舰店',
+});
 assert.deepEqual(first.data?.productResolution, {
   status: 'MATCHED', method: 'PLATFORM_PRODUCT_ID', osProductId: 'prod-taojin', osProductName: '淘金AI',
   rawProductName: '淘金AI 多模态创作智能体 读书卡',
@@ -273,8 +286,8 @@ const unmatched = await service.intake({
   paymentAmount: 188,
 }, actor);
 assert.equal(unmatched.code, 0, '未匹配商品仍必须创建线索');
-assert.equal(Object.hasOwn(createLeadCalls[2].input, 'sourceProductId'), false);
-assert.equal(Object.hasOwn(createLeadCalls[2].input, 'sourceProductName'), false);
+assert.equal(Object.prototype.hasOwnProperty.call(createLeadCalls[2].input, 'sourceProductId'), false);
+assert.equal(Object.prototype.hasOwnProperty.call(createLeadCalls[2].input, 'sourceProductName'), false);
 assert.match(createLeadCalls[2].input.remark, /平台商品待匹配：完全未配置的平台商品/);
 assert.deepEqual(unmatched.data?.productResolution, {
   status: 'UNMATCHED', rawProductName: '完全未配置的平台商品',
@@ -344,6 +357,9 @@ assert.deepEqual(duplicate.data?.storedContact, {
   wechat: 'wx_original_88',
 }, '重复入库必须返回已关联线索的实际联系快照');
 assert.deepEqual(duplicate.data?.productResolution, first.data?.productResolution);
+assert.equal(duplicate.data?.completedAt, first.data?.completedAt);
+assert.deepEqual(duplicate.data?.remarkLines, first.data?.remarkLines);
+assert.deepEqual(duplicate.data?.shop, first.data?.shop);
 assert.equal(createLeadCalls.length, 3, '重复点击不能再创建线索');
 assert.equal(records.size, 3, '业务幂等键必须先规范化再持久化');
 

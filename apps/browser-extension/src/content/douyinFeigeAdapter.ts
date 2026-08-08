@@ -673,21 +673,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         };
       }
       const existing = editableValue(editor) || text(orderCard, selectors.orderRemarkSummary);
-      let remarkText: string;
-      try {
-        remarkText = mergeOsOrderRemark(existing, {
-          nickname: expectedCustomer,
-          phone: input.phone,
-          wechat: input.wechat,
-        });
-      } catch (error) {
-        return {
-          ok: false,
-          code: 'ORDER_REMARK_INVALID',
-          message: error instanceof Error ? error.message : '订单备注内容无效',
-          stage: 'REMARK',
-        };
-      }
+      const remarkText = mergeOsOrderRemark(existing, input.remarkLines);
 
       const greenFlag = findUniqueGreenFlag(dialog);
       const save = findUniqueSave(dialog);

@@ -65,8 +65,10 @@ let completionCommand: unknown;
 const completionInput = {
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
-  phone: '13826459812',
-  wechat: 'wx_user88',
+  remarkLines: [
+    '#悠然一刻/手机号：13826459812/微信号：wx_user88（对接：销售小王）',
+    '#入OS（2026-08-08 21:00）',
+  ] as [string, string],
 };
 const completionResult = await activeTabCommand({
   type: 'COMPLETE_FEIGE_OS_ORDER',
@@ -80,7 +82,7 @@ const completionResult = await activeTabCommand({
       completionCommand = command;
       return {
         ok: true,
-        remarkText: '#悠然一刻/13826459812\n#入OS',
+        remarkText: completionInput.remarkLines.join('\n'),
         remarkStatus: 'SUCCEEDED',
         greenFlagStatus: 'SUCCEEDED',
       };
@@ -94,7 +96,7 @@ assert.deepEqual(completionCommand, {
 }, '飞鸽订单完成参数应原样转发到当前页面');
 assert.deepEqual(completionResult, {
   ok: true,
-  remarkText: '#悠然一刻/13826459812\n#入OS',
+  remarkText: completionInput.remarkLines.join('\n'),
   remarkStatus: 'SUCCEEDED',
   greenFlagStatus: 'SUCCEEDED',
 });

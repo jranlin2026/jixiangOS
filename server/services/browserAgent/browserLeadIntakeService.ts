@@ -2,6 +2,7 @@ import { failure, success, type ApiResponse } from '../../api/response';
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import type { Lead } from '../../../src/types/lead';
 import type { BrowserCatalogErrorCode, BrowserCatalogService } from './browserCatalogService';
+import { buildBrowserOrderRemark } from './browserOrderRemark';
 
 export type BrowserLeadIntakeInput = {
   platform: 'DOUYIN';
@@ -118,6 +119,13 @@ export type BrowserLeadIntakeResult = {
     intakeStatus?: string | null;
   };
   storedContact: StoredLeadContactSnapshot;
+  completedAt: string;
+  remarkLines: [string, string];
+  shop: {
+    id: string;
+    shopKey: string;
+    displayName: string;
+  };
   productResolution: BrowserLeadProductResolutionAudit;
   orderRemarkStatus: BrowserLeadSyncRecord['orderRemarkStatus'];
   greenFlagStatus: BrowserLeadSyncRecord['greenFlagStatus'];
@@ -154,6 +162,19 @@ function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadInt
       409,
     );
   }
+  if (!record.completedAt || Number.isNaN(record.completedAt.getTime())) {
+    return failure<BrowserLeadIntakeResult>(
+      '已入库线索的首次成功时间无法读取，请先在极享OS核对后重试',
+      409,
+    );
+  }
+  if (!record.shopBindingId || !record.shopKey || !record.shopDisplayName) {
+    return failure<BrowserLeadIntakeResult>(
+      '已入库线索的店铺快照无法完整读取，请先在极享OS核对后重试',
+      409,
+    );
+  }
+  const completedAt = record.completedAt.toISOString();
   return success<BrowserLeadIntakeResult>({
     syncId: record.id,
     outcome,
@@ -165,6 +186,17 @@ function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadInt
       intakeStatus: record.intakeStatus,
     },
     storedContact: record.storedContact,
+    completedAt,
+    remarkLines: buildBrowserOrderRemark({
+      ...record.storedContact,
+      assignedTo: record.assignedTo,
+      completedAt: record.completedAt,
+    }),
+    shop: {
+      id: record.shopBindingId,
+      shopKey: record.shopKey,
+      displayName: record.shopDisplayName,
+    },
     productResolution: productResolutionFromRecord(record),
     orderRemarkStatus: record.orderRemarkStatus,
     greenFlagStatus: record.greenFlagStatus,

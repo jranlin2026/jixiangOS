@@ -12,7 +12,8 @@ const browserLeadSyncFields = new Set([
   'platformProductId', 'platformSkuId', 'sourceProductName', 'matchedProductId',
   'matchedProductName', 'productMatchMethod', 'sourcePaymentAmount', 'sourcePaymentAt',
   'operatorId', 'operatorName', 'contactSource', 'status', 'leadId', 'leadName',
-  'assignedTo', 'assignedToId', 'intakeStatus', 'orderRemarkStatus', 'orderRemarkError',
+  'contactNickname', 'contactPhone', 'contactWechat', 'assignedTo', 'assignedToId',
+  'intakeStatus', 'orderRemarkStatus', 'orderRemarkError',
   'greenFlagStatus', 'greenFlagError', 'remarkOperatorId', 'remarkOperatorName',
   'attemptCount', 'lastError', 'completedAt', 'orderRemarkedAt', 'greenFlaggedAt',
   'createdAt', 'updatedAt',
@@ -164,22 +165,46 @@ assert.deepEqual({
 }, '创建同步记录必须保留店铺、商品匹配和付款审计事实');
 
 const succeededOnce = await repository.markSucceeded(first.record.id, {
-  leadId: 'lead-1', leadName: '首次入库客户', storedContact: { nickname: '首次入库客户', phone: '13800138000' },
+  leadId: 'lead-1', leadName: '首次入库客户', assignedTo: '首次销售', assignedToId: 'sales-first',
+  storedContact: { nickname: '首次入库客户', phone: '13800138000', wechat: 'wx_first' },
 });
 assert.ok(succeededOnce.completedAt instanceof Date, '首次成功必须记录完成时间');
+assert.deepEqual(succeededOnce.storedContact, {
+  nickname: '首次入库客户',
+  phone: '13800138000',
+  wechat: 'wx_first',
+}, '首次成功必须持久化联系人快照');
 const completedAt = succeededOnce.completedAt;
 const succeededAgain = await repository.markSucceeded(first.record.id, {
-  leadId: 'lead-1', leadName: '首次入库客户', storedContact: { nickname: '首次入库客户', phone: '13800138000' },
+  leadId: 'lead-1', leadName: '后续更名客户', assignedTo: '后续销售', assignedToId: 'sales-later',
+  storedContact: { nickname: '后续更名客户', phone: '13900139000', wechat: 'wx_later' },
 });
 assert.equal(succeededAgain.completedAt?.getTime(), completedAt?.getTime(), '重复标记成功不得重写首次完成时间');
+assert.deepEqual(succeededAgain.storedContact, succeededOnce.storedContact, '重复标记成功不得重写首次联系人快照');
+assert.equal(succeededAgain.assignedTo, '首次销售', '重复标记成功不得重写首次分配销售');
+
+leadRow = {
+  id: 'lead-1',
+  externalIntakeKey: first.record.id,
+  name: '线索后续改名',
+  phone: '13900139000',
+  wechat: 'wx_mutated',
+  assignedTo: '已改派销售',
+  data: { assignedTo: '已改派销售', assignedToId: 'sales-mutated' },
+};
+const duplicateAfterLeadMutation = await repository.reserve(reservationInput);
+assert.deepEqual(duplicateAfterLeadMutation.record.storedContact, succeededOnce.storedContact);
+assert.equal(duplicateAfterLeadMutation.record.assignedTo, '首次销售');
+assert.equal(duplicateAfterLeadMutation.record.completedAt?.getTime(), completedAt?.getTime());
+leadRow = null;
 
 row = {
   ...row,
   status: 'FAILED',
   leadId: 'lead-stale',
   leadName: '过期线索',
-  assignedTo: null,
-  assignedToId: null,
+  assignedTo: '首次销售',
+  assignedToId: 'sales-first',
   intakeStatus: null,
   lastError: '上次回写中断',
 };
@@ -189,7 +214,7 @@ const recoveredSuccess = await repository.markSucceeded(first.record.id, {
 });
 assert.equal(recoveredSuccess.status, 'SUCCEEDED', '已有完成时间的记录仍必须恢复成功状态');
 assert.equal(recoveredSuccess.leadId, 'lead-repaired', '已有完成时间的记录仍必须修复线索快照');
-assert.equal(recoveredSuccess.assignedToId, 'sales-1');
+assert.equal(recoveredSuccess.assignedToId, 'sales-first', '恢复成功状态不得改写首次分配销售');
 assert.equal(recoveredSuccess.lastError, null);
 assert.equal(recoveredSuccess.completedAt?.getTime(), completedAt?.getTime(), '恢复成功不得覆盖首次完成时间');
 
@@ -292,6 +317,12 @@ row = {
   id: 'browser-sync-recovery',
   status: 'PENDING',
   leadId: null,
+  contactNickname: null,
+  contactPhone: null,
+  contactWechat: null,
+  assignedTo: null,
+  assignedToId: null,
+  completedAt: null,
   updatedAt: new Date(),
 };
 leadRow = {
@@ -319,6 +350,9 @@ row = {
   status: 'SUCCEEDED',
   leadId: 'lead-legacy',
   leadName: '旧同步姓名',
+  contactNickname: null,
+  contactPhone: null,
+  contactWechat: null,
   updatedAt: new Date(),
 };
 leadRow = {
