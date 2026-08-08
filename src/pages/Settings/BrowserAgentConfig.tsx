@@ -120,6 +120,12 @@ type ShopListProps = {
 export function BrowserShopBindingList({ rows, selectedShopId, onSelect, onEdit, onToggleActive }: ShopListProps) {
   if (!rows.length) return <Paper variant="outlined" sx={{ p: 4, textAlign: 'center', color: '#64748b' }}>暂无符合条件的店铺绑定</Paper>;
 
+  const selectWithKeyboard = (event: React.KeyboardEvent, shop: BrowserShopBinding) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    onSelect(shop);
+  };
+
   return <>
     <TableContainer component={Paper} variant="outlined" sx={{ display: { xs: 'none', md: 'block' } }}>
       <Table size="small">
@@ -132,9 +138,11 @@ export function BrowserShopBindingList({ rows, selectedShopId, onSelect, onEdit,
           <TableCell>状态</TableCell>
           <TableCell align="right">操作</TableCell>
         </TableRow></TableHead>
-        <TableBody>{rows.map((shop) => <TableRow
+        <TableBody role="listbox" aria-label="店铺绑定">{rows.map((shop) => <TableRow
           data-view="desktop" data-row-id={shop.id} key={shop.id} hover selected={selectedShopId === shop.id}
-          onClick={() => onSelect(shop)} sx={{ cursor: 'pointer' }}
+          role="option" tabIndex={0} aria-selected={selectedShopId === shop.id}
+          aria-label={`选择店铺 ${shop.displayName}`}
+          onClick={() => onSelect(shop)} onKeyDown={(event) => selectWithKeyboard(event, shop)} sx={{ cursor: 'pointer' }}
         >
           <TableCell sx={{ fontWeight: 700 }}>{shop.displayName}</TableCell>
           <TableCell>{shop.shopKey}</TableCell>
@@ -152,10 +160,12 @@ export function BrowserShopBindingList({ rows, selectedShopId, onSelect, onEdit,
       </Table>
     </TableContainer>
 
-    <Stack spacing={1.25} sx={{ display: { xs: 'flex', md: 'none' } }}>
+    <Stack spacing={1.25} role="listbox" aria-label="店铺绑定" sx={{ display: { xs: 'flex', md: 'none' } }}>
       {rows.map((shop) => <Paper
         data-view="mobile" data-row-id={shop.id} key={shop.id} variant="outlined"
-        onClick={() => onSelect(shop)}
+        role="option" tabIndex={0} aria-selected={selectedShopId === shop.id}
+        aria-label={`选择店铺 ${shop.displayName}`}
+        onClick={() => onSelect(shop)} onKeyDown={(event) => selectWithKeyboard(event, shop)}
         sx={{ p: 2, borderColor: selectedShopId === shop.id ? 'primary.main' : undefined }}
       >
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={1}>
@@ -290,7 +300,7 @@ const BrowserAgentConfigPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
-  const load = async () => {
+  const load = async (): Promise<boolean> => {
     setLoading(true);
     try {
       const [catalogResponse, productResponse] = await Promise.all([
@@ -299,21 +309,30 @@ const BrowserAgentConfigPage: React.FC = () => {
       ]);
       if (catalogResponse.code !== 0 || !catalogResponse.data) {
         await alert(catalogResponse.message || '平台商品映射加载失败', '加载失败');
-        return;
+        return false;
       }
       setCatalog(catalogResponse.data);
       if (productResponse.code === 0) setProducts(productResponse.data);
       setSelectedShopId((current) => catalogResponse.data!.shops.some((shop) => shop.id === current)
         ? current
         : (catalogResponse.data!.shops[0]?.id || ''));
+      return true;
     } catch (error) {
       await alert(error instanceof Error ? error.message : '平台商品映射加载失败', '加载失败');
+      return false;
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => { void load(); }, []);
+
+  const showMutationTransportError = async (error: unknown, title: string) => {
+    const message = error instanceof Error && error.message.trim()
+      ? error.message
+      : '网络请求失败，请检查连接后重试';
+    await alert(message, title);
+  };
 
   const shopResult = useMemo(
     () => buildBrowserShopPage(catalog.shops, { query: shopQuery, status: shopStatus }, shopPage, shopPageSize),
@@ -364,7 +383,9 @@ const BrowserAgentConfigPage: React.FC = () => {
         : await browserAgentConfigApi.createShop(input);
       if (response.code !== 0) return void await alert(response.message, '保存失败');
       setShopFormOpen(false);
-      await load();
+      if (await load()) void alert('店铺绑定已保存', '保存成功');
+    } catch (error) {
+      await showMutationTransportError(error, '保存失败');
     } finally {
       setSubmitting(false);
     }
@@ -376,9 +397,13 @@ const BrowserAgentConfigPage: React.FC = () => {
       '停用店铺',
       { confirmText: '确认停用' },
     )) return;
-    const response = await browserAgentConfigApi.updateShop(shop.id, { active: !shop.active });
-    if (response.code !== 0) return void await alert(response.message, '更新失败');
-    await load();
+    try {
+      const response = await browserAgentConfigApi.updateShop(shop.id, { active: !shop.active });
+      if (response.code !== 0) return void await alert(response.message, '更新失败');
+      if (await load()) void alert(shop.active ? '店铺已停用' : '店铺已启用', '更新成功');
+    } catch (error) {
+      await showMutationTransportError(error, '更新失败');
+    }
   };
 
   const openMappingForm = (mapping?: BrowserProductMapping) => {
@@ -415,7 +440,9 @@ const BrowserAgentConfigPage: React.FC = () => {
         : await browserAgentConfigApi.createMapping(input);
       if (response.code !== 0) return void await alert(response.message, '保存失败');
       setMappingFormOpen(false);
-      await load();
+      if (await load()) void alert('商品映射已保存', '保存成功');
+    } catch (error) {
+      await showMutationTransportError(error, '保存失败');
     } finally {
       setSubmitting(false);
     }
@@ -423,9 +450,13 @@ const BrowserAgentConfigPage: React.FC = () => {
 
   const disableMapping = async (mapping: BrowserProductMapping) => {
     if (!await confirm(`确定停用平台商品映射「${mapping.platformProductName}」吗？`, '停用商品映射')) return;
-    const response = await browserAgentConfigApi.disableMapping(mapping.id);
-    if (response.code !== 0) return void await alert(response.message, '停用失败');
-    await load();
+    try {
+      const response = await browserAgentConfigApi.disableMapping(mapping.id);
+      if (response.code !== 0) return void await alert(response.message, '停用失败');
+      if (await load()) void alert('商品映射已停用', '停用成功');
+    } catch (error) {
+      await showMutationTransportError(error, '停用失败');
+    }
   };
 
   return <Box>
