@@ -209,39 +209,97 @@ model AiProviderConfig {
   @@map("ai_provider_configs")
 }
 
+model BrowserShopBinding {
+  id              String                  @id @db.VarChar(64)
+  platform        String                  @db.VarChar(40)
+  shopKey         String                  @db.VarChar(120)
+  platformShopId  String?                 @db.VarChar(160)
+  displayName     String                  @db.VarChar(160)
+  aliases         Json
+  source          String                  @default("抖音电商") @db.VarChar(80)
+  sourceName      String                  @default("飞鸽客服") @db.VarChar(80)
+  sourceType      String                  @default("公司资源") @db.VarChar(40)
+  active          Boolean                 @default(true)
+  createdById     String                  @db.VarChar(64)
+  createdByName   String                  @db.VarChar(100)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  productMappings BrowserProductMapping[]
+
+  @@unique([platform, shopKey])
+  @@index([platform, platformShopId])
+  @@index([active, updatedAt])
+  @@map("browser_shop_bindings")
+}
+
+model BrowserProductMapping {
+  id                  String             @id @db.VarChar(64)
+  shopBindingId       String             @db.VarChar(64)
+  platformIdentityKey String             @db.VarChar(300)
+  platformProductId   String?            @db.VarChar(200)
+  platformSkuId       String?            @db.VarChar(200)
+  platformProductName String             @db.VarChar(500)
+  aliases             Json
+  osProductId         String             @db.VarChar(64)
+  osProductName       String             @db.VarChar(200)
+  active              Boolean            @default(true)
+  confirmedById       String             @db.VarChar(64)
+  confirmedByName     String             @db.VarChar(100)
+  confirmedAt         DateTime           @default(now())
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  shopBinding         BrowserShopBinding @relation(fields: [shopBindingId], references: [id], onDelete: Restrict)
+
+  @@unique([shopBindingId, platformIdentityKey])
+  @@index([shopBindingId, active, updatedAt])
+  @@index([osProductId])
+  @@map("browser_product_mappings")
+}
+
 model BrowserLeadSync {
-  id                String    @id @db.VarChar(64)
-  platform          String    @db.VarChar(40)
-  shopKey           String    @db.VarChar(120)
-  platformOrderNo   String    @db.VarChar(160)
-  sourceProductName String?   @db.VarChar(240)
-  operatorId        String    @db.VarChar(64)
-  operatorName      String    @db.VarChar(100)
-  contactSource     String    @db.VarChar(24)
-  status            String    @default("PENDING") @db.VarChar(24)
-  leadId            String?   @db.VarChar(64)
-  leadName          String?   @db.VarChar(200)
-  assignedTo        String?   @db.VarChar(100)
-  assignedToId      String?   @db.VarChar(64)
-  intakeStatus      String?   @db.VarChar(40)
-  orderRemarkStatus String    @default("NOT_ATTEMPTED") @db.VarChar(24)
-  orderRemarkError  String?   @db.VarChar(1000)
-  greenFlagStatus   String    @default("NOT_ATTEMPTED") @db.VarChar(24)
-  greenFlagError    String?   @db.VarChar(1000)
-  remarkOperatorId  String?   @db.VarChar(64)
-  remarkOperatorName String?  @db.VarChar(100)
-  attemptCount      Int       @default(1)
-  lastError         String?   @db.VarChar(1000)
-  completedAt       DateTime?
-  orderRemarkedAt   DateTime?
-  greenFlaggedAt    DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                  String    @id @db.VarChar(64)
+  platform            String    @db.VarChar(40)
+  shopKey             String    @db.VarChar(120)
+  platformOrderNo     String    @db.VarChar(160)
+  shopBindingId       String?   @db.VarChar(64)
+  shopDisplayName     String?   @db.VarChar(160)
+  platformProductId   String?   @db.VarChar(200)
+  platformSkuId       String?   @db.VarChar(200)
+  sourceProductName   String?   @db.VarChar(240)
+  matchedProductId    String?   @db.VarChar(64)
+  matchedProductName  String?   @db.VarChar(200)
+  productMatchMethod  String?   @db.VarChar(40)
+  sourcePaymentAmount Decimal?  @db.Decimal(14, 2)
+  sourcePaymentAt     DateTime?
+  operatorId          String    @db.VarChar(64)
+  operatorName        String    @db.VarChar(100)
+  contactSource       String    @db.VarChar(24)
+  status              String    @default("PENDING") @db.VarChar(24)
+  leadId              String?   @db.VarChar(64)
+  leadName            String?   @db.VarChar(200)
+  assignedTo          String?   @db.VarChar(100)
+  assignedToId        String?   @db.VarChar(64)
+  intakeStatus        String?   @db.VarChar(40)
+  orderRemarkStatus   String    @default("NOT_ATTEMPTED") @db.VarChar(24)
+  orderRemarkError    String?   @db.VarChar(1000)
+  greenFlagStatus     String    @default("NOT_ATTEMPTED") @db.VarChar(24)
+  greenFlagError      String?   @db.VarChar(1000)
+  remarkOperatorId    String?   @db.VarChar(64)
+  remarkOperatorName  String?   @db.VarChar(100)
+  attemptCount        Int       @default(1)
+  lastError           String?   @db.VarChar(1000)
+  completedAt         DateTime?
+  orderRemarkedAt     DateTime?
+  greenFlaggedAt      DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   @@unique([platform, shopKey, platformOrderNo])
   @@index([operatorId, createdAt])
   @@index([status, updatedAt])
   @@index([leadId])
+  @@index([shopBindingId])
+  @@index([matchedProductId])
   @@map("browser_lead_syncs")
 }
 

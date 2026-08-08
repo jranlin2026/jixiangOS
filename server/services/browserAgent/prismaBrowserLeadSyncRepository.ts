@@ -97,7 +97,16 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       platform: string;
       shopKey: string;
       platformOrderNo: string;
+      shopBindingId?: string;
+      shopDisplayName?: string;
+      platformProductId?: string;
+      platformSkuId?: string;
       sourceProductName?: string;
+      matchedProductId?: string;
+      matchedProductName?: string;
+      productMatchMethod?: string;
+      sourcePaymentAmount?: number;
+      sourcePaymentAt?: Date;
       operatorId: string;
       operatorName: string;
       contactSource: 'CHAT' | 'OFF_PLATFORM';
@@ -140,7 +149,7 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
             ...leadFromRow(createdLead),
             status: 'SUCCEEDED',
             lastError: null,
-            completedAt: new Date(),
+            ...(existing.completedAt ? {} : { completedAt: new Date() }),
           },
         });
         return {
@@ -183,10 +192,13 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       storedContact: StoredLeadContactSnapshot;
     }) {
       const { storedContact, ...syncInput } = input;
-      return record(await prisma.browserLeadSync.update({
-        where: { id },
+      await prisma.browserLeadSync.updateMany({
+        where: { id, completedAt: null },
         data: { ...syncInput, status: 'SUCCEEDED', lastError: null, completedAt: new Date() },
-      }), storedContact);
+      });
+      const current = await prisma.browserLeadSync.findUnique({ where: { id } });
+      if (!current) throw new Error('浏览器线索同步成功记录未找到');
+      return record(current, storedContact);
     },
 
     async markFailed(id: string, errorMessage: string) {

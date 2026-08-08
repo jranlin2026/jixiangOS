@@ -35,6 +35,7 @@ const delegate = {
       greenFlagError: null,
       orderRemarkedAt: null,
       greenFlaggedAt: null,
+      completedAt: null,
     };
     return row;
   },
@@ -71,6 +72,12 @@ const leadDelegate = {
 const repository = createPrismaBrowserLeadSyncRepository({ browserLeadSync: delegate, leadRecord: leadDelegate } as any);
 const reservationInput = {
   platform: 'DOUYIN', shopKey: 'shop-1', platformOrderNo: 'order-1',
+  shopBindingId: 'binding-1', shopDisplayName: '极享抖音旗舰店',
+  platformProductId: 'DY-100', platformSkuId: 'SKU-100-A',
+  sourceProductName: '淘金AI 多模态创作智能体',
+  matchedProductId: 'product-taojin', matchedProductName: '淘金AI',
+  productMatchMethod: 'PLATFORM_PRODUCT_ID',
+  sourcePaymentAmount: 299, sourcePaymentAt: new Date('2026-08-08T09:00:00.000Z'),
   operatorId: 'user-1', operatorName: '客服小李',
   contactSource: 'CHAT' as const,
 };
@@ -79,6 +86,39 @@ const first = await repository.reserve(reservationInput);
 assert.equal(first.acquired, true);
 assert.equal(first.record.status, 'PENDING');
 assert.equal(first.record.attemptCount, 1);
+assert.deepEqual({
+  shopBindingId: first.record.shopBindingId,
+  shopDisplayName: first.record.shopDisplayName,
+  platformProductId: first.record.platformProductId,
+  platformSkuId: first.record.platformSkuId,
+  sourceProductName: first.record.sourceProductName,
+  matchedProductId: first.record.matchedProductId,
+  matchedProductName: first.record.matchedProductName,
+  productMatchMethod: first.record.productMatchMethod,
+  sourcePaymentAmount: first.record.sourcePaymentAmount,
+  sourcePaymentAt: first.record.sourcePaymentAt,
+}, {
+  shopBindingId: 'binding-1',
+  shopDisplayName: '极享抖音旗舰店',
+  platformProductId: 'DY-100',
+  platformSkuId: 'SKU-100-A',
+  sourceProductName: '淘金AI 多模态创作智能体',
+  matchedProductId: 'product-taojin',
+  matchedProductName: '淘金AI',
+  productMatchMethod: 'PLATFORM_PRODUCT_ID',
+  sourcePaymentAmount: 299,
+  sourcePaymentAt: new Date('2026-08-08T09:00:00.000Z'),
+}, '创建同步记录必须保留店铺、商品匹配和付款审计事实');
+
+const succeededOnce = await repository.markSucceeded(first.record.id, {
+  leadId: 'lead-1', leadName: '首次入库客户', storedContact: { nickname: '首次入库客户', phone: '13800138000' },
+});
+assert.ok(succeededOnce.completedAt instanceof Date, '首次成功必须记录完成时间');
+const completedAt = succeededOnce.completedAt;
+const succeededAgain = await repository.markSucceeded(first.record.id, {
+  leadId: 'lead-1', leadName: '首次入库客户', storedContact: { nickname: '首次入库客户', phone: '13800138000' },
+});
+assert.equal(succeededAgain.completedAt, completedAt, '重复标记成功不得重写首次完成时间');
 
 const duplicate = await repository.reserve(reservationInput);
 assert.equal(duplicate.acquired, false);
