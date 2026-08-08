@@ -5,11 +5,13 @@ type Props = {
   view: ScriptLibraryView | null;
   match?: ScriptMatch | null;
   recommendationMessage?: string;
+  loadError?: string;
   onFill: (content: string) => void;
   onManage: () => void;
+  onRetry: () => void;
 };
 
-export function ScriptLibrarySection({ view, match, recommendationMessage, onFill, onManage }: Props) {
+export function ScriptLibrarySection({ view, match, recommendationMessage, loadError, onFill, onManage, onRetry }: Props) {
   const groups = useMemo(() => (view?.library.groups || [])
     .filter((group) => group.enabled)
     .sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id)), [view]);
@@ -26,7 +28,8 @@ export function ScriptLibrarySection({ view, match, recommendationMessage, onFil
 
   return <section className="card">
     <div className="section-title"><h2>常用话术</h2>{view?.canManage && <button className="secondary compact" onClick={onManage}>管理话术</button>}</div>
-    {!view ? <p className="empty">正在从极享OS加载话术…</p> : !groups.length ? <p className="empty">暂无已启用的话术分组。</p> : <>
+    {!view && loadError ? <div className="script-load-error"><p>{loadError}</p><button className="secondary compact" onClick={onRetry}>重试加载</button></div>
+      : !view ? <p className="empty">正在从极享OS加载话术…</p> : !groups.length ? <p className="empty">暂无已启用的话术分组。</p> : <>
       <div className="script-tabs">{groups.map((group) => <button key={group.id} className={group.id === active?.id ? 'active' : ''} onClick={() => setActiveGroupId(group.id)}>{group.name}</button>)}</div>
       <div className="script-grid">{scripts.map((script) => <button key={script.id} className={`script-button ${match?.script.id === script.id ? 'recommended' : ''}`} onClick={() => onFill(script.content)}>
         <span className="script-heading"><strong>{script.title}</strong>{match?.script.id === script.id && <em>系统推荐</em>}</span>

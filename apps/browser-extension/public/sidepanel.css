@@ -46,6 +46,8 @@ input:focus, textarea:focus, select:focus { border-color: #5570d9; box-shadow: 0
 .script-heading em { padding: 2px 6px; border-radius: 999px; color: #3157d5; background: #dfe6ff; font-size: 9px; font-style: normal; }
 .script-button small { color: #3157d5; font-size: 10px; line-height: 1.4; }
 .recommendation-message { margin-top: 9px; padding: 8px 9px; border-radius: 8px; color: #3157d5; background: #eef2ff; font-size: 11px; }
+.script-load-error { padding: 10px; border: 1px solid #ffd6d6; border-radius: 9px; color: #a12727; background: #fff6f6; }
+.script-load-error p { margin: 0 0 8px; font-size: 11px; line-height: 1.5; }
 .script-editor .section-title h2 { margin-bottom: 3px; }
 .script-editor .section-title .hint { margin: 0; }
 .editor-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }

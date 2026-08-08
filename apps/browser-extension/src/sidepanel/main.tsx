@@ -9,6 +9,7 @@ import type {
 } from '../shared/contracts';
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
 import { activeTabCommand } from '../shared/activeTabMessaging';
+import { withWorkerTimeout } from '../shared/workerMessaging';
 import {
   matchScript,
   recommendationKey,
@@ -25,7 +26,7 @@ type ContactForm = { name: string; phone: string; wechat: string; source: 'CHAT'
 type RecognitionSnapshot = { id: number; context: FeigePageContext; hasContact: boolean };
 
 async function worker<T>(message: WorkerCommand): Promise<ApiEnvelope<T>> {
-  return chrome.runtime.sendMessage(message);
+  return withWorkerTimeout(chrome.runtime.sendMessage(message));
 }
 
 function permissionPattern(apiBaseUrl: string) {
@@ -55,6 +56,7 @@ function App() {
   const [remarkMessage, setRemarkMessage] = useState('');
   const [contactConfirmed, setContactConfirmed] = useState(false);
   const [scriptView, setScriptView] = useState<ScriptLibraryView | null>(null);
+  const [scriptLibraryError, setScriptLibraryError] = useState('');
   const [scriptDraft, setScriptDraft] = useState<ScriptLibrary | null>(null);
   const [managingScripts, setManagingScripts] = useState(false);
   const [savingScripts, setSavingScripts] = useState(false);
@@ -152,10 +154,17 @@ function App() {
   };
 
   const loadScriptLibrary = async () => {
-    const result = await worker<ScriptLibraryView>({ type: 'GET_SCRIPT_LIBRARY' });
-    if (result.code !== 0 || !result.data) throw new Error(result.message);
-    setScriptView(result.data);
-    return result.data;
+    setScriptLibraryError('');
+    try {
+      const result = await worker<ScriptLibraryView>({ type: 'GET_SCRIPT_LIBRARY' });
+      if (result.code !== 0 || !result.data) throw new Error(result.message);
+      setScriptView(result.data);
+      return result.data;
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : '话术加载失败';
+      setScriptLibraryError(message);
+      throw caught;
+    }
   };
 
   useEffect(() => {
@@ -196,7 +205,7 @@ function App() {
   const logout = async () => {
     await worker({ type: 'LOGOUT' });
     setAuth((current) => ({ config: current.config }));
-    setContext(null); setSync(null); setNotice(''); setScriptView(null); setScriptDraft(null); setManagingScripts(false);
+    setContext(null); setSync(null); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
     setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
   };
 
@@ -348,7 +357,18 @@ function App() {
       {context?.diagnostics.length ? <ul className="diagnostics">{context.diagnostics.map((item) => <li key={item}>{item}</li>)}</ul> : null}
     </section>
 
-    <ScriptLibrarySection view={scriptView} match={recommendation} recommendationMessage={recommendationMessage} onFill={(text) => void fillScript(text)} onManage={beginManageScripts} />
+    <ScriptLibrarySection
+      view={scriptView}
+      match={recommendation}
+      recommendationMessage={recommendationMessage}
+      loadError={scriptLibraryError}
+      onFill={(text) => void fillScript(text)}
+      onManage={beginManageScripts}
+      onRetry={() => {
+        setError('');
+        void loadScriptLibrary().catch((caught) => setError(caught instanceof Error ? caught.message : '话术加载失败'));
+      }}
+    />
 
     <section className="card">
       <div className="section-title"><h2>联系方式</h2><span className={`status ${form.phone || form.wechat ? 'ready' : ''}`}>{form.phone || form.wechat ? '已获取' : '待获取'}</span></div>

@@ -83,7 +83,9 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
       sendResponse(await request(`/browser-agent/lead-intakes/${encodeURIComponent(message.syncId)}/order-remark`, {
         method: 'POST', body: JSON.stringify({ status: message.status, errorMessage: message.errorMessage }),
       }));
+      return;
     }
+    sendResponse({ code: 400, data: null, message: '插件后台版本过旧，请在扩展程序页面重新加载插件' });
   })().catch((error) => sendResponse({ code: 500, data: null, message: error instanceof Error ? error.message : '执行失败' }));
   return true;
 });
