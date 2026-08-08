@@ -1,5 +1,5 @@
 import type { BrowserChatMessage } from '../domain/contactDetection';
-import { buildOsRemarkLines, mergeOsOrderRemark } from '../domain/orderCompletion';
+import { mergeOsOrderRemark } from '../domain/orderCompletion';
 import type { CompleteOsOrderInput, CompleteOsOrderResult } from '../shared/contracts';
 
 export type FeigePageContext = {
@@ -63,9 +63,72 @@ function findButtonByText(root: ParentNode, labels: string[]): HTMLElement | nul
 }
 
 function isVisible(element: HTMLElement | null): element is HTMLElement {
-  if (!element || element.hidden || element.getAttribute('aria-hidden') === 'true') return false;
-  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
-  return style?.display !== 'none' && style?.visibility !== 'hidden';
+  if (!element) return false;
+  let current: HTMLElement | null = element;
+  while (current) {
+    if (current.hidden || current.getAttribute('aria-hidden') === 'true') return false;
+    const style = current.ownerDocument.defaultView?.getComputedStyle(current);
+    if (style?.display === 'none' || style?.visibility === 'hidden') return false;
+    current = current.parentElement;
+  }
+  return true;
+}
+
+function isEnabled(element: HTMLElement) {
+  return !element.hasAttribute('disabled')
+    && element.getAttribute('aria-disabled') !== 'true'
+    && element.dataset.disabled !== 'true';
+}
+
+function uniqueMatches(root: ParentNode, candidates: string[]) {
+  const matches = candidates.flatMap((selector) => [...root.querySelectorAll<HTMLElement>(selector)]);
+  return [...new Set(matches)];
+}
+
+function hasExactGreenSemantic(element: HTMLElement) {
+  const semantics = [
+    ['data-flag-color', 'green'],
+    ['aria-label', '绿色旗帜'],
+    ['title', '绿色旗帜'],
+  ] as const;
+  let exactMatch = false;
+  for (const [attribute, expected] of semantics) {
+    const value = element.getAttribute(attribute);
+    if (value === null) continue;
+    if (value.trim().toLowerCase() !== expected.toLowerCase()) return false;
+    exactMatch = true;
+  }
+  return exactMatch;
+}
+
+function findUniqueGreenFlag(dialog: HTMLElement) {
+  const candidates = uniqueMatches(dialog, selectors.greenFlag)
+    .filter((element) => isVisible(element) && isEnabled(element) && hasExactGreenSemantic(element));
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+function findUniqueSave(dialog: HTMLElement) {
+  const semantic = uniqueMatches(dialog, selectors.orderRemarkSave);
+  const byText = [...dialog.querySelectorAll<HTMLElement>('button,[role="button"]')]
+    .filter((element) => element.textContent?.trim() === '保存');
+  const candidates = [...new Set([...semantic, ...byText])]
+    .filter((element) => isVisible(element) && isEnabled(element));
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+function visibleRemarkDialogs(document: Document) {
+  return [...document.querySelectorAll<HTMLElement>('[role="dialog"]')]
+    .filter(isVisible)
+    .filter((dialog) => {
+      const label = dialog.getAttribute('aria-label')?.trim() || '';
+      const hasRemarkSemantics = label.includes('备注') || (dialog.textContent || '').includes('订单标记');
+      return hasRemarkSemantics && Boolean(first(dialog, selectors.orderRemark));
+    });
+}
+
+function findUniqueRemarkDialog(document: Document) {
+  const dialogs = visibleRemarkDialogs(document);
+  return dialogs.length === 1 ? dialogs[0] : null;
 }
 
 async function waitForElement(
@@ -101,15 +164,9 @@ async function waitForElement(
 }
 
 function isGreenActive(orderCard: HTMLElement) {
-  const flag = first(orderCard, selectors.currentOrderFlag);
-  if (!flag) return false;
-  const signal = [
-    flag.dataset.currentFlag,
-    flag.dataset.flagColor,
-    flag.getAttribute('aria-label'),
-    flag.getAttribute('title'),
-  ].filter(Boolean).join(' ').toLowerCase();
-  return signal.includes('green') || signal.includes('绿色');
+  const currentFlags = uniqueMatches(orderCard, selectors.currentOrderFlag).filter(isVisible);
+  return currentFlags.length === 1
+    && currentFlags[0].dataset.currentFlag?.trim().toLowerCase() === 'green';
 }
 
 function direction(element: HTMLElement): BrowserChatMessage['direction'] {
@@ -256,6 +313,8 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         orderNo: text(document, selectors.orderNo),
         customer: text(first(document, selectors.root) || document, selectors.customer),
       });
+      const findExpectedOrderCard = () => all(document, selectors.orderCard)
+        .find((card) => text(card, selectors.orderNo) === expectedOrderNo) || null;
       const current = readCurrentContext();
       if (!expectedOrderNo || !expectedCustomer || !current.orderNo || !current.customer) {
         return {
@@ -274,8 +333,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         };
       }
 
-      const orderCard = all(document, selectors.orderCard)
-        .find((card) => text(card, selectors.orderNo) === expectedOrderNo);
+      let orderCard = findExpectedOrderCard();
       if (!orderCard) {
         return {
           ok: false,
@@ -297,16 +355,24 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       }
       edit.click();
 
-      const dialog = await waitForElement(document, () => {
-        const candidate = first(document, selectors.orderRemarkDialog);
-        return isVisible(candidate) ? candidate : null;
-      });
+      const dialog = await waitForElement(document, () => findUniqueRemarkDialog(document));
       if (!dialog) {
         return {
           ok: false,
           code: 'ORDER_REMARK_DIALOG_NOT_FOUND',
           message: '备注弹窗未打开，未修改订单',
           stage: 'REMARK',
+        };
+      }
+
+      const afterDialog = readCurrentContext();
+      orderCard = findExpectedOrderCard();
+      if (afterDialog.orderNo !== expectedOrderNo || afterDialog.customer !== expectedCustomer || !orderCard) {
+        return {
+          ok: false,
+          code: 'CONTEXT_CHANGED',
+          message: '打开备注弹窗后当前飞鸽客户或订单已切换',
+          stage: 'CONTEXT',
         };
       }
 
@@ -336,7 +402,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         };
       }
 
-      const greenFlag = first(dialog, selectors.greenFlag);
+      const greenFlag = findUniqueGreenFlag(dialog);
       if (!greenFlag) {
         return {
           ok: false,
@@ -346,7 +412,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           remarkText,
         };
       }
-      const save = first(dialog, selectors.orderRemarkSave) || findButtonByText(dialog, ['保存']);
+      const save = findUniqueSave(dialog);
       if (!save) {
         return {
           ok: false,
@@ -358,7 +424,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       }
 
       const latest = readCurrentContext();
-      if (latest.orderNo !== expectedOrderNo || latest.customer !== expectedCustomer) {
+      if (latest.orderNo !== expectedOrderNo || latest.customer !== expectedCustomer || !findExpectedOrderCard()) {
         return {
           ok: false,
           code: 'CONTEXT_CHANGED',
@@ -371,20 +437,71 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       if (!filled.ok) {
         return { ...filled, stage: 'REMARK', remarkText };
       }
-      greenFlag.click();
-      save.click();
+      const afterFill = readCurrentContext();
+      if (afterFill.orderNo !== expectedOrderNo || afterFill.customer !== expectedCustomer || !findExpectedOrderCard()) {
+        return {
+          ok: false,
+          code: 'CONTEXT_CHANGED',
+          message: '当前飞鸽客户或订单已切换，未提交订单修改',
+          stage: 'CONTEXT',
+          remarkText,
+        };
+      }
+      const dialogAfterFill = findUniqueRemarkDialog(document);
+      const greenAfterFill = dialogAfterFill ? findUniqueGreenFlag(dialogAfterFill) : null;
+      const saveAfterFill = dialogAfterFill ? findUniqueSave(dialogAfterFill) : null;
+      if (!greenAfterFill || !saveAfterFill) {
+        return {
+          ok: false,
+          code: 'ORDER_CONTROLS_CHANGED',
+          message: '备注写入后绿色旗帜或保存控件已变化，未保存',
+          stage: !greenAfterFill ? 'GREEN_FLAG' : 'SAVE',
+          remarkText,
+        };
+      }
+      greenAfterFill.click();
+      const afterGreen = readCurrentContext();
+      if (afterGreen.orderNo !== expectedOrderNo || afterGreen.customer !== expectedCustomer || !findExpectedOrderCard()) {
+        return {
+          ok: false,
+          code: 'CONTEXT_CHANGED',
+          message: '当前飞鸽客户或订单已切换，未保存订单修改',
+          stage: 'CONTEXT',
+          remarkText,
+        };
+      }
+      const dialogAfterGreen = findUniqueRemarkDialog(document);
+      const saveAfterGreen = dialogAfterGreen ? findUniqueSave(dialogAfterGreen) : null;
+      if (!saveAfterGreen) {
+        return {
+          ok: false,
+          code: 'ORDER_REMARK_SAVE_CHANGED',
+          message: '选择绿色旗帜后保存控件已变化，未保存',
+          stage: 'SAVE',
+          remarkText,
+        };
+      }
+      saveAfterGreen.click();
 
-      const desiredLines = buildOsRemarkLines({
-        nickname: expectedCustomer,
-        phone: input.phone,
-        wechat: input.wechat,
-      });
+      const afterSave = readCurrentContext();
+      if (afterSave.orderNo !== expectedOrderNo || afterSave.customer !== expectedCustomer || !findExpectedOrderCard()) {
+        return {
+          ok: false,
+          code: 'CONTEXT_CHANGED',
+          message: '保存后当前飞鸽客户或订单已切换，未报告成功',
+          stage: 'CONTEXT',
+          remarkText,
+        };
+      }
+
       const verified = await waitForElement(document, () => {
-        const summary = text(orderCard, selectors.orderRemarkSummary);
-        const closed = !isVisible(first(document, selectors.orderRemarkDialog));
-        return closed && desiredLines.every((line) => summary.split(/\r?\n/).map((value) => value.trim()).includes(line))
-          && isGreenActive(orderCard)
-          ? orderCard
+        const currentOrderCard = findExpectedOrderCard();
+        if (!currentOrderCard) return null;
+        const summary = text(currentOrderCard, selectors.orderRemarkSummary);
+        const closed = visibleRemarkDialogs(document).length === 0;
+        return closed && summary.replace(/\r\n/g, '\n') === remarkText.replace(/\r\n/g, '\n').trim()
+          && isGreenActive(currentOrderCard)
+          ? currentOrderCard
           : null;
       });
       if (!verified) {
@@ -393,6 +510,16 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           code: 'ORDER_COMPLETION_NOT_VERIFIED',
           message: '订单备注或绿色旗帜未完成页面验证',
           stage: 'SAVE',
+          remarkText,
+        };
+      }
+      const finalContext = readCurrentContext();
+      if (finalContext.orderNo !== expectedOrderNo || finalContext.customer !== expectedCustomer || !findExpectedOrderCard()) {
+        return {
+          ok: false,
+          code: 'CONTEXT_CHANGED',
+          message: '完成页面验证后当前飞鸽客户或订单已切换，未报告成功',
+          stage: 'CONTEXT',
           remarkText,
         };
       }
