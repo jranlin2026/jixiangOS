@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type {
   ApiEnvelope,
@@ -24,12 +24,16 @@ import { ScriptLibraryEditor } from './ScriptLibraryEditor';
 import { ScriptLibrarySection } from './ScriptLibrarySection';
 import {
   runOrderCompletion,
-  type OrderCompletionState,
   type PlatformCompletionReport,
 } from './orderCompletionWorkflow';
+import {
+  completionAttemptSnapshot,
+  completionPanelReducer,
+  createCompletionPanelState,
+  isCompletionFormLocked,
+} from './orderCompletionPanelState';
 
 type AuthState = { config?: ExtensionConfig; operator?: AuthenticatedOperator };
-type ContactForm = { name: string; phone: string; wechat: string; source: 'CHAT' | 'OFF_PLATFORM' };
 type RecognitionSnapshot = { id: number; context: FeigePageContext; hasContact: boolean };
 
 function completionStatus(status: string) {
@@ -59,12 +63,8 @@ function App() {
   const [shopKey, setShopKey] = useState('jixiang-douyin');
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
-  const [context, setContext] = useState<FeigePageContext | null>(null);
-  const [form, setForm] = useState<ContactForm>({ name: '', phone: '', wechat: '', source: 'CHAT' });
-  const [sync, setSync] = useState<LeadIntakeResponse | null>(null);
-  const [completion, setCompletion] = useState<OrderCompletionState | null>(null);
-  const [remarkText, setRemarkText] = useState('');
-  const [contactConfirmed, setContactConfirmed] = useState(false);
+  const [panel, dispatchPanel] = useReducer(completionPanelReducer, undefined, createCompletionPanelState);
+  const { context, form, sync, completion, remarkText, contactConfirmed } = panel;
   const [scriptView, setScriptView] = useState<ScriptLibraryView | null>(null);
   const [scriptLibraryError, setScriptLibraryError] = useState('');
   const [scriptDraft, setScriptDraft] = useState<ScriptLibrary | null>(null);
@@ -78,6 +78,7 @@ function App() {
   const evaluatedRecognition = useRef(0);
 
   const paidOrderRecognized = Boolean(context && isPaidOrderStatus(context.orderStatus));
+  const completionFormLocked = isCompletionFormLocked(panel);
   const canIntake = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
     && (form.phone.trim() || form.wechat.trim()) && shopKey.trim() && contactConfirmed
     && paidOrderRecognized);
@@ -88,17 +89,6 @@ function App() {
     return '等待联系方式';
   }, [completion?.stage, form.phone, form.wechat, sync]);
 
-  const applyCompletionState = (state: OrderCompletionState) => {
-    setCompletion(state);
-    if (!state.intakeResult) return;
-    const orderRemarkStatus = state.orderRemarkStatus === 'IN_PROGRESS'
-      ? state.intakeResult.orderRemarkStatus
-      : state.orderRemarkStatus;
-    const greenFlagStatus = state.greenFlagStatus === 'IN_PROGRESS'
-      ? state.intakeResult.greenFlagStatus
-      : state.greenFlagStatus;
-    setSync({ ...state.intakeResult, orderRemarkStatus, greenFlagStatus });
-  };
   useEffect(() => {
     if (!recognition || !scriptView || evaluatedRecognition.current === recognition.id) return;
     evaluatedRecognition.current = recognition.id;
@@ -151,31 +141,14 @@ function App() {
       const conversationChanged = context?.platformOrderNo !== result.context.platformOrderNo
         || context?.customerDisplayName !== result.context.customerDisplayName;
       const detectedHasContact = Boolean(result.detectedContact?.phone || result.detectedContact?.wechat);
-      setContext(result.context);
+      dispatchPanel({ type: 'RECOGNIZE_CONTEXT', context: result.context, detectedContact: result.detectedContact });
       setRecognition({
         id: ++recognitionSequence.current,
         context: result.context,
         hasContact: detectedHasContact || (!conversationChanged && Boolean(form.phone.trim() || form.wechat.trim())),
       });
-      if (conversationChanged) {
-        setContactConfirmed(false);
-        setSync(null); setCompletion(null); setRemarkText('');
-        setForm({
-          name: result.context.customerDisplayName,
-          phone: result.detectedContact?.phone || '',
-          wechat: result.detectedContact?.wechat || '',
-          source: result.detectedContact ? 'CHAT' : 'OFF_PLATFORM',
-        });
-      } else {
-        setForm((current) => ({
-          ...current,
-          phone: result.detectedContact?.phone || current.phone,
-          wechat: result.detectedContact?.wechat || current.wechat,
-          source: result.detectedContact ? 'CHAT' : current.source,
-        }));
-      }
     } catch (caught) {
-      setContext(null);
+      dispatchPanel({ type: 'CLEAR_CONTEXT' });
       setRecognition(null);
       setRecommendation(null);
       setRecommendationMessage('');
@@ -235,7 +208,7 @@ function App() {
   const logout = async () => {
     await worker({ type: 'LOGOUT' });
     setAuth((current) => ({ config: current.config }));
-    setContext(null); setSync(null); setCompletion(null); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
+    dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
     setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
   };
 
@@ -286,27 +259,32 @@ function App() {
     } finally { setSavingScripts(false); }
   };
 
-  const completeOrder = async (existingIntake?: LeadIntakeResponse) => {
-    if (!context || !canIntake) return;
+  const completeOrder = async () => {
+    const attempt = completionAttemptSnapshot(panel);
+    if (!context || !attempt || !canIntake) return;
     setBusy(true); setError(''); setNotice('');
+    const latestRecognitionRef: { value: {
+      context: FeigePageContext;
+      detectedContact: { phone?: string; wechat?: string } | null;
+    } | null } = { value: null };
     try {
       const result = await runOrderCompletion({
-        expectedOrderNo: context.platformOrderNo,
-        expectedCustomerDisplayName: context.customerDisplayName,
-        phone: form.phone.trim() || undefined,
-        wechat: form.wechat.trim() || undefined,
-        existingIntake,
+        expectedOrderNo: attempt.expectedOrderNo,
+        expectedCustomerDisplayName: attempt.expectedCustomerDisplayName,
+        phone: attempt.phone,
+        wechat: attempt.wechat,
+        existingIntake: attempt.existingIntake,
         intakeInput: {
-          platform: 'DOUYIN', shopKey: shopKey.trim(), platformOrderNo: context.platformOrderNo,
-          contactName: form.name.trim(), contactPhone: form.phone.trim() || undefined,
-          contactWechat: form.wechat.trim() || undefined, contactSource: form.source,
+          platform: 'DOUYIN', shopKey: shopKey.trim(), platformOrderNo: attempt.expectedOrderNo,
+          contactName: attempt.expectedCustomerDisplayName, contactPhone: attempt.phone,
+          contactWechat: attempt.wechat, contactSource: attempt.source,
           sourceProductName: context.productName || undefined,
         },
       }, {
         readContext: async () => {
           const latest = await activeTabCommand({ type: 'READ_FEIGE_CONTEXT' });
           if (!('context' in latest)) throw new Error('当前页面未返回飞鸽会话信息');
-          setContext(latest.context);
+          latestRecognitionRef.value = { context: latest.context, detectedContact: latest.detectedContact };
           return latest.context;
         },
         intake: (input) => worker<LeadIntakeResponse>({ type: 'CREATE_LEAD_INTAKE', input }),
@@ -318,10 +296,24 @@ function App() {
           return completed as CompleteOsOrderResult;
         },
         report: (input) => worker<PlatformCompletionReport>({ type: 'REPORT_PLATFORM_COMPLETION', ...input }),
-        onState: applyCompletionState,
+        onState: (state) => dispatchPanel({ type: 'APPLY_COMPLETION', completion: state }),
       });
-      applyCompletionState(result);
-      if (result.remarkText) setRemarkText(result.remarkText);
+      const latestRecognition = latestRecognitionRef.value;
+      if (latestRecognition) {
+        dispatchPanel({
+          type: 'RECOGNIZE_CONTEXT',
+          context: latestRecognition.context,
+          detectedContact: latestRecognition.detectedContact,
+        });
+        const conversationChanged = attempt.expectedOrderNo !== latestRecognition.context.platformOrderNo
+          || attempt.expectedCustomerDisplayName !== latestRecognition.context.customerDisplayName;
+        setRecognition({
+          id: ++recognitionSequence.current,
+          context: latestRecognition.context,
+          hasContact: Boolean(latestRecognition.detectedContact?.phone || latestRecognition.detectedContact?.wechat)
+            || (!conversationChanged && Boolean(form.phone.trim() || form.wechat.trim())),
+        });
+      }
       if (result.stage === 'COMPLETED') {
         setNotice(result.intakeResult?.outcome === 'ALREADY_CREATED'
           ? '该订单已入库，备注和绿色旗帜已完成'
@@ -386,11 +378,11 @@ function App() {
 
     <section className="card">
       <div className="section-title"><h2>联系方式</h2><span className={`status ${form.phone || form.wechat ? 'ready' : ''}`}>{form.phone || form.wechat ? '已获取' : '待获取'}</span></div>
-      <div className="source-switch"><button className={form.source === 'CHAT' ? 'active' : ''} onClick={() => { setForm({ ...form, source: 'CHAT' }); setContactConfirmed(false); }}>客户聊天提供</button><button className={form.source === 'OFF_PLATFORM' ? 'active' : ''} onClick={() => { setForm({ ...form, source: 'OFF_PLATFORM' }); setContactConfirmed(false); }}>站外已获取</button></div>
+      <div className="source-switch"><button disabled={completionFormLocked} className={form.source === 'CHAT' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'CHAT' })}>客户聊天提供</button><button disabled={completionFormLocked} className={form.source === 'OFF_PLATFORM' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'OFF_PLATFORM' })}>站外已获取</button></div>
       <label>抖音昵称<input value={form.name} readOnly placeholder="请先刷新识别当前客户" /></label>
-      <label>手机号<input value={form.phone} onChange={(event) => { setForm({ ...form, phone: event.target.value }); setContactConfirmed(false); }} placeholder="手机号和微信至少填一项" /></label>
-      <label>微信号<input value={form.wechat} onChange={(event) => { setForm({ ...form, wechat: event.target.value }); setContactConfirmed(false); }} placeholder="可选" /></label>
-      <label className="confirm-row"><input type="checkbox" checked={contactConfirmed} onChange={(event) => setContactConfirmed(event.target.checked)} /> 我已确认昵称和联系方式属于当前订单</label>
+      <label>手机号<input disabled={completionFormLocked} value={form.phone} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'phone', value: event.target.value })} placeholder="手机号和微信至少填一项" /></label>
+      <label>微信号<input disabled={completionFormLocked} value={form.wechat} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'wechat', value: event.target.value })} placeholder="可选" /></label>
+      <label className="confirm-row"><input disabled={completionFormLocked} type="checkbox" checked={contactConfirmed} onChange={(event) => dispatchPanel({ type: 'SET_CONTACT_CONFIRMED', value: event.target.checked })} /> 我已确认昵称和联系方式属于当前订单</label>
       {context && !paidOrderRecognized && <div className="alert warning">请先确认当前订单为已付款有效订单</div>}
       <button className="primary" disabled={busy || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '一键入OS并完成订单'}</button>
     </section>
@@ -412,7 +404,7 @@ function App() {
       {remarkText && <pre className="remark-preview">{remarkText}</pre>}
       {completion?.stage === 'PLATFORM_FAILED' && sync && <div className="result-actions">
         <button className="secondary" onClick={() => void navigator.clipboard.writeText(remarkText)}>复制备注</button>
-        <button className="secondary" disabled={busy || !canIntake} onClick={() => void completeOrder(sync)}>{busy ? '正在重试…' : '重试订单备注和绿旗'}</button>
+        <button className="secondary" disabled={busy || !canIntake} onClick={() => void completeOrder()}>{busy ? '正在重试…' : '重试订单备注和绿旗'}</button>
       </div>}
     </section>}
   </main>;

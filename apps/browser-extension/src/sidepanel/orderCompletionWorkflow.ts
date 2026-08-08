@@ -1,5 +1,5 @@
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
-import { buildOsRemarkLines } from '../domain/orderCompletion';
+import { buildOsRemarkLines, isPaidOrderStatus } from '../domain/orderCompletion';
 import type {
   ApiEnvelope,
   CompleteOsOrderInput,
@@ -47,7 +47,7 @@ type ReportInput = {
 };
 
 export type OrderCompletionDependencies = {
-  readContext(): Promise<Pick<FeigePageContext, 'supported' | 'platformOrderNo' | 'customerDisplayName'>>;
+  readContext(): Promise<Pick<FeigePageContext, 'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus'>>;
   intake(input: Record<string, unknown>): Promise<ApiEnvelope<LeadIntakeResponse>>;
   completePage(input: CompleteOsOrderInput): Promise<CompleteOsOrderResult>;
   report(input: ReportInput): Promise<ApiEnvelope<PlatformCompletionReport>>;
@@ -61,6 +61,19 @@ function emit(deps: OrderCompletionDependencies, state: OrderCompletionState) {
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+function failedPageStatuses(stage: Extract<CompleteOsOrderResult, { ok: false }>['stage']): Pick<
+  ReportInput,
+  'orderRemarkStatus' | 'greenFlagStatus'
+> {
+  if (stage === 'GREEN_FLAG') {
+    return { orderRemarkStatus: 'FAILED', greenFlagStatus: 'FAILED' };
+  }
+  if (stage === 'SAVE') {
+    return { orderRemarkStatus: 'FAILED', greenFlagStatus: 'FAILED' };
+  }
+  return { orderRemarkStatus: 'FAILED', greenFlagStatus: 'NOT_ATTEMPTED' };
 }
 
 async function reportCompletion(deps: OrderCompletionDependencies, input: ReportInput) {
@@ -105,7 +118,7 @@ export async function runOrderCompletion(
     });
   };
 
-  let current: Pick<FeigePageContext, 'supported' | 'platformOrderNo' | 'customerDisplayName'>;
+  let current: Pick<FeigePageContext, 'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus'>;
   try {
     current = await deps.readContext();
   } catch (error) {
@@ -115,6 +128,9 @@ export async function runOrderCompletion(
     || current.platformOrderNo.trim() !== input.expectedOrderNo.trim()
     || current.customerDisplayName.trim() !== input.expectedCustomerDisplayName.trim()) {
     return stopForContext('当前飞鸽客户或订单已切换，请刷新识别并重新确认客户资料');
+  }
+  if (!isPaidOrderStatus(current.orderStatus)) {
+    return stopForContext('请先确认当前订单为已付款有效订单');
   }
 
   let intakeResult = input.existingIntake;
@@ -206,17 +222,17 @@ export async function runOrderCompletion(
     });
   }
   if (!pageResult.ok) {
+    const failedStatuses = failedPageStatuses(pageResult.stage);
     const report = await reportCompletion(deps, {
       syncId: intakeResult.syncId,
-      orderRemarkStatus: 'FAILED',
-      greenFlagStatus: 'NOT_ATTEMPTED',
+      ...failedStatuses,
       errorMessage: pageResult.message,
     });
     return emit(deps, {
       ...osCompleted,
       stage: 'PLATFORM_FAILED',
-      orderRemarkStatus: report.data?.orderRemarkStatus || 'FAILED',
-      greenFlagStatus: report.data?.greenFlagStatus || 'NOT_ATTEMPTED',
+      orderRemarkStatus: report.data?.orderRemarkStatus || failedStatuses.orderRemarkStatus,
+      greenFlagStatus: report.data?.greenFlagStatus || failedStatuses.greenFlagStatus,
       remarkText: pageResult.remarkText || remarkText,
       message: report.code === 0 ? pageResult.message : `${pageResult.message}；${report.message}`,
     });

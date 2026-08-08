@@ -120,6 +120,80 @@ assert.deepEqual(reportedFailure, {
   errorMessage: '未找到订单备注输入框',
 });
 
+let greenFlagFailureReport: unknown;
+const greenFlagFailure = await runOrderCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13826459812',
+  intakeInput: { platform: 'DOUYIN' },
+}, {
+  readContext: async () => currentContext,
+  intake: async () => ({ code: 0, data: intakeResult, message: 'success' }),
+  completePage: async () => ({
+    ok: false,
+    code: 'GREEN_FLAG_NOT_FOUND',
+    message: '未找到绿色旗帜',
+    stage: 'GREEN_FLAG',
+    remarkText: '#悠然一刻/13826459812\n#入OS',
+  }),
+  report: async (input) => {
+    greenFlagFailureReport = input;
+    return {
+      code: 0,
+      data: {
+        syncId: input.syncId,
+        orderRemarkStatus: input.orderRemarkStatus,
+        greenFlagStatus: input.greenFlagStatus,
+      },
+      message: 'success',
+    };
+  },
+});
+assert.deepEqual(greenFlagFailureReport, {
+  syncId: 'sync-1',
+  orderRemarkStatus: 'FAILED',
+  greenFlagStatus: 'FAILED',
+  errorMessage: '未找到绿色旗帜',
+});
+assert.equal(greenFlagFailure.orderRemarkStatus, 'FAILED');
+assert.equal(greenFlagFailure.greenFlagStatus, 'FAILED');
+
+let pageContextFailureReport: unknown;
+const pageContextFailure = await runOrderCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13826459812',
+  intakeInput: { platform: 'DOUYIN' },
+}, {
+  readContext: async () => currentContext,
+  intake: async () => ({ code: 0, data: intakeResult, message: 'success' }),
+  completePage: async () => ({
+    ok: false,
+    code: 'CONTEXT_CHANGED',
+    message: '保存前会话已切换',
+    stage: 'CONTEXT',
+  }),
+  report: async (input) => {
+    pageContextFailureReport = input;
+    return {
+      code: 0,
+      data: {
+        syncId: input.syncId,
+        orderRemarkStatus: input.orderRemarkStatus,
+        greenFlagStatus: input.greenFlagStatus,
+      },
+      message: 'success',
+    };
+  },
+});
+assert.equal(pageContextFailure.stage, 'PLATFORM_FAILED');
+assert.deepEqual(pageContextFailureReport, {
+  syncId: 'sync-1',
+  orderRemarkStatus: 'FAILED',
+  greenFlagStatus: 'NOT_ATTEMPTED',
+  errorMessage: '保存前会话已切换',
+});
+
 let alreadyCreatedPageCalls = 0;
 const alreadyCreated = await runOrderCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
@@ -205,6 +279,36 @@ const changedRetry = await runOrderCompletion({
 });
 assert.equal(changedRetry.stage, 'PLATFORM_FAILED');
 assert.equal(changedRetryReports, 1, '已有 syncId 时会话变更也必须上报最终结果');
+
+for (const invalidPaidStatus of ['待付款', '退款中', '已关闭']) {
+  let invalidStatusIntakeCalls = 0;
+  let invalidStatusPageCalls = 0;
+  const invalidStatusResult = await runOrderCompletion({
+    expectedOrderNo: currentContext.platformOrderNo,
+    expectedCustomerDisplayName: currentContext.customerDisplayName,
+    phone: '13826459812',
+    intakeInput: { platform: 'DOUYIN' },
+  }, {
+    readContext: async () => ({ ...currentContext, orderStatus: invalidPaidStatus }),
+    intake: async () => {
+      invalidStatusIntakeCalls += 1;
+      return { code: 0, data: intakeResult, message: 'success' };
+    },
+    completePage: async () => {
+      invalidStatusPageCalls += 1;
+      return {
+        ok: true,
+        remarkText: '',
+        remarkStatus: 'SUCCEEDED',
+        greenFlagStatus: 'SUCCEEDED',
+      };
+    },
+    report: async () => ({ code: 0, data: completionResult, message: 'success' }),
+  });
+  assert.equal(invalidStatusResult.message, '请先确认当前订单为已付款有效订单');
+  assert.equal(invalidStatusIntakeCalls, 0, `${invalidPaidStatus} 不得入库`);
+  assert.equal(invalidStatusPageCalls, 0, `${invalidPaidStatus} 不得修改页面`);
+}
 
 let retryIntakeCalls = 0;
 const retry = await runOrderCompletion({
