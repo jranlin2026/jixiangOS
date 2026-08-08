@@ -122,6 +122,9 @@ export function BrowserShopBindingList({ rows, selectedShopId, onSelect, onEdit,
 
   const selectWithKeyboard = (event: React.KeyboardEvent, shop: BrowserShopBinding) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
+    const target = event.target instanceof Element ? event.target : null;
+    const interactiveTarget = target?.closest('button, input, select, textarea, a, [role="button"]');
+    if (interactiveTarget && interactiveTarget !== event.currentTarget) return;
     event.preventDefault();
     onSelect(shop);
   };

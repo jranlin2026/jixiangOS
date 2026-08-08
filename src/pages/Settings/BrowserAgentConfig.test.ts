@@ -142,7 +142,7 @@ await testAsync('管理API保留服务端中文错误和结构化errorCode', asy
   }
 });
 
-execFileSync('npm', ['exec', '--', 'vitest', 'run', 'src/pages/Settings/BrowserAgentConfig.dom.test.ts'], {
+execFileSync('npm', ['exec', '--', 'vitest', 'run', 'src/pages/Settings/BrowserAgentConfig.dom.spec.tsx'], {
   cwd: process.cwd(),
   stdio: 'inherit',
   maxBuffer: 5 * 1024 * 1024,

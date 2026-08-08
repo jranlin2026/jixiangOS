@@ -210,6 +210,13 @@ async function dismissFeedback() {
   )));
 }
 
+async function closeEditDialog() {
+  const dialog = [...document.querySelectorAll('[role="dialog"]')].find((item) => item.textContent?.includes('编辑店铺绑定'));
+  assert.ok(dialog, '键盘激活编辑按钮应打开真实店铺表单');
+  dispatchClick(findButton('取消', dialog));
+  await waitFor('店铺编辑弹窗关闭', () => ![...document.querySelectorAll('[role="dialog"]')].some((item) => item.textContent?.includes('编辑店铺绑定')));
+}
+
 async function exerciseRealPageWorkflow() {
   const fixture = backendFixture();
   await mountPage(fixture);
@@ -223,6 +230,34 @@ async function exerciseRealPageWorkflow() {
   assert.equal(shopTwoRow.getAttribute('aria-selected'), 'true');
   assert.ok(document.body.textContent?.includes('二号店铺商品'), '键盘选店后应切换下方映射结果');
 
+  const shopOneRow = document.querySelector('[data-view="desktop"][data-row-id="shop-1"]') as HTMLElement;
+  dispatchKey(shopOneRow, 'Enter');
+  await waitFor('回车键选择一号店铺', () => document.body.textContent?.includes('当前店铺：一号店铺') === true);
+
+  const shopTwoCard = document.querySelector('[data-view="mobile"][data-row-id="shop-2"]') as HTMLElement | null;
+  assert.ok(shopTwoCard);
+  assert.equal(shopTwoCard.tabIndex, 0, '手机卡片必须可聚焦');
+  assert.equal(shopTwoCard.getAttribute('aria-selected'), 'false');
+  dispatchKey(shopTwoCard, ' ');
+  await waitFor('手机卡片空格键选择二号店铺', () => document.body.textContent?.includes('当前店铺：二号店铺') === true);
+  assert.equal(shopTwoCard.getAttribute('aria-selected'), 'true');
+  assert.ok(document.body.textContent?.includes('二号店铺商品'), '手机卡片键盘选店后应切换下方映射结果');
+
+  const desktopEdit = findButton('编辑', shopOneRow);
+  dispatchKey(desktopEdit, 'Enter');
+  dispatchClick(desktopEdit);
+  await waitFor('桌面行编辑按钮键盘激活', () => document.body.textContent?.includes('编辑店铺绑定') === true);
+  assert.ok(document.body.textContent?.includes('当前店铺：二号店铺'), '嵌套按钮的Enter不得冒泡选中所在行');
+  await closeEditDialog();
+
+  const shopOneCard = document.querySelector('[data-view="mobile"][data-row-id="shop-1"]') as HTMLElement;
+  const mobileEdit = findButton('编辑', shopOneCard);
+  dispatchKey(mobileEdit, ' ');
+  dispatchClick(mobileEdit);
+  await waitFor('手机卡片编辑按钮键盘激活', () => document.body.textContent?.includes('编辑店铺绑定') === true);
+  assert.ok(document.body.textContent?.includes('当前店铺：二号店铺'), '嵌套按钮的Space不得冒泡选中所在卡片');
+  await closeEditDialog();
+
   dispatchClick(findButton('停用', shopTwoRow));
   await waitFor('店铺停用确认', () => document.body.textContent?.includes('停用后插件不能以该店铺创建新线索，历史记录保留') === true);
   dispatchClick(findButton('确认停用', document.querySelector('[role="dialog"]')!));
@@ -230,8 +265,8 @@ async function exerciseRealPageWorkflow() {
   assert.deepEqual(fixture.requests.find((request) => request.url.endsWith('/shops/shop-2') && request.method === 'PUT')?.body, { active: false });
   await dismissFeedback();
 
-  const shopOneRow = document.querySelector('[data-view="desktop"][data-row-id="shop-1"]') as HTMLElement;
-  dispatchKey(shopOneRow, 'Enter');
+  const refreshedShopOneRow = document.querySelector('[data-view="desktop"][data-row-id="shop-1"]') as HTMLElement;
+  dispatchKey(refreshedShopOneRow, 'Enter');
   await waitFor('回车键选择一号店铺', () => document.body.textContent?.includes('当前店铺：一号店铺') === true);
 
   dispatchClick(findButton('新增商品映射'));
