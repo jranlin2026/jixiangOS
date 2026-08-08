@@ -27,6 +27,12 @@ assert.deepEqual(context.messages.map((message) => message.direction), ['OUTBOUN
 
 assert.deepEqual(adapter.fillReply('已收到，我们尽快联系您。'), { ok: true });
 assert.equal((dom.window.document.querySelector('[data-jx-reply-input]') as HTMLTextAreaElement).value, '已收到，我们尽快联系您。');
+const guardedReply = dom.window.document.querySelector('[data-jx-reply-input]') as HTMLTextAreaElement;
+guardedReply.value = '';
+assert.deepEqual(adapter.fillReplyIfEmpty('错误会话话术', {
+  expectedOrderNo: 'DY-OTHER', expectedCustomerDisplayName: '李先生',
+}), { ok: false, code: 'CONTEXT_CHANGED', message: '当前飞鸽会话已切换，未填入话术' });
+assert.equal(guardedReply.value, '');
 
 let remarkSaved = false;
 dom.window.document.querySelector('[data-jx-order-remark-save]')?.addEventListener('click', () => { remarkSaved = true; });

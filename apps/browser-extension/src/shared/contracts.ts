@@ -21,7 +21,12 @@ export type LeadIntakeResponse = {
 export type PageCommand =
   | { type: 'READ_FEIGE_CONTEXT' }
   | { type: 'FILL_FEIGE_REPLY'; text: string }
-  | { type: 'FILL_FEIGE_REPLY_IF_EMPTY'; text: string }
+  | {
+      type: 'FILL_FEIGE_REPLY_IF_EMPTY';
+      text: string;
+      expectedOrderNo?: string;
+      expectedCustomerDisplayName?: string;
+    }
   | { type: 'SAVE_ORDER_REMARK'; text: string };
 
 export type PageCommandResult =

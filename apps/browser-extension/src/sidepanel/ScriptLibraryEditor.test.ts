@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { ScriptLibrary } from '../domain/scriptLibrary';
-import { addGroup, addScript, removeGroup, updateScript } from './ScriptLibraryEditor';
+import { addGroup, addScript, parseConditionList, removeGroup, updateScript } from './ScriptLibraryEditor';
 
 const original: ScriptLibrary = {
   schemaVersion: 1, revision: 1, groups: [], updatedAt: '', updatedBy: { id: '', name: '' },
@@ -24,5 +24,6 @@ assert.equal(edited.groups[0].scripts[0].match.contactState, 'MISSING');
 const removed = removeGroup(edited, 'group-1');
 assert.deepEqual(removed.groups, [], '删除分组必须级联删除其中话术');
 assert.equal(edited.groups.length, 1);
+assert.deepEqual(parseConditionList('已付款, 已完成\n已付款，待发货'), ['已付款', '已完成', '待发货']);
 
 console.log('browser script editor model: ok');

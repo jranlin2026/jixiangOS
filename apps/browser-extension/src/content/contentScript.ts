@@ -14,7 +14,10 @@ chrome.runtime.onMessage.addListener((message: PageCommand, _sender, sendRespons
     return;
   }
   if (message.type === 'FILL_FEIGE_REPLY_IF_EMPTY') {
-    sendResponse(adapter.fillReplyIfEmpty(String(message.text || '')));
+    sendResponse(adapter.fillReplyIfEmpty(String(message.text || ''), {
+      expectedOrderNo: message.expectedOrderNo,
+      expectedCustomerDisplayName: message.expectedCustomerDisplayName,
+    }));
     return;
   }
   if (message.type === 'SAVE_ORDER_REMARK') {

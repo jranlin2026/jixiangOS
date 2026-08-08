@@ -135,7 +135,16 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         : { ok: false, code: 'REPLY_EDITOR_NOT_FOUND', message: '未找到飞鸽回复输入框' };
     },
 
-    fillReplyIfEmpty(value: string): SafeReplyFillResult {
+    fillReplyIfEmpty(value: string, expected?: {
+      expectedOrderNo?: string;
+      expectedCustomerDisplayName?: string;
+    }): SafeReplyFillResult {
+      const currentOrderNo = text(document, selectors.orderNo);
+      const currentCustomer = text(first(document, selectors.root) || document, selectors.customer);
+      if ((expected?.expectedOrderNo && currentOrderNo !== expected.expectedOrderNo)
+        || (expected?.expectedCustomerDisplayName && currentCustomer !== expected.expectedCustomerDisplayName)) {
+        return { ok: false, code: 'CONTEXT_CHANGED', message: '当前飞鸽会话已切换，未填入话术' };
+      }
       const editor = first(document, selectors.reply);
       if (!editor) return { ok: false, code: 'REPLY_EDITOR_NOT_FOUND', message: '未找到飞鸽回复输入框' };
       if (editableValue(editor).trim()) return { ok: true, filled: false, reason: 'NOT_EMPTY' };

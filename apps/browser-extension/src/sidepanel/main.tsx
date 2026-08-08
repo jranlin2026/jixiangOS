@@ -15,12 +15,14 @@ import {
   shouldAttemptAutoFill,
   type ScriptLibrary,
   type ScriptLibraryView,
+  type ScriptMatch,
 } from '../domain/scriptLibrary';
 import { ScriptLibraryEditor } from './ScriptLibraryEditor';
 import { ScriptLibrarySection } from './ScriptLibrarySection';
 
 type AuthState = { config?: ExtensionConfig; operator?: AuthenticatedOperator };
 type ContactForm = { name: string; phone: string; wechat: string; source: 'CHAT' | 'OFF_PLATFORM' };
+type RecognitionSnapshot = { id: number; context: FeigePageContext; hasContact: boolean };
 
 async function worker<T>(message: WorkerCommand): Promise<ApiEnvelope<T>> {
   return chrome.runtime.sendMessage(message);
@@ -57,7 +59,11 @@ function App() {
   const [managingScripts, setManagingScripts] = useState(false);
   const [savingScripts, setSavingScripts] = useState(false);
   const [recommendationMessage, setRecommendationMessage] = useState('');
+  const [recommendation, setRecommendation] = useState<ScriptMatch | null>(null);
+  const [recognition, setRecognition] = useState<RecognitionSnapshot | null>(null);
   const attemptedRecommendationKeys = useRef(new Set<string>());
+  const recognitionSequence = useRef(0);
+  const evaluatedRecognition = useRef(0);
 
   const canIntake = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
     && (form.phone.trim() || form.wechat.trim()) && shopKey.trim() && contactConfirmed);
@@ -66,28 +72,33 @@ function App() {
     if (form.phone || form.wechat) return '联系方式待确认';
     return '等待联系方式';
   }, [form.phone, form.wechat, sync]);
-  const recommendation = useMemo(() => context && scriptView
-    ? matchScript(scriptView.library, {
-        orderStatus: context.orderStatus,
-        productName: context.productName,
-        hasContact: Boolean(form.phone.trim() || form.wechat.trim()),
-      })
-    : null, [context, form.phone, form.wechat, scriptView]);
-
   useEffect(() => {
-    if (!context || !recommendation) {
+    if (!recognition || !scriptView || evaluatedRecognition.current === recognition.id) return;
+    evaluatedRecognition.current = recognition.id;
+    const nextRecommendation = matchScript(scriptView.library, {
+      orderStatus: recognition.context.orderStatus,
+      productName: recognition.context.productName,
+      hasContact: recognition.hasContact,
+    });
+    setRecommendation(nextRecommendation);
+    if (!nextRecommendation) {
       setRecommendationMessage('');
       return;
     }
-    const key = recommendationKey(context.platformOrderNo, recommendation.script.id);
+    const key = recommendationKey(recognition.context.platformOrderNo, nextRecommendation.script.id);
     if (!shouldAttemptAutoFill({
-      orderNo: context.platformOrderNo,
-      orderStatus: context.orderStatus,
+      orderNo: recognition.context.platformOrderNo,
+      orderStatus: recognition.context.orderStatus,
       key,
       attemptedKeys: attemptedRecommendationKeys.current,
     })) return;
     attemptedRecommendationKeys.current.add(key);
-    void activeTabCommand({ type: 'FILL_FEIGE_REPLY_IF_EMPTY', text: recommendation.script.content })
+    void activeTabCommand({
+      type: 'FILL_FEIGE_REPLY_IF_EMPTY',
+      text: nextRecommendation.script.content,
+      expectedOrderNo: recognition.context.platformOrderNo,
+      expectedCustomerDisplayName: recognition.context.customerDisplayName,
+    })
       .then((result) => {
         if (!result.ok) {
           setRecommendationMessage(`已推荐话术，自动填入失败：${result.message}`);
@@ -97,7 +108,7 @@ function App() {
         else setRecommendationMessage('输入框已有内容，仅提供推荐，未覆盖人工输入');
       })
       .catch((caught) => setRecommendationMessage(`已推荐话术，自动填入失败：${caught instanceof Error ? caught.message : '执行失败'}`));
-  }, [context, recommendation]);
+  }, [recognition, scriptView]);
 
   const refreshContext = async () => {
     setError('');
@@ -105,9 +116,16 @@ function App() {
     try {
       const result = await activeTabCommand({ type: 'READ_FEIGE_CONTEXT' });
       if (!('context' in result)) throw new Error('当前页面未返回飞鸽会话信息');
-      const orderChanged = context?.platformOrderNo !== result.context.platformOrderNo;
+      const conversationChanged = context?.platformOrderNo !== result.context.platformOrderNo
+        || context?.customerDisplayName !== result.context.customerDisplayName;
+      const detectedHasContact = Boolean(result.detectedContact?.phone || result.detectedContact?.wechat);
       setContext(result.context);
-      if (orderChanged) {
+      setRecognition({
+        id: ++recognitionSequence.current,
+        context: result.context,
+        hasContact: detectedHasContact || (!conversationChanged && Boolean(form.phone.trim() || form.wechat.trim())),
+      });
+      if (conversationChanged) {
         setContactConfirmed(false);
         setSync(null); setRemarkText(''); setRemarkMessage('');
         setForm({
@@ -126,6 +144,9 @@ function App() {
       }
     } catch (caught) {
       setContext(null);
+      setRecognition(null);
+      setRecommendation(null);
+      setRecommendationMessage('');
       setError(caught instanceof Error ? caught.message : '无法读取当前页面');
     }
   };
@@ -176,15 +197,21 @@ function App() {
     await worker({ type: 'LOGOUT' });
     setAuth((current) => ({ config: current.config }));
     setContext(null); setSync(null); setNotice(''); setScriptView(null); setScriptDraft(null); setManagingScripts(false);
-    setRecommendationMessage(''); attemptedRecommendationKeys.current.clear();
+    setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
   };
 
   const fillScript = async (text: string) => {
     setError(''); setNotice('');
     try {
-      const result = await activeTabCommand({ type: 'FILL_FEIGE_REPLY', text });
+      const result = await activeTabCommand({
+        type: 'FILL_FEIGE_REPLY_IF_EMPTY', text,
+        expectedOrderNo: context?.platformOrderNo,
+        expectedCustomerDisplayName: context?.customerDisplayName,
+      });
       if (!result.ok) throw new Error(result.message);
-      setNotice('话术已填入飞鸽，请客服确认后发送');
+      setNotice('filled' in result && result.filled
+        ? '话术已填入飞鸽，请客服确认后发送'
+        : '输入框已有内容，未覆盖人工输入');
     } catch (caught) { setError(caught instanceof Error ? caught.message : '填入话术失败'); }
   };
 
@@ -199,9 +226,17 @@ function App() {
     setSavingScripts(true); setError(''); setNotice('');
     try {
       const result = await worker<ScriptLibraryView>({ type: 'SAVE_SCRIPT_LIBRARY', library: scriptDraft });
-      if (result.code !== 0 || !result.data) throw new Error(result.message);
+      if (result.code !== 0 || !result.data) {
+        if (result.code === 409) {
+          await loadScriptLibrary();
+          setManagingScripts(false);
+        }
+        throw new Error(result.message);
+      }
       setScriptView(result.data);
       setScriptDraft(structuredClone(result.data.library));
+      setRecommendation(null);
+      setRecommendationMessage('');
       setManagingScripts(false);
       setNotice('话术库已更新，公司插件下次加载即使用新版本');
     } catch (caught) {

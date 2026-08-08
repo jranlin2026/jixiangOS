@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { ScriptGroup, ScriptLibrary, ScriptTemplate } from '../domain/scriptLibrary';
 
 export function addGroup(library: ScriptLibrary, id: string): ScriptLibrary {
@@ -53,8 +53,14 @@ function removeScript(library: ScriptLibrary, groupId: string, scriptId: string)
   });
 }
 
-function list(value: string) {
+export function parseConditionList(value: string) {
   return [...new Set(value.split(/[\n，,]/).map((item) => item.trim()).filter(Boolean))];
+}
+
+function ListEditor({ label, items, onCommit }: { label: string; items: string[]; onCommit: (items: string[]) => void }) {
+  const [value, setValue] = useState(items.join('\n'));
+  useEffect(() => setValue(items.join('\n')), [items]);
+  return <label>{label}<textarea rows={2} value={value} onChange={(event) => setValue(event.target.value)} onBlur={() => onCommit(parseConditionList(value))} /></label>;
 }
 
 function nextId(prefix: string) {
@@ -87,7 +93,11 @@ export function ScriptLibraryEditor({ library, saving, onChange, onSave, onCance
       </div>
       <div className="inline-controls">
         <label className="confirm-row"><input type="checkbox" checked={group.enabled} onChange={(event) => onChange(updateGroup(library, group.id, { enabled: event.target.checked }))} />启用分组</label>
-        <button className="danger-link" onClick={() => onChange(removeGroup(library, group.id))}>删除分组</button>
+        <button className="danger-link" onClick={() => {
+          if (window.confirm(`确认删除“${group.name}”分组吗？其中 ${group.scripts.length} 条话术会一并删除。`)) {
+            onChange(removeGroup(library, group.id));
+          }
+        }}>删除分组</button>
       </div>
       {group.scripts.map((script) => <div className="editor-script" key={script.id}>
         <div className="section-title"><strong>{script.title || '未命名话术'}</strong><button className="danger-link" onClick={() => onChange(removeScript(library, group.id, script.id))}>删除</button></div>
@@ -98,8 +108,8 @@ export function ScriptLibraryEditor({ library, saving, onChange, onSave, onCance
           <label>优先级<input type="number" value={script.priority} onChange={(event) => onChange(updateScript(library, group.id, script.id, { priority: Number(event.target.value) }))} /></label>
           <label>联系方式<select value={script.match.contactState} onChange={(event) => onChange(updateScript(library, group.id, script.id, { match: { ...script.match, contactState: event.target.value as ScriptTemplate['match']['contactState'] } }))}><option value="ANY">不限</option><option value="MISSING">未提供</option><option value="PRESENT">已提供</option></select></label>
         </div>
-        <label>订单状态（逗号或换行）<textarea rows={2} value={script.match.orderStatuses.join('\n')} onChange={(event) => onChange(updateScript(library, group.id, script.id, { match: { ...script.match, orderStatuses: list(event.target.value) } }))} /></label>
-        <label>商品关键词（逗号或换行）<textarea rows={2} value={script.match.productKeywords.join('\n')} onChange={(event) => onChange(updateScript(library, group.id, script.id, { match: { ...script.match, productKeywords: list(event.target.value) } }))} /></label>
+        <ListEditor label="订单状态（逗号或换行）" items={script.match.orderStatuses} onCommit={(items) => onChange(updateScript(library, group.id, script.id, { match: { ...script.match, orderStatuses: items } }))} />
+        <ListEditor label="商品关键词（逗号或换行）" items={script.match.productKeywords} onCommit={(items) => onChange(updateScript(library, group.id, script.id, { match: { ...script.match, productKeywords: items } }))} />
         <label className="confirm-row"><input type="checkbox" checked={script.enabled} onChange={(event) => onChange(updateScript(library, group.id, script.id, { enabled: event.target.checked }))} />启用话术</label>
       </div>)}
       <button className="secondary compact add-script" onClick={() => onChange(addScript(library, group.id, nextId('script')))}>新增话术</button>

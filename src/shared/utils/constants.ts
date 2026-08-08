@@ -308,6 +308,7 @@ export const STORAGE_KEYS = {
   LEAD_FLOW_CONFIG: `${STORAGE_PREFIX}lead_flow_config`,
   LEAD_INTAKE_RECORDS: `${STORAGE_PREFIX}lead_intake_records`,
   BROWSER_EMPLOYEE_SCRIPT_LIBRARY: `${STORAGE_PREFIX}browser_employee_script_library_v1`,
+  BROWSER_EMPLOYEE_SCRIPT_LIBRARY_HISTORY_PREFIX: `${STORAGE_PREFIX}browser_employee_script_library_history_v1_`,
   LEAD_SOURCE_CONFIGS: `${STORAGE_PREFIX}lead_source_configs`,
   AFTER_SALES_SOURCE_CONFIGS: `${STORAGE_PREFIX}after_sales_source_configs`,
   COMMISSION_RULES: `${STORAGE_PREFIX}commission_rules`,
