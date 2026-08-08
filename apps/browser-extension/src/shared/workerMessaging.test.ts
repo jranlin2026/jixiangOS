@@ -55,6 +55,8 @@ let sessionValues: Record<string, unknown> = {
 const originalFetch = globalThis.fetch;
 let previewRequestBody: unknown;
 let logoutEnvelope: ApiEnvelope<unknown> = { code: 0, data: true, message: 'success' };
+let logoutHttpStatus = 200;
+let logoutBodyMode: 'JSON' | 'EMPTY' | 'MALFORMED' = 'JSON';
 let runtimeConfig = {
   shops: [
     {
@@ -77,8 +79,13 @@ globalThis.fetch = async (input, init) => {
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
   if (url.endsWith('/auth/logout')) {
-    return new Response(JSON.stringify(logoutEnvelope), {
-      status: logoutEnvelope.code >= 400 ? 500 : 200,
+    const body = logoutBodyMode === 'EMPTY'
+      ? null
+      : logoutBodyMode === 'MALFORMED'
+        ? '{not-json'
+        : JSON.stringify(logoutEnvelope);
+    return new Response(body, {
+      status: logoutHttpStatus,
       headers: { 'content-type': 'application/json' },
     });
   }
@@ -213,6 +220,14 @@ try {
     [tokenKey]: 'token-before-failed-logout',
     [operatorKey]: { id: 'u1', name: '客服甲', role: 'SERVICE' },
   };
+  logoutEnvelope = { code: -1, data: null, message: '应用拒绝退出，请重试' };
+  const negativeCodeLogout = await new Promise<any>((resolve) => {
+    assert.equal(workerListener?.({ type: 'LOGOUT' }, {}, resolve), true);
+  });
+  assert.equal(negativeCodeLogout.code, -1, '非零应用码即使小于400也必须按失败返回');
+  assert.equal(sessionValues[tokenKey], 'token-before-failed-logout', 'code -1 不得清除持久化 token');
+  assert.ok(sessionValues[operatorKey], 'code -1 不得清除持久化 operator');
+
   logoutEnvelope = { code: 500, data: null, message: '服务端拒绝退出，请重试' };
   const failedLogout = await new Promise<any>((resolve) => {
     assert.equal(workerListener?.({ type: 'LOGOUT' }, {}, resolve), true);
@@ -221,11 +236,34 @@ try {
   assert.equal(sessionValues[tokenKey], 'token-before-failed-logout', '退出失败不得清除持久化 token');
   assert.ok(sessionValues[operatorKey], '退出失败不得清除持久化 operator');
 
+  for (const bodyMode of ['JSON', 'EMPTY', 'MALFORMED'] as const) {
+    sessionValues = {
+      [tokenKey]: `token-before-401-${bodyMode}`,
+      [operatorKey]: { id: 'u1', name: '客服甲', role: 'SERVICE' },
+    };
+    logoutHttpStatus = 401;
+    logoutBodyMode = bodyMode;
+    logoutEnvelope = { code: 401, data: null, message: '登录已失效' };
+    const expiredLogout = await new Promise<any>((resolve) => {
+      assert.equal(workerListener?.({ type: 'LOGOUT' }, {}, resolve), true);
+    });
+    assert.deepEqual(expiredLogout, {
+      code: 0,
+      data: { sessionExpired: true, localLogoutCompleted: true },
+      message: '登录状态已失效，已在本地退出',
+    }, `HTTP 401 ${bodyMode} 必须统一映射为已完成本地退出`);
+    assert.equal(sessionValues[tokenKey], undefined, `HTTP 401 ${bodyMode} 必须清除 token`);
+    assert.equal(sessionValues[operatorKey], undefined, `HTTP 401 ${bodyMode} 必须清除 operator`);
+  }
+
+  logoutHttpStatus = 200;
+  logoutBodyMode = 'JSON';
   logoutEnvelope = { code: 0, data: true, message: 'success' };
   const successfulLogout = await new Promise<any>((resolve) => {
     assert.equal(workerListener?.({ type: 'LOGOUT' }, {}, resolve), true);
   });
   assert.equal(successfulLogout.code, 0);
+  assert.deepEqual(successfulLogout.data, { sessionExpired: false, localLogoutCompleted: true });
   assert.equal(sessionValues[tokenKey], undefined, '退出成功才清除持久化 token');
   assert.equal(sessionValues[operatorKey], undefined, '退出成功才清除持久化 operator');
   assert.ok(localValues[configKey], '退出成功仍保留本地 API/店铺配置');

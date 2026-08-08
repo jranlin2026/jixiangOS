@@ -24,3 +24,8 @@ export type BrowserPlatformProductFacts = {
   platformProductName?: string | null;
   paymentAmount?: number | null;
 };
+
+export type BrowserRequiredOrderFacts = BrowserPlatformProductFacts & {
+  platformProductName: string;
+  paymentAmount: number;
+};

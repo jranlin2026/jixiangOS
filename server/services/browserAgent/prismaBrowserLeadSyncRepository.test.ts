@@ -15,7 +15,7 @@ const browserLeadSyncFields = new Set([
   'contactNickname', 'contactPhone', 'contactWechat', 'assignedTo', 'assignedToId',
   'intakeStatus', 'orderRemarkStatus', 'orderRemarkError',
   'greenFlagStatus', 'greenFlagError', 'remarkOperatorId', 'remarkOperatorName',
-  'attemptCount', 'lastError', 'completedAt', 'orderRemarkedAt', 'greenFlaggedAt',
+  'attemptCount', 'attemptToken', 'lastError', 'completedAt', 'orderRemarkedAt', 'greenFlaggedAt',
   'createdAt', 'updatedAt',
 ]);
 
@@ -164,7 +164,7 @@ assert.deepEqual({
   sourcePaymentAt: new Date('2026-08-08T09:00:00.000Z'),
 }, '创建同步记录必须保留店铺、商品匹配和付款审计事实');
 
-const succeededOnce = await repository.markSucceeded(first.record.id, {
+const succeededOnce = await repository.markSucceeded(first.record.id, first.record.attemptToken!, {
   leadId: 'lead-1', leadName: '首次入库客户', assignedTo: '首次销售', assignedToId: 'sales-first',
   storedContact: { nickname: '首次入库客户', phone: '13800138000', wechat: 'wx_first' },
 });
@@ -175,7 +175,7 @@ assert.deepEqual(succeededOnce.storedContact, {
   wechat: 'wx_first',
 }, '首次成功必须持久化联系人快照');
 const completedAt = succeededOnce.completedAt;
-const succeededAgain = await repository.markSucceeded(first.record.id, {
+const succeededAgain = await repository.markSucceeded(first.record.id, first.record.attemptToken!, {
   leadId: 'lead-1', leadName: '后续更名客户', assignedTo: '后续销售', assignedToId: 'sales-later',
   storedContact: { nickname: '后续更名客户', phone: '13900139000', wechat: 'wx_later' },
 });
@@ -200,7 +200,7 @@ leadRow = null;
 
 row = {
   ...row,
-  status: 'FAILED',
+  status: 'PENDING',
   leadId: 'lead-stale',
   leadName: '过期线索',
   assignedTo: '首次销售',
@@ -208,7 +208,7 @@ row = {
   intakeStatus: null,
   lastError: '上次回写中断',
 };
-const recoveredSuccess = await repository.markSucceeded(first.record.id, {
+const recoveredSuccess = await repository.markSucceeded(first.record.id, first.record.attemptToken!, {
   leadId: 'lead-repaired', leadName: '修复后的线索', assignedTo: '销售小王', assignedToId: 'sales-1', intakeStatus: '已入库',
   storedContact: { nickname: '修复后的线索', phone: '13800138000' },
 });
@@ -331,7 +331,13 @@ assert.equal(missingSuccessfulLead.existingLeadState, 'MISSING');
 assert.equal(missingSuccessfulLead.record.status, 'SUCCEEDED');
 assert.equal(missingSuccessfulLead.record.sourcePaymentAmount, '123456789012.34');
 
-await repository.markFailed(first.record.id, '极享OS暂时不可用');
+const protectedSuccess = await repository.markFailed(
+  first.record.id,
+  first.record.attemptToken!,
+  '极享OS暂时不可用',
+);
+assert.equal(protectedSuccess.status, 'SUCCEEDED', '迟到失败不得把成功记录降级');
+row = { ...row, status: 'FAILED', lastError: '极享OS暂时不可用' };
 const correctedReservationInput = {
   ...reservationInput,
   shopBindingId: 'binding-1-corrected',
@@ -626,7 +632,7 @@ retryRaceLead = {
   wechat: 'wx_retry_race',
   data: { assignedTo: '销售小王', assignedToId: 'sales-1', intakeStatus: '入库成功' },
 };
-await retryRaceRepository.markSucceeded(retryRaceRow.id, {
+await retryRaceRepository.markSucceeded(retryRaceRow.id, winner.result.record.attemptToken!, {
   leadId: retryRaceLead.id,
   leadName: retryRaceLead.name,
   assignedTo: '销售小王',

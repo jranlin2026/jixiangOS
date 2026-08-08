@@ -3,14 +3,17 @@ import { createRoot } from 'react-dom/client';
 import type {
   ApiEnvelope,
   AuthenticatedOperator,
+  BrowserLeadIntakeInput,
   BrowserProductPreviewResponse,
   BrowserRuntimeSelection,
   BrowserRuntimeShop,
   CompleteOsOrderResult,
   ExtensionConfig,
   LeadIntakeResponse,
+  LogoutResult,
   WorkerCommand,
 } from '../shared/contracts';
+import { hasRequiredOrderFacts } from '../shared/contracts';
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
 import { activeTabCommand } from '../shared/activeTabMessaging';
 import { withWorkerTimeout } from '../shared/workerMessaging';
@@ -51,7 +54,7 @@ function completionStatus(status: string) {
   return { className: 'warning', label: '待处理' };
 }
 
-async function worker<T>(message: WorkerCommand): Promise<ApiEnvelope<T>> {
+async function sendWorkerCommand<T>(message: WorkerCommand): Promise<ApiEnvelope<T>> {
   return withWorkerTimeout(chrome.runtime.sendMessage(message));
 }
 
@@ -74,6 +77,23 @@ function matchMethodLabel(method?: string) {
 
 function selectedRuntimeShop(shops: BrowserRuntimeShop[], shopBindingId: string) {
   return shops.find((shop) => shop.id === shopBindingId);
+}
+
+function normalizedFact(value: unknown) {
+  return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ');
+}
+
+function previewRepresentsContext(
+  preview: BrowserProductPreviewResponse | null,
+  context: FeigePageContext | null,
+  shopBindingId: string,
+) {
+  if (!preview || !hasRequiredOrderFacts(context) || preview.shop.id !== shopBindingId) return false;
+  return normalizedFact(preview.facts.platformProductId) === normalizedFact(context.platformProductId)
+    && normalizedFact(preview.facts.platformSkuId) === normalizedFact(context.platformSkuId)
+    && normalizedFact(preview.facts.platformProductName) === normalizedFact(context.productName)
+    && preview.facts.paymentAmount === context.paymentAmount
+    && new Date(preview.facts.paymentAt).getTime() === new Date(context.paymentAt).getTime();
 }
 
 function App() {
@@ -130,6 +150,37 @@ function App() {
   currentShopBindingId.current = shopBindingId;
   currentConversationKey.current = context ? conversationKey(context) : '';
 
+  const clearAuthenticatedUi = (sessionExpiredMessage?: string) => {
+    if (activeAttempt.current) activeAttempt.current.cancellationReason = 'SESSION_CHANGE';
+    activeAttempt.current = null;
+    busyAttemptId.current = null;
+    activeProductPreview.current = null;
+    activeOperatorId.current = undefined;
+    loggingOutRef.current = false;
+    setBusy(false);
+    setLoggingOut(false);
+    setAuth((current) => ({ config: current.config }));
+    dispatchPanel({ type: 'RESET' });
+    setNotice('');
+    setScriptView(null);
+    setScriptLibraryError('');
+    setScriptDraft(null);
+    setManagingScripts(false);
+    setRecommendationMessage('');
+    setRecommendation(null);
+    setRecognition(null);
+    attemptedRecommendationKeys.current.clear();
+    if (sessionExpiredMessage) setError(sessionExpiredMessage);
+  };
+
+  const worker = async <T,>(message: WorkerCommand): Promise<ApiEnvelope<T>> => {
+    const result = await sendWorkerCommand<T>(message);
+    if (result.authOutcome === 'SESSION_EXPIRED_LOCAL_LOGOUT' && mounted.current) {
+      clearAuthenticatedUi(result.message || '登录状态已失效，请重新登录');
+    }
+    return result;
+  };
+
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -159,9 +210,10 @@ function App() {
     && referencePrice !== context.paymentAmount;
   const pageShopMismatch = Boolean(context?.shopDisplayName && selectedShop
     && !pageShopMatchesBinding(context.shopDisplayName, selectedShop));
+  const orderFactsReady = hasRequiredOrderFacts(context);
   const canRunAuthoritativePreflight = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
     && (form.phone.trim() || form.wechat.trim()) && selectedShop && contactConfirmed
-    && paidOrderRecognized && context.shopDisplayName?.trim() && !loggingOut);
+    && paidOrderRecognized && context.shopDisplayName?.trim() && orderFactsReady && !loggingOut);
   const canIntake = canRunAuthoritativePreflight
     && (productPreviewStatus === 'READY' || pageShopMismatch);
   const workflowLabel = useMemo(() => {
@@ -221,7 +273,13 @@ function App() {
     const customerName = context?.customerDisplayName.trim() || '';
     const pageShopDisplayName = context?.shopDisplayName?.trim() || '';
     if (loggingOut || !operatorId || !selectedShopId || !context?.supported || !orderNo || !customerName
+      || !hasRequiredOrderFacts(context)
       || !pageShopDisplayName || pageShopMismatch) {
+      activeProductPreview.current = null;
+      return;
+    }
+    if (productPreviewStatus === 'READY'
+      && previewRepresentsContext(authoritativePreview, context, selectedShopId)) {
       activeProductPreview.current = null;
       return;
     }
@@ -236,6 +294,7 @@ function App() {
       context.paymentAmount ?? null,
       context.paymentAt?.trim() || '',
     ]);
+    if (activeProductPreview.current?.requestKey === requestKey) return;
     const generation = ++productPreviewSequence.current;
     activeProductPreview.current = { generation, requestKey };
     const requestIsActive = () => mounted.current
@@ -251,9 +310,9 @@ function App() {
         pageShopDisplayName,
         platformProductId: context.platformProductId?.trim() || undefined,
         platformSkuId: context.platformSkuId?.trim() || undefined,
-        platformProductName: context.productName.trim() || undefined,
+        platformProductName: context.productName.trim(),
         paymentAmount: context.paymentAmount,
-        paymentAt: context.paymentAt?.trim() || undefined,
+        paymentAt: context.paymentAt.trim(),
       },
     }).then((result) => {
       if (!requestIsActive()) return;
@@ -282,6 +341,7 @@ function App() {
     auth.operator?.id,
     selectedShop?.id,
     context?.supported,
+    context?.readyForIntake,
     context?.platformOrderNo,
     context?.customerDisplayName,
     context?.shopDisplayName,
@@ -290,6 +350,8 @@ function App() {
     context?.productName,
     context?.paymentAmount,
     context?.paymentAt,
+    productPreviewStatus,
+    authoritativePreview,
     pageShopMismatch,
     loggingOut,
   ]);
@@ -408,14 +470,12 @@ function App() {
     setBusy(false);
     activeProductPreview.current = null;
     try {
-      const result = await worker<boolean>({ type: 'LOGOUT' });
+      const result = await worker<LogoutResult>({ type: 'LOGOUT' });
       if (!mounted.current) return;
-      if (result.code >= 400) throw new Error(result.message || '退出失败，请重试');
-      setAuth((current) => ({ config: current.config }));
-      dispatchPanel({ type: 'RESET' }); setNotice(''); setScriptView(null); setScriptLibraryError(''); setScriptDraft(null); setManagingScripts(false);
-      setRecommendationMessage(''); setRecommendation(null); setRecognition(null); attemptedRecommendationKeys.current.clear();
-      loggingOutRef.current = false;
-      setLoggingOut(false);
+      if (result.code !== 0 || !result.data?.localLogoutCompleted) {
+        throw new Error(result.message || '退出失败，请重试');
+      }
+      clearAuthenticatedUi();
     } catch (caught) {
       if (!mounted.current) return;
       loggingOutRef.current = false;
@@ -531,6 +591,7 @@ function App() {
       context: FeigePageContext;
       detectedContact: { phone?: string; wechat?: string } | null;
     } | null } = { value: null };
+    const latestAuthoritativePreviewRef: { value: BrowserProductPreviewResponse | null } = { value: null };
     try {
       const result = await runOrderCompletion({
         expectedOrderNo: attempt.expectedOrderNo,
@@ -539,19 +600,20 @@ function App() {
         wechat: attempt.wechat,
         shop: attemptShop,
         pageShopDisplayName: context.shopDisplayName,
+        displayedPreview: authoritativePreview || undefined,
         existingIntake: attempt.existingIntake,
         intakeInput: {
           platform: 'DOUYIN', shopBindingId: attempt.shopBindingId,
-          pageShopDisplayName: context.shopDisplayName || undefined,
+          pageShopDisplayName: context.shopDisplayName || '',
           platformOrderNo: attempt.expectedOrderNo,
           contactName: attempt.expectedCustomerDisplayName, contactPhone: attempt.phone,
           contactWechat: attempt.wechat, contactSource: attempt.source,
           platformProductId: context.platformProductId || undefined,
           platformSkuId: context.platformSkuId || undefined,
-          platformProductName: context.productName || undefined,
-          paymentAmount: context.paymentAmount,
-          paymentAt: context.paymentAt,
-        },
+          platformProductName: context.productName,
+          paymentAmount: context.paymentAmount as number,
+          paymentAt: context.paymentAt || '',
+        } satisfies BrowserLeadIntakeInput,
       }, {
         isAttemptActive,
         readContext: async () => {
@@ -560,34 +622,24 @@ function App() {
           latestRecognitionRef.value = { context: latest.context, detectedContact: latest.detectedContact };
           return latest.context;
         },
+        preview: async (input) => {
+          assertAttemptActive();
+          const previewResult = await worker<BrowserProductPreviewResponse>({
+            type: 'PREVIEW_PRODUCT_MAPPING',
+            input,
+          });
+          assertAttemptActive();
+          if (previewResult.code === 0 && previewResult.data) {
+            latestAuthoritativePreviewRef.value = previewResult.data;
+          }
+          return previewResult;
+        },
         intake: async (input) => {
           assertAttemptActive();
-          if (pageShopMismatch) {
-            const refreshedPreview = await worker<BrowserProductPreviewResponse>({
-              type: 'PREVIEW_PRODUCT_MAPPING',
-              input: {
-                platform: 'DOUYIN',
-                shopBindingId: String(input.shopBindingId || ''),
-                pageShopDisplayName: String(input.pageShopDisplayName || ''),
-                platformProductId: typeof input.platformProductId === 'string' ? input.platformProductId : undefined,
-                platformSkuId: typeof input.platformSkuId === 'string' ? input.platformSkuId : undefined,
-                platformProductName: typeof input.platformProductName === 'string' ? input.platformProductName : undefined,
-                paymentAmount: typeof input.paymentAmount === 'number' ? input.paymentAmount : undefined,
-                paymentAt: typeof input.paymentAt === 'string' ? input.paymentAt : undefined,
-              },
-            });
-            assertAttemptActive();
-            if (refreshedPreview.code !== 0 || !refreshedPreview.data) {
-              return {
-                code: refreshedPreview.code,
-                data: null,
-                message: refreshedPreview.message || '商品匹配预览失败',
-                ...(refreshedPreview.errorCode ? { errorCode: refreshedPreview.errorCode } : {}),
-              };
-            }
-          }
-          assertAttemptActive();
-          const intakeResult = await worker<LeadIntakeResponse>({ type: 'CREATE_LEAD_INTAKE', input });
+          const intakeResult = await worker<LeadIntakeResponse>({
+            type: 'CREATE_LEAD_INTAKE',
+            input: input as BrowserLeadIntakeInput,
+          });
           assertAttemptActive();
           return intakeResult;
         },
@@ -611,10 +663,29 @@ function App() {
       });
       if (!isAttemptActive() || result.stage === 'ABORTED') return;
       const latestRecognition = latestRecognitionRef.value;
+      const latestAuthoritativePreview = latestAuthoritativePreviewRef.value;
       const conversationChanged = Boolean(latestRecognition
         && (attempt.expectedOrderNo !== latestRecognition.context.platformOrderNo
           || attempt.expectedCustomerDisplayName !== latestRecognition.context.customerDisplayName));
-      if (latestRecognition && !conversationChanged) {
+      if (result.errorCode === 'ORDER_FACTS_CHANGED'
+        && latestRecognition
+        && latestAuthoritativePreview
+        && !conversationChanged) {
+        dispatchPanel({
+          type: 'APPLY_RECONFIRMATION_SNAPSHOT',
+          attemptId,
+          conversationKey: expectedConversationKey,
+          context: latestRecognition.context,
+          detectedContact: latestRecognition.detectedContact,
+          preview: latestAuthoritativePreview,
+        });
+        setRecognition({
+          id: ++recognitionSequence.current,
+          context: latestRecognition.context,
+          hasContact: Boolean(latestRecognition.detectedContact?.phone || latestRecognition.detectedContact?.wechat)
+            || Boolean(form.phone.trim() || form.wechat.trim()),
+        });
+      } else if (latestRecognition && !conversationChanged) {
         dispatchPanel({
           type: 'RECOGNIZE_ATTEMPT_CONTEXT',
           attemptId,
@@ -718,6 +789,8 @@ function App() {
         ? <div className="alert warning">当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试。</div> : null}
       {context && selectedShop && !context.shopDisplayName?.trim()
         ? <div className="alert warning">当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别。</div> : null}
+      {context && !orderFactsReady
+        ? <div className="alert warning">当前订单的平台商品名称、实付金额或付款时间未完整唯一识别，请等待订单加载完成后刷新识别。</div> : null}
       {productPreview?.status === 'UNMATCHED'
         ? <div className="alert warning">商品尚未匹配OS标准产品，本次仍可录入；平台原名“{productPreview.rawProductName || context?.productName || '未识别'}”将写入OS备注。</div> : null}
       {priceDiffers

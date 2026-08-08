@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import type { ApiResponse } from '../../api/response';
 import { success } from '../../api/response';
-import type { BrowserCatalogProduct, BrowserPlatformProductFacts, BrowserStoreProductMapping } from './browserCatalogTypes';
+import type {
+  BrowserCatalogProduct,
+  BrowserRequiredOrderFacts,
+  BrowserStoreProductMapping,
+} from './browserCatalogTypes';
 import { normalizePlatformProductName, resolveBrowserProduct, type BrowserProductResolution } from './browserProductMatcher';
 
 export type BrowserShopBinding = {
@@ -56,6 +60,8 @@ export type BrowserShopMappingRepository = {
   updateMapping(id: string, input: Partial<BrowserStoredProductMapping>): Promise<BrowserStoredProductMapping | null>;
 };
 
+export type BrowserLockedShopBinding = Pick<BrowserShopBinding, 'id' | 'active'>;
+
 export type BrowserCatalogRepository = {
   listShops(): Promise<BrowserShopBinding[]>;
   findShopById(id: string): Promise<BrowserShopBinding | null>;
@@ -72,7 +78,10 @@ export type BrowserCatalogRepository = {
   hasShopAuditReferences(id: string): Promise<boolean>;
   withShopMappingLock<T>(
     shopBindingId: string,
-    callback: (repository: BrowserShopMappingRepository) => Promise<T>,
+    callback: (
+      repository: BrowserShopMappingRepository,
+      lockedShop: BrowserLockedShopBinding | null,
+    ) => Promise<T>,
   ): Promise<T>;
 };
 
@@ -97,15 +106,15 @@ export type BrowserProductPreviewInput = {
   pageShopDisplayName?: string;
   platformProductId?: string;
   platformSkuId?: string;
-  platformProductName?: string;
-  paymentAmount?: number;
-  paymentAt?: string;
+  platformProductName: string;
+  paymentAmount: number;
+  paymentAt: string;
 };
 
 export type BrowserProductPreview = {
   shop: ReturnType<typeof runtimeShop>;
   productResolution: Exclude<BrowserProductResolution, { status: 'CONFIG_CONFLICT' }>;
-  facts: BrowserPlatformProductFacts & { paymentAt?: string };
+  facts: BrowserRequiredOrderFacts & { paymentAt: string };
   priceDifference: { paymentAmount: number; osReferencePrice: number; amount: number; differs: boolean } | null;
 };
 
@@ -121,10 +130,25 @@ function cleanText(value: unknown) {
 
 export function browserPaymentAmountInCents(value: unknown) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
-  const scaled = value * 100;
-  const cents = Math.round(scaled);
-  const tolerance = Number.EPSILON * Math.max(1, Math.abs(scaled)) * 8;
-  return Number.isSafeInteger(cents) && Math.abs(scaled - cents) <= tolerance ? cents : null;
+  if (Number(value.toFixed(2)) !== value) return null;
+  const cents = Math.round(value * 100);
+  return Number.isSafeInteger(cents) ? cents : null;
+}
+
+export function browserPaymentAtDate(value: unknown) {
+  const text = cleanText(value);
+  const parts = text.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/);
+  if (!parts) return null;
+  const [year, month, day, hour, minute, second] = parts.slice(1, 7).map(Number);
+  const calendar = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  if (calendar.getUTCFullYear() !== year
+    || calendar.getUTCMonth() !== month - 1
+    || calendar.getUTCDate() !== day
+    || calendar.getUTCHours() !== hour
+    || calendar.getUTCMinutes() !== minute
+    || calendar.getUTCSeconds() !== second) return null;
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function uniqueTexts(values: unknown) {
@@ -201,7 +225,13 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       confirmedByName: actor.name,
       confirmedAt: now,
     };
-    return repository.withShopMappingLock(shopBindingId, async (mappingRepository) => {
+    return repository.withShopMappingLock(shopBindingId, async (mappingRepository, lockedShop) => {
+      if (!lockedShop) {
+        return catalogFailure('店铺绑定不存在', 404, 'SHOP_BINDING_NOT_FOUND');
+      }
+      if (!lockedShop.active) {
+        return catalogFailure('店铺绑定已停用', 409, 'SHOP_BINDING_UNAVAILABLE');
+      }
       const existing = mappingId ? await mappingRepository.findMappingById(mappingId) : null;
       if (mappingId && !existing) return catalogFailure('商品映射不存在', 404, 'PRODUCT_MAPPING_NOT_FOUND');
       if (existing && existing.shopBindingId !== shopBindingId) {
@@ -243,7 +273,7 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     platform: string;
     shopBindingId: string;
     pageShopDisplayName?: string;
-    facts: BrowserPlatformProductFacts;
+    facts: BrowserRequiredOrderFacts;
   }): Promise<BrowserCatalogResponse<{
     binding: ReturnType<typeof runtimeShop>;
     resolution: BrowserProductResolution;
@@ -300,22 +330,30 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     }
     const shopBindingId = cleanText(input.shopBindingId);
     if (!shopBindingId) return catalogFailure('店铺绑定不能为空', 400, 'INVALID_INPUT');
-    const paymentCents = input.paymentAmount === undefined
-      ? undefined
-      : browserPaymentAmountInCents(input.paymentAmount);
+    const platformProductName = cleanText(input.platformProductName);
+    if (!platformProductName) {
+      return catalogFailure('平台商品名称不能为空，请刷新飞鸽订单后重试', 400, 'INVALID_INPUT');
+    }
+    if (input.paymentAmount === undefined || input.paymentAmount === null) {
+      return catalogFailure('实付金额不能为空，请刷新飞鸽订单后重试', 400, 'INVALID_INPUT');
+    }
+    const paymentCents = browserPaymentAmountInCents(input.paymentAmount);
     if (paymentCents === null) {
       return catalogFailure('实付金额必须为非负数且最多两位小数', 400, 'INVALID_INPUT');
     }
     const paymentAt = cleanText(input.paymentAt);
-    const paymentAtDate = paymentAt ? new Date(paymentAt) : undefined;
-    if (paymentAtDate && Number.isNaN(paymentAtDate.getTime())) {
+    if (!paymentAt) {
+      return catalogFailure('付款时间不能为空，请刷新飞鸽订单后重试', 400, 'INVALID_INPUT');
+    }
+    const paymentAtDate = browserPaymentAtDate(paymentAt);
+    if (!paymentAtDate) {
       return catalogFailure('付款时间格式不正确', 400, 'INVALID_INPUT');
     }
     const facts = {
       ...(cleanText(input.platformProductId) ? { platformProductId: cleanText(input.platformProductId) } : {}),
       ...(cleanText(input.platformSkuId) ? { platformSkuId: cleanText(input.platformSkuId) } : {}),
-      ...(cleanText(input.platformProductName) ? { platformProductName: cleanText(input.platformProductName) } : {}),
-      ...(paymentCents !== undefined ? { paymentAmount: paymentCents / 100 } : {}),
+      platformProductName,
+      paymentAmount: paymentCents / 100,
     };
     const resolved = await resolveForIntake({
       platform: 'DOUYIN',
@@ -339,7 +377,7 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       productResolution: resolved.data.resolution as BrowserProductPreview['productResolution'],
       facts: {
         ...facts,
-        ...(paymentAtDate ? { paymentAt: paymentAtDate.toISOString() } : {}),
+        paymentAt: paymentAtDate.toISOString(),
       },
       priceDifference: resolved.data.priceDifference,
     });

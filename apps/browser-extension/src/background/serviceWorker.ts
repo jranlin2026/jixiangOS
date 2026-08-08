@@ -5,6 +5,7 @@ import type {
   BrowserRuntimeSelection,
   BrowserRuntimeShop,
   ExtensionConfig,
+  LogoutResult,
   WorkerCommand,
 } from '../shared/contracts';
 import { normalizedApiBaseUrl } from '../shared/apiBaseUrl';
@@ -19,6 +20,10 @@ async function stored<T>(area: chrome.storage.StorageArea, key: string): Promise
   return (await area.get(key))[key] as T | undefined;
 }
 
+async function clearSessionAuth() {
+  await chrome.storage.session.remove([TOKEN_KEY, OPERATOR_KEY]);
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T>> {
   const config = await stored<ExtensionConfig>(chrome.storage.local, CONFIG_KEY);
   if (!config?.apiBaseUrl) return { code: 400, data: null, message: '请先配置极享OS地址' };
@@ -29,7 +34,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnve
   try {
     const response = await fetch(`${normalizedApiBaseUrl(config.apiBaseUrl)}${path}`, { ...init, headers });
     const payload = await response.json().catch(() => null) as ApiEnvelope<T> | null;
-    if (response.status === 401) await chrome.storage.session.remove([TOKEN_KEY, OPERATOR_KEY]);
+    if (response.status === 401) {
+      await clearSessionAuth();
+      return {
+        code: 401,
+        data: null,
+        message: payload?.message || '登录状态已失效，请重新登录',
+        authOutcome: 'SESSION_EXPIRED_LOCAL_LOGOUT',
+      };
+    }
     return payload || { code: response.status, data: null, message: `极享OS返回了HTTP ${response.status}` };
   } catch (error) {
     return { code: 503, data: null, message: error instanceof Error ? error.message : '无法连接极享OS' };
@@ -97,12 +110,24 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
     }
     if (message.type === 'LOGOUT') {
       const result = await request<boolean>('/auth/logout', { method: 'POST' });
-      if (result.code >= 400) {
+      if (result.authOutcome === 'SESSION_EXPIRED_LOCAL_LOGOUT') {
+        sendResponse({
+          code: 0,
+          data: { sessionExpired: true, localLogoutCompleted: true } satisfies LogoutResult,
+          message: '登录状态已失效，已在本地退出',
+        });
+        return;
+      }
+      if (result.code !== 0) {
         sendResponse(result);
         return;
       }
-      await chrome.storage.session.remove([TOKEN_KEY, OPERATOR_KEY]);
-      sendResponse(result);
+      await clearSessionAuth();
+      sendResponse({
+        code: 0,
+        data: { sessionExpired: false, localLogoutCompleted: true } satisfies LogoutResult,
+        message: result.message,
+      });
       return;
     }
     if (message.type === 'GET_RUNTIME_CONFIG') {

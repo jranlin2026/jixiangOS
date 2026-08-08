@@ -26,6 +26,9 @@ const dom = new JSDOM(`<!doctype html><html><body>
 const adapter = createDouyinFeigeAdapter(dom.window.document, dom.window.location.href);
 const context = adapter.readContext();
 assert.equal(context.supported, true);
+assert.equal(context.readyForIntake, false, '飞鸽根节点存在不等于订单事实完整');
+assert.ok(context.diagnostics.includes('未识别实付金额'));
+assert.ok(context.diagnostics.includes('未识别付款时间'));
 assert.equal(context.customerDisplayName, '张先生');
 assert.equal(context.platformOrderNo, 'DY-20260808-001');
 assert.equal(context.orderStatus, '已付款');
@@ -55,6 +58,7 @@ assert.equal(realOrderFacts.platformProductId, 'DY-TAOJIN-100');
 assert.equal(realOrderFacts.platformSkuId, undefined);
 assert.equal(realOrderFacts.paymentAmount, 299, '实付金额必须保留平台展示事实');
 assert.equal(realOrderFacts.paymentAt, '2026-08-08T19:34:20+08:00');
+assert.equal(realOrderFacts.readyForIntake, true, '唯一商品名、精确实付和有效付款时间齐全才可入库');
 
 const ancestorProductIdentityDom = new JSDOM(`<!doctype html><html><body>
   <main data-jx-feige-conversation><span data-jx-customer-name>海盗船长</span></main>
@@ -97,6 +101,7 @@ assert.equal(ambiguousPaymentRows.paymentAmount, undefined, '多个实付语义�
 assert.ok(ambiguousPaymentRows.diagnostics.includes('实付金额存在歧义'));
 assert.equal(ambiguousPaymentRows.paymentAt, undefined, '多个付款时间语义行时必须失败关闭');
 assert.ok(ambiguousPaymentRows.diagnostics.includes('付款时间存在歧义'));
+assert.equal(ambiguousPaymentRows.readyForIntake, false);
 
 const conflictingProductIdentity = readOrderFactsFixture(`
   <section data-testid="order-card">
@@ -110,6 +115,7 @@ assert.equal(conflictingProductIdentity.platformProductId, undefined, '商品节
 assert.ok(conflictingProductIdentity.diagnostics.includes('当前订单商品ID存在冲突'));
 assert.equal(conflictingProductIdentity.platformSkuId, undefined, '商品节点与祖先的 SKU ID 冲突时不得选首值');
 assert.ok(conflictingProductIdentity.diagnostics.includes('当前订单SKU ID存在冲突'));
+assert.equal(conflictingProductIdentity.readyForIntake, false, '商品身份诊断冲突时不得继续入库');
 
 function readOrderFactsFixture(orderMarkup: string, pageMarkup = '') {
   const fixture = new JSDOM(`<!doctype html><html><body>
@@ -152,6 +158,18 @@ assert.equal(invalidPaymentFacts.paymentAmount, undefined, '无人民币符号�
 assert.ok(invalidPaymentFacts.diagnostics.includes('实付金额格式无效'));
 assert.equal(invalidPaymentFacts.paymentAt, undefined, '无效日历日期不得转换为付款时间');
 assert.ok(invalidPaymentFacts.diagnostics.includes('付款时间格式无效'));
+assert.equal(invalidPaymentFacts.readyForIntake, false);
+
+const missingProductName = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-MISSING-PRODUCT</span>
+    <div>实付金额 <strong>¥0.00</strong></div>
+    <div>付款时间 <strong>2026/08/08 19:34:20</strong></div>
+  </section>
+`);
+assert.equal(missingProductName.readyForIntake, false);
+assert.ok(missingProductName.diagnostics.includes('未识别平台商品名称'));
+assert.equal(missingProductName.paymentAmount, 0, '实付为0是有效平台事实');
 
 const ambiguousOrderFacts = readOrderFactsFixture(`
   <section data-testid="order-card">

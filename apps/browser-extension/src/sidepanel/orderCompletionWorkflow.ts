@@ -3,11 +3,14 @@ import { isPaidOrderStatus } from '../domain/orderCompletion';
 import { normalizePhoneForComparison } from '../../../../src/shared/utils/phoneNumber';
 import type {
   ApiEnvelope,
+  BrowserProductPreviewInput,
+  BrowserProductPreviewResponse,
   BrowserRuntimeShop,
   CompleteOsOrderInput,
   CompleteOsOrderResult,
   LeadIntakeResponse,
 } from '../shared/contracts';
+import { hasRequiredOrderFacts } from '../shared/contracts';
 
 export type OrderCompletionStage =
   | 'READY'
@@ -48,6 +51,7 @@ export type OrderCompletionInput = {
   existingIntake?: LeadIntakeResponse;
   shop?: BrowserRuntimeShop;
   pageShopDisplayName?: string;
+  displayedPreview?: BrowserProductPreviewResponse;
 };
 
 type ReportInput = {
@@ -59,10 +63,8 @@ type ReportInput = {
 
 export type OrderCompletionDependencies = {
   isAttemptActive?(): boolean;
-  readContext(): Promise<Pick<
-    FeigePageContext,
-    'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus' | 'shopDisplayName'
-  >>;
+  readContext(): Promise<FeigePageContext>;
+  preview(input: BrowserProductPreviewInput): Promise<ApiEnvelope<BrowserProductPreviewResponse>>;
   intake(input: Record<string, unknown>): Promise<ApiEnvelope<LeadIntakeResponse>>;
   completePage(input: CompleteOsOrderInput): Promise<CompleteOsOrderResult>;
   report(input: ReportInput): Promise<ApiEnvelope<PlatformCompletionReport>>;
@@ -80,6 +82,64 @@ function errorMessage(error: unknown, fallback: string) {
 
 function normalizedShopName(value: string) {
   return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('zh-CN');
+}
+
+function normalizedFactText(value: unknown) {
+  return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ');
+}
+
+function paymentTime(value: unknown) {
+  const timestamp = new Date(String(value || '')).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function previewMatchesDisplayed(
+  displayed: BrowserProductPreviewResponse | undefined,
+  latest: BrowserProductPreviewResponse,
+) {
+  if (!displayed || displayed.shop.id !== latest.shop.id) return false;
+  const displayedFacts = displayed.facts;
+  const latestFacts = latest.facts;
+  if (normalizedFactText(displayedFacts.platformProductId) !== normalizedFactText(latestFacts.platformProductId)
+    || normalizedFactText(displayedFacts.platformSkuId) !== normalizedFactText(latestFacts.platformSkuId)
+    || normalizedFactText(displayedFacts.platformProductName) !== normalizedFactText(latestFacts.platformProductName)
+    || displayedFacts.paymentAmount !== latestFacts.paymentAmount
+    || paymentTime(displayedFacts.paymentAt) !== paymentTime(latestFacts.paymentAt)) return false;
+  return JSON.stringify(displayed.productResolution) === JSON.stringify(latest.productResolution)
+    && JSON.stringify(displayed.priceDifference) === JSON.stringify(latest.priceDifference);
+}
+
+type ReadyFeigePageContext = FeigePageContext & {
+  readyForIntake: true;
+  productName: string;
+  paymentAmount: number;
+  paymentAt: string;
+};
+
+function latestIntakeInput(input: OrderCompletionInput, current: ReadyFeigePageContext) {
+  const {
+    pageShopDisplayName: _cachedPageShop,
+    platformOrderNo: _cachedOrderNo,
+    contactName: _cachedContactName,
+    platformProductId: _cachedProductId,
+    platformSkuId: _cachedSkuId,
+    platformProductName: _cachedProductName,
+    paymentAmount: _cachedPaymentAmount,
+    paymentAt: _cachedPaymentAt,
+    ...stableInput
+  } = input.intakeInput;
+  return {
+    ...stableInput,
+    ...(input.shop ? { shopBindingId: input.shop.id } : {}),
+    pageShopDisplayName: String(current.shopDisplayName || '').trim(),
+    platformOrderNo: current.platformOrderNo.trim(),
+    contactName: current.customerDisplayName.trim(),
+    platformProductId: current.platformProductId?.trim() || undefined,
+    platformSkuId: current.platformSkuId?.trim() || undefined,
+    platformProductName: current.productName.trim(),
+    paymentAmount: current.paymentAmount,
+    paymentAt: current.paymentAt.trim(),
+  };
 }
 
 export function pageShopMatchesBinding(pageShopDisplayName: string | undefined, shop: BrowserRuntimeShop) {
@@ -211,10 +271,7 @@ export async function runOrderCompletion(
     message,
   });
 
-  let current: Pick<
-    FeigePageContext,
-    'supported' | 'platformOrderNo' | 'customerDisplayName' | 'orderStatus' | 'shopDisplayName'
-  >;
+  let current: FeigePageContext;
   if (!isAttemptActive()) return aborted();
   try {
     current = await deps.readContext();
@@ -231,6 +288,12 @@ export async function runOrderCompletion(
   if (!isPaidOrderStatus(current.orderStatus)) {
     return stopForContext('请先确认当前订单为已付款有效订单');
   }
+  if (!hasRequiredOrderFacts(current)) {
+    return stopForContext(
+      '当前订单的平台商品名称、实付金额或付款时间未完整唯一识别，请等待订单加载完成后刷新识别',
+      'ORDER_FACTS_UNAVAILABLE',
+    );
+  }
   if (input.shop && !current.shopDisplayName?.trim()) {
     return stopForContext(
       '当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别后重试',
@@ -244,16 +307,42 @@ export async function runOrderCompletion(
     );
   }
 
+  let latestPreview: BrowserProductPreviewResponse | undefined;
+  if (input.shop) {
+    if (!isAttemptActive()) return aborted();
+    let preview: ApiEnvelope<BrowserProductPreviewResponse>;
+    try {
+      preview = await deps.preview({
+        platform: 'DOUYIN',
+        shopBindingId: input.shop.id,
+        pageShopDisplayName: String(current.shopDisplayName || '').trim(),
+        platformProductId: current.platformProductId?.trim() || undefined,
+        platformSkuId: current.platformSkuId?.trim() || undefined,
+        platformProductName: current.productName.trim(),
+        paymentAmount: current.paymentAmount,
+        paymentAt: current.paymentAt.trim(),
+      });
+    } catch (error) {
+      if (!isAttemptActive()) return aborted();
+      return stopForContext(errorMessage(error, '商品匹配预览失败'), 'PRODUCT_PREVIEW_FAILED');
+    }
+    if (!isAttemptActive()) return aborted();
+    if (preview.code !== 0 || !preview.data) {
+      return stopForContext(preview.message || '商品匹配预览失败', preview.errorCode || 'PRODUCT_PREVIEW_FAILED');
+    }
+    latestPreview = preview.data;
+    if (!input.existingIntake && !previewMatchesDisplayed(input.displayedPreview, latestPreview)) {
+      return stopForContext('订单信息已变化，请确认后重试', 'ORDER_FACTS_CHANGED');
+    }
+  }
+
   let intakeResult = input.existingIntake;
   if (!intakeResult) {
     if (!isAttemptActive()) return aborted();
     emit(deps, { ...initial, stage: 'INTAKING', osStatus: 'IN_PROGRESS' });
     let intake: ApiEnvelope<LeadIntakeResponse>;
     try {
-      intake = await deps.intake({
-        ...input.intakeInput,
-        ...(input.shop ? { pageShopDisplayName: current.shopDisplayName?.trim() } : {}),
-      });
+      intake = await deps.intake(latestIntakeInput(input, current));
     } catch (error) {
       if (!isAttemptActive()) return aborted();
       return emit(deps, {

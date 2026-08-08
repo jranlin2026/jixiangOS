@@ -27,9 +27,10 @@ const shop = {
 };
 const baseContext = {
   supported: true,
+  readyForIntake: true,
   pageUrl: 'https://fxg.jinritemai.com/im',
   customerDisplayName: '取消测试客户',
-  shopDisplayName: '其他店铺',
+  shopDisplayName: shop.displayName,
   platformOrderNo: 'ORDER-CANCEL-1',
   orderStatus: '已付款',
   platformProductId: 'DY-CANCEL',
@@ -39,14 +40,15 @@ const baseContext = {
   messages: [],
   diagnostics: [],
 };
-let pageContext = baseContext;
+let pageContext: any = baseContext;
 let previewMode: 'IMMEDIATE' | 'PENDING' = 'IMMEDIATE';
 let previewGate = deferred();
 let intakeMode: 'IMMEDIATE' | 'PENDING' = 'IMMEDIATE';
 let intakeGate = deferred();
 let logoutMode: 'IMMEDIATE' | 'PENDING' = 'IMMEDIATE';
 let logoutGate = deferred();
-let logoutOutcome: 'SUCCESS' | 'RESOLVED_FAILURE' | 'REJECTED' = 'SUCCESS';
+let logoutOutcome: 'SUCCESS' | 'APP_MINUS_ONE' | 'APP_500' | 'SESSION_EXPIRED' | 'REJECTED' = 'SUCCESS';
+let previewSessionExpired = false;
 let reportMode: 'IMMEDIATE' | 'PENDING' = 'IMMEDIATE';
 let reportGate = deferred();
 let pageCompletionMode: 'SUCCESS' | 'FAIL' = 'SUCCESS';
@@ -91,10 +93,20 @@ const chromeMock = {
         logoutCalls += 1;
         if (logoutMode === 'PENDING') await logoutGate.promise;
         if (logoutOutcome === 'REJECTED') throw new Error('退出网络中断');
-        if (logoutOutcome === 'RESOLVED_FAILURE') {
+        if (logoutOutcome === 'APP_MINUS_ONE') {
+          return { code: -1, data: null, message: '应用拒绝退出，请重试' };
+        }
+        if (logoutOutcome === 'APP_500') {
           return { code: 500, data: null, message: '服务端拒绝退出，请重试' };
         }
-        return { code: 0, data: null, message: 'success' };
+        if (logoutOutcome === 'SESSION_EXPIRED') {
+          return {
+            code: 0,
+            data: { sessionExpired: true, localLogoutCompleted: true },
+            message: '登录状态已失效，已在本地退出',
+          };
+        }
+        return { code: 0, data: { sessionExpired: false, localLogoutCompleted: true }, message: 'success' };
       }
       if (message.type === 'GET_RUNTIME_CONFIG') {
         return { code: 0, data: { shops: [shop], selectedShopBindingId: shop.id }, message: 'success' };
@@ -112,6 +124,14 @@ const chromeMock = {
       if (message.type === 'PREVIEW_PRODUCT_MAPPING') {
         previewCalls += 1;
         if (previewMode === 'PENDING') await previewGate.promise;
+        if (previewSessionExpired) {
+          return {
+            code: 401,
+            data: null,
+            message: '登录状态已失效，请重新登录',
+            authOutcome: 'SESSION_EXPIRED_LOCAL_LOGOUT',
+          };
+        }
         return {
           code: 0,
           data: {
@@ -192,7 +212,7 @@ function inputValue(input: HTMLInputElement, value: string) {
 }
 
 async function loginAndPrepare(orderNo: string) {
-  pageContext = { ...baseContext, platformOrderNo: orderNo, shopDisplayName: '其他店铺' };
+  pageContext = { ...baseContext, platformOrderNo: orderNo, shopDisplayName: shop.displayName };
   const loginCard = await waitFor('.login-card');
   const inputs = [...loginCard.querySelectorAll<HTMLInputElement>('input')];
   inputValue(inputs[1], 'agent-cancel');
@@ -201,11 +221,70 @@ async function loginAndPrepare(orderNo: string) {
   await waitFor('.context-card', (node) => (node.textContent || '').includes(orderNo));
   document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
   await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
-  pageContext = { ...pageContext, shopDisplayName: shop.displayName };
 }
 
 const module = await import('./main');
 await loginAndPrepare('ORDER-AUTHORITATIVE-A');
+const mandatoryFactsPreviewBaseline = previewCalls;
+for (const invalidContext of [
+  {
+    ...baseContext,
+    platformOrderNo: 'ORDER-AUTHORITATIVE-A',
+    shopDisplayName: shop.displayName,
+    readyForIntake: false,
+    productName: '',
+    diagnostics: ['未识别平台商品名称'],
+  },
+  {
+    ...baseContext,
+    platformOrderNo: 'ORDER-AUTHORITATIVE-A',
+    shopDisplayName: shop.displayName,
+    readyForIntake: false,
+    paymentAmount: undefined,
+    diagnostics: ['实付金额存在歧义'],
+  },
+  {
+    ...baseContext,
+    platformOrderNo: 'ORDER-AUTHORITATIVE-A',
+    shopDisplayName: shop.displayName,
+    readyForIntake: false,
+    paymentAt: undefined,
+    diagnostics: ['付款时间格式无效'],
+  },
+]) {
+  pageContext = invalidContext;
+  document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+  await waitFor('.context-card', (node) => (
+    (node.textContent || '').includes('平台商品名称、实付金额或付款时间未完整唯一识别')
+  ));
+  assert.equal(
+    document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.disabled,
+    true,
+    '必填订单事实缺失、歧义或无效时UI必须禁用入库',
+  );
+  assert.equal(previewCalls, mandatoryFactsPreviewBaseline, '事实不完整时不得请求权威预览');
+}
+pageContext = {
+  ...baseContext,
+  platformOrderNo: 'ORDER-AUTHORITATIVE-A',
+  shopDisplayName: shop.displayName,
+};
+document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+await waitFor('.context-card', (node) => (node.textContent || '').includes('平台商品取消测试商品'));
+await new Promise((resolve) => setTimeout(resolve, 15));
+assert.equal(previewCalls, mandatoryFactsPreviewBaseline + 1, '必填事实加载完成后必须重新权威预览');
+assert.equal(
+  document.querySelector<HTMLInputElement>('.confirm-row input')?.checked,
+  false,
+  '订单事实从不完整变为完整后必须由客服重新确认',
+);
+document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
+assert.equal(
+  document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.disabled,
+  false,
+  '必填事实加载完成且预览成功后应恢复入库操作',
+);
+const changedConversationCallBaseline = [previewCalls, intakeCalls, completePageCalls, reportCalls];
 pageContext = {
   ...pageContext,
   platformOrderNo: 'ORDER-AUTHORITATIVE-B',
@@ -216,7 +295,11 @@ const changedConversationDialog = await waitFor<HTMLElement>('[role="dialog"]', 
   (node.textContent || '').includes('当前飞鸽客户或订单已切换')
 ));
 assert.match(changedConversationDialog.textContent || '', /操作未完成/);
-assert.deepEqual([previewCalls, intakeCalls, completePageCalls, reportCalls], [0, 0, 0, 0]);
+assert.deepEqual(
+  [previewCalls, intakeCalls, completePageCalls, reportCalls],
+  changedConversationCallBaseline,
+  '点击时会话变更不得发起新预览、入库、页面动作或上报',
+);
 assert.equal(document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.disabled, false, '权威重读安全失败后必须释放 busy');
 assert.equal(document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.disabled, false, '当前尝试的正常安全失败不得把操作永久卡死');
 changedConversationDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
@@ -226,8 +309,9 @@ await waitFor('.login-card');
 await loginAndPrepare('ORDER-CANCEL-PREVIEW-LOGOUT');
 previewMode = 'PENDING';
 previewGate = deferred();
+const pendingPreviewBaseline = previewCalls;
 document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
-await waitFor('button[data-action="complete-order"]', () => previewCalls === 1);
+await waitFor('button[data-action="complete-order"]', () => previewCalls === pendingPreviewBaseline + 1);
 document.querySelector<HTMLButtonElement>('header .text-button')?.click();
 await waitFor('.login-card');
 previewGate.release();
@@ -272,28 +356,50 @@ logoutGate.release();
 await waitFor('.login-card');
 
 logoutMode = 'IMMEDIATE';
-logoutOutcome = 'RESOLVED_FAILURE';
+logoutOutcome = 'APP_MINUS_ONE';
+await loginAndPrepare('ORDER-LOGOUT-RESOLVED-FAILURE');
 previewMode = 'PENDING';
 previewGate = deferred();
-await loginAndPrepare('ORDER-LOGOUT-RESOLVED-FAILURE');
 const resolvedFailureIntakeBaseline = intakeCalls;
 const resolvedFailurePreviewBaseline = previewCalls;
 document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
 await waitFor('button[data-action="complete-order"]', () => previewCalls === resolvedFailurePreviewBaseline + 1);
 document.querySelector<HTMLButtonElement>('header .text-button')?.click();
 const resolvedLogoutFailureDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
-  (node.textContent || '').includes('服务端拒绝退出，请重试')
+  (node.textContent || '').includes('应用拒绝退出，请重试')
 ));
 assert.match(resolvedLogoutFailureDialog.textContent || '', /操作未完成/);
-assert.ok(document.querySelector('.context-card'), '退出响应 code 500 时必须保留已认证界面');
+assert.ok(document.querySelector('.context-card'), '退出响应 code -1 时必须保留已认证界面');
 assert.equal(document.querySelector<HTMLButtonElement>('header .text-button')?.disabled, false, '退出失败后应允许重试');
 previewGate.release();
 await new Promise((resolve) => setTimeout(resolve, 15));
 assert.equal(intakeCalls, resolvedFailureIntakeBaseline, '退出失败也不得恢复被取消的旧完成尝试');
 resolvedLogoutFailureDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+logoutOutcome = 'APP_500';
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+const code500LogoutFailureDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('服务端拒绝退出，请重试')
+));
+assert.ok(document.querySelector('.context-card'), '退出响应 code 500 时必须保留已认证界面');
+code500LogoutFailureDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
 logoutOutcome = 'SUCCESS';
 document.querySelector<HTMLButtonElement>('header .text-button')?.click();
 await waitFor('.login-card');
+
+logoutOutcome = 'SESSION_EXPIRED';
+await loginAndPrepare('ORDER-LOGOUT-SESSION-EXPIRED');
+document.querySelector<HTMLButtonElement>('header .text-button')?.click();
+await waitFor('.login-card');
+assert.equal(document.querySelector('.context-card'), null, 'HTTP 401 映射的本地退出必须清除UI登录态');
+
+logoutOutcome = 'SUCCESS';
+await loginAndPrepare('ORDER-PREVIEW-SESSION-EXPIRED');
+previewSessionExpired = true;
+pageContext = { ...pageContext, platformOrderNo: 'ORDER-PREVIEW-SESSION-EXPIRED-2' };
+document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+await waitFor('.login-card');
+assert.equal(document.querySelector('.context-card'), null, '其他鉴权请求的HTTP 401也必须终结本地会话');
+previewSessionExpired = false;
 
 previewMode = 'IMMEDIATE';
 logoutOutcome = 'REJECTED';
@@ -337,12 +443,15 @@ document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]'
 await waitFor('button[data-action="complete-order"]', () => previewCalls === previewsBeforeSupersededAttempts + 1);
 document.querySelector<HTMLButtonElement>('header .text-button')?.click();
 await waitFor('.login-card');
+previewMode = 'IMMEDIATE';
 await loginAndPrepare('ORDER-CANCEL-NEWER-BUSY');
+previewMode = 'PENDING';
 const newerPreviewGate = deferred();
 previewGate = newerPreviewGate;
+const previewsBeforeNewerAttempt = previewCalls;
 const supersededButton = document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')!;
 supersededButton.click();
-await waitFor('button[data-action="complete-order"]', () => previewCalls === previewsBeforeSupersededAttempts + 2);
+await waitFor('button[data-action="complete-order"]', () => previewCalls === previewsBeforeNewerAttempt + 1);
 supersededPreviewGate.release();
 await new Promise((resolve) => setTimeout(resolve, 15));
 assert.equal(supersededButton.disabled, true, '旧尝试的 finally 不得释放新尝试持有的 busy');

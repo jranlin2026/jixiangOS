@@ -290,6 +290,7 @@ model BrowserLeadSync {
   remarkOperatorId    String?   @db.VarChar(64)
   remarkOperatorName  String?   @db.VarChar(100)
   attemptCount        Int       @default(1)
+  attemptToken        String?   @db.VarChar(64)
   lastError           String?   @db.VarChar(1000)
   completedAt         DateTime?
   orderRemarkedAt     DateTime?

@@ -225,6 +225,7 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       operatorName: string;
       contactSource: 'CHAT' | 'OFF_PLATFORM';
     }) {
+      const attemptToken = randomUUID();
       try {
         const created = await prisma.browserLeadSync.create({
           data: {
@@ -234,6 +235,7 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
             orderRemarkStatus: 'NOT_ATTEMPTED',
             greenFlagStatus: 'NOT_ATTEMPTED',
             attemptCount: 1,
+            attemptToken,
           },
         });
         return { acquired: true as const, record: record(created) };
@@ -266,6 +268,7 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
         where: {
           id: existing.id,
           status: existing.status,
+          attemptToken: existing.attemptToken,
           ...(stalePending ? { updatedAt: { lte: new Date(Date.now() - PENDING_LEASE_MS) } } : {}),
         },
         data: {
@@ -288,6 +291,7 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
           operatorName: input.operatorName,
           contactSource: input.contactSource,
           attemptCount: { increment: 1 },
+          attemptToken,
         },
       });
       const refreshed = await prisma.browserLeadSync.findUnique({ where: { id: existing.id } });
@@ -303,7 +307,7 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       };
     },
 
-    async markSucceeded(id: string, input: {
+    async markSucceeded(id: string, attemptToken: string, input: {
       leadId: string;
       leadName: string;
       assignedTo?: string | null;
@@ -318,32 +322,38 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
         ...syncInput
       } = input;
       const current = await prisma.$transaction(async (transaction) => {
-        await transaction.browserLeadSync.updateMany({
-          where: { id, completedAt: null },
+        const completed = await transaction.browserLeadSync.updateMany({
+          where: { id, status: 'PENDING', attemptToken, completedAt: null },
           data: {
             completedAt: new Date(),
             ...storedContactData(storedContact),
             assignedTo: assignedTo?.trim() || null,
             assignedToId: assignedToId || null,
+            ...syncInput,
+            status: 'SUCCEEDED',
+            lastError: null,
           },
         });
-        await transaction.browserLeadSync.updateMany({
-          where: { id, contactNickname: null },
-          data: storedContactData(storedContact),
-        });
-        return transaction.browserLeadSync.update({
-          where: { id },
-          data: { ...syncInput, status: 'SUCCEEDED', lastError: null },
-        });
+        if (completed.count === 0) {
+          await transaction.browserLeadSync.updateMany({
+            where: { id, status: 'PENDING', attemptToken },
+            data: { ...syncInput, status: 'SUCCEEDED', lastError: null },
+          });
+        }
+        return transaction.browserLeadSync.findUnique({ where: { id } });
       });
+      if (!current) throw new Error('浏览器线索同步完成后记录未找到');
       return record(current);
     },
 
-    async markFailed(id: string, errorMessage: string) {
-      return record(await prisma.browserLeadSync.update({
-        where: { id },
+    async markFailed(id: string, attemptToken: string, errorMessage: string) {
+      await prisma.browserLeadSync.updateMany({
+        where: { id, status: 'PENDING', attemptToken },
         data: { status: 'FAILED', lastError: errorMessage.slice(0, 1000) },
-      }));
+      });
+      const current = await prisma.browserLeadSync.findUnique({ where: { id } });
+      if (!current) throw new Error('浏览器线索同步失败后记录未找到');
+      return record(current);
     },
 
     async reportOrderRemark(

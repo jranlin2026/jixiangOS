@@ -17,6 +17,7 @@ Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.
 
 const context = {
   supported: true,
+  readyForIntake: true,
   pageUrl: 'https://fxg.jinritemai.com/im',
   customerDisplayName: '海盗船长',
   shopDisplayName: '极享官方店',
@@ -29,7 +30,7 @@ const context = {
   messages: [],
   diagnostics: [],
 };
-let pageContext = context;
+let pageContext: any = context;
 const shops = [
   {
     id: 'shop-1', platform: 'DOUYIN', shopKey: 'jx-main', platformShopId: 'DY-SHOP-1',
@@ -62,6 +63,8 @@ const intakeInputs: Record<string, unknown>[] = [];
 const previewInputs: Record<string, unknown>[] = [];
 const productWorkerCallOrder: string[] = [];
 let completeInput: unknown;
+let completePageCalls = 0;
+let reportCalls = 0;
 const savedConfigs: unknown[] = [];
 const scriptView = {
   library: { schemaVersion: 1, revision: 1, groups: [], updatedAt: '', updatedBy: { id: 'u1', name: '客服甲' } },
@@ -146,6 +149,7 @@ const chromeMock = {
                 },
             facts: {
               platformProductId: message.input.platformProductId,
+              platformSkuId: message.input.platformSkuId,
               platformProductName: message.input.platformProductName,
               paymentAmount: message.input.paymentAmount,
               paymentAt: message.input.paymentAt,
@@ -163,7 +167,11 @@ const chromeMock = {
       }
       if (message.type === 'LOGOUT') {
         await logoutGate;
-        return { code: 0, data: null, message: 'success' };
+        return {
+          code: 0,
+          data: { sessionExpired: false, localLogoutCompleted: true },
+          message: 'success',
+        };
       }
       if (message.type === 'GET_SCRIPT_LIBRARY') return { code: 0, data: scriptView, message: 'success' };
       if (message.type === 'CREATE_LEAD_INTAKE') {
@@ -183,6 +191,7 @@ const chromeMock = {
           : { code: 409, data: null, errorCode: 'ORDER_CONTACT_CONFLICT', message: '昵称与首次入库快照不一致，请先在极享OS核对' };
       }
       if (message.type === 'REPORT_PLATFORM_COMPLETION') {
+        reportCalls += 1;
         return {
           code: 0,
           data: { syncId: message.syncId, orderRemarkStatus: 'SUCCEEDED', greenFlagStatus: 'SUCCEEDED' },
@@ -199,6 +208,7 @@ const chromeMock = {
         return { ok: true, context: pageContext, detectedContact: { phone: '13800138000' } };
       }
       if (message.type === 'COMPLETE_FEIGE_OS_ORDER') {
+        completePageCalls += 1;
         completeInput = message.input;
         return {
           ok: true,
@@ -315,15 +325,27 @@ const previewCountBeforeCachedMismatchClick = previewInputs.length;
 const productCallCountBeforeCachedMismatchClick = productWorkerCallOrder.length;
 intakeSucceeds = true;
 completeButton.click();
-const cachedMismatchSuccess = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
-  (node.textContent || '').includes('操作成功')
+const cachedMismatchReconfirm = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('订单信息已变化，请确认后重试')
 ));
 assert.equal(previewInputs.length >= previewCountBeforeCachedMismatchClick + 1, true, '缓存店铺不一致时，最新页面预检后仍必须在创建线索前权威预览');
 assert.equal(previewInputs[previewCountBeforeCachedMismatchClick]?.pageShopDisplayName, '极享官方店');
-assert.deepEqual(productWorkerCallOrder.slice(productCallCountBeforeCachedMismatchClick, productCallCountBeforeCachedMismatchClick + 2), [
+assert.deepEqual(productWorkerCallOrder.slice(productCallCountBeforeCachedMismatchClick), [
+  'PREVIEW_PRODUCT_MAPPING',
+], '页面店铺从不匹配恢复后，首次点击只能更新预览并要求重新确认');
+assert.equal(intakeInputs.length, 0, '首次点击未展示过最新预览时不得入库');
+cachedMismatchReconfirm.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
+await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
+completeButton.click();
+const cachedMismatchSuccess = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('操作成功')
+));
+assert.deepEqual(productWorkerCallOrder.slice(productCallCountBeforeCachedMismatchClick), [
+  'PREVIEW_PRODUCT_MAPPING',
   'PREVIEW_PRODUCT_MAPPING',
   'CREATE_LEAD_INTAKE',
-], '缓存不一致的特殊路径也必须先用最新店铺权威预览，再创建线索');
+], '重新确认后仍必须先再做一次权威预览，才能创建线索');
 assert.equal(intakeInputs.at(-1)?.pageShopDisplayName, '极享官方店', '点击后必须使用最新预检店铺');
 cachedMismatchSuccess.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
 intakeSucceeds = false;
@@ -397,6 +419,73 @@ assert.deepEqual(completeInput, {
 });
 
 successDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+
+pageContext = {
+  ...context,
+  platformOrderNo: 'ORDER-LATEST-FACTS',
+  platformProductId: 'DY-LATEST-INITIAL',
+  platformSkuId: 'SKU-LATEST-INITIAL',
+  productName: '初始商品',
+  paymentAmount: 299,
+  paymentAt: '2026-08-09T09:00:00+08:00',
+};
+document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+await waitFor('.context-card', (node) => (node.textContent || '').includes('平台商品初始商品'));
+await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled || previewInputs.length > 0);
+document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
+await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
+const latestFactsBaselines = {
+  preview: previewInputs.length,
+  intake: intakeInputs.length,
+  page: completePageCalls,
+  report: reportCalls,
+};
+pageContext = {
+  ...pageContext,
+  platformProductId: 'DY-LATEST-CONFIRMED',
+  platformSkuId: 'SKU-LATEST-CONFIRMED',
+  productName: '点击时最新商品',
+  paymentAmount: 188.25,
+  paymentAt: '2026-08-09T10:30:00+08:00',
+};
+document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
+const latestFactsChangedDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('订单信息已变化，请确认后重试')
+));
+assert.equal(previewInputs.length, latestFactsBaselines.preview + 1, '首次点击必须用最新快照再做一次权威预览');
+assert.deepEqual(
+  [intakeInputs.length, completePageCalls, reportCalls],
+  [latestFactsBaselines.intake, latestFactsBaselines.page, latestFactsBaselines.report],
+  '商品、实付或付款时间变化后的首次点击不得入库、改页面或上报',
+);
+assert.match(document.body.textContent || '', /平台商品点击时最新商品/);
+assert.match(document.body.textContent || '', /实付金额¥188\.25/);
+assert.match(document.body.textContent || '', /2026-08-09T10:30:00\+08:00/);
+assert.equal(document.querySelector<HTMLInputElement>('.confirm-row input')?.checked, false, '事实变化后必须重新确认');
+latestFactsChangedDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
+await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
+document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
+const latestFactsSuccessDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
+  (node.textContent || '').includes('操作成功')
+));
+assert.deepEqual(intakeInputs.at(-1), {
+  platform: 'DOUYIN',
+  shopBindingId: 'shop-1',
+  pageShopDisplayName: '极享官方店',
+  platformOrderNo: 'ORDER-LATEST-FACTS',
+  contactName: '海盗船长',
+  contactPhone: '13800138000',
+  contactWechat: undefined,
+  contactSource: 'CHAT',
+  platformProductId: 'DY-LATEST-CONFIRMED',
+  platformSkuId: 'SKU-LATEST-CONFIRMED',
+  platformProductName: '点击时最新商品',
+  paymentAmount: 188.25,
+  paymentAt: '2026-08-09T10:30:00+08:00',
+}, '第二次确认只能提交点击时同一份最新快照');
+latestFactsSuccessDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+
 pageContext = {
   ...context,
   platformOrderNo: 'ORDER-LOGOUT-LATE',

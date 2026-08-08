@@ -1,13 +1,19 @@
 import assert from 'node:assert/strict';
-import { runOrderCompletion } from './orderCompletionWorkflow';
+import { runOrderCompletion as runOrderCompletionProduction } from './orderCompletionWorkflow';
 
 const currentContext = {
   supported: true,
+  readyForIntake: true,
+  pageUrl: 'https://im.jinritemai.com/pc_seller_v2/main/workspace',
   customerDisplayName: '悠然一刻',
   platformOrderNo: 'ORDER-20260808-1',
   orderStatus: '已付款',
   shopDisplayName: '极享官方店',
+  platformProductId: 'PRODUCT-OLD',
+  platformSkuId: 'SKU-OLD',
   productName: '体验套餐',
+  paymentAmount: 299,
+  paymentAt: '2026-08-08T19:34:20+08:00',
   messages: [],
   diagnostics: [],
 };
@@ -23,6 +29,55 @@ const selectedShop = {
   sourceName: '飞鸽客服',
   sourceType: '公司资源',
 };
+
+function previewForContext(context: typeof currentContext, shop: any = selectedShop) {
+  return {
+    shop,
+    productResolution: { status: 'UNMATCHED' as const, rawProductName: context.productName },
+    facts: {
+      platformProductId: context.platformProductId,
+      platformSkuId: context.platformSkuId,
+      platformProductName: context.productName,
+      paymentAmount: context.paymentAmount,
+      paymentAt: new Date(context.paymentAt).toISOString(),
+    },
+    priceDifference: null,
+  };
+}
+
+type WorkflowInput = Parameters<typeof runOrderCompletionProduction>[0];
+type WorkflowDependencies = Parameters<typeof runOrderCompletionProduction>[1];
+
+function runCompletion(
+  input: WorkflowInput,
+  dependencies: Omit<WorkflowDependencies, 'preview'> & Partial<Pick<WorkflowDependencies, 'preview'>>,
+) {
+  const displayedPreview = input.shop && !input.existingIntake && !input.displayedPreview
+    ? previewForContext(currentContext, input.shop)
+    : input.displayedPreview;
+  return runOrderCompletionProduction({
+    ...input,
+    ...(displayedPreview ? { displayedPreview } : {}),
+  }, {
+    preview: async (previewInput: any) => ({
+      code: 0,
+      data: {
+        shop: input.shop || selectedShop,
+        productResolution: { status: 'UNMATCHED', rawProductName: previewInput.platformProductName },
+        facts: {
+          platformProductId: previewInput.platformProductId,
+          platformSkuId: previewInput.platformSkuId,
+          platformProductName: previewInput.platformProductName,
+          paymentAmount: previewInput.paymentAmount,
+          paymentAt: new Date(previewInput.paymentAt).toISOString(),
+        },
+        priceDifference: null,
+      },
+      message: 'success',
+    }),
+    ...dependencies,
+  });
+}
 
 const backendRemarkLines: [string, string] = [
   '#悠然一刻/手机号：13826459812/微信号：wx_original_88（对接：销售小陈）',
@@ -51,7 +106,7 @@ const completionResult = {
 
 let firstPageInput: unknown;
 let firstIntakeInput: unknown;
-const result = await runOrderCompletion({
+const result = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -83,19 +138,170 @@ assert.equal(result.greenFlagStatus, 'SUCCEEDED');
 assert.equal(result.remarkText, backendRemarkText);
 assert.deepEqual(firstIntakeInput, {
   platform: 'DOUYIN',
+  shopBindingId: selectedShop.id,
   pageShopDisplayName: '极享官方店',
-}, '入库必须使用预检重读的当前页面店铺，不得沿用缓存名称');
+  platformOrderNo: currentContext.platformOrderNo,
+  contactName: currentContext.customerDisplayName,
+  platformProductId: currentContext.platformProductId,
+  platformSkuId: currentContext.platformSkuId,
+  platformProductName: currentContext.productName,
+  paymentAmount: currentContext.paymentAmount,
+  paymentAt: currentContext.paymentAt,
+}, '入库必须使用预检重读的完整订单快照，不得沿用缓存事实');
 assert.deepEqual(firstPageInput, {
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   remarkLines: backendRemarkLines,
 }, '工作流必须把后端备注行原样传给页面，不得自行重建销售或时间');
 
+const initiallyDisplayedPreview = {
+  shop: selectedShop,
+  productResolution: { status: 'UNMATCHED' as const, rawProductName: currentContext.productName },
+  facts: {
+    platformProductId: currentContext.platformProductId,
+    platformSkuId: currentContext.platformSkuId,
+    platformProductName: currentContext.productName,
+    paymentAmount: currentContext.paymentAmount,
+    paymentAt: '2026-08-08T11:34:20.000Z',
+  },
+  priceDifference: null,
+};
+const changedFactsContext = {
+  ...currentContext,
+  platformProductId: 'PRODUCT-LATEST',
+  platformSkuId: 'SKU-LATEST',
+  productName: '最新商品',
+  paymentAmount: 188.25,
+  paymentAt: '2026-08-09T10:30:00+08:00',
+};
+const changedFactsPreview = {
+  ...initiallyDisplayedPreview,
+  productResolution: { status: 'UNMATCHED' as const, rawProductName: changedFactsContext.productName },
+  facts: {
+    platformProductId: changedFactsContext.platformProductId,
+    platformSkuId: changedFactsContext.platformSkuId,
+    platformProductName: changedFactsContext.productName,
+    paymentAmount: changedFactsContext.paymentAmount,
+    paymentAt: '2026-08-09T02:30:00.000Z',
+  },
+};
+let changedFactsPreviewCalls = 0;
+let changedFactsIntakeCalls = 0;
+let changedFactsPageCalls = 0;
+let changedFactsReportCalls = 0;
+let changedFactsPreviewInput: unknown;
+const changedFactsFirstClick = await runCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13826459812',
+  shop: selectedShop,
+  displayedPreview: initiallyDisplayedPreview,
+  intakeInput: {
+    platform: 'DOUYIN',
+    shopBindingId: selectedShop.id,
+    pageShopDisplayName: currentContext.shopDisplayName,
+    platformOrderNo: currentContext.platformOrderNo,
+    contactName: currentContext.customerDisplayName,
+    contactPhone: '13826459812',
+    contactSource: 'CHAT',
+    platformProductId: currentContext.platformProductId,
+    platformSkuId: currentContext.platformSkuId,
+    platformProductName: currentContext.productName,
+    paymentAmount: currentContext.paymentAmount,
+    paymentAt: currentContext.paymentAt,
+  },
+} as any, {
+  readContext: async () => changedFactsContext,
+  preview: async (previewInput: unknown) => {
+    changedFactsPreviewCalls += 1;
+    changedFactsPreviewInput = previewInput;
+    return { code: 0, data: changedFactsPreview, message: 'success' };
+  },
+  intake: async () => {
+    changedFactsIntakeCalls += 1;
+    return { code: 0, data: intakeResult, message: 'success' };
+  },
+  completePage: async () => {
+    changedFactsPageCalls += 1;
+    return { ok: true, remarkText: '', remarkStatus: 'SUCCEEDED', greenFlagStatus: 'SUCCEEDED' };
+  },
+  report: async () => {
+    changedFactsReportCalls += 1;
+    return { code: 0, data: completionResult, message: 'success' };
+  },
+} as any);
+assert.equal(changedFactsFirstClick.stage, 'OS_FAILED');
+assert.equal(changedFactsFirstClick.errorCode, 'ORDER_FACTS_CHANGED');
+assert.equal(changedFactsFirstClick.message, '订单信息已变化，请确认后重试');
+assert.deepEqual(changedFactsPreviewInput, {
+  platform: 'DOUYIN',
+  shopBindingId: selectedShop.id,
+  pageShopDisplayName: changedFactsContext.shopDisplayName,
+  platformProductId: changedFactsContext.platformProductId,
+  platformSkuId: changedFactsContext.platformSkuId,
+  platformProductName: changedFactsContext.productName,
+  paymentAmount: changedFactsContext.paymentAmount,
+  paymentAt: changedFactsContext.paymentAt,
+});
+assert.deepEqual(
+  [changedFactsPreviewCalls, changedFactsIntakeCalls, changedFactsPageCalls, changedFactsReportCalls],
+  [1, 0, 0, 0],
+  '同订单事实变化的首次点击只允许更新权威预览，不得入库或操作页面',
+);
+
+let confirmedLatestIntake: unknown;
+const changedFactsSecondClick = await runCompletion({
+  expectedOrderNo: changedFactsContext.platformOrderNo,
+  expectedCustomerDisplayName: changedFactsContext.customerDisplayName,
+  phone: '13826459812',
+  shop: selectedShop,
+  displayedPreview: changedFactsPreview,
+  intakeInput: {
+    platform: 'DOUYIN',
+    shopBindingId: selectedShop.id,
+    pageShopDisplayName: changedFactsContext.shopDisplayName,
+    platformOrderNo: changedFactsContext.platformOrderNo,
+    contactName: changedFactsContext.customerDisplayName,
+    contactPhone: '13826459812',
+    contactSource: 'CHAT',
+    platformProductId: 'CACHED-MUST-NOT-BE-SUBMITTED',
+    platformProductName: 'CACHED-MUST-NOT-BE-SUBMITTED',
+    paymentAmount: 999,
+    paymentAt: currentContext.paymentAt,
+  },
+} as any, {
+  readContext: async () => changedFactsContext,
+  preview: async () => ({ code: 0, data: changedFactsPreview, message: 'success' }),
+  intake: async (intakeInput: unknown) => {
+    confirmedLatestIntake = intakeInput;
+    return { code: 0, data: intakeResult, message: 'success' };
+  },
+  completePage: async () => ({
+    ok: true, remarkText: backendRemarkText, remarkStatus: 'SUCCEEDED', greenFlagStatus: 'SUCCEEDED',
+  }),
+  report: async () => ({ code: 0, data: completionResult, message: 'success' }),
+} as any);
+assert.equal(changedFactsSecondClick.stage, 'COMPLETED');
+assert.deepEqual(confirmedLatestIntake, {
+  platform: 'DOUYIN',
+  shopBindingId: selectedShop.id,
+  platformOrderNo: changedFactsContext.platformOrderNo,
+  contactName: changedFactsContext.customerDisplayName,
+  contactPhone: '13826459812',
+  contactSource: 'CHAT',
+  pageShopDisplayName: changedFactsContext.shopDisplayName,
+  platformProductId: changedFactsContext.platformProductId,
+  platformSkuId: changedFactsContext.platformSkuId,
+  platformProductName: changedFactsContext.productName,
+  paymentAmount: changedFactsContext.paymentAmount,
+  paymentAt: changedFactsContext.paymentAt,
+}, '第二次确认必须完全使用同一份最新页面快照创建线索');
+
 let mismatchReadCalls = 0;
 let mismatchIntakeCalls = 0;
 let mismatchPageCalls = 0;
 let mismatchReportCalls = 0;
-const pageShopMismatch = await runOrderCompletion({
+const pageShopMismatch = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -133,7 +339,7 @@ for (const latestShopContext of [
   let latestIntakeCalls = 0;
   let latestPageCalls = 0;
   let latestReportCalls = 0;
-  const latestResult = await runOrderCompletion({
+  const latestResult = await runCompletion({
     expectedOrderNo: currentContext.platformOrderNo,
     expectedCustomerDisplayName: currentContext.customerDisplayName,
     phone: '13826459812',
@@ -162,7 +368,7 @@ for (const retryShopContext of [
   { label: '已有入库结果时权威店铺缺失', context: { ...currentContext, shopDisplayName: '' }, code: 'SHOP_CONTEXT_UNAVAILABLE' },
 ] as const) {
   let retryShopReportCalls = 0;
-  const retryShopResult = await runOrderCompletion({
+  const retryShopResult = await runCompletion({
     expectedOrderNo: currentContext.platformOrderNo,
     expectedCustomerDisplayName: currentContext.customerDisplayName,
     phone: '13826459812',
@@ -186,7 +392,7 @@ for (const retryShopContext of [
 }
 
 let pageCallsAfterOsFailure = 0;
-const osFailure = await runOrderCompletion({
+const osFailure = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -213,7 +419,7 @@ for (const terminalErrorCode of [
   let terminalPageCalls = 0;
   let terminalReportCalls = 0;
   const terminalStates: string[] = [];
-  const terminalResult = await runOrderCompletion({
+  const terminalResult = await runCompletion({
     expectedOrderNo: currentContext.platformOrderNo,
     expectedCustomerDisplayName: currentContext.customerDisplayName,
     phone: '13826459812',
@@ -248,7 +454,7 @@ for (const terminalErrorCode of [
   assert.equal(terminalStates.includes('PLATFORM_COMPLETING'), false);
 }
 
-const osException = await runOrderCompletion({
+const osException = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -267,7 +473,7 @@ assert.equal(osException.osStatus, 'FAILED');
 assert.equal(osException.message, '入库网络中断');
 
 let reportedFailure: unknown;
-const pageFailure = await runOrderCompletion({
+const pageFailure = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -303,7 +509,7 @@ assert.deepEqual(reportedFailure, {
 });
 
 let greenFlagFailureReport: unknown;
-const greenFlagFailure = await runOrderCompletion({
+const greenFlagFailure = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -341,7 +547,7 @@ assert.equal(greenFlagFailure.orderRemarkStatus, 'FAILED');
 assert.equal(greenFlagFailure.greenFlagStatus, 'FAILED');
 
 let pageContextFailureReport: unknown;
-const pageContextFailure = await runOrderCompletion({
+const pageContextFailure = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -377,7 +583,7 @@ assert.deepEqual(pageContextFailureReport, {
 });
 
 let alreadyCreatedPageCalls = 0;
-const alreadyCreated = await runOrderCompletion({
+const alreadyCreated = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -421,7 +627,7 @@ for (const mismatch of [
   },
 ] as const) {
   let mismatchPageCalls = 0;
-  const mismatchResult = await runOrderCompletion({
+  const mismatchResult = await runCompletion({
     expectedOrderNo: currentContext.platformOrderNo,
     expectedCustomerDisplayName: currentContext.customerDisplayName,
     ...mismatch.input,
@@ -457,7 +663,7 @@ for (const matchingContact of [
   { wechat: 'wx_original_88' },
 ] as const) {
   let matchingPageCalls = 0;
-  const matchingResult = await runOrderCompletion({
+  const matchingResult = await runCompletion({
     expectedOrderNo: currentContext.platformOrderNo,
     expectedCustomerDisplayName: currentContext.customerDisplayName,
     ...matchingContact,
@@ -503,7 +709,7 @@ for (const normalizedContact of [
   },
 ] as const) {
   let normalizedPageCalls = 0;
-  const normalizedResult = await runOrderCompletion({
+  const normalizedResult = await runCompletion({
     expectedOrderNo: currentContext.platformOrderNo,
     expectedCustomerDisplayName: currentContext.customerDisplayName,
     ...normalizedContact.input,
@@ -535,7 +741,7 @@ for (const changedContext of [
   { ...currentContext, customerDisplayName: '已切换客户' },
 ]) {
   let changedIntakeCalls = 0;
-  const changed = await runOrderCompletion({
+  const changed = await runCompletion({
     expectedOrderNo: currentContext.platformOrderNo,
     expectedCustomerDisplayName: currentContext.customerDisplayName,
     phone: '13826459812',
@@ -559,7 +765,7 @@ for (const changedContext of [
 }
 
 let changedRetryReports = 0;
-const changedRetry = await runOrderCompletion({
+const changedRetry = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -593,7 +799,7 @@ assert.equal(changedRetryReports, 0, '权威重读失败未验证当前页面，
 for (const invalidPaidStatus of ['待付款', '退款中', '已关闭']) {
   let invalidStatusIntakeCalls = 0;
   let invalidStatusPageCalls = 0;
-  const invalidStatusResult = await runOrderCompletion({
+  const invalidStatusResult = await runCompletion({
     expectedOrderNo: currentContext.platformOrderNo,
     expectedCustomerDisplayName: currentContext.customerDisplayName,
     phone: '13826459812',
@@ -621,7 +827,7 @@ for (const invalidPaidStatus of ['待付款', '退款中', '已关闭']) {
 }
 
 let retryIntakeCalls = 0;
-const retry = await runOrderCompletion({
+const retry = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -647,7 +853,7 @@ assert.equal(retryIntakeCalls, 0, '已有 syncId 的重试不得重新入库');
 let reportOnlyPageCalls = 0;
 let reportOnlyReportCalls = 0;
 let reportOnlyReadCalls = 0;
-const reportOnlyRetry = await runOrderCompletion({
+const reportOnlyRetry = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -681,7 +887,7 @@ assert.equal(reportOnlyReportCalls, 1, '只重试一次平台结果上报');
 
 let reportOnlyWithoutPageContextReadCalls = 0;
 let reportOnlyWithoutPageContextReportCalls = 0;
-const reportOnlyWithoutPageContext = await runOrderCompletion({
+const reportOnlyWithoutPageContext = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -714,7 +920,7 @@ assert.equal(reportOnlyWithoutPageContext.stage, 'COMPLETED');
 
 let reportOnlyMismatchReadCalls = 0;
 let reportOnlyMismatchReportCalls = 0;
-const reportOnlyMismatch = await runOrderCompletion({
+const reportOnlyMismatch = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13900139000',
@@ -752,7 +958,7 @@ let createdReportOnlyMismatchReadCalls = 0;
 let createdReportOnlyMismatchIntakeCalls = 0;
 let createdReportOnlyMismatchPageCalls = 0;
 let createdReportOnlyMismatchReportCalls = 0;
-const createdReportOnlyMismatch = await runOrderCompletion({
+const createdReportOnlyMismatch = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13900139000',
@@ -790,7 +996,7 @@ assert.equal(createdReportOnlyMismatch.greenFlagStatus, 'SUCCEEDED', '已创建�
 assert.match(createdReportOnlyMismatch.message || '', /极享OS已有资料与本次提交不一致/);
 
 let exceptionReportCalls = 0;
-const pageException = await runOrderCompletion({
+const pageException = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -821,7 +1027,7 @@ assert.equal(pageException.stage, 'PLATFORM_FAILED');
 assert.equal(pageException.message, '页面通信中断');
 assert.equal(exceptionReportCalls, 1, '页面异常也必须上报最终平台结果');
 
-const reportException = await runOrderCompletion({
+const reportException = await runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -849,7 +1055,7 @@ const cancelledReadGate = new Promise<void>((resolve) => { releaseCancelledRead 
 let cancelledReadIntakeCalls = 0;
 let cancelledReadPageCalls = 0;
 let cancelledReadReportCalls = 0;
-const cancelledDuringReadPromise = runOrderCompletion({
+const cancelledDuringReadPromise = runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -882,7 +1088,7 @@ let releaseCancelledIntake!: () => void;
 const cancelledIntakeGate = new Promise<void>((resolve) => { releaseCancelledIntake = resolve; });
 let cancelledIntakePageCalls = 0;
 let cancelledIntakeReportCalls = 0;
-const cancelledDuringIntakePromise = runOrderCompletion({
+const cancelledDuringIntakePromise = runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -911,7 +1117,7 @@ let pageAttemptActive = true;
 let releaseCancelledPage!: () => void;
 const cancelledPageGate = new Promise<void>((resolve) => { releaseCancelledPage = resolve; });
 let cancelledPageReportCalls = 0;
-const cancelledDuringPagePromise = runOrderCompletion({
+const cancelledDuringPagePromise = runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',
@@ -945,7 +1151,7 @@ let reportAttemptActive = true;
 let releaseCancelledReport!: () => void;
 const cancelledReportGate = new Promise<void>((resolve) => { releaseCancelledReport = resolve; });
 const cancelledReportStates: string[] = [];
-const cancelledDuringReportPromise = runOrderCompletion({
+const cancelledDuringReportPromise = runCompletion({
   expectedOrderNo: currentContext.platformOrderNo,
   expectedCustomerDisplayName: currentContext.customerDisplayName,
   phone: '13826459812',

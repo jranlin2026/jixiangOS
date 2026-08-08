@@ -480,15 +480,32 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       if (!platformOrderNo) diagnostics.push('未识别平台订单号');
       if (!orderStatus) diagnostics.push('未识别订单状态');
       if (productFacts.ambiguous) diagnostics.push('当前订单商品存在歧义');
+      if (!productFacts.ambiguous && !productName.trim()) diagnostics.push('未识别平台商品名称');
       if (productFacts.productIdConflict) diagnostics.push('当前订单商品ID存在冲突');
       if (productFacts.skuIdConflict) diagnostics.push('当前订单SKU ID存在冲突');
+      if (paymentAmountFact.status === 'ABSENT') diagnostics.push('未识别实付金额');
       if (paymentAmountFact.status === 'AMBIGUOUS') diagnostics.push('实付金额存在歧义');
       if (paymentAmountFact.status === 'INVALID') diagnostics.push('实付金额格式无效');
+      if (paymentTimeFact.status === 'ABSENT') diagnostics.push('未识别付款时间');
       if (paymentTimeFact.status === 'AMBIGUOUS') diagnostics.push('付款时间存在歧义');
       if (paymentTimeFact.status === 'INVALID') diagnostics.push('付款时间格式无效');
       if (!messages.length) diagnostics.push('未识别会话消息');
       return {
         supported: Boolean(root),
+        readyForIntake: Boolean(
+          root
+          && customerDisplayName.trim()
+          && shopDisplayName.trim()
+          && activeOrderCards.length === 1
+          && platformOrderNo.trim()
+          && orderStatus.trim()
+          && productName.trim()
+          && !productFacts.ambiguous
+          && !productFacts.productIdConflict
+          && !productFacts.skuIdConflict
+          && paymentAmountFact.status === 'FOUND'
+          && paymentTimeFact.status === 'FOUND'
+        ),
         pageUrl,
         customerDisplayName,
         shopDisplayName,

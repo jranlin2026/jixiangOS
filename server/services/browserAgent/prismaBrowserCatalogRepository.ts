@@ -107,10 +107,14 @@ export function createPrismaBrowserCatalogRepository(prisma: BrowserCatalogPrism
     },
     async withShopMappingLock(shopBindingId, callback) {
       return prisma.$transaction(async (transaction) => {
-        await transaction.$queryRaw(
-          Prisma.sql`SELECT id FROM browser_shop_bindings WHERE id = ${shopBindingId} FOR UPDATE`,
+        const lockedRows = await transaction.$queryRaw<Array<{ id: string; active: boolean | number }>>(
+          Prisma.sql`SELECT id, active FROM browser_shop_bindings WHERE id = ${shopBindingId} FOR UPDATE`,
         );
-        return callback(createMappingRepository(transaction));
+        const lockedRow = lockedRows[0];
+        return callback(
+          createMappingRepository(transaction),
+          lockedRow ? { id: String(lockedRow.id), active: Boolean(lockedRow.active) } : null,
+        );
       });
     },
   };

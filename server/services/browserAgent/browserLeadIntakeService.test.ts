@@ -111,6 +111,7 @@ const repository = {
         status: 'PENDING',
         lastError: null,
         attemptCount: existing.attemptCount + 1,
+        attemptToken: `attempt-${existing.attemptCount + 1}`,
         updatedAt: new Date(),
       });
       return { acquired: true as const, record: existing };
@@ -122,21 +123,24 @@ const repository = {
       orderRemarkStatus: 'NOT_ATTEMPTED',
       greenFlagStatus: 'NOT_ATTEMPTED',
       attemptCount: 1,
+      attemptToken: 'attempt-1',
       updatedAt: new Date(),
     };
     records.set(key, record);
     return { acquired: true as const, record };
   },
-  async markSucceeded(id: string, input: any) {
+  async markSucceeded(id: string, attemptToken: string, input: any) {
     const current = [...records.values()].find((item) => item.id === id);
+    if (current.attemptToken !== attemptToken || current.status !== 'PENDING') return current;
     Object.assign(current, input, {
       status: 'SUCCEEDED',
       completedAt: current.completedAt || new Date('2026-08-08T13:00:00.000Z'),
     });
     return current;
   },
-  async markFailed(id: string, errorMessage: string) {
+  async markFailed(id: string, attemptToken: string, errorMessage: string) {
     const current = [...records.values()].find((item) => item.id === id);
+    if (current.attemptToken !== attemptToken || current.status !== 'PENDING') return current;
     Object.assign(current, { status: 'FAILED', lastError: errorMessage });
     return current;
   },
@@ -166,9 +170,16 @@ const repository = {
   },
 };
 
+const authoritativeCatalog = createBrowserCatalogService({ repository: catalogRepository });
+let catalogResolveCalls = 0;
 const service = createBrowserLeadIntakeService({
   repository,
-  catalog: createBrowserCatalogService({ repository: catalogRepository }),
+  catalog: {
+    async resolveForIntake(input) {
+      catalogResolveCalls += 1;
+      return authoritativeCatalog.resolveForIntake(input);
+    },
+  },
   async createLead(input, currentUser) {
     createLeadCalls.push({ input, currentUser });
     return {
@@ -349,11 +360,34 @@ for (const pageShopDisplayName of [undefined, '   ']) {
     ...shopAInput,
     pageShopDisplayName,
     platformOrderNo: `DY-20260808-MISSING-SHOP-${String(pageShopDisplayName)}`,
-  }, actor);
+  } as any, actor);
   assert.equal(missingPageShop.code, 409);
   assert.equal(missingPageShop.errorCode, 'SHOP_CONTEXT_MISMATCH');
 }
 assert.equal(createLeadCalls.length, 3, '页面店铺缺失或歧义时不得预留或创建线索');
+
+for (const [label, invalidFacts, expectedMessage] of [
+  ['缺少商品名', { platformProductName: undefined }, /平台商品名称/],
+  ['空白商品名', { platformProductName: '   ' }, /平台商品名称/],
+  ['缺少实付', { paymentAmount: undefined }, /实付金额/],
+  ['无效实付', { paymentAmount: Number.NaN }, /非负数且最多两位小数/],
+  ['缺少付款时间', { paymentAt: undefined }, /付款时间/],
+  ['无效付款时间', { paymentAt: 'not-a-time' }, /付款时间/],
+] as const) {
+  const beforeResolve = catalogResolveCalls;
+  const beforeRecords = records.size;
+  const beforeCreates: number = createLeadCalls.length;
+  const invalidFactsResult = await service.intake({
+    ...shopAInput,
+    platformOrderNo: `DY-20260808-REQUIRED-${label}`,
+    ...invalidFacts,
+  } as any, actor);
+  assert.equal(invalidFactsResult.code, 400, `${label}时必须在入库边界失败关闭`);
+  assert.match(invalidFactsResult.message, expectedMessage);
+  assert.equal(catalogResolveCalls, beforeResolve, `${label}时不得调用商品解析器`);
+  assert.equal(records.size, beforeRecords, `${label}时不得预留同步记录`);
+  assert.equal(createLeadCalls.length, beforeCreates, `${label}时不得创建线索`);
+}
 
 for (const paymentAmount of [-0.01, 299.001]) {
   const invalidAmount = await service.intake({

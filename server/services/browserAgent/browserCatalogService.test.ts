@@ -31,6 +31,8 @@ let mappingLockEntries = 0;
 let activeMappingLocks = 0;
 let maxActiveMappingLocks = 0;
 let catalogWriteCalls = 0;
+let mappingReadCalls = 0;
+let nextLockedShopState: 'MISSING' | 'INACTIVE' | null = null;
 
 async function waitForConcurrentMappingScans() {
   await new Promise<void>((resolve) => {
@@ -70,6 +72,7 @@ const repository: BrowserCatalogRepository = {
     return true;
   },
   async listMappings(shopBindingId) {
+    mappingReadCalls += 1;
     if (mappingScanRaceEnabled && activeMappingLocks === 0) await waitForConcurrentMappingScans();
     return structuredClone(mappings.filter((mapping) => !shopBindingId || mapping.shopBindingId === shopBindingId));
   },
@@ -92,7 +95,7 @@ const repository: BrowserCatalogRepository = {
   async listProducts() { return structuredClone(products); },
   async findProductById(id) { return structuredClone(products.find((product) => product.id === id) || null); },
   async hasShopAuditReferences(id) { return id === 'shop-1'; },
-  async withShopMappingLock(_shopBindingId, callback) {
+  async withShopMappingLock(shopBindingId, callback) {
     mappingLockEntries += 1;
     const previous = mappingLockTail;
     let release!: () => void;
@@ -102,7 +105,12 @@ const repository: BrowserCatalogRepository = {
     maxActiveMappingLocks = Math.max(maxActiveMappingLocks, activeMappingLocks);
     await new Promise<void>((resolve) => setImmediate(resolve));
     try {
-      return await callback(repository);
+      const currentShop = shops.find((shop) => shop.id === shopBindingId) || null;
+      const lockedShop = nextLockedShopState === 'MISSING'
+        ? null
+        : currentShop && { id: currentShop.id, active: nextLockedShopState === 'INACTIVE' ? false : currentShop.active };
+      nextLockedShopState = null;
+      return await (callback as any)(repository, lockedShop);
     } finally {
       activeMappingLocks -= 1;
       release();
@@ -137,6 +145,24 @@ const inactiveProduct = await service.saveMapping({
 }, actor);
 assert.equal(inactiveProduct.code, 409);
 assert.equal(inactiveProduct.errorCode, 'OS_PRODUCT_INACTIVE');
+
+for (const [lockedState, expectedCode, expectedError] of [
+  ['MISSING', 404, 'SHOP_BINDING_NOT_FOUND'],
+  ['INACTIVE', 409, 'SHOP_BINDING_UNAVAILABLE'],
+] as const) {
+  const writesBeforeLockedValidation = catalogWriteCalls;
+  const mappingReadsBeforeLockedValidation = mappingReadCalls;
+  nextLockedShopState = lockedState;
+  const changedAfterPrecheck = await service.saveMapping({
+    shopBindingId: 'shop-1', platformProductId: `DY-${lockedState}`,
+    platformProductName: `锁内状态-${lockedState}`, aliases: [],
+    osProductId: 'prod-taojin', active: true,
+  }, actor);
+  assert.equal(changedAfterPrecheck.code, expectedCode, '店铺预检后的最新锁内状态必须决定写入结果');
+  assert.equal(changedAfterPrecheck.errorCode, expectedError);
+  assert.equal(mappingReadCalls, mappingReadsBeforeLockedValidation, '锁内店铺无效时不得扫描别名冲突');
+  assert.equal(catalogWriteCalls, writesBeforeLockedValidation, '锁内店铺无效时不得写映射');
+}
 
 const savedMapping = await service.saveMapping({
   shopBindingId: 'shop-1', platformProductId: 'DY-100',
@@ -286,34 +312,61 @@ assert.deepEqual(authoritativePreview.data, {
 
 const excessivePaymentPrecision = await service.previewProductMapping({
   platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享官方店',
-  platformProductId: 'DY-100', paymentAmount: 299.001,
+  platformProductId: 'DY-100', platformProductName: '淘金AI 多模态', paymentAmount: 299.001,
+  paymentAt: '2026-08-08T19:34:20+08:00',
 });
 assert.equal(excessivePaymentPrecision.code, 400);
 assert.equal(excessivePaymentPrecision.errorCode, 'INVALID_INPUT');
 assert.match(excessivePaymentPrecision.message, /最多两位小数/);
 
-const equalDisplayedCents = await service.previewProductMapping({
+const inexactDisplayedCents = await service.previewProductMapping({
   platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享官方店',
-  platformProductId: 'DY-100', paymentAmount: 298.99999999999994,
+  platformProductId: 'DY-100', platformProductName: '淘金AI 多模态',
+  paymentAmount: 298.99999999999994, paymentAt: '2026-08-08T19:34:20+08:00',
 });
-assert.equal(equalDisplayedCents.code, 0);
-assert.equal(equalDisplayedCents.data?.facts.paymentAmount, 299);
-assert.deepEqual(equalDisplayedCents.data?.priceDifference, {
-  paymentAmount: 299, osReferencePrice: 299, amount: 0, differs: false,
-}, '参考价与实付显示分相同时不得提示价差');
+assert.equal(inexactDisplayedCents.code, 400, '超过两位小数的浮点近似值不得静默四舍五入');
+assert.match(inexactDisplayedCents.message, /最多两位小数/);
 
 const authoritativeUnmatched = await service.previewProductMapping({
   platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
   platformProductName: '完全未配置商品', paymentAmount: 188,
+  paymentAt: '2026-08-08T19:34:20+08:00',
 });
 assert.equal(authoritativeUnmatched.code, 0);
 assert.deepEqual(authoritativeUnmatched.data?.productResolution, {
   status: 'UNMATCHED', rawProductName: '完全未配置商品',
 });
 
+const zeroPaymentPreview = await service.previewProductMapping({
+  platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
+  platformProductName: '完全未配置商品', paymentAmount: 0,
+  paymentAt: '2026-08-08T19:34:20+08:00',
+});
+assert.equal(zeroPaymentPreview.code, 0, '精确0元实付是允许的业务事实');
+assert.equal(zeroPaymentPreview.data?.facts.paymentAmount, 0);
+
+for (const [label, invalidFacts, expectedMessage] of [
+  ['缺少商品名', { platformProductName: undefined, paymentAmount: 299, paymentAt: '2026-08-08T19:34:20+08:00' }, /平台商品名称/],
+  ['空白商品名', { platformProductName: '   ', paymentAmount: 299, paymentAt: '2026-08-08T19:34:20+08:00' }, /平台商品名称/],
+  ['缺少实付', { platformProductName: '商品', paymentAmount: undefined, paymentAt: '2026-08-08T19:34:20+08:00' }, /实付金额/],
+  ['缺少付款时间', { platformProductName: '商品', paymentAmount: 299, paymentAt: undefined }, /付款时间/],
+  ['无效付款时间', { platformProductName: '商品', paymentAmount: 299, paymentAt: 'not-a-time' }, /付款时间/],
+] as const) {
+  const beforeWrites = catalogWriteCalls;
+  const invalidPreview = await service.previewProductMapping({
+    platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
+    ...invalidFacts,
+  } as any);
+  assert.equal(invalidPreview.code, 400, `${label}时权威预览必须失败关闭`);
+  assert.equal(invalidPreview.errorCode, 'INVALID_INPUT');
+  assert.match(invalidPreview.message, expectedMessage);
+  assert.equal(catalogWriteCalls, beforeWrites, `${label}时不得写目录`);
+}
+
 const previewMismatch = await service.previewProductMapping({
   platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '其他店铺',
-  platformProductName: '淘金AI 多模态',
+  platformProductName: '淘金AI 多模态', paymentAmount: 299,
+  paymentAt: '2026-08-08T19:34:20+08:00',
 });
 assert.equal(previewMismatch.code, 409);
 assert.equal(previewMismatch.errorCode, 'SHOP_CONTEXT_MISMATCH');
@@ -321,7 +374,8 @@ assert.equal(previewMismatch.errorCode, 'SHOP_CONTEXT_MISMATCH');
 for (const pageShopDisplayName of [undefined, '   ']) {
   const previewMissingShopContext = await service.previewProductMapping({
     platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName,
-    platformProductName: '淘金AI 多模态',
+    platformProductName: '淘金AI 多模态', paymentAmount: 299,
+    paymentAt: '2026-08-08T19:34:20+08:00',
   });
   assert.equal(previewMissingShopContext.code, 409);
   assert.equal(previewMissingShopContext.errorCode, 'SHOP_CONTEXT_MISMATCH');
@@ -330,14 +384,16 @@ for (const pageShopDisplayName of [undefined, '   ']) {
 
 const previewUnavailable = await service.previewProductMapping({
   platform: 'DOUYIN', shopBindingId: 'shop-off', pageShopDisplayName: '旧店铺',
-  platformProductName: '淘金AI 多模态',
+  platformProductName: '淘金AI 多模态', paymentAmount: 299,
+  paymentAt: '2026-08-08T19:34:20+08:00',
 });
 assert.equal(previewUnavailable.code, 409);
 assert.equal(previewUnavailable.errorCode, 'SHOP_BINDING_UNAVAILABLE');
 
 const previewWrongPlatformBinding = await service.previewProductMapping({
   platform: 'DOUYIN', shopBindingId: 'shop-other-platform', pageShopDisplayName: '微信店铺',
-  platformProductName: '淘金AI 多模态',
+  platformProductName: '淘金AI 多模态', paymentAmount: 299,
+  paymentAt: '2026-08-08T19:34:20+08:00',
 });
 assert.equal(previewWrongPlatformBinding.code, 409);
 assert.equal(previewWrongPlatformBinding.errorCode, 'SHOP_BINDING_UNAVAILABLE');
@@ -350,7 +406,8 @@ mappings.push({
 });
 const previewConflict = await service.previewProductMapping({
   platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
-  platformProductId: 'DY-100', platformProductName: '淘金AI 多模态',
+  platformProductId: 'DY-100', platformProductName: '淘金AI 多模态', paymentAmount: 299,
+  paymentAt: '2026-08-08T19:34:20+08:00',
 });
 assert.equal(previewConflict.code, 409);
 assert.equal(previewConflict.errorCode, 'PRODUCT_CONFIG_CONFLICT');

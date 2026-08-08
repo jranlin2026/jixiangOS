@@ -3,6 +3,7 @@ import type { ScriptLibrary } from '../domain/scriptLibrary';
 
 export type FeigePageContext = {
   supported: boolean;
+  readyForIntake: boolean;
   pageUrl: string;
   customerDisplayName: string;
   shopDisplayName?: string;
@@ -52,7 +53,19 @@ export type BrowserRuntimeSelection = BrowserRuntimeConfig & {
 
 export type AuthenticatedOperator = { id: string; name: string; role: string };
 
-export type ApiEnvelope<T> = { code: number; data: T | null; message: string; errorCode?: string };
+export type ApiEnvelope<T> = {
+  code: number;
+  data: T | null;
+  message: string;
+  errorCode?: string;
+  /** HTTP 401 has already atomically removed worker-side session auth. */
+  authOutcome?: 'SESSION_EXPIRED_LOCAL_LOGOUT';
+};
+
+export type LogoutResult = {
+  sessionExpired: boolean;
+  localLogoutCompleted: true;
+};
 
 export type BrowserLeadProductResolutionAudit = {
   status: 'MATCHED';
@@ -72,9 +85,9 @@ export type BrowserProductPreviewInput = {
   pageShopDisplayName: string;
   platformProductId?: string;
   platformSkuId?: string;
-  platformProductName?: string;
-  paymentAmount?: number;
-  paymentAt?: string;
+  platformProductName: string;
+  paymentAmount: number;
+  paymentAt: string;
 };
 
 export type BrowserProductPreviewResponse = {
@@ -83,9 +96,9 @@ export type BrowserProductPreviewResponse = {
   facts: {
     platformProductId?: string;
     platformSkuId?: string;
-    platformProductName?: string;
-    paymentAmount?: number;
-    paymentAt?: string;
+    platformProductName: string;
+    paymentAmount: number;
+    paymentAt: string;
   };
   priceDifference: {
     paymentAmount: number;
@@ -93,6 +106,40 @@ export type BrowserProductPreviewResponse = {
     amount: number;
     differs: boolean;
   } | null;
+};
+
+export function hasRequiredOrderFacts(
+  context: FeigePageContext | null | undefined,
+): context is FeigePageContext & {
+  readyForIntake: true;
+  productName: string;
+  paymentAmount: number;
+  paymentAt: string;
+} {
+  return Boolean(
+    context?.readyForIntake
+    && context.productName.trim()
+    && typeof context.paymentAmount === 'number'
+    && Number.isFinite(context.paymentAmount)
+    && context.paymentAmount >= 0
+    && context.paymentAt?.trim(),
+  );
+}
+
+export type BrowserLeadIntakeInput = {
+  platform: 'DOUYIN';
+  shopBindingId: string;
+  pageShopDisplayName: string;
+  platformOrderNo: string;
+  contactName: string;
+  contactSource: 'CHAT' | 'OFF_PLATFORM';
+  contactPhone?: string;
+  contactWechat?: string;
+  platformProductId?: string;
+  platformSkuId?: string;
+  platformProductName: string;
+  paymentAmount: number;
+  paymentAt: string;
 };
 
 export type LeadIntakeResponse = {
@@ -157,7 +204,7 @@ export type WorkerCommand =
   | { type: 'SAVE_CONFIG'; config: ExtensionConfig }
   | { type: 'GET_SCRIPT_LIBRARY' }
   | { type: 'SAVE_SCRIPT_LIBRARY'; library: ScriptLibrary }
-  | { type: 'CREATE_LEAD_INTAKE'; input: Record<string, unknown> }
+  | { type: 'CREATE_LEAD_INTAKE'; input: BrowserLeadIntakeInput }
   | {
       type: 'REPORT_PLATFORM_COMPLETION';
       syncId: string;

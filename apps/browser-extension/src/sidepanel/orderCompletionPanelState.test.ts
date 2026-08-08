@@ -11,6 +11,7 @@ import type { BrowserProductPreviewResponse, BrowserRuntimeConfig } from '../sha
 
 const oldContext = {
   supported: true,
+  readyForIntake: false,
   pageUrl: 'https://fxg.jinritemai.com/old',
   customerDisplayName: '旧客户',
   platformOrderNo: 'ORDER-OLD',
@@ -236,7 +237,11 @@ const newPreview: BrowserProductPreviewResponse = {
   ...matchedPreview,
   shop: runtimeConfig.shops[0],
   productResolution: { status: 'UNMATCHED', rawProductName: '新商品' },
-  facts: { platformProductName: '新商品' },
+  facts: {
+    platformProductName: '新商品',
+    paymentAmount: 0,
+    paymentAt: '2026-08-08T11:34:20.000Z',
+  },
   priceDifference: null,
 };
 const beforeLatePreview = structuredClone(previewRaceState);

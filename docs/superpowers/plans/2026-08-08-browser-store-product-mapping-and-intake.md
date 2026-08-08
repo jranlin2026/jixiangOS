@@ -10,14 +10,14 @@
 
 ## Execution record (2026-08-09)
 
-- Tasks 1-9 were implemented and reviewed on branch `codex/ai-browser-employee-mvp` through `c927004`, but the final whole-branch review parked two Task 9 logout defects. Task 9 is not release-ready until those code defects are fixed and re-reviewed. Original step checkboxes remain as authored rather than being retroactively asserted by Task 10.
+- Tasks 1-9 were implemented and reviewed on branch `codex/ai-browser-employee-mvp` through `c927004`. The later final-fix wave closed the two previously parked Task 9 logout defects: only `code === 0` plus completed local cleanup is logout success, and any HTTP 401 is a terminal local logout shared by worker and UI. Original step checkboxes remain as authored rather than being retroactively asserted by Task 10.
 - Task 10 documentation was reconciled against the final implementation, including the deliberate minimum immutable contact snapshot, controlled source/shop derivation, read-only product preview, retry/cancellation/logout behavior, and the actual single-dialog remark plus green-flag save sequence.
-- All Task 10 automated commands passed: Prisma validate/generate, six focused backend tests, extension test/typecheck/build, root build, and `git diff --check`. The built MV3 manifest was also inspected at `apps/browser-extension/dist/manifest.json`.
-- Local database preflight exposed only `mysql / 127.0.0.1 / 3306 / jixiang_os` (no credentials). `npm run db:deploy` applied `20260808090000_browser_store_product_mapping` and `20260809010000_browser_sync_contact_snapshot`; `npx prisma migrate status` then reported all 30 migrations up to date.
-- No service was listening on `127.0.0.1:3001`, so no administrator mapping was created through the UI/API. No real Feige order was opened or written. Administrator configuration and authorized paid-order acceptance remain manual release gates; this record does not claim real Feige write acceptance.
-- Parked Task 9 blocker A: side-panel logout treats only `result.code >= 400` as failure, so a nonzero application code below 400 is incorrectly accepted as success; success must require `code === 0`.
-- Parked Task 9 blocker B: an HTTP 401 clears worker session auth before the logout response reaches the UI, while the UI failure branch can restore its local authenticated display. Failed logout therefore does not guarantee a coherent preserved session. Both logout defects require a whole-branch code fix and re-review before release.
-- Task 10 documentation fix round 1 recorded both blockers, corrected green-state uncertainty and legacy snapshot semantics, and repaired Task 7/Task 10 file history. Documentation consistency greps and `git diff --check` passed; no build, database, admin mapping, or Feige write command was rerun.
+- The final-fix wave also made platform product name, exact non-negative paid amount and valid payment time mandatory; every completion click rereads the current order and repeats authoritative preview. Changed facts/resolution stop before writes, refresh the displayed snapshot, clear contact confirmation and require a second confirmation/click.
+- `BrowserLeadSync.attemptToken` now owns each PENDING attempt. New and reclaimed attempts rotate the token; success/failure writes are conditional on `id + PENDING + token`, so stale owners cannot overwrite a new PENDING or regress SUCCEEDED.
+- Mapping writes now lock the selected shop row with `FOR UPDATE` inside the same transaction and recheck the locked row's latest existence/active state before writing. Service and Prisma-adapter tests cover the contract; a live two-session MySQL lock integration is deferred and non-blocking.
+- The original Task 10 commands passed before the final-fix wave. Final-fix verification adds the lock-adapter, lease-ownership, mandatory-fact, latest-preview, logout/401 and cancellation regressions listed in Task 10 Step 2; no root database test or live/destructive database integration was run.
+- Final-fix database preflight exposed only `mysql / 127.0.0.1 / 3306 / jixiang_os` (no credentials). After Prisma format/validate/generate passed, the authorized `npm run db:deploy` applied `20260809020000_browser_sync_attempt_token`; all 31 local migrations are applied. No root database integration suite was run.
+- No administrator mapping was created through the UI/API and no real Feige order was opened or written. The only remaining manual release gates are administrator mapping-UI acceptance and authorized real Feige mapped/unmapped paid-order acceptance; this record does not claim either passed.
 
 ## Global Constraints
 
@@ -29,12 +29,16 @@
 - 线索来源固定显示为 `抖音电商 / 飞鸽客服`，资源归属固定为 `公司资源`；店铺绑定可停用，来源配置由系统集成自动维护并向管理员可见。
 - 商品匹配优先使用平台商品 ID/SKU，其次使用当前店铺下的已确认名称别名，再次使用唯一的OS产品完全同名；禁止按价格单独匹配，禁止模糊匹配后静默选择。
 - 平台实付金额和付款时间必须来自当前飞鸽订单卡；OS产品价格只用于参考和差异提示，绝不能覆盖平台实付金额。
+- 平台商品名称、非负且最多两位小数的实付金额、有效付款时间是预览和入库必填事实；不完整或不唯一时失败关闭。
+- 每次完成点击必须重读页面并用最新事实重新权威预览；事实、匹配或价差变化时刷新快照、清除确认，必须二次核对确认后再点击。
 - 商品未匹配时仍允许录入线索，但不写 `sourceProductId/sourceProductName`，并在OS线索备注中保存 `平台商品待匹配：<原始平台商品名>`。
 - 商品匹配成功时写入OS标准产品 ID 与名称，同时在同步审计记录中保留平台商品原名、平台商品 ID/SKU、匹配方式和原始实付事实。
 - 订单备注固定为两行，原备注必须原样保留：第一行包含昵称、现有联系方式和销售对接人；第二行包含权威OS入库时间。格式见 Task 7。
 - 销售由现有极享OS线索流转规则同步分配；有负责人写员工姓名，无负责人写 `暂未分配`。
 - 自动设置的唯一旗帜是绿色；其他旗帜继续由人工处理。
 - 页面、店铺、订单或商品配置出现歧义时必须安全停止并显示明确可操作提示，不得猜测点击。
+- 退出成功只接受`code === 0`且本地清理完成；任意 HTTP 401 都是 worker/UI 一致的终态本地退出。
+- 商品映射写入必须在同一事务内锁定店铺行并重新校验存在/active；线索同步终态回写必须持有当前`attemptToken`租约。
 - 所有行为变化遵循 RED-GREEN-REFACTOR；每个任务通过聚焦测试后再运行相关全量测试并独立提交。
 
 ---
@@ -46,14 +50,17 @@
 - `prisma/schema.prisma`: 新增店铺绑定、平台商品映射、同步审计字段，以及首次成功联系人快照字段。
 - `prisma/migrations/20260808090000_browser_store_product_mapping/migration.sql`: 创建新表并扩展 `browser_lead_syncs`。
 - `prisma/migrations/20260809010000_browser_sync_contact_snapshot/migration.sql`: 为旧库增加可空的`contactNickname/contactPhone/contactWechat`兼容字段。
+- `prisma/migrations/20260809020000_browser_sync_attempt_token/migration.sql`: 以可滚动部署的 nullable 字段和存量 UUID 回填增加单次执行租约；已部署至授权的本地`127.0.0.1/jixiang_os`。
 - `server/services/browserAgent/browserCatalogTypes.ts`: 店铺、映射、解析结果和错误码的单一类型定义。
 - `server/services/browserAgent/browserProductMatcher.ts`: 无数据库依赖的确定性商品匹配规则。
-- `server/services/browserAgent/browserCatalogService.ts`: 店铺/映射管理、产品目录读取和运行时配置。
-- `server/services/browserAgent/prismaBrowserCatalogRepository.ts`: Prisma 持久化和OS标准产品读取。
+- `server/services/browserAgent/browserCatalogService.ts`: 店铺/映射管理、产品目录读取和运行时配置；在锁内用最新店铺状态失败关闭。
+- `server/services/browserAgent/prismaBrowserCatalogRepository.ts`: Prisma 持久化和OS标准产品读取；映射写入提供同事务店铺行`FOR UPDATE`。
+- `server/services/browserAgent/prismaBrowserCatalogRepository.test.ts`: 校验锁 SQL 和锁内存在/active快照传递。
 - `server/services/browserAgent/browserOrderRemark.ts`: 根据联系方式、销售和权威时间生成两行订单备注。
 - `server/services/browserAgent/browserLeadIntakeService.ts`: 绑定解析、商品匹配、来源派生、原始订单事实入库和清晰冲突提示。
-- `server/services/browserAgent/prismaBrowserLeadSyncRepository.ts`: 保存新审计字段；原子固化新记录的首次成功联系人/销售/时间；对旧成功空快照做一次条件回填并重读；区分有效、回收站和不存在的线索。
+- `server/services/browserAgent/prismaBrowserLeadSyncRepository.ts`: 保存审计字段；原子固化首次成功快照；对旧成功空快照做条件回填并重读；区分有效/回收站/不存在线索；用`attemptToken`防止失效执行者回写。
 - `server/services/browserAgent/prismaBrowserLeadSyncRepository.test.ts`: 验证首次成功快照不可变、旧行并发回填收敛、缺失/异常数据失败关闭及同步状态单调性。
+- `server/services/browserAgent/prismaBrowserLeadSyncRepository.lease.test.ts`: 验证旧租约在新租约抢占后不得覆盖新`PENDING/SUCCEEDED`，当前 token 可正常成功/失败。
 - `server/routes/browserAgentRoutes.ts`: 运行时目录和管理员店铺/映射接口。
 - `server/index.ts`: 注入目录服务以及产品设置读写权限。
 
@@ -77,6 +84,7 @@
 - `apps/browser-extension/src/sidepanel/orderCompletionWorkflow.ts`: 把后端返回的备注行传给页面完成动作。
 - `apps/browser-extension/src/sidepanel/orderCompletionWorkflow.test.ts`: 店铺、匹配、入库、备注和绿旗顺序测试。
 - `apps/browser-extension/src/sidepanel/main.tsx`: 绑定店铺选择、商品匹配预览、实付事实和可操作错误展示。
+- `apps/browser-extension/src/sidepanel/mainAttemptCancellation.test.tsx`: 覆盖必填事实、变化后二次确认、取消所有权、`code === 0`退出和401本地登出。
 - `apps/browser-extension/src/sidepanel/orderCompletionPanelState.ts`: 保存当前店铺与商品解析状态，切换会话时清空旧状态。
 
 ### Documentation
@@ -448,7 +456,7 @@ Expected: FAIL，新字段不存在。
 
 金额解析只接受 `实付金额` 标签附近唯一的人民币数值；付款时间只接受 `付款时间` 标签附近唯一的 `YYYY/MM/DD HH:mm:ss`，并显式补上 `+08:00`。商品 ID/SKU 优先读取当前商品节点及祖先的 `data-product-id/data-item-id/data-sku-id`；没有稳定属性时保持为空，依靠店铺名称别名映射。
 
-店铺显示名可以从明确的店铺区域读取，但不得把当前客服员工姓名、客户昵称或商品品牌误当店铺。页面无法证明店铺时返回空字符串，由插件显示“页面未识别店铺，按已绑定店铺处理”的人工确认提示。
+店铺显示名可以从明确的店铺区域读取，但不得把当前客服员工姓名、客户昵称或商品品牌误当店铺。页面无法唯一证明店铺时返回空字符串，插件失败关闭并要求刷新识别，不得按已绑定店铺猜测继续。
 
 - [ ] **Step 4: 运行适配器测试和扩展类型检查**
 
@@ -737,7 +745,7 @@ git commit -m "fix(browser-agent): explain recycled intake conflicts"
 
 ### Task 9: 在插件中完成店铺选择、匹配预览和统一反馈
 
-> **2026-08-09 release status:** 功能已实现，但最终全分支审查发现两个尚未修复的退出状态机缺陷：UI以`code < 400`误判成功，以及HTTP 401可能先清空worker认证、随后UI恢复“已登录”显示。Task 9在修复和复审前不得标记为发布就绪。
+> **2026-08-09 final-fix status:** 先前的两个退出状态机 blocker 已修复并由分支测试覆盖：退出成功仅接受`code === 0`且本地清理完成；任意 HTTP 401 都会让 worker/UI 收敛到终态本地退出。这两项不再是开放发布 blocker。
 
 **Files:**
 - Modify: `apps/browser-extension/src/shared/contracts.ts`
@@ -755,7 +763,7 @@ git commit -m "fix(browser-agent): explain recycled intake conflicts"
 
 - [ ] **Step 1: 写失败的状态与消息测试**
 
-覆盖：切换会话清空旧商品解析；切换绑定店铺清空旧入库结果；多个店铺时未选择不能入库；页面店铺不一致时不能入库；未匹配商品允许继续但展示警告；OS参考价与实付金额不同只提示不阻止；后端备注行原样传给 `completePage()`。
+覆盖：切换会话清空旧商品解析；切换绑定店铺清空旧入库结果；多个店铺时未选择不能入库；页面店铺不一致时不能入库；商品名/实付/付款时间不完整时不预览也不入库；完成点击重读并重预览，事实/匹配变化时停止并要求二次确认；未匹配商品允许继续但展示警告；OS参考价与实付金额不同只提示不阻止；后端备注行原样传给 `completePage()`；退出只接受`code === 0`，401收敛为本地登出。
 
 - [ ] **Step 2: 运行扩展测试确认失败**
 
@@ -784,6 +792,8 @@ Expected: 新测试 FAIL。
 ```
 
 未匹配显示 `匹配产品：待匹配（本次仍可录入，平台原名会写入OS备注）`。价格不同显示 `OS参考价 ¥299.00，仅供参考；本次按飞鸽实付 ¥399.00 录入`。
+
+平台商品名称、非负且最多两位小数的实付、有效付款时间是必填事实。点击完成时再次读页面和请求权威预览；最新快照不同则替换界面预览、取消原联系方式确认，客服必须二次核对并再点击。
 
 - [ ] **Step 5: 统一弹窗反馈**
 
@@ -839,9 +849,11 @@ npx prisma validate
 npm run db:generate
 npm exec -- tsx server/services/browserAgent/browserProductMatcher.test.ts
 npm exec -- tsx server/services/browserAgent/browserCatalogService.test.ts
+npm exec -- tsx server/services/browserAgent/prismaBrowserCatalogRepository.test.ts
 npm exec -- tsx server/services/browserAgent/browserOrderRemark.test.ts
 npm exec -- tsx server/services/browserAgent/browserLeadIntakeService.test.ts
 npm exec -- tsx server/services/browserAgent/prismaBrowserLeadSyncRepository.test.ts
+npm exec -- tsx server/services/browserAgent/prismaBrowserLeadSyncRepository.lease.test.ts
 npm exec -- tsx server/routes/browserAgentRoutes.test.ts
 npm run browser-employee:test
 npm run browser-employee:typecheck
@@ -854,7 +866,7 @@ Expected: 全部 exit 0；不得为通过测试跳过失败用例或放宽安全
 
 - [ ] **Step 3: 本地迁移与管理员配置验收**
 
-2026-08-09：本地迁移已安全完成且状态为最新；因本地 API 未启动，管理员配置验收未执行，因此本步骤保持未完成。
+2026-08-09：脱敏预检确认目标为授权的本地`127.0.0.1/jixiang_os`后，`npm run db:deploy`已成功应用`20260809020000_browser_sync_attempt_token`。管理员配置 UI 验收仍未执行，因此本步骤保持未完成。
 
 在本地数据库执行 `npm run db:deploy`，随后在极享OS“系统设置 → 产品设置 → 平台商品映射”创建：
 
@@ -878,7 +890,7 @@ OS产品：淘金AI
 2. 确认店铺、订单号、平台商品、实付金额和付款时间与飞鸽一致。
 3. 确认插件显示映射到 `淘金AI`，价格差异只提示。
 4. 填写或识别客户联系方式并勾选确认。
-5. 点击一键处理，确认OS线索的来源、店铺、订单号、标准产品、实付金额、付款时间和销售正确。
+5. 点击一键处理，确认点击时完成最新页面重读和权威重预览；可在授权测试中先制造一次事实/映射变化，确认首次停止、刷新快照并要求二次确认。随后确认OS线索的来源、店铺、订单号、标准产品、实付金额、付款时间和销售正确。
 6. 确认飞鸽原备注保留，并追加：
 
 ```text
@@ -904,15 +916,11 @@ git commit -m "docs(browser-agent): document mapped intake workflow"
 
 ## Release Gate
 
-只有同时满足以下条件，才可以把该版本交给客服继续试运行：
+自动安全约束已覆盖必填订单事实、点击时重预览/变化后二次确认、店铺行锁、`attemptToken`租约、幂等/回收站/冲突、页面未知状态、`code === 0`退出和401终态本地登出；新迁移已部署至授权本地库。数据库部署不冒充人工业务验收。
 
-- 店铺绑定必须由管理员配置，插件不再使用自由文本店铺标识创建线索。
-- 两个不同店铺的不同平台名称可以映射到同一个OS产品。
-- 相同价格但没有名称/ID映射的商品不会被错误匹配。
-- 飞鸽实付金额和付款时间与OS线索字段逐字/数值一致。
-- 未匹配商品不会阻止录入，也不会伪造OS产品。
-- 销售姓名来自OS实际分配结果；没有分配时备注明确写 `暂未分配`。
-- 重复订单、回收站线索和联系方式冲突都有不同且可操作的提示。
-- OS入库失败时不修改飞鸽；发生在绿旗选择前的页面失败不点击绿旗；绿旗已选后若保存/验证失败则页面状态未知，必须人工核对且系统不得报告成功；会话切换时立即停止后续动作。
-- 客服仍必须确认联系方式，插件仍不会自动发送消息。
-- 退出成功只接受`code === 0`；HTTP 401及所有失败路径必须让UI与worker认证状态一致。两个已知Task 9退出缺陷修复并重新评审前不得发布。
+只保留以下两项手工发布门禁，当前都未宣称通过：
+
+1. 在可安全写入的OS环境通过管理员映射 UI 完成店铺绑定和平台商品映射验收，包括停用、别名冲突、跨店复用和历史审计保留。
+2. 使用明确获授权的真实飞鸽已付款/已发货订单，分别完成 mapped 和 unmapped 全链路验收，包括最新点击重预览/二次确认、OS线索/销售、原备注保留、标准两行、绿旗、重复点击幂等和真实页面成功信号。
+
+真实 MySQL 双会话 live lock integration 可在后续受控数据库验证中补充，当前不作为第三项手工发布阻断。

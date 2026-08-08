@@ -52,6 +52,14 @@ export type CompletionPanelAction =
       context: FeigePageContext;
       detectedContact: RecognizedContact;
     }
+  | {
+      type: 'APPLY_RECONFIRMATION_SNAPSHOT';
+      attemptId: number;
+      conversationKey: string;
+      context: FeigePageContext;
+      detectedContact: RecognizedContact;
+      preview: BrowserProductPreviewResponse;
+    }
   | { type: 'START_ATTEMPT'; attemptId: number; conversationKey: string }
   | { type: 'SET_FORM_FIELD'; field: 'phone' | 'wechat' | 'source'; value: string }
   | { type: 'SET_CONTACT_CONFIRMED'; value: boolean }
@@ -124,6 +132,7 @@ function productPreviewContextKey(context: FeigePageContext | null) {
   return JSON.stringify([
     context.platformOrderNo.trim(),
     context.customerDisplayName.trim(),
+    context.readyForIntake,
     context.shopDisplayName?.trim() || '',
     context.platformProductId?.trim() || '',
     context.platformSkuId?.trim() || '',
@@ -224,6 +233,33 @@ export function completionPanelReducer(
       context: action.context,
       detectedContact: action.detectedContact,
     });
+  }
+  if (action.type === 'APPLY_RECONFIRMATION_SNAPSHOT') {
+    if (!state.context
+      || state.activeAttempt?.id !== action.attemptId
+      || state.activeAttempt.conversationKey !== action.conversationKey
+      || conversationKey(state.context) !== action.conversationKey
+      || conversationKey(action.context) !== action.conversationKey) return state;
+    return {
+      ...state,
+      productPreview: action.preview,
+      productPreviewStatus: 'READY',
+      productPreviewMessage: '',
+      activeProductPreview: null,
+      context: action.context,
+      form: {
+        ...state.form,
+        name: action.context.customerDisplayName,
+        phone: action.detectedContact?.phone || state.form.phone,
+        wechat: action.detectedContact?.wechat || state.form.wechat,
+        source: action.detectedContact ? 'CHAT' : state.form.source,
+      },
+      contactConfirmed: false,
+      sync: null,
+      completion: null,
+      remarkText: '',
+      activeAttempt: null,
+    };
   }
   if (action.type === 'RECOGNIZE_CONTEXT') {
     const conversationChanged = state.context?.platformOrderNo !== action.context.platformOrderNo

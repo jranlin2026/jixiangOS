@@ -2,7 +2,12 @@ import { failure, success, type ApiResponse } from '../../api/response';
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import type { Lead } from '../../../src/types/lead';
 import { normalizePhoneForComparison } from '../../../src/shared/utils/phoneNumber';
-import { browserPaymentAmountInCents, type BrowserCatalogErrorCode, type BrowserCatalogService } from './browserCatalogService';
+import {
+  browserPaymentAmountInCents,
+  browserPaymentAtDate,
+  type BrowserCatalogErrorCode,
+  type BrowserCatalogService,
+} from './browserCatalogService';
 import { buildBrowserOrderRemark } from './browserOrderRemark';
 
 export type ExistingLeadState = 'ACTIVE' | 'RECYCLED' | 'MISSING';
@@ -10,7 +15,7 @@ export type ExistingLeadState = 'ACTIVE' | 'RECYCLED' | 'MISSING';
 export type BrowserLeadIntakeInput = {
   platform: 'DOUYIN';
   shopBindingId: string;
-  pageShopDisplayName?: string;
+  pageShopDisplayName: string;
   platformOrderNo: string;
   contactName: string;
   contactSource: 'CHAT' | 'OFF_PLATFORM';
@@ -18,9 +23,9 @@ export type BrowserLeadIntakeInput = {
   contactWechat?: string;
   platformProductId?: string;
   platformSkuId?: string;
-  platformProductName?: string;
-  paymentAmount?: number;
-  paymentAt?: string;
+  platformProductName: string;
+  paymentAmount: number;
+  paymentAt: string;
 };
 
 export type BrowserLeadSyncRecord = {
@@ -45,6 +50,7 @@ export type BrowserLeadSyncRecord = {
   orderRemarkStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
   greenFlagStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
   attemptCount: number;
+  attemptToken: string | null;
   completedAt?: Date | null;
   updatedAt?: Date;
   leadId?: string | null;
@@ -85,7 +91,7 @@ type BrowserLeadSyncRepository = {
     record: BrowserLeadSyncRecord;
     existingLeadState?: ExistingLeadState;
   }>;
-  markSucceeded(id: string, input: {
+  markSucceeded(id: string, attemptToken: string, input: {
     leadId: string;
     leadName: string;
     assignedTo?: string | null;
@@ -93,7 +99,7 @@ type BrowserLeadSyncRepository = {
     intakeStatus?: string | null;
     storedContact: StoredLeadContactSnapshot;
   }): Promise<BrowserLeadSyncRecord>;
-  markFailed(id: string, errorMessage: string): Promise<BrowserLeadSyncRecord>;
+  markFailed(id: string, attemptToken: string, errorMessage: string): Promise<BrowserLeadSyncRecord>;
   reportOrderRemark(
     id: string,
     operator: { id: string; name: string },
@@ -250,6 +256,18 @@ function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadInt
   });
 }
 
+function resultAfterLeaseLoss(record: BrowserLeadSyncRecord) {
+  if (record.status === 'SUCCEEDED' && record.leadId) {
+    return resultFromRecord(record, 'ALREADY_CREATED');
+  }
+  return failure<BrowserLeadIntakeResult>(
+    record.status === 'PENDING'
+      ? '该订单已由新的入库任务接管，请勿重复操作'
+      : '本次入库任务已失去执行权，请稍后重试',
+    409,
+  );
+}
+
 function productResolutionFromRecord(record: BrowserLeadSyncRecord): BrowserLeadProductResolutionAudit {
   if (record.matchedProductId || record.matchedProductName) {
     return {
@@ -287,15 +305,23 @@ export function createBrowserLeadIntakeService(deps: {
       if (!String(input.contactPhone || '').trim() && !String(input.contactWechat || '').trim()) {
         return failure<BrowserLeadIntakeResult>('手机号或微信至少填写一项', 400);
       }
-      const paymentCents = input.paymentAmount === undefined
-        ? undefined
-        : browserPaymentAmountInCents(input.paymentAmount);
+      const platformProductName = String(input.platformProductName || '').trim();
+      if (!platformProductName) {
+        return failure<BrowserLeadIntakeResult>('平台商品名称不能为空，请刷新飞鸽订单后重试', 400);
+      }
+      if (input.paymentAmount === undefined || input.paymentAmount === null) {
+        return failure<BrowserLeadIntakeResult>('实付金额不能为空，请刷新飞鸽订单后重试', 400);
+      }
+      const paymentCents = browserPaymentAmountInCents(input.paymentAmount);
       if (paymentCents === null) {
         return failure<BrowserLeadIntakeResult>('实付金额必须为非负数且最多两位小数', 400);
       }
-      const paymentAt = String(input.paymentAt || '').trim() || undefined;
-      const paymentAtDate = paymentAt ? new Date(paymentAt) : undefined;
-      if (paymentAtDate && Number.isNaN(paymentAtDate.getTime())) {
+      const paymentAt = String(input.paymentAt || '').trim();
+      if (!paymentAt) {
+        return failure<BrowserLeadIntakeResult>('付款时间不能为空，请刷新飞鸽订单后重试', 400);
+      }
+      const paymentAtDate = browserPaymentAtDate(paymentAt);
+      if (!paymentAtDate) {
         return failure<BrowserLeadIntakeResult>('付款时间格式不正确', 400);
       }
       const normalized = {
@@ -308,8 +334,8 @@ export function createBrowserLeadIntakeService(deps: {
         contactWechat: input.contactWechat?.trim() || undefined,
         platformProductId: input.platformProductId?.trim() || undefined,
         platformSkuId: input.platformSkuId?.trim() || undefined,
-        platformProductName: input.platformProductName?.trim() || undefined,
-        paymentAmount: paymentCents === undefined ? undefined : paymentCents / 100,
+        platformProductName,
+        paymentAmount: paymentCents / 100,
         paymentAt,
       };
       const catalogResolution = await deps.catalog.resolveForIntake({
@@ -346,8 +372,8 @@ export function createBrowserLeadIntakeService(deps: {
           matchedProductName: resolution.osProductName,
           productMatchMethod: resolution.method,
         } : {}),
-        ...(normalized.paymentAmount !== undefined ? { sourcePaymentAmount: normalized.paymentAmount } : {}),
-        ...(paymentAtDate ? { sourcePaymentAt: paymentAtDate } : {}),
+        sourcePaymentAmount: normalized.paymentAmount,
+        sourcePaymentAt: paymentAtDate,
         operatorId: actor.id,
         operatorName: actor.name,
         contactSource: input.contactSource,
@@ -384,6 +410,10 @@ export function createBrowserLeadIntakeService(deps: {
       }
 
       const reserved = reservation.record;
+      const attemptToken = reserved.attemptToken;
+      if (!attemptToken) {
+        return failure<BrowserLeadIntakeResult>('入库任务租约缺失，请稍后重试', 500);
+      }
       const reservedProduct = productResolutionFromRecord(reserved);
       const reservedPaymentAmount = paymentAmountFromRecord(reserved);
       const reservedPaymentAt = reserved.sourcePaymentAt?.toISOString();
@@ -422,15 +452,21 @@ export function createBrowserLeadIntakeService(deps: {
         created = await deps.createLead(leadInput, actor);
       } catch (error) {
         const message = error instanceof Error ? error.message : '线索入库异常';
-        await deps.repository.markFailed(reservation.record.id, message);
+        const failedRecord = await deps.repository.markFailed(reservation.record.id, attemptToken, message);
+        if (failedRecord.status !== 'FAILED' || failedRecord.attemptToken !== attemptToken) {
+          return resultAfterLeaseLoss(failedRecord);
+        }
         return failure<BrowserLeadIntakeResult>(message, 500);
       }
       if (created.code !== 0 || !created.data) {
         const message = created.message || '线索入库失败';
-        await deps.repository.markFailed(reservation.record.id, message);
+        const failedRecord = await deps.repository.markFailed(reservation.record.id, attemptToken, message);
+        if (failedRecord.status !== 'FAILED' || failedRecord.attemptToken !== attemptToken) {
+          return resultAfterLeaseLoss(failedRecord);
+        }
         return failure<BrowserLeadIntakeResult>(message, created.code || 400);
       }
-      const completed = await deps.repository.markSucceeded(reservation.record.id, {
+      const completed = await deps.repository.markSucceeded(reservation.record.id, attemptToken, {
         leadId: created.data.id,
         leadName: created.data.name,
         assignedTo: created.data.assignedTo,
@@ -438,6 +474,9 @@ export function createBrowserLeadIntakeService(deps: {
         intakeStatus: created.data.intakeStatus,
         storedContact: normalizedContactSnapshot(created.data),
       });
+      if (completed.status !== 'SUCCEEDED' || completed.attemptToken !== attemptToken) {
+        return resultAfterLeaseLoss(completed);
+      }
       return resultFromRecord(completed, 'CREATED');
     },
 
