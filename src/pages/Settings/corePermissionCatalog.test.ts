@@ -63,6 +63,7 @@ assert.deepEqual(CORE_DATA_SCOPE_DOMAINS, [
   'deliveries',
   'recoveryOrders',
   'recoveryOrderApplications',
+  'academy',
 ]);
 
 console.log('core permission catalog tests passed');

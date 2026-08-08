@@ -93,6 +93,10 @@ import { createKnowledgeFileStore } from './services/enablement/knowledgeFileSto
 import { createPrismaKnowledgeRepository } from './services/enablement/prismaKnowledgeRepository';
 import { createKeywordKnowledgeSearchProvider } from './services/enablement/knowledgeSearchProvider';
 import { createEnablementKnowledgeRouter } from './routes/enablementKnowledgeRoutes';
+import { createAcademyRouter } from './routes/academyRoutes';
+import { createAcademyService } from './services/academy/academyService';
+import { createPrismaAcademyRepository } from './services/academy/prismaAcademyRepository';
+import { buildDataVisibilityScopeForUser } from '../src/shared/utils/dataVisibility';
 import { createEnterpriseBrainRouter } from './routes/enterpriseBrainRoutes';
 import { createPositionStandardService } from './services/enterpriseBrain/positionStandardService';
 import { createPrismaPositionStandardRepository } from './services/enterpriseBrain/prismaPositionStandardRepository';
@@ -285,6 +289,19 @@ const knowledgeService = createKnowledgeService({
   fileStore: knowledgeFileStore,
   searchProvider: createKeywordKnowledgeSearchProvider(),
 });
+const academyService = createAcademyService(createPrismaAcademyRepository(prisma as any), {
+  resolveScope: async (actor) => {
+    const [users, roles, departments] = await Promise.all([
+      prisma.user.findMany(),
+      prisma.role.findMany({ where: { isActive: true } }),
+      prisma.department.findMany(),
+    ]);
+    const scope = buildDataVisibilityScopeForUser(
+      actor, users.map(mapPrismaUser), roles.map(mapPrismaRole), departments as any, 'academy',
+    );
+    return { unrestricted: scope.unrestricted, visibleUserIds: scope.visibleUserIds };
+  },
+});
 const positionStandardService = createPositionStandardService({
   repository: createPrismaPositionStandardRepository(prisma as any),
 });
@@ -404,6 +421,11 @@ const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KE
 const requireEnablementRead = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE);
 const requireEnablementReview = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_REVIEW, 'write');
 const requireEnablementPublish = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_PUBLISH, 'write');
+const requireAcademyRead = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_VIEW);
+const requireAcademyCourseWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, 'write');
+const requireAcademySessionWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, 'write');
+const requireAcademyEngagementWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE, 'write');
+const requireAcademyReviewWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE, 'write');
 const assignableUsersPermissions = [
   PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT,
   PERMISSION_KEYS.DELIVERY_MOVE_CARD,
@@ -487,6 +509,14 @@ app.use('/api/enablement/knowledge', createEnablementKnowledgeRouter({
   requireRead: requireEnablementRead,
   requireReview: requireEnablementReview,
   requirePublish: requireEnablementPublish,
+}));
+app.use('/api/academy', createAcademyRouter({
+  service: academyService,
+  requireRead: requireAcademyRead,
+  requireCourseWrite: requireAcademyCourseWrite,
+  requireSessionWrite: requireAcademySessionWrite,
+  requireEngagementWrite: requireAcademyEngagementWrite,
+  requireReviewWrite: requireAcademyReviewWrite,
 }));
 app.use('/api/enterprise-brain', createEnterpriseBrainRouter({
   requireAuth: requireStorageAccess,

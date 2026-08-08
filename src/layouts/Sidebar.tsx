@@ -177,6 +177,20 @@ const navItems: NavItem[] = [
   },
   { label: 'AI岗位助手', icon: <SmartToyIcon />, path: ROUTES.AI_ASSISTANT, permissionKey: PERMISSION_KEYS.AI_ASSISTANT, permissionKeys: [PERMISSION_KEYS.AI_ASSISTANT, PERMISSION_KEYS.AI_POSITION_ASSISTANT] },
   {
+    label: '极享商学院',
+    icon: <SchoolIcon />,
+    path: ROUTES.ACADEMY,
+    permissionKey: PERMISSION_KEYS.ACADEMY,
+    permissionKeys: [
+      PERMISSION_KEYS.ACADEMY_VIEW,
+      PERMISSION_KEYS.ACADEMY_PLAN_MANAGE,
+      PERMISSION_KEYS.ACADEMY_COURSE_MANAGE,
+      PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
+      PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE,
+      PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE,
+    ],
+  },
+  {
     label: '企业标准中心',
     icon: <SchoolIcon />,
     path: ROUTES.ENABLEMENT,

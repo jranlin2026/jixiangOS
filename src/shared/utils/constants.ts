@@ -19,6 +19,7 @@ export const ROUTES = {
   ASSETS: '/assets',
   GEO: '/geo',
   AI_ASSISTANT: '/ai-assistant',
+  ACADEMY: '/academy',
   ENABLEMENT: '/enablement',
   TASKS: '/tasks',
   CO_CREATION: '/co-creation',

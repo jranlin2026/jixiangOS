@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DialogProps } from '@mui/material';
 import useAppFeedback from './useAppFeedback';
-import { resolveProtectedFormClose } from '../utils/protectedFormClose';
+import { resolveProtectedFormClose, shouldMarkProtectedFormButtonClick } from '../utils/protectedFormClose';
 
 interface UseProtectedFormCloseOptions {
   open: boolean;
   submitting?: boolean;
   resetKey?: string;
+  markButtonClicksDirty?: boolean;
   onClose: () => void;
 }
 
@@ -14,6 +15,7 @@ export function useProtectedFormClose({
   open,
   submitting = false,
   resetKey = '',
+  markButtonClicksDirty = true,
   onClose,
 }: UseProtectedFormCloseOptions) {
   const [dirty, setDirty] = useState(false);
@@ -51,9 +53,12 @@ export function useProtectedFormClose({
     onDropCapture: markDirty,
     onClickCapture: (event: React.MouseEvent<HTMLElement>) => {
       const button = (event.target as Element | null)?.closest('button');
-      if (button && button.getAttribute('aria-expanded') === null) markDirty();
+      if (shouldMarkProtectedFormButtonClick({
+        markButtonClicksDirty,
+        isButton: Boolean(button && button.getAttribute('aria-expanded') === null),
+      })) markDirty();
     },
-  }), [markDirty]);
+  }), [markButtonClicksDirty, markDirty]);
 
   return {
     dirty,

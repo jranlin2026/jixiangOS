@@ -14,6 +14,7 @@ interface ProtectedFormDialogProps extends Omit<DialogProps, 'children' | 'onClo
   onClose: () => void;
   submitting?: boolean;
   resetKey?: string;
+  markButtonClicksDirty?: boolean;
 }
 
 /**
@@ -26,6 +27,7 @@ const ProtectedFormDialog: React.FC<ProtectedFormDialogProps> = ({
   open,
   submitting = false,
   resetKey = '',
+  markButtonClicksDirty = true,
   ...dialogProps
 }) => {
   const {
@@ -35,7 +37,7 @@ const ProtectedFormDialog: React.FC<ProtectedFormDialogProps> = ({
     handleDialogClose,
     interactionProps,
     dialog,
-  } = useProtectedFormClose({ open, submitting, resetKey, onClose });
+  } = useProtectedFormClose({ open, submitting, resetKey, markButtonClicksDirty, onClose });
 
   const content = typeof children === 'function'
     ? children({ dirty, markDirty, requestClose })

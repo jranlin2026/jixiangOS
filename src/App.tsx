@@ -24,6 +24,7 @@ const EcommerceSettlement = React.lazy(() => import('./pages/EcommerceSettlement
 const Assets = React.lazy(() => import('./pages/Assets'));
 const GEO = React.lazy(() => import('./pages/GEO'));
 const AIAssistant = React.lazy(() => import('./pages/AIAssistant'));
+const Academy = React.lazy(() => import('./pages/Academy'));
 const Enablement = React.lazy(() => import('./pages/Enablement'));
 const Tasks = React.lazy(() => import('./pages/Tasks'));
 const CoCreation = React.lazy(() => import('./pages/CoCreation'));
@@ -240,6 +241,16 @@ const App: React.FC = () => {
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AI_ASSISTANT, PERMISSION_KEYS.AI_POSITION_ASSISTANT]} />}>
             <Route path={ROUTES.AI_ASSISTANT} element={<Suspense fallback={<PageLoader />}><AIAssistant /></Suspense>} />
+          </Route>
+          <Route element={<ProtectedRoute permissionKeys={[
+            PERMISSION_KEYS.ACADEMY_VIEW,
+            PERMISSION_KEYS.ACADEMY_PLAN_MANAGE,
+            PERMISSION_KEYS.ACADEMY_COURSE_MANAGE,
+            PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
+            PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE,
+            PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE,
+          ]} />}>
+            <Route path={`${ROUTES.ACADEMY}/*`} element={<Suspense fallback={<PageLoader />}><Academy /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[
             PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE,

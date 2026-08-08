@@ -27,6 +27,7 @@ const NON_CUSTOMER_DATA_SCOPE_DOMAINS: NonCustomerDataScopeDomain[] = [
   'orderApplications',
   'recoveryOrders',
   'recoveryOrderApplications',
+  'academy',
   'assets',
 ];
 const DATA_SCOPE_LEVELS: DataScopeLevel[] = ['self', 'department', 'all'];
@@ -324,6 +325,7 @@ function buildDataScopes(
   recoveryOrderApplications: DataScopeLevel = orderApplications,
   assets: DataScopeLevel = customerScopeAsStandardScope(customers),
   deliveries: DataScopeLevel = orders,
+  academy: DataScopeLevel = customerScopeAsStandardScope(customers),
 ): NormalizedRoleDataScopes {
   return {
     leads,
@@ -333,6 +335,7 @@ function buildDataScopes(
     orderApplications,
     recoveryOrders,
     recoveryOrderApplications,
+    academy,
     assets,
   };
 }

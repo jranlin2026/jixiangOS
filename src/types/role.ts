@@ -20,6 +20,7 @@ export type DataScopeDomain =
   | 'orderApplications'
   | 'recoveryOrders'
   | 'recoveryOrderApplications'
+  | 'academy'
   | 'assets';
 
 export type NonCustomerDataScopeDomain = Exclude<DataScopeDomain, 'customers'>;

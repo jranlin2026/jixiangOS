@@ -1,6 +1,20 @@
 export type ProtectedFormCloseReason = 'backdropClick' | 'escapeKeyDown' | 'explicit';
 export type ProtectedFormCloseAction = 'ignore' | 'close' | 'confirm';
 
+export function shouldMarkProtectedFormButtonClick({
+  markButtonClicksDirty,
+  isButton,
+}: {
+  markButtonClicksDirty: boolean;
+  isButton: boolean;
+}): boolean {
+  return markButtonClicksDirty && isButton;
+}
+
+export function shouldMarkAutocompleteInputDirty(reason: string): boolean {
+  return reason !== 'reset';
+}
+
 export function resolveProtectedFormClose({
   reason,
   dirty,

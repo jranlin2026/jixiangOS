@@ -756,6 +756,148 @@ model DailyReview {
   @@map("daily_reviews")
 }
 
+model AcademyCourse {
+  id                     String   @id @db.VarChar(64)
+  code                   String   @unique @db.VarChar(80)
+  title                  String   @db.VarChar(200)
+  category               String   @db.VarChar(80)
+  summary                String   @db.Text
+  defaultDurationMinutes Int
+  objectives             Json
+  status                 String   @default("DRAFT") @db.VarChar(24)
+  ownerUserId            String   @db.VarChar(64)
+  ownerUserName          String   @db.VarChar(100)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  versions AcademyCourseVersion[]
+  sessions AcademySession[]
+
+  @@index([status, updatedAt])
+  @@index([category, status])
+  @@map("academy_courses")
+}
+
+model AcademyCourseVersion {
+  id            String   @id @db.VarChar(64)
+  courseId      String   @db.VarChar(64)
+  versionNumber Int
+  status        String   @default("DRAFT") @db.VarChar(24)
+  title         String   @db.VarChar(200)
+  summary       String   @db.Text
+  objectives    Json
+  outline       Json?
+  createdById   String   @db.VarChar(64)
+  createdByName String   @db.VarChar(100)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  course   AcademyCourse    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  sessions AcademySession[]
+
+  @@unique([courseId, versionNumber])
+  @@index([status, updatedAt])
+  @@map("academy_course_versions")
+}
+
+model AcademySession {
+  id                  String   @id @db.VarChar(64)
+  courseId            String   @db.VarChar(64)
+  courseVersionId     String?  @db.VarChar(64)
+  title               String   @db.VarChar(200)
+  startsAt            DateTime
+  endsAt              DateTime
+  venue               String   @db.VarChar(240)
+  capacity            Int
+  status              String   @default("PLANNED") @db.VarChar(24)
+  facilitatorUserId   String?  @db.VarChar(64)
+  facilitatorUserName String?  @db.VarChar(100)
+  createdById         String   @db.VarChar(64)
+  createdByName       String   @db.VarChar(100)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  course        AcademyCourse         @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  courseVersion AcademyCourseVersion? @relation(fields: [courseVersionId], references: [id], onDelete: SetNull)
+  tasks         AcademySessionTask[]
+  engagements   AcademyEngagement[]
+  review        AcademySessionReview?
+
+  @@index([startsAt, status])
+  @@index([courseId, startsAt])
+  @@index([facilitatorUserId, startsAt])
+  @@map("academy_sessions")
+}
+
+model AcademySessionTask {
+  id              String    @id @db.VarChar(64)
+  sessionId       String    @db.VarChar(64)
+  templateKey     String    @db.VarChar(40)
+  title           String    @db.VarChar(200)
+  category        String    @db.VarChar(24)
+  isRequired      Boolean   @default(true)
+  status          String    @default("PENDING") @db.VarChar(24)
+  note            String?   @db.Text
+  completedAt     DateTime?
+  completedById   String?   @db.VarChar(64)
+  completedByName String?   @db.VarChar(100)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  session AcademySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, templateKey])
+  @@index([sessionId, category, status])
+  @@map("academy_session_tasks")
+}
+
+model AcademyEngagement {
+  id               String   @id @db.VarChar(64)
+  sessionId        String   @db.VarChar(64)
+  participantKey   String   @db.VarChar(160)
+  customerId       String?  @db.VarChar(80)
+  leadId           String?  @db.VarChar(80)
+  participantName  String   @db.VarChar(200)
+  invitationStatus String   @default("PENDING") @db.VarChar(24)
+  attendanceStatus String   @default("UNKNOWN") @db.VarChar(24)
+  interactionLevel String?  @db.VarChar(24)
+  courseAssessment String?  @db.VarChar(12)
+  followUpStatus   String   @default("PENDING") @db.VarChar(24)
+  notes            String?  @db.Text
+  ownerUserId      String?  @db.VarChar(64)
+  ownerUserName    String?  @db.VarChar(100)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  session AcademySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, participantKey])
+  @@index([sessionId, attendanceStatus])
+  @@index([ownerUserId, followUpStatus])
+  @@index([customerId])
+  @@index([leadId])
+  @@map("academy_engagements")
+}
+
+model AcademySessionReview {
+  id            String   @id @db.VarChar(64)
+  sessionId     String   @unique @db.VarChar(64)
+  summary       String   @db.Text
+  issues        String   @db.Text
+  improvements  String   @db.Text
+  metrics       Json
+  actionItems   Json
+  createdById   String   @db.VarChar(64)
+  createdByName String   @db.VarChar(100)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  session AcademySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([updatedAt])
+  @@map("academy_session_reviews")
+}
+
 model AiConversation {
   id        String   @id @db.VarChar(64)
   userId    String   @db.VarChar(64)
