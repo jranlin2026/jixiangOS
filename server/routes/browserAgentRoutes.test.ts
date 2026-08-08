@@ -56,6 +56,45 @@ const scriptLibrary = {
     };
   },
 } as any;
+const catalog = {
+  async listRuntimeShops() {
+    calls.push({ method: 'catalog:runtime' });
+    return {
+      code: 0,
+      data: { shops: [{ id: 'shop-1', displayName: '极享智能体', source: '抖音电商', sourceName: '飞鸽客服' }] },
+      message: 'success',
+    };
+  },
+  async listCatalog() {
+    calls.push({ method: 'catalog:list' });
+    return { code: 0, data: { shops: [], mappings: [], products: [] }, message: 'success' };
+  },
+  async createShop(input: any, actor: any) {
+    calls.push({ method: 'catalog:create-shop', input, actor });
+    return { code: 0, data: { id: 'shop-2', ...input }, message: 'success' };
+  },
+  async updateShop(id: string, input: any, actor: any) {
+    calls.push({ method: 'catalog:update-shop', id, input, actor });
+    return { code: 0, data: { id, ...input }, message: 'success' };
+  },
+  async saveMapping(input: any, actor: any) {
+    calls.push({ method: 'catalog:create-mapping', input, actor });
+    if (input.aliases?.includes('conflict')) {
+      return {
+        code: 409, data: null, message: '别名冲突', errorCode: 'PRODUCT_ALIAS_CONFLICT',
+      };
+    }
+    return { code: 0, data: { id: 'map-1', ...input }, message: 'success' };
+  },
+  async updateMapping(id: string, input: any, actor: any) {
+    calls.push({ method: 'catalog:update-mapping', id, input, actor });
+    return { code: 0, data: { id, ...input }, message: 'success' };
+  },
+  async deleteMapping(id: string, actor: any) {
+    calls.push({ method: 'catalog:delete-mapping', id, actor });
+    return { code: 0, data: { id, active: false }, message: 'success' };
+  },
+} as any;
 
 const authenticate: express.RequestHandler = (req: any, _res, next) => {
   req.currentUser = { id: 'user-1', name: '客服小李' };
@@ -70,10 +109,32 @@ const requireLeadCreate: express.RequestHandler = (req: any, res, next) => {
     next();
   });
 };
+const requireBrowserCatalogRead: express.RequestHandler = (req: any, res, next) => {
+  authenticate(req, res, () => {
+    if (req.headers['x-test-no-product-read']) {
+      res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
+      return;
+    }
+    next();
+  });
+};
+const requireBrowserCatalogWrite: express.RequestHandler = (req: any, res, next) => {
+  authenticate(req, res, () => {
+    if (req.headers['x-test-no-product-write']) {
+      res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
+      return;
+    }
+    next();
+  });
+};
 const app = express();
 app.use(express.json());
 app.use('/api/browser-agent', createBrowserAgentRouter({
-  service, scriptLibrary, requireAuthenticated: authenticate, requireLeadCreate,
+  service, scriptLibrary, catalog,
+  requireAuthenticated: authenticate,
+  requireLeadCreate,
+  requireBrowserCatalogRead,
+  requireBrowserCatalogWrite,
 }));
 const listener = app.listen(0, '127.0.0.1');
 await once(listener, 'listening');
@@ -124,6 +185,57 @@ try {
   });
   assert.equal(customerServiceLibrary.status, 200, '已登录客服不应因没有线索录入权限而无法读取话术');
 
+  const runtimeConfig = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/runtime-config`, {
+    headers: { 'x-test-no-product-read': '1' },
+  });
+  assert.equal(runtimeConfig.status, 200, '已认证客服应能读取只含启用店铺的运行时配置');
+  assert.equal((await runtimeConfig.json()).data.shops[0].source, '抖音电商');
+
+  const deniedCatalog = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog`, {
+    headers: { 'x-test-no-product-read': '1' },
+  });
+  assert.equal(deniedCatalog.status, 403, '无产品设置读权限不能读取管理目录');
+
+  const createdShop = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog/shops`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ platform: 'DOUYIN', shopKey: 'shop-2', displayName: '新店铺' }),
+  });
+  assert.equal(createdShop.status, 201);
+  assert.equal((await createdShop.json()).data.id, 'shop-2');
+
+  const stoppedShop = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog/shops/shop-2`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ active: false }),
+  });
+  assert.equal(stoppedShop.status, 200);
+  assert.equal((await stoppedShop.json()).data.active, false);
+
+  const deniedMapping = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog/product-mappings`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-test-no-product-write': '1' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(deniedMapping.status, 403, '无产品设置写权限不能修改映射');
+
+  const createdMapping = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog/product-mappings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ shopBindingId: 'shop-1', platformProductName: '长商品名', aliases: [], osProductId: 'p-1', active: true }),
+  });
+  assert.equal(createdMapping.status, 201);
+  assert.equal((await createdMapping.json()).data.id, 'map-1');
+
+  const conflictMapping = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog/product-mappings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ shopBindingId: 'shop-1', platformProductName: '冲突', aliases: ['conflict'], osProductId: 'p-2', active: true }),
+  });
+  assert.equal(conflictMapping.status, 409);
+  assert.equal((await conflictMapping.json()).errorCode, 'PRODUCT_ALIAS_CONFLICT', '409必须保留结构化错误码');
+
+  const stoppedMapping = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog/product-mappings/map-1`, {
+    method: 'DELETE',
+  });
+  assert.equal(stoppedMapping.status, 200);
+  assert.equal((await stoppedMapping.json()).data.active, false);
+
   const deniedIntake = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/lead-intakes`, {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-test-no-lead-create': '1' },
     body: JSON.stringify({}),
@@ -140,6 +252,8 @@ try {
   assert.equal(deniedCompletion.status, 403, '平台完成上报必须校验线索录入权限');
   assert.deepEqual(calls.map((call) => call.method), [
     'intake', 'remark', 'platform-completion', 'script-library:get', 'script-library:update', 'script-library:get',
+    'catalog:runtime', 'catalog:create-shop', 'catalog:update-shop',
+    'catalog:create-mapping', 'catalog:create-mapping', 'catalog:delete-mapping',
   ]);
 } finally {
   await new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));

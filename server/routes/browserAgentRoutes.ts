@@ -1,6 +1,7 @@
 import express from 'express';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { BrowserLeadIntakeService } from '../services/browserAgent/browserLeadIntakeService';
+import type { BrowserCatalogService } from '../services/browserAgent/browserCatalogService';
 import type { BrowserScriptLibraryService } from '../services/browserAgent/scriptLibraryService';
 
 function statusFor(code: number, successStatus = 200) {
@@ -15,8 +16,11 @@ function routeParam(value: string | string[] | undefined) {
 export function createBrowserAgentRouter(deps: {
   service: BrowserLeadIntakeService;
   scriptLibrary: BrowserScriptLibraryService;
+  catalog: BrowserCatalogService;
   requireAuthenticated: express.RequestHandler;
   requireLeadCreate: express.RequestHandler;
+  requireBrowserCatalogRead: express.RequestHandler;
+  requireBrowserCatalogWrite: express.RequestHandler;
 }) {
   const router = express.Router();
 
@@ -61,6 +65,49 @@ export function createBrowserAgentRouter(deps: {
     const result = await deps.scriptLibrary.update(req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
+
+  router.get('/runtime-config', deps.requireAuthenticated, async (_req: AuthenticatedRequest, res) => {
+    const result = await deps.catalog.listRuntimeShops();
+    res.status(statusFor(result.code)).json(result);
+  });
+
+  router.get('/catalog', deps.requireBrowserCatalogRead, async (_req: AuthenticatedRequest, res) => {
+    const result = await deps.catalog.listCatalog();
+    res.status(statusFor(result.code)).json(result);
+  });
+
+  router.post('/catalog/shops', deps.requireBrowserCatalogWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.catalog.createShop(req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code, 201)).json(result);
+  });
+
+  router.put('/catalog/shops/:id', deps.requireBrowserCatalogWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.catalog.updateShop(routeParam(req.params.id), req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+
+  router.post('/catalog/product-mappings', deps.requireBrowserCatalogWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.catalog.saveMapping(req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code, 201)).json(result);
+  });
+
+  router.put(
+    '/catalog/product-mappings/:id',
+    deps.requireBrowserCatalogWrite,
+    async (req: AuthenticatedRequest, res) => {
+      const result = await deps.catalog.updateMapping(routeParam(req.params.id), req.body || {}, req.currentUser!);
+      res.status(statusFor(result.code)).json(result);
+    },
+  );
+
+  router.delete(
+    '/catalog/product-mappings/:id',
+    deps.requireBrowserCatalogWrite,
+    async (req: AuthenticatedRequest, res) => {
+      const result = await deps.catalog.deleteMapping(routeParam(req.params.id), req.currentUser!);
+      res.status(statusFor(result.code)).json(result);
+    },
+  );
 
   return router;
 }
