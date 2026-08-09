@@ -32,3 +32,9 @@ assert.match(
   /business-platform-preset-/,
   'Preset platforms should be clickable choices instead of free-form names.',
 );
+
+for (const field of ['店铺名称', '平台店铺ID', '店铺别名', '启用店铺']) {
+  assert.ok(source.includes(field), `The business shop editor should contain ${field}.`);
+}
+assert.match(source, /syncBusinessShop/, 'Saving a Douyin business shop should automatically sync its hidden browser binding.');
+assert.match(source, /保存后系统会自动创建或更新飞鸽客服接入/, 'The editor should explain automatic Feige access.');

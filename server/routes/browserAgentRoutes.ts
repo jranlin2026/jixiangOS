@@ -81,6 +81,11 @@ export function createBrowserAgentRouter(deps: {
     res.status(statusFor(result.code)).json(result);
   });
 
+  router.put('/catalog/business-shops/:id/sync', deps.requireBrowserCatalogWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.catalog.syncBusinessShop(routeParam(req.params.id), req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+
   router.post('/catalog/shops', deps.requireBrowserCatalogWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.catalog.createShop(req.body || {}, req.currentUser!);
     res.status(statusFor(result.code, 201)).json(result);

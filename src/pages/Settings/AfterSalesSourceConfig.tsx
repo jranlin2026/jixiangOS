@@ -10,6 +10,7 @@ import {
   DialogContent,
   Paper,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -25,7 +26,7 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import LinkOutlinedIcon from '@mui/icons-material/LinkOutlined';
 import LanguageOutlinedIcon from '@mui/icons-material/LanguageOutlined';
-import { settingsApi } from '../../api';
+import { browserAgentConfigApi, settingsApi } from '../../api';
 import type { AfterSalesSourceConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import OperationFeedbackDialog, { type OperationFeedbackSeverity } from '../../shared/components/OperationFeedbackDialog';
@@ -40,14 +41,22 @@ type EditorState = {
   item: AfterSalesSourceConfig | null;
   parentId?: string;
   name: string;
+  platformShopId: string;
+  aliasesText: string;
+  isActive: boolean;
   platformChoice?: BusinessPlatformPresetKey | 'custom';
 };
 
-const emptyEditor: EditorState = { kind: 'platform', item: null, name: '' };
+const emptyEditor: EditorState = { kind: 'platform', item: null, name: '', platformShopId: '', aliasesText: '', isActive: true };
+
+function splitLines(value: string) {
+  return [...new Set(value.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean))];
+}
 
 const AfterSalesSourceConfigPage: React.FC = () => {
   const [, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<AfterSalesSourceConfig[]>([]);
+  const [linkedBusinessShopIds, setLinkedBusinessShopIds] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
   const [editor, setEditor] = useState<EditorState>(emptyEditor);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -56,8 +65,25 @@ const AfterSalesSourceConfigPage: React.FC = () => {
   const platforms = useMemo(() => items.filter((item) => !item.parentId).sort((a, b) => a.sortOrder - b.sortOrder), [items]);
 
   const load = async () => {
-    const response = await settingsApi.fetchAfterSalesSourceConfigs();
-    if (response.code === 0) setItems(response.data);
+    const [response, catalogResponse] = await Promise.all([
+      settingsApi.fetchAfterSalesSourceConfigs(),
+      browserAgentConfigApi.getCatalog().catch(() => null),
+    ]);
+    if (response.code !== 0) return;
+    const bindings = catalogResponse?.code === 0 ? catalogResponse.data?.shops || [] : [];
+    const bindingByBusinessShopId = new Map(bindings
+      .filter((binding) => binding.businessShopId)
+      .map((binding) => [binding.businessShopId as string, binding]));
+    setLinkedBusinessShopIds(new Set(bindingByBusinessShopId.keys()));
+    setItems(response.data.map((item) => {
+      const binding = bindingByBusinessShopId.get(item.id);
+      if (!item.parentId || !binding) return item;
+      return {
+        ...item,
+        platformShopId: item.platformShopId || binding.platformShopId || undefined,
+        aliases: item.aliases !== undefined ? item.aliases : binding.aliases,
+      };
+    }));
   };
   useEffect(() => { void load(); }, []);
 
@@ -68,6 +94,9 @@ const AfterSalesSourceConfigPage: React.FC = () => {
       item: item || null,
       parentId: parentId || item?.parentId,
       name: item?.name || '',
+      platformShopId: item?.platformShopId || '',
+      aliasesText: item?.aliases?.join('\n') || '',
+      isActive: item?.isActive ?? true,
       platformChoice: kind === 'platform' && item ? (preset?.key || 'custom') : undefined,
     });
     setEditorOpen(true);
@@ -79,10 +108,27 @@ const AfterSalesSourceConfigPage: React.FC = () => {
     setSubmitting(true);
     try {
       const siblings = items.filter((item) => (item.parentId || '') === (editor.parentId || ''));
+      const shopData = editor.kind === 'shop' ? {
+        platformShopId: editor.platformShopId.trim(),
+        aliases: splitLines(editor.aliasesText),
+        isActive: editor.isActive,
+      } : {};
       const response = editor.item
-        ? await settingsApi.updateAfterSalesSourceConfig(editor.item.id, { name })
-        : await settingsApi.createAfterSalesSourceConfig({ name, parentId: editor.parentId, isActive: true, sortOrder: siblings.length + 1 });
-      setFeedback({ severity: response.code === 0 ? 'success' : 'error', message: response.code === 0 ? `${editor.kind === 'platform' ? '平台' : '店铺'}已保存` : response.message });
+        ? await settingsApi.updateAfterSalesSourceConfig(editor.item.id, { name, ...shopData })
+        : await settingsApi.createAfterSalesSourceConfig({ name, parentId: editor.parentId, isActive: editor.isActive, sortOrder: siblings.length + 1, ...shopData });
+      let message = response.code === 0 ? `${editor.kind === 'platform' ? '平台' : '店铺'}已保存` : response.message;
+      let severity: OperationFeedbackSeverity = response.code === 0 ? 'success' : 'error';
+      if (response.code === 0 && editor.kind === 'shop' && response.data) {
+        const parent = items.find((item) => item.id === response.data?.parentId);
+        if (findBusinessPlatformPreset(parent?.name)?.code === 'DOUYIN') {
+          const synced = await browserAgentConfigApi.syncBusinessShop(response.data.id);
+          if (synced.code !== 0) {
+            severity = 'warning';
+            message = `店铺资料已保存，但飞鸽接入同步失败：${synced.message}`;
+          } else message = '店铺资料已保存，并已自动接入飞鸽客服';
+        }
+      }
+      setFeedback({ severity, message });
       if (response.code === 0) {
         setEditorOpen(false);
         await load();
@@ -94,11 +140,29 @@ const AfterSalesSourceConfigPage: React.FC = () => {
 
   const toggle = async (item: AfterSalesSourceConfig) => {
     const response = await settingsApi.updateAfterSalesSourceConfig(item.id, { isActive: !item.isActive });
-    setFeedback({ severity: response.code === 0 ? 'success' : 'error', message: response.code === 0 ? `${item.name}已${item.isActive ? '停用' : '启用'}` : response.message });
+    let severity: OperationFeedbackSeverity = response.code === 0 ? 'success' : 'error';
+    let message = response.code === 0 ? `${item.name}已${item.isActive ? '停用' : '启用'}` : response.message;
+    if (response.code === 0 && item.parentId) {
+      const parent = items.find((entry) => entry.id === item.parentId);
+      if (findBusinessPlatformPreset(parent?.name)?.code === 'DOUYIN') {
+        const synced = await browserAgentConfigApi.syncBusinessShop(item.id);
+        if (synced.code !== 0) { severity = 'warning'; message = `${message}，但飞鸽接入同步失败：${synced.message}`; }
+      }
+    }
+    setFeedback({ severity, message });
     if (response.code === 0) await load();
   };
 
-  const manageMappings = (shopId: string) => {
+  const manageMappings = async (shopId: string, platformName: string) => {
+    if (findBusinessPlatformPreset(platformName)?.code !== 'DOUYIN') {
+      setFeedback({ severity: 'warning', message: `${platformName}的浏览器员工尚未接入，当前只能维护店铺资料` });
+      return;
+    }
+    const synced = await browserAgentConfigApi.syncBusinessShop(shopId);
+    if (synced.code !== 0) {
+      setFeedback({ severity: 'error', message: `店铺接入失败：${synced.message}` });
+      return;
+    }
     setSearchParams({ group: 'product', tab: 'platformMapping', businessShopId: shopId });
   };
 
@@ -141,7 +205,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
                   <Chip size="small" label={`${shops.length} 家店铺`} sx={{ bgcolor: '#e2e8f0', fontWeight: 700 }} />
                   <Chip size="small" color={platform.isActive ? 'success' : 'default'} label={platform.isActive ? '启用' : '停用'} />
                 </Stack>
-                <Typography variant="caption" color="text.secondary">平台下的店铺可分别配置商品映射和插件接入。</Typography>
+                <Typography variant="caption" color="text.secondary">店铺资料在这里统一维护；当前仅抖音小店支持浏览器员工。</Typography>
               </Box>
             </Stack>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
@@ -154,13 +218,16 @@ const AfterSalesSourceConfigPage: React.FC = () => {
           {shops.length ? <>
             <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
               <Table size="small">
-                <TableHead><TableRow><TableCell>店铺名称</TableCell><TableCell>所属平台</TableCell><TableCell>状态</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
+                <TableHead><TableRow><TableCell>店铺名称</TableCell><TableCell>平台店铺ID</TableCell><TableCell>浏览器员工</TableCell><TableCell>状态</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
                 <TableBody>{shops.map((shop) => <TableRow key={shop.id} hover>
-                  <TableCell><Stack direction="row" alignItems="center" spacing={1}><BusinessPlatformBrand platform={platform.name} compact /><Typography fontWeight={700}>{shop.name}</Typography></Stack></TableCell>
-                  <TableCell>{platform.name}</TableCell>
+                  <TableCell><Stack direction="row" alignItems="center" spacing={1}><BusinessPlatformBrand platform={platform.name} compact /><Box><Typography fontWeight={700}>{shop.name}</Typography>{shop.aliases?.length ? <Typography variant="caption" color="text.secondary">别名：{shop.aliases.join('、')}</Typography> : null}</Box></Stack></TableCell>
+                  <TableCell>{shop.platformShopId || <Typography variant="body2" color="warning.main">待补充</Typography>}</TableCell>
+                  <TableCell>{findBusinessPlatformPreset(platform.name)?.code === 'DOUYIN'
+                    ? <Chip size="small" color={linkedBusinessShopIds.has(shop.id) ? 'success' : 'warning'} variant="outlined" label={linkedBusinessShopIds.has(shop.id) ? '飞鸽已接入' : '保存后自动接入'} />
+                    : <Chip size="small" variant="outlined" label="暂未支持" />}</TableCell>
                   <TableCell><Chip size="small" color={shop.isActive ? 'success' : 'default'} variant={shop.isActive ? 'filled' : 'outlined'} label={shop.isActive ? '启用' : '停用'} /></TableCell>
                   <TableCell align="right">
-                    <Button size="small" startIcon={<LinkOutlinedIcon />} onClick={() => manageMappings(shop.id)}>管理商品映射</Button>
+                    <Button size="small" startIcon={<LinkOutlinedIcon />} disabled={findBusinessPlatformPreset(platform.name)?.code !== 'DOUYIN'} onClick={() => void manageMappings(shop.id, platform.name)}>管理商品映射</Button>
                     <Button size="small" onClick={() => openEditor('shop', shop)}>编辑</Button>
                     <Button size="small" color={shop.isActive ? 'warning' : 'success'} onClick={() => void toggle(shop)}>{shop.isActive ? '停用' : '启用'}</Button>
                   </TableCell>
@@ -171,11 +238,11 @@ const AfterSalesSourceConfigPage: React.FC = () => {
             <Stack spacing={1} sx={{ display: { xs: 'flex', md: 'none' }, p: 1.5 }}>
               {shops.map((shop) => <Paper key={shop.id} variant="outlined" sx={{ p: 1.5 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={1}>
-                  <Box><Stack direction="row" alignItems="center" spacing={0.75}><BusinessPlatformBrand platform={platform.name} compact /><Typography fontWeight={800}>{shop.name}</Typography></Stack><Typography variant="caption" color="text.secondary">{platform.name}</Typography></Box>
+                  <Box><Stack direction="row" alignItems="center" spacing={0.75}><BusinessPlatformBrand platform={platform.name} compact /><Typography fontWeight={800}>{shop.name}</Typography></Stack><Typography variant="caption" color="text.secondary">店铺ID：{shop.platformShopId || '待补充'}</Typography></Box>
                   <Chip size="small" color={shop.isActive ? 'success' : 'default'} label={shop.isActive ? '启用' : '停用'} />
                 </Stack>
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-                  <Button size="small" onClick={() => manageMappings(shop.id)}>管理商品映射</Button>
+                  <Button size="small" disabled={findBusinessPlatformPreset(platform.name)?.code !== 'DOUYIN'} onClick={() => void manageMappings(shop.id, platform.name)}>管理商品映射</Button>
                   <Button size="small" onClick={() => openEditor('shop', shop)}>编辑</Button>
                   <Button size="small" color={shop.isActive ? 'warning' : 'success'} onClick={() => void toggle(shop)}>{shop.isActive ? '停用' : '启用'}</Button>
                 </Stack>
@@ -183,7 +250,9 @@ const AfterSalesSourceConfigPage: React.FC = () => {
             </Stack>
           </> : <Box sx={{ px: 2.5, py: 4, textAlign: 'center' }}>
             <Typography fontWeight={700}>该平台还没有店铺</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>添加店铺后，才能配置插件接入和商品映射。</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{findBusinessPlatformPreset(platform.name)?.code === 'DOUYIN'
+              ? '添加店铺名称和平台店铺ID后，系统会自动建立飞鸽接入。'
+              : '添加店铺名称和平台店铺ID后，即可供线索、客户和订单统一引用。'}</Typography>
             <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => openEditor('shop', undefined, platform.id)}>添加第一家店铺</Button>
           </Box>}
         </Paper>;
@@ -195,7 +264,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
       </Paper> : null}
     </Stack>
 
-    <Dialog open={editorOpen} onClose={() => !submitting && setEditorOpen(false)} maxWidth="xs" fullWidth>
+    <Dialog open={editorOpen} onClose={() => !submitting && setEditorOpen(false)} maxWidth={editor.kind === 'shop' ? 'sm' : 'xs'} fullWidth>
       <DialogCloseTitle onClose={() => setEditorOpen(false)} closeDisabled={submitting}>{editor.item ? '编辑' : '新增'}{editor.kind === 'platform' ? '业务平台' : '店铺'}</DialogCloseTitle>
       <DialogContent dividers>
         {editor.kind === 'platform' && !editor.item ? <Stack spacing={2}>
@@ -250,13 +319,38 @@ const AfterSalesSourceConfigPage: React.FC = () => {
             onChange={(event) => setEditor((current) => ({ ...current, name: event.target.value }))}
             helperText={findBusinessPlatformPreset(editor.name) ? '系统预设平台名称固定，避免插件和商品映射失去关联' : '可修改第三方平台名称'}
           />
-        </Stack> : <TextField
-          autoFocus fullWidth label="店铺名称" value={editor.name}
-          onChange={(event) => setEditor((current) => ({ ...current, name: event.target.value }))}
-          helperText="请输入客户能够辨认的真实店铺名称"
-        />}
+        </Stack> : <Stack spacing={2}>
+          <Paper variant="outlined" sx={{ p: 1.5, bgcolor: '#f8fbff', borderColor: '#dbe4f0' }}>
+            <Typography variant="caption" color="text.secondary">所属平台</Typography>
+            <Box sx={{ mt: 0.5 }}><BusinessPlatformBrand platform={items.find((item) => item.id === editor.parentId)?.name || ''} showName /></Box>
+          </Paper>
+          <TextField
+            autoFocus fullWidth required label="店铺名称" value={editor.name}
+            onChange={(event) => setEditor((current) => ({ ...current, name: event.target.value }))}
+            helperText="填写平台后台显示的正式店铺名称"
+          />
+          <TextField
+            fullWidth required label="平台店铺ID" value={editor.platformShopId}
+            onChange={(event) => setEditor((current) => ({ ...current, platformShopId: event.target.value }))}
+            helperText="平台分配的唯一店铺ID；同一平台下不能重复"
+          />
+          <TextField
+            fullWidth label="店铺别名" value={editor.aliasesText} multiline minRows={3}
+            onChange={(event) => setEditor((current) => ({ ...current, aliasesText: event.target.value }))}
+            helperText="选填，每行一个；用于识别飞鸽页面上可能出现的简称或旧名称"
+          />
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 0.5 }}>
+            <Box><Typography fontWeight={700}>启用店铺</Typography><Typography variant="caption" color="text.secondary">停用后不再用于新线索和商品匹配，历史数据保留</Typography></Box>
+            <Switch checked={editor.isActive} onChange={(_event, checked) => setEditor((current) => ({ ...current, isActive: checked }))} />
+          </Stack>
+          <Typography variant="body2" color="text.secondary">
+            {findBusinessPlatformPreset(items.find((item) => item.id === editor.parentId)?.name)?.code === 'DOUYIN'
+              ? '保存后系统会自动创建或更新飞鸽客服接入，无需再到“平台商品映射”填写店铺信息。'
+              : '当前平台可先维护店铺资料；对应浏览器员工上线后会直接复用这份数据。'}
+          </Typography>
+        </Stack>}
       </DialogContent>
-      <DialogActions><Button onClick={() => setEditorOpen(false)} disabled={submitting}>取消</Button><Button variant="contained" onClick={() => void save()} disabled={submitting || !editor.name.trim()}>保存</Button></DialogActions>
+      <DialogActions><Button onClick={() => setEditorOpen(false)} disabled={submitting}>取消</Button><Button variant="contained" onClick={() => void save()} disabled={submitting || !editor.name.trim() || (editor.kind === 'shop' && !editor.platformShopId.trim())}>保存</Button></DialogActions>
     </Dialog>
 
     <OperationFeedbackDialog open={Boolean(feedback)} severity={feedback?.severity} message={feedback?.message || ''} onClose={() => setFeedback(null)} />

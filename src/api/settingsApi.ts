@@ -1155,6 +1155,11 @@ async function deleteLeadSourceConfig(id: string): Promise<ApiResponse<boolean>>
 
 // ---- 售后来源平台与店铺 ----
 
+function normalizeBusinessShopAliases(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((entry) => String(entry).trim()).filter(Boolean))];
+}
+
 async function fetchAfterSalesSourceConfigs(): Promise<ApiResponse<AfterSalesSourceConfig[]>> {
   if (shouldUseBackendApi()) {
     const stored = await fetchBackendStorageValue<AfterSalesSourceConfig[]>(STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS);
@@ -1173,12 +1178,22 @@ async function createAfterSalesSourceConfig(
   if (data.parentId && !configs.some((item) => item.id === data.parentId && !item.parentId)) {
     return createErrorResponse('所属平台不存在');
   }
+  const platformShopId = data.parentId ? String(data.platformShopId || '').trim() : undefined;
+  if (data.parentId && !platformShopId) return createErrorResponse('平台店铺ID不能为空');
   if (configs.some((item) => (item.parentId || '') === (data.parentId || '') && item.name === name)) {
     return createErrorResponse(data.parentId ? '该平台下已存在同名店铺' : '平台已存在');
   }
+  if (data.parentId && configs.some((item) => item.parentId === data.parentId && item.platformShopId === platformShopId)) {
+    return createErrorResponse('该平台下已存在相同店铺ID');
+  }
   const now = new Date().toISOString();
   const item: AfterSalesSourceConfig = {
-    ...data, name, id: `assrc-${uuidv4().slice(0, 8)}`, createdAt: now, updatedAt: now,
+    ...data,
+    name,
+    ...(data.parentId ? { platformShopId, aliases: normalizeBusinessShopAliases(data.aliases) } : {}),
+    id: `assrc-${uuidv4().slice(0, 8)}`,
+    createdAt: now,
+    updatedAt: now,
   };
   await setStorageData(STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS, [...configs, item]);
   return createSuccessResponse(item);
@@ -1197,8 +1212,24 @@ async function updateAfterSalesSourceConfig(
   if (configs.some((item) => item.id !== id && (item.parentId || '') === (parentId || '') && item.name === name)) {
     return createErrorResponse(parentId ? '该平台下已存在同名店铺' : '平台已存在');
   }
+  const platformShopId = parentId && data.platformShopId !== undefined
+    ? String(data.platformShopId).trim()
+    : configs[index].platformShopId;
+  if (parentId && data.platformShopId !== undefined && !platformShopId) {
+    return createErrorResponse('平台店铺ID不能为空');
+  }
+  if (parentId && platformShopId && configs.some((item) => (
+    item.id !== id && item.parentId === parentId && item.platformShopId === platformShopId
+  ))) return createErrorResponse('该平台下已存在相同店铺ID');
   const next = [...configs];
-  next[index] = { ...configs[index], ...data, name, updatedAt: new Date().toISOString() };
+  next[index] = {
+    ...configs[index],
+    ...data,
+    name,
+    ...(parentId && data.platformShopId !== undefined ? { platformShopId } : {}),
+    ...(parentId && data.aliases !== undefined ? { aliases: normalizeBusinessShopAliases(data.aliases) } : {}),
+    updatedAt: new Date().toISOString(),
+  };
   await setStorageData(STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS, next);
   return createSuccessResponse(next[index]);
 }

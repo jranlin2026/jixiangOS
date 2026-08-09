@@ -200,8 +200,8 @@ async function mountPage(fixture: ReturnType<typeof backendFixture>) {
   act(() => { root.render(React.createElement(BrowserAgentConfigPage)); });
   assert.ok(document.querySelector('[role="progressbar"]'), '初始HTTP/产品请求未完成时应显示加载态');
   await waitFor('店铺目录初始加载', () => document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent === '一号店铺');
-  assert.ok(document.body.textContent?.includes('当前浏览器员工仅支持抖音飞鸽'), '商品映射页应明确当前插件的支持范围');
-  assert.equal(findButton('抖音店铺已全部接入').disabled, true, '无可接入抖音店铺时应说明原因，而不是显示含糊的灰色按钮');
+  assert.ok(document.body.textContent?.includes('店铺名称、店铺ID和别名统一在“业务平台与店铺”维护'), '商品映射页应明确店铺主数据的唯一维护入口');
+  assert.ok(![...document.querySelectorAll('button')].some((button) => button.textContent?.trim() === '抖音店铺已全部接入'), '商品映射页不应保留重复接入按钮');
   assert.equal(document.querySelectorAll('[data-testid="current-browser-shop-label"]').length, 1, '当前店铺标题只能出现一次');
   return root;
 }
@@ -258,18 +258,9 @@ async function exerciseRealPageWorkflow() {
   assert.equal(shopTwoCard.getAttribute('aria-selected'), 'true');
   assert.ok(document.body.textContent?.includes('二号店铺商品'), '手机卡片键盘选店后应切换下方映射结果');
 
-  const desktopEdit = findButton('编辑接入');
-  dispatchClick(desktopEdit);
-  await waitFor('当前店铺编辑按钮打开表单', () => document.body.textContent?.includes('编辑店铺接入') === true);
-  assert.equal(document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent, '二号店铺', '编辑当前店铺不得改变店铺上下文');
-  await closeEditDialog();
-
-  dispatchClick(findButton('停用店铺'));
-  await waitFor('店铺停用确认', () => document.body.textContent?.includes('停用后插件不能以该店铺创建新线索，历史记录保留') === true);
-  dispatchClick(findButton('确认停用', document.querySelector('[role="dialog"]')!));
-  await waitFor('店铺停用成功反馈', () => document.body.textContent?.includes('店铺已停用') === true);
-  assert.deepEqual(fixture.requests.find((request) => request.url.endsWith('/shops/shop-2') && request.method === 'PUT')?.body, { active: false });
-  await dismissFeedback();
+  const pageButtons = [...document.querySelectorAll('button')].map((button) => button.textContent?.trim());
+  assert.ok(!pageButtons.includes('编辑接入'), '商品映射页不再重复编辑店铺接入资料');
+  assert.ok(!pageButtons.includes('停用店铺'), '店铺启停统一在业务平台与店铺维护');
 
   const refreshedShopOneRow = document.querySelector('[data-view="desktop"][data-row-id="shop-1"]') as HTMLElement;
   dispatchKey(refreshedShopOneRow, 'Enter');
@@ -278,24 +269,12 @@ async function exerciseRealPageWorkflow() {
   dispatchClick(findButton('新增商品映射'));
   const mappingDialog = document.querySelector('[role="dialog"]')!;
   const mappingSelects = mappingDialog.querySelectorAll('[role="combobox"]');
-  assert.equal(mappingSelects.length, 2, '新增映射时应可直接选择所属店铺和OS产品');
-  act(() => { mappingSelects[0].dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
-  let shopListbox: Element | undefined;
-  await waitFor('所属店铺下拉展开', () => {
-    shopListbox = [...document.querySelectorAll('[role="listbox"]')].find((item) => (
-      [...item.querySelectorAll('[role="option"]')].some((option) => option.textContent?.trim() === '一号店铺')
-    ));
-    return Boolean(shopListbox);
-  });
-  assert.deepEqual(
-    [...shopListbox!.querySelectorAll('[role="option"]')].map((option) => option.textContent?.trim()),
-    ['一号店铺', '二号店铺（已停用）'],
-    '所属店铺下拉应列出所有已接入店铺',
-  );
-  dispatchClick([...shopListbox!.querySelectorAll('[role="option"]')].find((option) => option.textContent?.trim() === '一号店铺')!);
+  assert.equal(mappingSelects.length, 1, '所属店铺来自当前上下文，表单只保留OS产品下拉');
+  assert.ok(mappingDialog.textContent?.includes('当前店铺'));
+  assert.ok(mappingDialog.textContent?.includes('一号店铺'));
   changeValue(findInput('平台商品名称', mappingDialog), '新平台商品');
   changeValue(findInput('平台商品别名', mappingDialog), '别名甲\n别名乙');
-  const productSelect = mappingDialog.querySelectorAll('[role="combobox"]')[1];
+  const productSelect = mappingDialog.querySelectorAll('[role="combobox"]')[0];
   assert.ok(productSelect);
   act(() => { productSelect.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
   let productListbox: Element | undefined;

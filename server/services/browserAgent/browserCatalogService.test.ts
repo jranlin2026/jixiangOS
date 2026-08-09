@@ -10,6 +10,15 @@ const businessShops = [{
   name: '极享新店',
   active: true,
 }, {
+  id: 'business-shop-auto',
+  platformId: 'business-platform-douyin',
+  platformCode: 'DOUYIN',
+  platformName: '抖音小店',
+  name: '自动接入店',
+  platformShopId: 'dy-business-main',
+  aliases: ['自动接入旗舰店'],
+  active: true,
+}, {
   id: 'business-shop-legacy',
   platformId: 'business-platform-douyin',
   platformCode: 'DOUYIN',
@@ -160,6 +169,40 @@ const repository: BrowserCatalogRepository = {
 };
 
 const service = createBrowserCatalogService({ repository });
+
+const syncedBusinessShop = await service.syncBusinessShop('business-shop-auto', actor);
+assert.equal(syncedBusinessShop.code, 0);
+assert.equal(syncedBusinessShop.data?.businessShopId, 'business-shop-auto');
+assert.equal(syncedBusinessShop.data?.shopKey, 'business-business-shop-auto');
+assert.equal(syncedBusinessShop.data?.platformShopId, 'dy-business-main');
+assert.deepEqual(syncedBusinessShop.data?.aliases, ['自动接入旗舰店']);
+const syncedBusinessBindingId = syncedBusinessShop.data?.id;
+businessShops[1].name = '自动接入店（更新）';
+businessShops[1].platformShopId = 'dy-business-main-2';
+businessShops[1].aliases = ['自动接入官方店'];
+const resyncedBusinessShop = await service.syncBusinessShop('business-shop-auto', actor);
+assert.equal(resyncedBusinessShop.code, 0);
+assert.equal(resyncedBusinessShop.data?.id, syncedBusinessBindingId);
+assert.equal(resyncedBusinessShop.data?.displayName, '自动接入店（更新）');
+assert.equal(resyncedBusinessShop.data?.platformShopId, 'dy-business-main-2');
+assert.deepEqual(resyncedBusinessShop.data?.aliases, ['自动接入官方店']);
+businessShops[1].active = false;
+const retiredBusinessShop = await service.syncBusinessShop('business-shop-auto', actor);
+assert.equal(retiredBusinessShop.code, 0);
+assert.equal(retiredBusinessShop.data?.active, false);
+delete businessShops[1].platformShopId;
+delete businessShops[1].aliases;
+businessShops[1].active = true;
+const legacyMasterSync = await service.syncBusinessShop('business-shop-auto', actor);
+assert.equal(legacyMasterSync.code, 0);
+assert.equal(legacyMasterSync.data?.platformShopId, 'dy-business-main-2');
+assert.deepEqual(legacyMasterSync.data?.aliases, ['自动接入官方店']);
+businessShops[1].active = false;
+await service.syncBusinessShop('business-shop-auto', actor);
+
+const unsupportedSync = await service.syncBusinessShop('business-shop-wechat', actor);
+assert.equal(unsupportedSync.code, 400);
+assert.match(unsupportedSync.message, /仅支持抖音/);
 
 const unsupportedBusinessShop = await service.createShop({
   businessShopId: 'business-shop-wechat', shopKey: 'wechat-linked', aliases: [], active: true,

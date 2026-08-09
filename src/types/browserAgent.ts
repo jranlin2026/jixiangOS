@@ -63,6 +63,8 @@ export type BusinessShopDirectoryEntry = {
   platformCode: string;
   platformName: string;
   name: string;
+  platformShopId?: string | null;
+  aliases?: string[];
   active: boolean;
 };
 

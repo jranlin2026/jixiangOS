@@ -110,6 +110,10 @@ const catalog = {
     return { code: 0, data: { shops: [], mappings: [], products: [] }, message: 'success' };
   },
   previewProductMapping,
+  async syncBusinessShop(id: string, actor: any) {
+    calls.push({ method: 'catalog:sync-business-shop', id, actor });
+    return { code: 0, data: { id: 'binding-synced', businessShopId: id, active: true }, message: 'success' };
+  },
   async createShop(input: any, actor: any) {
     calls.push({ method: 'catalog:create-shop', input, actor });
     return { code: 0, data: { id: 'shop-2', ...input }, message: 'success' };
@@ -298,6 +302,13 @@ try {
   });
   assert.equal(deniedCatalog.status, 403, '无产品设置读权限不能读取管理目录');
 
+  const syncedBusinessShop = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog/business-shops/business-shop-1/sync`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+  });
+  assert.equal(syncedBusinessShop.status, 200);
+  assert.equal((await syncedBusinessShop.json()).data.businessShopId, 'business-shop-1');
+  assert.ok(calls.some((call) => call.method === 'catalog:sync-business-shop' && call.id === 'business-shop-1'));
+
   const createdShop = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog/shops`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ platform: 'DOUYIN', shopKey: 'shop-2', displayName: '新店铺' }),
@@ -354,7 +365,7 @@ try {
   assert.equal(deniedCompletion.status, 403, '平台完成上报必须校验线索录入权限');
   assert.deepEqual(calls.map((call) => call.method), [
     'intake', 'remark', 'platform-completion', 'script-library:get', 'script-library:update', 'script-library:get',
-    'catalog:runtime', 'catalog:preview', 'catalog:preview', 'catalog:create-shop', 'catalog:update-shop',
+    'catalog:runtime', 'catalog:preview', 'catalog:preview', 'catalog:sync-business-shop', 'catalog:create-shop', 'catalog:update-shop',
     'catalog:create-mapping', 'catalog:create-mapping', 'catalog:delete-mapping',
   ]);
 } finally {

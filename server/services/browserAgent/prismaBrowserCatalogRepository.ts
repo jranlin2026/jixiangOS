@@ -27,6 +27,8 @@ type LegacySourceConfig = {
   name?: unknown;
   parentId?: unknown;
   isActive?: unknown;
+  platformShopId?: unknown;
+  aliases?: unknown;
 };
 
 export function businessPlatformCode(name: string) {
@@ -91,6 +93,8 @@ async function listBusinessShops(prisma: Pick<BrowserCatalogDataClient, 'appStor
       platformCode: businessPlatformCode(platformName),
       platformName,
       name,
+      ...(item.platformShopId !== undefined ? { platformShopId: String(item.platformShopId || '').trim() || null } : {}),
+      ...(Array.isArray(item.aliases) ? { aliases: stringArray(item.aliases) } : {}),
       active: item.isActive !== false && platform?.isActive !== false,
     }];
   });
@@ -147,6 +151,8 @@ export function createPrismaBrowserCatalogRepository(prisma: BrowserCatalogPrism
       businessPlatformName: business.platformName,
       platform: business.platformCode,
       displayName: business.name,
+      platformShopId: business.platformShopId !== undefined ? business.platformShopId : stored.platformShopId,
+      aliases: business.aliases !== undefined ? business.aliases : stored.aliases,
       active: stored.active && business.active,
     };
   };

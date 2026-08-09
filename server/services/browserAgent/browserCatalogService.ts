@@ -53,6 +53,8 @@ export type BusinessShopDirectoryEntry = {
   platformCode: string;
   platformName: string;
   name: string;
+  platformShopId?: string | null;
+  aliases?: string[];
   active: boolean;
 };
 
@@ -208,6 +210,55 @@ function uniqueConflict(error: unknown) {
 
 export function createBrowserCatalogService(deps: { repository: BrowserCatalogRepository }) {
   const { repository } = deps;
+
+  async function syncBusinessShop(
+    businessShopId: string,
+    actor: AuthenticatedUser,
+  ): Promise<BrowserCatalogResponse<BrowserShopBinding>> {
+    const id = cleanText(businessShopId);
+    const businessShop = id ? await repository.findBusinessShopById(id) : null;
+    if (!businessShop) return catalogFailure('业务店铺不存在', 404, 'SHOP_BINDING_NOT_FOUND');
+    if (businessShop.platformCode.toUpperCase() !== 'DOUYIN') {
+      return catalogFailure('当前浏览器员工MVP仅支持抖音店铺', 400, 'INVALID_INPUT');
+    }
+    const existing = (await repository.listShops()).find((shop) => shop.businessShopId === businessShop.id);
+    const platformShopId = businessShop.platformShopId !== undefined
+      ? cleanText(businessShop.platformShopId)
+      : cleanText(existing?.platformShopId);
+    if (!existing && !platformShopId) {
+      return catalogFailure('请先在业务平台与店铺中填写平台店铺ID', 400, 'INVALID_INPUT');
+    }
+    const values = {
+      businessPlatformId: businessShop.platformId,
+      businessShopId: businessShop.id,
+      platform: 'DOUYIN',
+      platformShopId: platformShopId || null,
+      displayName: businessShop.name,
+      aliases: businessShop.aliases !== undefined ? uniqueTexts(businessShop.aliases) : (existing?.aliases || []),
+      source: '抖音电商',
+      sourceName: '飞鸽客服',
+      sourceType: '公司资源',
+      active: businessShop.active,
+    };
+    try {
+      if (existing) {
+        const updated = await repository.updateShop(existing.id, values);
+        return updated ? success(updated) : catalogFailure('店铺绑定不存在', 404, 'SHOP_BINDING_NOT_FOUND');
+      }
+      return success(await repository.createShop({
+        id: randomUUID(),
+        ...values,
+        shopKey: `business-${businessShop.id}`,
+        createdById: actor.id,
+        createdByName: actor.name,
+      }));
+    } catch (error) {
+      if (uniqueConflict(error)) {
+        return catalogFailure('该业务店铺已接入浏览器员工', 409, 'SHOP_KEY_CONFLICT');
+      }
+      throw error;
+    }
+  }
 
   async function saveMapping(
     input: BrowserProductMappingInput,
@@ -393,6 +444,7 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
   }
 
   return {
+    syncBusinessShop,
     async listRuntimeShops() {
       const shops = (await repository.listShops())
         .filter((shop) => shop.active && cleanText(shop.platform).toUpperCase() === 'DOUYIN')
