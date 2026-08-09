@@ -101,3 +101,40 @@ export type BrowserCatalogApiResponse<T> = {
   message: string;
   errorCode?: BrowserCatalogErrorCode;
 };
+
+export type BrowserScriptContactState = 'ANY' | 'MISSING' | 'PRESENT';
+
+export type BrowserScriptTemplate = {
+  id: string;
+  title: string;
+  content: string;
+  enabled: boolean;
+  sortOrder: number;
+  priority: number;
+  match: {
+    orderStatuses: string[];
+    productKeywords: string[];
+    contactState: BrowserScriptContactState;
+  };
+};
+
+export type BrowserScriptGroup = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  sortOrder: number;
+  scripts: BrowserScriptTemplate[];
+};
+
+export type BrowserScriptLibrary = {
+  schemaVersion: 1;
+  revision: number;
+  groups: BrowserScriptGroup[];
+  updatedAt: string;
+  updatedBy: { id: string; name: string };
+};
+
+export type BrowserScriptLibraryView = {
+  library: BrowserScriptLibrary;
+  canManage: boolean;
+};

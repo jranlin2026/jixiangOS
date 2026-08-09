@@ -4,6 +4,7 @@ import { Box, Paper, Tab, Tabs, Typography } from '@mui/material';
 import RolePermission from './RolePermission';
 import ProductConfigPage from './ProductConfig';
 import BrowserAgentConfigPage from './BrowserAgentConfig';
+import BrowserScriptLibraryConfigPage from './BrowserScriptLibraryConfig';
 import EmployeeDepartmentManagement from './EmployeeDepartmentManagement';
 import PositionManagement from './PositionManagement';
 import PositionGovernance from './PositionGovernance';
@@ -114,6 +115,20 @@ const Settings: React.FC = () => {
       description: '客户成功自动分配规则',
       tabs: [
         { label: '客户成功分配', permissionKey: PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT, component: <DeliveryAssignmentConfig /> },
+      ],
+    },
+    {
+      key: 'aiEmployee',
+      label: 'AI员工设置',
+      description: '浏览器客服员工的话术和执行规则',
+      tabs: [
+        {
+          key: 'scriptLibrary',
+          label: '浏览器客服话术',
+          permissionKey: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE,
+          superAdminOnly: true,
+          component: <BrowserScriptLibraryConfigPage />,
+        },
       ],
     },
     {

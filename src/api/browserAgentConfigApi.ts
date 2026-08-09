@@ -6,6 +6,8 @@ import type {
   BrowserProductMappingInput,
   BrowserShopBinding,
   BrowserShopInput,
+  BrowserScriptLibrary,
+  BrowserScriptLibraryView,
 } from '../types/browserAgent';
 
 async function catalogRequest<T>(path: string, init?: RequestInit): Promise<BrowserCatalogApiResponse<T>> {
@@ -13,6 +15,13 @@ async function catalogRequest<T>(path: string, init?: RequestInit): Promise<Brow
 }
 
 export const browserAgentConfigApi = {
+  getScriptLibrary: () => catalogRequest<BrowserScriptLibraryView>('/browser-agent/script-library'),
+
+  saveScriptLibrary: (library: BrowserScriptLibrary) => catalogRequest<BrowserScriptLibraryView>(
+    '/browser-agent/script-library',
+    { method: 'PUT', body: JSON.stringify(library) },
+  ),
+
   getCatalog: () => catalogRequest<BrowserAgentCatalog>('/browser-agent/catalog'),
 
   syncBusinessShop: (id: string) => catalogRequest<BrowserShopBinding>(

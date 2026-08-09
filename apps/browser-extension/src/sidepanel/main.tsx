@@ -17,16 +17,13 @@ import { hasRequiredIntakeContext } from '../shared/contracts';
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
 import { activeTabCommand } from '../shared/activeTabMessaging';
 import { withWorkerTimeout } from '../shared/workerMessaging';
+import { scriptLibrarySettingsUrl } from '../shared/osSettingsUrl';
 import {
   matchScript,
-  recommendationKey,
-  shouldAttemptAutoFill,
-  type ScriptLibrary,
   type ScriptLibraryView,
   type ScriptMatch,
 } from '../domain/scriptLibrary';
 import { isIntakeEligibleOrderStatus } from '../domain/orderCompletion';
-import { ScriptLibraryEditor } from './ScriptLibraryEditor';
 import { ScriptLibrarySection } from './ScriptLibrarySection';
 import { FeedbackDialog } from './FeedbackDialog';
 import {
@@ -134,13 +131,9 @@ function App() {
   } = panel;
   const [scriptView, setScriptView] = useState<ScriptLibraryView | null>(null);
   const [scriptLibraryError, setScriptLibraryError] = useState('');
-  const [scriptDraft, setScriptDraft] = useState<ScriptLibrary | null>(null);
-  const [managingScripts, setManagingScripts] = useState(false);
-  const [savingScripts, setSavingScripts] = useState(false);
   const [recommendationMessage, setRecommendationMessage] = useState('');
   const [recommendation, setRecommendation] = useState<ScriptMatch | null>(null);
   const [recognition, setRecognition] = useState<RecognitionSnapshot | null>(null);
-  const attemptedRecommendationKeys = useRef(new Set<string>());
   const recognitionSequence = useRef(0);
   const evaluatedRecognition = useRef(0);
   const attemptSequence = useRef(0);
@@ -177,12 +170,9 @@ function App() {
     setNotice('');
     setScriptView(null);
     setScriptLibraryError('');
-    setScriptDraft(null);
-    setManagingScripts(false);
     setRecommendationMessage('');
     setRecommendation(null);
     setRecognition(null);
-    attemptedRecommendationKeys.current.clear();
     if (sessionExpiredMessage) setError(sessionExpiredMessage);
   };
 
@@ -216,7 +206,22 @@ function App() {
     && (form.phone.trim() || form.wechat.trim()) && selectedShop && contactConfirmed
     && hasRequiredIntakeContext(context) && isIntakeEligibleOrderStatus(context.orderStatus) && !loggingOut);
   const canIntake = canRunAuthoritativePreflight
-    && (productPreviewStatus === 'READY' || pageShopMismatch);
+    && productPreviewStatus === 'READY'
+    && !pageShopMismatch;
+  const intakeBlockedReason = sync ? ''
+    : !context ? '请先刷新识别当前会话'
+      : !context.supported ? '当前页面不是受支持的抖店飞鸽会话'
+        : !context.customerDisplayName.trim() ? '未识别客户昵称，请刷新当前会话'
+          : !context.platformOrderNo.trim() ? '未识别平台订单号，请展开订单后刷新'
+            : !hasRequiredIntakeContext(context) ? '订单必要信息尚未识别完整，请展开订单后刷新'
+              : !selectedShop ? '请先选择当前店铺'
+                : pageShopMismatch ? '当前页面店铺与绑定店铺不一致'
+                  : !(form.phone.trim() || form.wechat.trim()) ? '请至少填写手机号或微信号'
+                    : !contactConfirmed ? '请先核对并确认客户资料'
+                      : !isIntakeEligibleOrderStatus(context.orderStatus) ? '当前订单状态暂不支持入OS'
+                        : productPreviewStatus === 'LOADING' ? '正在校验订单与商品信息'
+                          : productPreviewStatus === 'FAILED' ? '订单或商品校验失败，请按上方提示处理'
+                            : '请根据上方提示完善信息';
   const workflowLabel = useMemo(() => {
     if (completion?.stage === 'COMPLETED') return '订单闭环已完成';
     if (sync) return '线索已入库，待完成订单';
@@ -233,33 +238,7 @@ function App() {
       hasContact: recognition.hasContact,
     });
     setRecommendation(nextRecommendation);
-    if (!nextRecommendation) {
-      setRecommendationMessage('');
-      return;
-    }
-    const key = recommendationKey(recognition.context.platformOrderNo, nextRecommendation.script.id);
-    if (!shouldAttemptAutoFill({
-      orderNo: recognition.context.platformOrderNo,
-      orderStatus: recognition.context.orderStatus,
-      key,
-      attemptedKeys: attemptedRecommendationKeys.current,
-    })) return;
-    attemptedRecommendationKeys.current.add(key);
-    void activeTabCommand({
-      type: 'FILL_FEIGE_REPLY_IF_EMPTY',
-      text: nextRecommendation.script.content,
-      expectedOrderNo: recognition.context.platformOrderNo,
-      expectedCustomerDisplayName: recognition.context.customerDisplayName,
-    })
-      .then((result) => {
-        if (!result.ok) {
-          setRecommendationMessage(`已推荐话术，自动填入失败：${result.message}`);
-          return;
-        }
-        if ('filled' in result && result.filled) setRecommendationMessage('已自动填入，请客服确认后发送');
-        else setRecommendationMessage('输入框已有内容，仅提供推荐，未覆盖人工输入');
-      })
-      .catch((caught) => setRecommendationMessage(`已推荐话术，自动填入失败：${caught instanceof Error ? caught.message : '执行失败'}`));
+    setRecommendationMessage(nextRecommendation ? '点击推荐话术后，将追加到回复框末尾。' : '');
   }, [recognition, scriptView]);
 
   useEffect(() => {
@@ -522,35 +501,6 @@ function App() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : '填入话术失败'); }
   };
 
-  const beginManageScripts = () => {
-    if (!scriptView?.canManage) return;
-    setScriptDraft(structuredClone(scriptView.library));
-    setManagingScripts(true);
-  };
-
-  const saveScripts = async () => {
-    if (!scriptDraft) return;
-    setSavingScripts(true); setError(''); setNotice('');
-    try {
-      const result = await worker<ScriptLibraryView>({ type: 'SAVE_SCRIPT_LIBRARY', library: scriptDraft });
-      if (result.code !== 0 || !result.data) {
-        if (result.code === 409) {
-          await loadScriptLibrary();
-          setManagingScripts(false);
-        }
-        throw new Error(result.message);
-      }
-      setScriptView(result.data);
-      setScriptDraft(structuredClone(result.data.library));
-      setRecommendation(null);
-      setRecommendationMessage('');
-      setManagingScripts(false);
-      setNotice('话术库已更新，公司插件下次加载即使用新版本');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '话术保存失败');
-    } finally { setSavingScripts(false); }
-  };
-
   const completeOrder = async () => {
     if (loggingOutRef.current) return;
     const attempt = completionAttemptSnapshot(panel);
@@ -735,12 +685,6 @@ function App() {
     {feedbackDialog}
   </main>;
 
-  if (managingScripts && scriptDraft) return <main className="shell">
-    <header><span className="brand-mark">JX</span><div><h1>飞鸽客服副驾驶</h1><p>{auth.operator.name}·话术库管理</p></div></header>
-    <ScriptLibraryEditor library={scriptDraft} saving={savingScripts} onChange={setScriptDraft} onSave={() => void saveScripts()} onCancel={() => setManagingScripts(false)} />
-    {feedbackDialog}
-  </main>;
-
   return <main className="shell">
     <header><span className="brand-mark">JX</span><div><h1>飞鸽客服副驾驶</h1><p>{auth.operator.name}·{workflowLabel}</p></div><button className="text-button" disabled={loggingOut} onClick={() => void logout()}>{loggingOut ? '正在退出…' : '退出'}</button></header>
     {feedbackDialog}
@@ -788,7 +732,7 @@ function App() {
       recommendationMessage={recommendationMessage}
       loadError={scriptLibraryError}
       onFill={(text) => void fillScript(text)}
-      onManage={beginManageScripts}
+      onManage={() => window.open(scriptLibrarySettingsUrl(apiBaseUrl), '_blank', 'noopener,noreferrer')}
       onRetry={() => {
         setError('');
         void loadScriptLibrary().catch((caught) => setError(caught instanceof Error ? caught.message : '话术加载失败'));
@@ -797,12 +741,12 @@ function App() {
 
     <section className="card">
       <div className="section-title"><h2>联系方式</h2><span className={`status ${form.phone || form.wechat ? 'ready' : ''}`}>{form.phone || form.wechat ? '已获取' : '待获取'}</span></div>
-      <div className="source-switch"><button disabled={completionFormLocked} className={form.source === 'CHAT' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'CHAT' })}>客户聊天提供</button><button disabled={completionFormLocked} className={form.source === 'OFF_PLATFORM' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'OFF_PLATFORM' })}>站外已获取</button></div>
-      <label>抖音昵称<input value={form.name} readOnly placeholder="请先刷新识别当前客户" /></label>
+      <div className="source-switch" role="radiogroup" aria-label="联系方式来源"><button role="radio" aria-checked={form.source === 'CHAT'} disabled={completionFormLocked} className={form.source === 'CHAT' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'CHAT' })}>聊天中提供</button><button role="radio" aria-checked={form.source === 'OFF_PLATFORM'} disabled={completionFormLocked} className={form.source === 'OFF_PLATFORM' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'OFF_PLATFORM' })}>客服站外补录</button></div>
+      <p className="source-description">{form.source === 'CHAT' ? '客户在当前飞鸽会话中发送了手机号或微信号。' : '客服通过电话、微信等站外方式取得联系方式后手工补录。'}</p>
+      <div className="customer-summary"><span>客户昵称</span><strong>{form.name || '请先刷新识别当前客户'}</strong></div>
       <label>手机号<input disabled={completionFormLocked} value={form.phone} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'phone', value: event.target.value })} placeholder="手机号和微信至少填一项" /></label>
       <label>微信号<input disabled={completionFormLocked} value={form.wechat} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'wechat', value: event.target.value })} placeholder="可选" /></label>
-      <label className="confirm-row"><input disabled={completionFormLocked} type="checkbox" checked={contactConfirmed} onChange={(event) => dispatchPanel({ type: 'SET_CONTACT_CONFIRMED', value: event.target.checked })} /> 我已确认昵称和联系方式属于当前订单</label>
-      <button data-action="complete-order" className="primary" disabled={busy || loggingOut || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '一键入OS并备注订单'}</button>
+      <label className="confirm-row contact-confirm"><input disabled={completionFormLocked} type="checkbox" checked={contactConfirmed} onChange={(event) => dispatchPanel({ type: 'SET_CONTACT_CONFIRMED', value: event.target.checked })} /> 已核对：昵称、联系方式与当前订单属于同一客户</label>
     </section>
 
     {(completion || sync) && <section className="card result-card">
@@ -824,6 +768,10 @@ function App() {
         <button className="secondary" disabled={busy || loggingOut || !canIntake} onClick={() => void completeOrder()}>{busy ? '正在重试…' : '重试订单备注和红旗'}</button>
       </div>}
     </section>}
+    <div className="sticky-primary-action">
+      {!sync && !canIntake && <p className="action-reason">{intakeBlockedReason}</p>}
+      <button data-action="complete-order" className="primary" disabled={busy || loggingOut || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '入OS并写入订单备注'}</button>
+    </div>
   </main>;
 }
 

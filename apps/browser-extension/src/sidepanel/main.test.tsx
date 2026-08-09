@@ -67,9 +67,21 @@ let completePageCalls = 0;
 let reportCalls = 0;
 const savedConfigs: unknown[] = [];
 const scriptView = {
-  library: { schemaVersion: 1, revision: 1, groups: [], updatedAt: '', updatedBy: { id: 'u1', name: '客服甲' } },
+  library: {
+    schemaVersion: 1,
+    revision: 1,
+    groups: [{
+      id: 'paid', name: '付款用户', enabled: true, sortOrder: 1,
+      scripts: [{
+        id: 'paid-script', title: '付款确认', content: '已收到您的付款。', enabled: true, sortOrder: 1, priority: 10,
+        match: { orderStatuses: ['已付款'], productKeywords: [], contactState: 'ANY' },
+      }],
+    }],
+    updatedAt: '', updatedBy: { id: 'u1', name: '客服甲' },
+  },
   canManage: false,
 };
+const pageMessageTypes: string[] = [];
 let releaseInitialPreview!: () => void;
 const initialPreviewGate = new Promise<void>((resolve) => { releaseInitialPreview = resolve; });
 let holdInitialPreview = true;
@@ -204,9 +216,11 @@ const chromeMock = {
   tabs: {
     query: async () => [{ id: 1, url: context.pageUrl }],
     sendMessage: async (_tabId: number, message: any) => {
+      pageMessageTypes.push(message.type);
       if (message.type === 'READ_FEIGE_CONTEXT') {
         return { ok: true, context: pageContext, detectedContact: { phone: '13800138000' } };
       }
+      if (message.type === 'APPEND_FEIGE_REPLY') return { ok: true, appended: true };
       if (message.type === 'COMPLETE_FEIGE_OS_ORDER') {
         completePageCalls += 1;
         completeInput = message.input;
@@ -256,6 +270,17 @@ assert.equal(shopBindingRow?.firstElementChild?.textContent, '绑定店铺');
 assert.equal(shopSelect.value, '', '多店铺不得自动猜测');
 const completeButton = await waitFor<HTMLButtonElement>('button[data-action="complete-order"]');
 assert.equal(completeButton.disabled, true, '多店铺未选择时必须阻止入库');
+assert.ok(completeButton.closest('.sticky-primary-action'), '入OS主操作必须固定在插件底部操作区');
+assert.equal(completeButton.textContent, '入OS并写入订单备注');
+assert.match(document.body.textContent || '', /聊天中提供/);
+assert.match(document.body.textContent || '', /客服站外补录/);
+assert.match(document.body.textContent || '', /已核对：昵称、联系方式与当前订单属于同一客户/);
+await waitFor('.primary-recommendation', (node) => (node.textContent || '').includes('付款确认'));
+assert.equal(pageMessageTypes.includes('FILL_FEIGE_REPLY_IF_EMPTY'), false, '推荐话术只能由客服点击填入，不得自动改写回复框');
+document.querySelector<HTMLButtonElement>('.primary-recommendation')?.click();
+await waitFor<HTMLElement>('[role="dialog"]', (node) => (node.textContent || '').includes('话术已追加到飞鸽'));
+assert.equal(pageMessageTypes.includes('APPEND_FEIGE_REPLY'), true, '客服点击推荐话术后才应追加到回复框');
+document.querySelector<HTMLButtonElement>('[role="dialog"] .feedback-confirm')?.click();
 
 shopSelect.value = 'shop-1';
 shopSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
@@ -315,37 +340,22 @@ pageContext = {
 document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
 await waitFor('.context-card', (node) => (node.textContent || '').includes('当前页面店铺与已选店铺绑定不一致'));
 document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
+assert.equal(completeButton.disabled, true, '页面店铺与绑定店铺不一致时必须阻止入OS');
+assert.match(document.querySelector('.action-reason')?.textContent || '', /店铺.*不一致/);
 pageContext = {
   ...context,
   platformOrderNo: 'ORDER-CACHED-MISMATCH',
   platformProductId: 'DY-CACHED-MISMATCH',
 };
-await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
-const previewCountBeforeCachedMismatchClick = previewInputs.length;
-const productCallCountBeforeCachedMismatchClick = productWorkerCallOrder.length;
-intakeSucceeds = true;
-completeButton.click();
-const cachedMismatchReconfirm = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
-  (node.textContent || '').includes('订单信息已变化，请确认后重试')
-));
-assert.equal(previewInputs.length >= previewCountBeforeCachedMismatchClick + 1, true, '缓存店铺不一致时，最新页面预检后仍必须在创建线索前权威预览');
-assert.equal(previewInputs[previewCountBeforeCachedMismatchClick]?.pageShopDisplayName, '极享官方店');
-assert.deepEqual(productWorkerCallOrder.slice(productCallCountBeforeCachedMismatchClick), [
-  'PREVIEW_PRODUCT_MAPPING',
-], '页面店铺从不匹配恢复后，首次点击只能更新预览并要求重新确认');
-assert.equal(intakeInputs.length, 0, '首次点击未展示过最新预览时不得入库');
-cachedMismatchReconfirm.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
+document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
+await waitFor('.context-card', (node) => !(node.textContent || '').includes('当前页面店铺与已选店铺绑定不一致') && (node.textContent || '').includes('OS产品淘金AI'));
 document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
 await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
+intakeSucceeds = true;
 completeButton.click();
 const cachedMismatchSuccess = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
   (node.textContent || '').includes('操作成功')
 ));
-assert.deepEqual(productWorkerCallOrder.slice(productCallCountBeforeCachedMismatchClick), [
-  'PREVIEW_PRODUCT_MAPPING',
-  'PREVIEW_PRODUCT_MAPPING',
-  'CREATE_LEAD_INTAKE',
-], '重新确认后仍必须先再做一次权威预览，才能创建线索');
 assert.equal(intakeInputs.at(-1)?.pageShopDisplayName, '极享官方店', '点击后必须使用最新预检店铺');
 cachedMismatchSuccess.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
 intakeSucceeds = false;
