@@ -60,6 +60,66 @@ assert.equal(realOrderFacts.paymentAmount, 299, '实付金额必须保留平台�
 assert.equal(realOrderFacts.paymentAt, '2026-08-08T19:34:20+08:00');
 assert.equal(realOrderFacts.readyForIntake, true, '唯一商品名、精确实付和有效付款时间齐全才可入库');
 
+const liveAccountPopoverShopDom = new JSDOM(`<!doctype html><html><body>
+  <main id="workspace-chat"><span data-jx-customer-name>御康源健康管理</span></main>
+  <div data-btm="c4455" role="button">
+    <div>
+      <div aria-hidden="true"></div>
+      <div>
+        <div style="overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1;">林恩光</div>
+        <div style="overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1;">
+          <div class="rmrc7AcICV34ReetAMIQ">极享智能体</div>
+        </div>
+      </div>
+    </div>
+    <div>切换状态</div>
+  </div>
+</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+const liveAccountPopoverShop = createDouyinFeigeAdapter(
+  liveAccountPopoverShopDom.window.document,
+  liveAccountPopoverShopDom.window.location.href,
+).readContext();
+assert.equal(
+  liveAccountPopoverShop.shopDisplayName,
+  '极享智能体',
+  '飞鸽账号状态弹层中客服姓名下方的第二行应识别为店铺名',
+);
+
+const incompleteAccountPopoverDom = new JSDOM(`<!doctype html><html><body>
+  <main id="workspace-chat"></main>
+  <div data-btm="c4455" role="button">
+    <div style="display: -webkit-box; -webkit-line-clamp: 1;">林恩光</div>
+  </div>
+</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+assert.equal(
+  createDouyinFeigeAdapter(
+    incompleteAccountPopoverDom.window.document,
+    incompleteAccountPopoverDom.window.location.href,
+  ).readContext().shopDisplayName,
+  '',
+  '账号区域只有客服姓名时不得猜测店铺',
+);
+
+const ambiguousAccountPopoverDom = new JSDOM(`<!doctype html><html><body>
+  <main id="workspace-chat"></main>
+  <div data-btm="c4455" role="button">
+    <div style="display: -webkit-box; -webkit-line-clamp: 1;">林恩光</div>
+    <div style="display: -webkit-box; -webkit-line-clamp: 1;">极享智能体</div>
+  </div>
+  <div data-btm="c4455" role="button">
+    <div style="display: -webkit-box; -webkit-line-clamp: 1;">其他客服</div>
+    <div style="display: -webkit-box; -webkit-line-clamp: 1;">其他店铺</div>
+  </div>
+</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+assert.equal(
+  createDouyinFeigeAdapter(
+    ambiguousAccountPopoverDom.window.document,
+    ambiguousAccountPopoverDom.window.location.href,
+  ).readContext().shopDisplayName,
+  '',
+  '同时存在多个可见账号区域时必须失败关闭',
+);
+
 const ancestorProductIdentityDom = new JSDOM(`<!doctype html><html><body>
   <main data-jx-feige-conversation><span data-jx-customer-name>海盗船长</span></main>
   <section data-testid="order-card">

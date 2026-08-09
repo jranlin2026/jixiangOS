@@ -276,7 +276,20 @@ function shopDisplayNameFromPage(document: Document) {
   const candidates = uniqueMatches(document, selectors.shop)
     .filter(isVisible)
     .filter((element) => Boolean(element.textContent?.trim()));
-  return candidates.length === 1 ? candidates[0].textContent?.trim() || '' : '';
+  if (candidates.length === 1) return candidates[0].textContent?.trim() || '';
+  if (candidates.length > 1) return '';
+
+  const accountRegions = [...document.querySelectorAll<HTMLElement>('[data-btm="c4455"][role="button"]')]
+    .filter(isVisible);
+  if (accountRegions.length !== 1) return '';
+
+  const identityLines = [...accountRegions[0].querySelectorAll<HTMLElement>('[style]')]
+    .filter(isVisible)
+    .filter((element) => element.style.getPropertyValue('-webkit-line-clamp').trim() === '1')
+    .map((element) => element.textContent?.trim() || '')
+    .filter(Boolean);
+  const uniqueIdentityLines = [...new Set(identityLines)];
+  return uniqueIdentityLines.length === 2 ? uniqueIdentityLines[1] : '';
 }
 
 function activeOrderContainer(orderCard: HTMLElement) {
