@@ -250,6 +250,9 @@ inputValue(loginInputs[2], 'password');
 document.querySelector<HTMLButtonElement>('.login-card .primary')?.click();
 
 const shopSelect = await waitFor<HTMLSelectElement>('select[aria-label="绑定店铺"]');
+const shopBindingRow = shopSelect.closest('.shop-binding-row');
+assert.ok(shopBindingRow, '店铺标题和下拉框应在同一水平行');
+assert.equal(shopBindingRow?.firstElementChild?.textContent, '绑定店铺');
 assert.equal(shopSelect.value, '', '多店铺不得自动猜测');
 const completeButton = await waitFor<HTMLButtonElement>('button[data-action="complete-order"]');
 assert.equal(completeButton.disabled, true, '多店铺未选择时必须阻止入库');
@@ -262,8 +265,10 @@ await waitFor('.context-card', (node) => (node.textContent || '').includes('正�
 assert.equal(completeButton.disabled, true, '权威预览加载中必须禁用最终操作');
 assert.equal(intakeInputs.length, 0);
 releaseInitialPreview();
-assert.match(document.body.textContent || '', /绑定店铺极享官方店/);
+assert.equal(shopSelect.selectedOptions[0]?.textContent, '极享官方店');
 assert.match(document.body.textContent || '', /平台商品淘金AI 多模态创作智能体 读书卡/);
+assert.equal(document.querySelector('[data-field="platform-payment-amount"]')?.textContent, '平台实付金额¥399.00');
+assert.equal(document.querySelector('[data-field="platform-payment-time"]')?.textContent, '平台付款时间2026/08/08 19:34:20');
 await waitFor('.context-card', (node) => (node.textContent || '').includes('OS产品淘金AI'));
 assert.match(document.body.textContent || '', /OS产品淘金AI/);
 assert.equal(intakeInputs.length, 0, '权威匹配预览必须发生在线索创建之前');

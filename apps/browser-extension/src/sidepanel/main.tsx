@@ -71,6 +71,23 @@ function normalizedFact(value: unknown) {
   return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ');
 }
 
+function formatPlatformPaymentAmount(value?: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? `¥${value.toFixed(2)}` : '未识别';
+}
+
+function formatPlatformPaymentTime(value?: string) {
+  if (!value) return '未识别';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '未识别';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || '';
+  return `${part('year')}/${part('month')}/${part('day')} ${part('hour')}:${part('minute')}:${part('second')}`;
+}
+
 function sameOptionalInstant(left?: string, right?: string) {
   if (!left && !right) return true;
   if (!left || !right) return false;
@@ -730,7 +747,7 @@ function App() {
 
     <section className="card context-card">
       <div className="section-title"><h2>当前会话</h2><button className="secondary compact" disabled={busy || loggingOut} onClick={() => void refreshContext()}>刷新识别</button></div>
-      {runtimeConfig && runtimeConfig.shops.length > 1 ? <label>绑定店铺
+      {runtimeConfig && runtimeConfig.shops.length ? <div className="shop-binding-row"><span>绑定店铺</span>
         <select
           aria-label="绑定店铺"
           disabled={busy || loggingOut || completionFormLocked}
@@ -740,18 +757,19 @@ function App() {
           <option value="">请选择当前店铺</option>
           {runtimeConfig.shops.map((shop) => <option key={shop.id} value={shop.id}>{shop.displayName}</option>)}
         </select>
-      </label> : null}
+      </div> : null}
       {context ? <div className="facts">
         <div><span>客户</span><strong>{context.customerDisplayName || '未识别'}</strong></div>
         <div><span>订单</span><strong>{context.platformOrderNo || '未识别'}</strong></div>
         <div><span>订单状态</span><strong>{context.orderStatus || '未识别'}</strong></div>
-        <div><span>绑定店铺</span><strong>{selectedShop?.displayName || '未选择'}</strong></div>
         <div><span>平台商品</span><strong>{context.productName || '未识别'}</strong></div>
         <div><span>OS产品</span><strong>{productPreview?.status === 'MATCHED'
           ? productPreview.osProductName || '已匹配'
           : productPreview?.status === 'UNMATCHED'
             ? '未匹配（不影响入OS）'
             : productPreviewStatus === 'LOADING' ? '正在匹配…' : '待匹配预览'}</strong></div>
+        <div data-field="platform-payment-amount"><span>平台实付金额</span><strong>{formatPlatformPaymentAmount(context.paymentAmount)}</strong></div>
+        <div data-field="platform-payment-time"><span>平台付款时间</span><strong>{formatPlatformPaymentTime(context.paymentAt)}</strong></div>
       </div> : <p className="empty">请打开抖店飞鸽客服会话，然后点击“刷新识别”。</p>}
       {criticalDiagnostics.length ? <ul className="diagnostics">{criticalDiagnostics.map((item) => <li key={item}>{item}</li>)}</ul> : null}
       {runtimeConfig && runtimeConfig.shops.length > 1 && !selectedShop
