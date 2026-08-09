@@ -11,13 +11,13 @@ type MutationMode = 'success' | 'server-error' | 'network-error';
 
 const shops: BrowserShopBinding[] = [
   {
-    id: 'shop-1', platform: 'DOUYIN', shopKey: 'shop-one', platformShopId: 'DY-SHOP-1',
+    id: 'shop-1', businessPlatformId: 'platform-douyin', businessShopId: 'business-shop-1', platform: 'DOUYIN', shopKey: 'shop-one', platformShopId: 'DY-SHOP-1',
     displayName: '一号店铺', aliases: ['店铺一'], sourceType: '公司资源', source: '抖音电商',
     sourceName: '飞鸽客服', active: true, createdById: 'admin-1', createdByName: '管理员',
     createdAt: '2026-08-08T08:00:00.000Z', updatedAt: '2026-08-08T08:00:00.000Z',
   },
   {
-    id: 'shop-2', platform: 'DOUYIN', shopKey: 'shop-two', platformShopId: 'DY-SHOP-2',
+    id: 'shop-2', businessPlatformId: 'platform-douyin', businessShopId: 'business-shop-2', platform: 'DOUYIN', shopKey: 'shop-two', platformShopId: 'DY-SHOP-2',
     displayName: '二号店铺', aliases: ['店铺二'], sourceType: '公司资源', source: '抖音电商',
     sourceName: '飞鸽客服', active: true, createdById: 'admin-1', createdByName: '管理员',
     createdAt: '2026-08-08T08:00:00.000Z', updatedAt: '2026-08-08T08:00:00.000Z',
@@ -90,6 +90,10 @@ function backendFixture() {
     shops: structuredClone(shops),
     mappings: structuredClone(mappings),
     products: products.map(({ id, name, price, isActive }) => ({ id, name, price, isActive })),
+    businessShops: [
+      { id: 'business-shop-1', platformId: 'platform-douyin', platformCode: 'DOUYIN', platformName: '抖音小店', name: '一号店铺', active: true },
+      { id: 'business-shop-2', platformId: 'platform-douyin', platformCode: 'DOUYIN', platformName: '抖音小店', name: '二号店铺', active: true },
+    ],
   };
   const requests: Array<{ url: string; method: string; body: unknown }> = [];
   let nextMappingMutation: MutationMode = 'success';
@@ -211,10 +215,10 @@ async function dismissFeedback() {
 }
 
 async function closeEditDialog() {
-  const dialog = [...document.querySelectorAll('[role="dialog"]')].find((item) => item.textContent?.includes('编辑店铺绑定'));
+  const dialog = [...document.querySelectorAll('[role="dialog"]')].find((item) => item.textContent?.includes('编辑店铺接入'));
   assert.ok(dialog, '键盘激活编辑按钮应打开真实店铺表单');
   dispatchClick(findButton('取消', dialog));
-  await waitFor('店铺编辑弹窗关闭', () => ![...document.querySelectorAll('[role="dialog"]')].some((item) => item.textContent?.includes('编辑店铺绑定')));
+  await waitFor('店铺编辑弹窗关闭', () => ![...document.querySelectorAll('[role="dialog"]')].some((item) => item.textContent?.includes('编辑店铺接入')));
 }
 
 async function exerciseRealPageWorkflow() {
@@ -246,7 +250,7 @@ async function exerciseRealPageWorkflow() {
   const desktopEdit = findButton('编辑', shopOneRow);
   dispatchKey(desktopEdit, 'Enter');
   dispatchClick(desktopEdit);
-  await waitFor('桌面行编辑按钮键盘激活', () => document.body.textContent?.includes('编辑店铺绑定') === true);
+  await waitFor('桌面行编辑按钮键盘激活', () => document.body.textContent?.includes('编辑店铺接入') === true);
   assert.ok(document.body.textContent?.includes('当前店铺：二号店铺'), '嵌套按钮的Enter不得冒泡选中所在行');
   await closeEditDialog();
 
@@ -254,7 +258,7 @@ async function exerciseRealPageWorkflow() {
   const mobileEdit = findButton('编辑', shopOneCard);
   dispatchKey(mobileEdit, ' ');
   dispatchClick(mobileEdit);
-  await waitFor('手机卡片编辑按钮键盘激活', () => document.body.textContent?.includes('编辑店铺绑定') === true);
+  await waitFor('手机卡片编辑按钮键盘激活', () => document.body.textContent?.includes('编辑店铺接入') === true);
   assert.ok(document.body.textContent?.includes('当前店铺：二号店铺'), '嵌套按钮的Space不得冒泡选中所在卡片');
   await closeEditDialog();
 

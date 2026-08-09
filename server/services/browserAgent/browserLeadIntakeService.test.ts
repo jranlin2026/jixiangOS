@@ -17,7 +17,8 @@ const actor = {
 
 const shops = [
   {
-    id: 'binding-a', platform: 'DOUYIN', shopKey: 'jixiang-a', platformShopId: 'dy-a',
+    id: 'binding-a', businessPlatformId: 'business-platform-douyin', businessPlatformName: '抖音小店',
+    businessShopId: 'business-shop-jixiang-a', platform: 'DOUYIN', shopKey: 'jixiang-a', platformShopId: 'dy-a',
     displayName: '极享官方旗舰店', aliases: ['极享官方店'], source: '抖音电商', sourceName: '飞鸽客服',
     sourceType: '公司资源', active: true, createdById: 'admin-1', createdByName: '管理员',
   },
@@ -56,6 +57,8 @@ const mappings = [
 ];
 
 const catalogRepository: BrowserCatalogRepository = {
+  async listBusinessShops() { return []; },
+  async findBusinessShopById() { return null; },
   async listShops() { return structuredClone(shops); },
   async findShopById(id) { return structuredClone(shops.find((shop) => shop.id === id) || null); },
   async findShopByPlatformAndKey(platform, shopKey) {
@@ -250,9 +253,9 @@ assert.deepEqual(createLeadCalls[0].input, {
   source: '抖音电商',
   sourceName: '飞鸽客服',
   sourceType: '公司资源',
-  sourcePlatformId: 'DOUYIN',
-  sourcePlatformName: '抖音',
-  sourceShopId: 'jixiang-a',
+  sourcePlatformId: 'business-platform-douyin',
+  sourcePlatformName: '抖音小店',
+  sourceShopId: 'business-shop-jixiang-a',
   sourceShopName: '极享官方旗舰店',
   platformOrderNo: 'DY-20260808-A001',
   sourceProductId: 'prod-taojin',

@@ -117,6 +117,7 @@ import { createBrowserLeadIntakeService } from './services/browserAgent/browserL
 import { createPrismaBrowserLeadSyncRepository } from './services/browserAgent/prismaBrowserLeadSyncRepository';
 import { createBrowserCatalogService } from './services/browserAgent/browserCatalogService';
 import { createPrismaBrowserCatalogRepository } from './services/browserAgent/prismaBrowserCatalogRepository';
+import { referencedBusinessShopDeletion, type BusinessSourceDirectoryItem } from './services/businessShopDirectoryGuard';
 import { createBrowserScriptLibraryService } from './services/browserAgent/scriptLibraryService';
 import { createRuntimeStorageGetHandler } from './routes/runtimeStorageRoutes';
 import { createDisabledCrmCustomerImportHandler } from './routes/crmMigrationRoutes';
@@ -2059,6 +2060,39 @@ app.put('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequ
   if (!req.currentUser || !canAccessLegacyStorageKey(req.currentUser, key, 'write')) {
     res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
     return;
+  }
+  if (key === STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS) {
+    const [currentResult, linkedBindings, businessRows] = await Promise.all([
+      storageService.get(key),
+      prisma.browserShopBinding.findMany({
+        where: { businessShopId: { not: null } },
+        select: { businessShopId: true },
+      }),
+      prisma.businessRecord.findMany({
+        where: { domain: { in: [STORAGE_KEYS.LEADS, STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.ORDERS, STORAGE_KEYS.RECOVERY_ORDERS] } },
+        select: { data: true },
+      }),
+    ]);
+    const referencedShopIds = new Set<string>([
+      ...linkedBindings.map((item) => String(item.businessShopId || '')).filter(Boolean),
+      ...businessRows.map((row) => {
+        const data = row.data && typeof row.data === 'object' && !Array.isArray(row.data)
+          ? row.data as Record<string, unknown>
+          : {};
+        return String(data.sourceShopId || '');
+      }).filter(Boolean),
+    ]);
+    const current = Array.isArray(currentResult.data) ? currentResult.data as BusinessSourceDirectoryItem[] : [];
+    const next = Array.isArray(req.body?.value) ? req.body.value as BusinessSourceDirectoryItem[] : [];
+    const deleted = referencedBusinessShopDeletion(current, next, referencedShopIds);
+    if (deleted) {
+      res.status(409).json({
+        code: 409,
+        data: null,
+        message: `店铺“${String(deleted.name || '')}”已被商品映射或历史业务引用，不能删除，可改为停用`,
+      });
+      return;
+    }
   }
   const result = await storageService.set(key, req.body?.value);
   res.status(result.code === 0 ? 200 : 400).json(result);

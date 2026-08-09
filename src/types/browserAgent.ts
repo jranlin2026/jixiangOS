@@ -14,6 +14,9 @@ export type BrowserCatalogErrorCode =
 
 export type BrowserShopBinding = {
   id: string;
+  businessPlatformId?: string | null;
+  businessPlatformName?: string | null;
+  businessShopId?: string | null;
   platform: string;
   shopKey: string;
   platformShopId?: string | null;
@@ -54,13 +57,24 @@ export type BrowserCatalogProduct = {
   isActive: boolean;
 };
 
+export type BusinessShopDirectoryEntry = {
+  id: string;
+  platformId: string;
+  platformCode: string;
+  platformName: string;
+  name: string;
+  active: boolean;
+};
+
 export type BrowserAgentCatalog = {
   shops: BrowserShopBinding[];
   mappings: BrowserProductMapping[];
   products: BrowserCatalogProduct[];
+  businessShops?: BusinessShopDirectoryEntry[];
 };
 
 export type BrowserShopInput = {
+  businessShopId?: string;
   platform?: string;
   shopKey?: string;
   platformShopId?: string;

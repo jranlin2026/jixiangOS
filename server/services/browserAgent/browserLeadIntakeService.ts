@@ -430,9 +430,9 @@ export function createBrowserLeadIntakeService(deps: {
         source: binding.source,
         sourceName: binding.sourceName,
         sourceType: binding.sourceType,
-        sourcePlatformId: 'DOUYIN',
-        sourcePlatformName: '抖音',
-        sourceShopId: reserved.shopKey,
+        sourcePlatformId: binding.businessPlatformId || binding.platform,
+        sourcePlatformName: binding.businessPlatformName || '抖音',
+        sourceShopId: binding.businessShopId || reserved.shopKey,
         sourceShopName: reservedShopDisplayName,
         platformOrderNo: reserved.platformOrderNo,
         ...(reservedProduct.status === 'MATCHED' && reservedProduct.osProductId && reservedProduct.osProductName ? {

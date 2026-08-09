@@ -89,6 +89,7 @@ const Settings: React.FC = () => {
       description: '产品配置和订单类型配置',
       tabs: [
         { label: '产品配置', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <ProductConfigPage /> },
+        { label: '业务平台与店铺', permissionKey: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES, component: <AfterSalesSourceConfigPage /> },
         { label: '平台商品映射', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <BrowserAgentConfigPage /> },
         { label: '订单类型', permissionKey: PERMISSION_KEYS.SETTINGS_ORDER_TYPES, component: <OrderTypeConfigPage /> },
       ],
@@ -102,7 +103,6 @@ const Settings: React.FC = () => {
         { label: '客户生命周期', permissionKey: PERMISSION_KEYS.SETTINGS_LIFECYCLE, component: <LifecycleStatusConfigPage /> },
         { label: '客户标签', permissionKey: PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, component: <CustomerTagConfig /> },
         { label: '线索来源', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, component: <LeadSourceConfigPage /> },
-        { label: '业务平台与店铺', permissionKey: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES, component: <AfterSalesSourceConfigPage /> },
         { label: '线索流转', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, component: <LeadFlowConfigTab /> },
       ],
     },

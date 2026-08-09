@@ -11,6 +11,9 @@ import { normalizePlatformProductName, resolveBrowserProduct, type BrowserProduc
 
 export type BrowserShopBinding = {
   id: string;
+  businessPlatformId?: string | null;
+  businessPlatformName?: string | null;
+  businessShopId?: string | null;
   platform: string;
   shopKey: string;
   platformShopId?: string | null;
@@ -35,12 +38,22 @@ export type BrowserStoredProductMapping = BrowserStoreProductMapping & {
 };
 
 export type BrowserShopInput = {
+  businessShopId?: string;
   platform?: string;
   shopKey?: string;
   platformShopId?: string | null;
   displayName?: string;
   aliases?: string[];
   active?: boolean;
+};
+
+export type BusinessShopDirectoryEntry = {
+  id: string;
+  platformId: string;
+  platformCode: string;
+  platformName: string;
+  name: string;
+  active: boolean;
 };
 
 export type BrowserProductMappingInput = {
@@ -63,6 +76,8 @@ export type BrowserShopMappingRepository = {
 export type BrowserLockedShopBinding = Pick<BrowserShopBinding, 'id' | 'active'>;
 
 export type BrowserCatalogRepository = {
+  listBusinessShops(): Promise<BusinessShopDirectoryEntry[]>;
+  findBusinessShopById(id: string): Promise<BusinessShopDirectoryEntry | null>;
   listShops(): Promise<BrowserShopBinding[]>;
   findShopById(id: string): Promise<BrowserShopBinding | null>;
   findShopByPlatformAndKey(platform: string, shopKey: string): Promise<BrowserShopBinding | null>;
@@ -173,6 +188,9 @@ function platformIdentityKey(input: BrowserProductMappingInput, aliases: string[
 function runtimeShop(shop: BrowserShopBinding) {
   return {
     id: shop.id,
+    ...(shop.businessPlatformId ? { businessPlatformId: shop.businessPlatformId } : {}),
+    ...(shop.businessPlatformName ? { businessPlatformName: shop.businessPlatformName } : {}),
+    ...(shop.businessShopId ? { businessShopId: shop.businessShopId } : {}),
     platform: shop.platform,
     shopKey: shop.shopKey,
     platformShopId: shop.platformShopId ?? null,
@@ -394,16 +412,27 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     previewProductMapping,
 
     async listCatalog() {
-      const [shops, mappings, products] = await Promise.all([
-        repository.listShops(), repository.listMappings(), repository.listProducts(),
+      const [shops, mappings, products, businessShops] = await Promise.all([
+        repository.listShops(), repository.listMappings(), repository.listProducts(), repository.listBusinessShops(),
       ]);
-      return success({ shops, mappings, products });
+      return success({ shops, mappings, products, businessShops });
     },
 
     async createShop(input: BrowserShopInput, actor: AuthenticatedUser): Promise<BrowserCatalogResponse<BrowserShopBinding>> {
-      const platform = cleanText(input.platform).toUpperCase();
+      const businessShopId = cleanText(input.businessShopId);
+      const businessShop = businessShopId ? await repository.findBusinessShopById(businessShopId) : null;
+      if (businessShopId && (!businessShop || !businessShop.active)) {
+        return catalogFailure('业务店铺不存在或已停用，请先在业务平台与店铺中维护', 409, 'SHOP_BINDING_UNAVAILABLE');
+      }
+      if (businessShop && businessShop.platformCode.toUpperCase() !== 'DOUYIN') {
+        return catalogFailure('当前浏览器员工MVP仅支持抖音店铺', 400, 'INVALID_INPUT');
+      }
+      if (businessShopId && (await repository.listShops()).some((shop) => shop.businessShopId === businessShopId)) {
+        return catalogFailure('该业务店铺已接入平台商品映射，请直接编辑原配置', 409, 'SHOP_KEY_CONFLICT');
+      }
+      const platform = businessShop?.platformCode || cleanText(input.platform).toUpperCase();
       const shopKey = cleanText(input.shopKey);
-      const displayName = cleanText(input.displayName);
+      const displayName = businessShop?.name || cleanText(input.displayName);
       if (!platform || !shopKey || !displayName) {
         return catalogFailure('平台、稳定店铺标识和店铺名称不能为空', 400, 'INVALID_INPUT');
       }
@@ -413,6 +442,8 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       try {
         return success(await repository.createShop({
           id: randomUUID(),
+          businessPlatformId: businessShop?.platformId || null,
+          businessShopId: businessShop?.id || null,
           platform,
           shopKey,
           platformShopId: cleanText(input.platformShopId) || null,
@@ -440,17 +471,49 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
         || (input.platform !== undefined && cleanText(input.platform).toUpperCase() !== existing.platform)) {
         return catalogFailure('平台和稳定店铺标识创建后不可修改', 409, 'SHOP_KEY_IMMUTABLE');
       }
-      const displayName = input.displayName === undefined ? existing.displayName : cleanText(input.displayName);
+      const requestedBusinessShopId = input.businessShopId === undefined
+        ? cleanText(existing.businessShopId)
+        : cleanText(input.businessShopId);
+      if (existing.businessShopId && requestedBusinessShopId !== cleanText(existing.businessShopId)) {
+        return catalogFailure('已接入的业务店铺不能更换，请停用后重新接入', 409, 'SHOP_KEY_IMMUTABLE');
+      }
+      const businessShop = requestedBusinessShopId
+        ? await repository.findBusinessShopById(requestedBusinessShopId)
+        : null;
+      if (requestedBusinessShopId && (!businessShop || !businessShop.active)) {
+        return catalogFailure('业务店铺不存在或已停用，请先在业务平台与店铺中维护', 409, 'SHOP_BINDING_UNAVAILABLE');
+      }
+      if (businessShop && businessShop.platformCode.toUpperCase() !== 'DOUYIN') {
+        return catalogFailure('当前浏览器员工MVP仅支持抖音店铺', 400, 'INVALID_INPUT');
+      }
+      if (!existing.businessShopId && requestedBusinessShopId
+        && (await repository.listShops()).some((shop) => shop.id !== id && shop.businessShopId === requestedBusinessShopId)) {
+        return catalogFailure('该业务店铺已接入平台商品映射，请直接编辑原配置', 409, 'SHOP_KEY_CONFLICT');
+      }
+      const displayName = businessShop?.name
+        || (input.displayName === undefined ? existing.displayName : cleanText(input.displayName));
       if (!displayName) return catalogFailure('店铺名称不能为空', 400, 'INVALID_INPUT');
-      const updated = await repository.updateShop(id, {
-        displayName,
-        platformShopId: input.platformShopId === undefined
-          ? existing.platformShopId
-          : (cleanText(input.platformShopId) || null),
-        aliases: input.aliases === undefined ? existing.aliases : uniqueTexts(input.aliases),
-        active: input.active === undefined ? existing.active : Boolean(input.active),
-      });
-      return updated ? success(updated) : catalogFailure('店铺绑定不存在', 404, 'SHOP_BINDING_NOT_FOUND');
+      try {
+        const updated = await repository.updateShop(id, {
+          ...(businessShop ? {
+            businessPlatformId: businessShop.platformId,
+            businessShopId: businessShop.id,
+            platform: businessShop.platformCode,
+          } : {}),
+          displayName,
+          platformShopId: input.platformShopId === undefined
+            ? existing.platformShopId
+            : (cleanText(input.platformShopId) || null),
+          aliases: input.aliases === undefined ? existing.aliases : uniqueTexts(input.aliases),
+          active: input.active === undefined ? existing.active : Boolean(input.active),
+        });
+        return updated ? success(updated) : catalogFailure('店铺绑定不存在', 404, 'SHOP_BINDING_NOT_FOUND');
+      } catch (error) {
+        if (uniqueConflict(error)) {
+          return catalogFailure('该业务店铺已接入平台商品映射，请直接编辑原配置', 409, 'SHOP_KEY_CONFLICT');
+        }
+        throw error;
+      }
     },
 
     async deleteShop(id: string, _actor: AuthenticatedUser): Promise<BrowserCatalogResponse<BrowserShopBinding & { deleted?: boolean }>> {

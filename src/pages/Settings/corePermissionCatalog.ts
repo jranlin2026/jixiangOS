@@ -176,6 +176,7 @@ const CORE_ROLE_PERMISSION_TREE: RolePermissionNode[] = [
         label: '产品设置',
         children: [
           { label: '产品配置', key: PERMISSION_KEYS.SETTINGS_PRODUCTS },
+          { label: '业务平台与店铺', key: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES },
           { label: '订单类型', key: PERMISSION_KEYS.SETTINGS_ORDER_TYPES },
         ],
       },
@@ -186,7 +187,6 @@ const CORE_ROLE_PERMISSION_TREE: RolePermissionNode[] = [
           { label: '客户生命周期', key: PERMISSION_KEYS.SETTINGS_LIFECYCLE },
           { label: '客户标签', key: PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS },
           { label: '线索来源', key: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES },
-          { label: '业务平台与店铺', key: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES },
           { label: '线索流转', key: PERMISSION_KEYS.SETTINGS_LEAD_FLOW },
         ],
       },

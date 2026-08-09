@@ -266,10 +266,9 @@ export function BrowserMappingResults({
 }
 
 type ShopDraft = {
-  platform: string;
+  businessShopId: string;
   shopKey: string;
   platformShopId: string;
-  displayName: string;
   aliasesText: string;
   active: boolean;
 };
@@ -277,7 +276,7 @@ type ShopDraft = {
 type MappingDraft = BrowserProductMappingInput & { aliasesText: string };
 
 const emptyCatalog: BrowserAgentCatalog = { shops: [], mappings: [], products: [] };
-const emptyShopDraft: ShopDraft = { platform: 'DOUYIN', shopKey: '', platformShopId: '', displayName: '', aliasesText: '', active: true };
+const emptyShopDraft: ShopDraft = { businessShopId: '', shopKey: '', platformShopId: '', aliasesText: '', active: true };
 
 const splitLines = (value: string) => [...new Set(value.split(/[\n，,]/).map((item) => item.trim()).filter(Boolean))];
 
@@ -349,6 +348,13 @@ const BrowserAgentConfigPage: React.FC = () => {
     mappingPageSize,
   ), [catalog.mappings, mappingPage, mappingPageSize, mappingQuery, mappingStatus, selectedShopId]);
   const activeProducts = useMemo(() => products.filter((product) => product.isActive), [products]);
+  const businessShops = useMemo(() => (catalog.businessShops || []).filter((shop) => (
+    shop.active && shop.platformCode.toUpperCase() === 'DOUYIN'
+  )), [catalog.businessShops]);
+  const selectableBusinessShops = useMemo(() => businessShops.filter((shop) => (
+    shop.id === editingShop?.businessShopId
+    || !catalog.shops.some((binding) => binding.businessShopId === shop.id && binding.id !== editingShop?.id)
+  )), [businessShops, catalog.shops, editingShop?.businessShopId, editingShop?.id]);
   const productPrices = useMemo(() => new Map([
     ...catalog.products.map((product) => [product.id, product.price] as const),
     ...products.map((product) => [product.id, product.price] as const),
@@ -360,22 +366,20 @@ const BrowserAgentConfigPage: React.FC = () => {
   const openShopForm = (shop?: BrowserShopBinding) => {
     setEditingShop(shop || null);
     setShopDraft(shop ? {
-      platform: shop.platform,
+      businessShopId: shop.businessShopId || '',
       shopKey: shop.shopKey,
       platformShopId: shop.platformShopId || '',
-      displayName: shop.displayName,
       aliasesText: shop.aliases.join('\n'),
-      active: shop.active,
+      active: shop.businessShopId ? shop.active : true,
     } : emptyShopDraft);
     setShopFormOpen(true);
   };
 
   const saveShop = async () => {
     const input: BrowserShopInput = {
-      platform: shopDraft.platform,
+      businessShopId: shopDraft.businessShopId,
       shopKey: shopDraft.shopKey,
       platformShopId: shopDraft.platformShopId,
-      displayName: shopDraft.displayName,
       aliases: splitLines(shopDraft.aliasesText),
       active: shopDraft.active,
     };
@@ -386,7 +390,7 @@ const BrowserAgentConfigPage: React.FC = () => {
         : await browserAgentConfigApi.createShop(input);
       if (response.code !== 0) return void await alert(response.message, '保存失败');
       setShopFormOpen(false);
-      if (await load()) void alert('店铺绑定已保存', '保存成功');
+      if (await load()) void alert('业务店铺接入已保存', '保存成功');
     } catch (error) {
       await showMutationTransportError(error, '保存失败');
     } finally {
@@ -464,13 +468,13 @@ const BrowserAgentConfigPage: React.FC = () => {
 
   return <Box>
     <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={1}>
-      <Box><Typography variant="h6" fontWeight={700}>平台商品映射</Typography><Typography variant="body2" color="text.secondary">管理插件可选店铺，并把平台商品名称与OS标准产品稳定绑定。</Typography></Box>
-      <Button variant="contained" startIcon={<AddIcon />} onClick={() => openShopForm()}>新增店铺绑定</Button>
+      <Box><Typography variant="h6" fontWeight={700}>平台商品映射</Typography><Typography variant="body2" color="text.secondary">店铺统一来自“业务平台与店铺”，本页只配置插件识别参数和商品映射。</Typography></Box>
+      <Button variant="contained" startIcon={<AddIcon />} onClick={() => openShopForm()} disabled={!selectableBusinessShops.length}>接入已有业务店铺</Button>
     </Stack>
 
     {loading ? <Box sx={{ py: 8, textAlign: 'center' }}><CircularProgress size={28} /></Box> : <>
       <Box sx={{ mt: 3 }}>
-        <Typography variant="subtitle1" fontWeight={700}>店铺绑定</Typography>
+        <Typography variant="subtitle1" fontWeight={700}>店铺接入配置</Typography>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ my: 1.5 }}>
           <TextField size="small" label="搜索店铺" value={shopQuery} onChange={(event) => { setShopQuery(event.target.value); setShopPage(0); }} sx={{ minWidth: 240 }} />
           <TextField select size="small" label="状态" value={shopStatus} onChange={(event) => { setShopStatus(event.target.value as StatusFilter); setShopPage(0); }} sx={{ minWidth: 120 }}>
@@ -497,17 +501,18 @@ const BrowserAgentConfigPage: React.FC = () => {
     </>}
 
     <Dialog open={shopFormOpen} onClose={() => !submitting && setShopFormOpen(false)} maxWidth="sm" fullWidth>
-      <DialogCloseTitle onClose={() => setShopFormOpen(false)} closeDisabled={submitting}>{editingShop ? '编辑店铺绑定' : '新增店铺绑定'}</DialogCloseTitle>
+      <DialogCloseTitle onClose={() => setShopFormOpen(false)} closeDisabled={submitting}>{editingShop ? '编辑店铺接入' : '接入已有业务店铺'}</DialogCloseTitle>
       <DialogContent dividers><Stack spacing={2}>
-        <TextField label="平台" value={shopDraft.platform} disabled={Boolean(editingShop)} onChange={(event) => setShopDraft((draft) => ({ ...draft, platform: event.target.value }))} />
-        <TextField label="店铺名称" value={shopDraft.displayName} onChange={(event) => setShopDraft((draft) => ({ ...draft, displayName: event.target.value }))} />
+        <TextField select label="业务平台 / 店铺" value={shopDraft.businessShopId} disabled={Boolean(editingShop?.businessShopId)} onChange={(event) => setShopDraft((draft) => ({ ...draft, businessShopId: event.target.value }))} helperText="店铺名称和启停状态请在“业务平台与店铺”统一维护">
+          {selectableBusinessShops.map((shop) => <MenuItem key={shop.id} value={shop.id}>{shop.platformName} / {shop.name}</MenuItem>)}
+        </TextField>
         <TextField label="稳定店铺标识" value={shopDraft.shopKey} disabled={Boolean(editingShop)} helperText="创建后不可修改" onChange={(event) => setShopDraft((draft) => ({ ...draft, shopKey: event.target.value }))} />
         <TextField label="平台店铺ID" value={shopDraft.platformShopId} onChange={(event) => setShopDraft((draft) => ({ ...draft, platformShopId: event.target.value }))} />
         <TextField label="店铺别名" value={shopDraft.aliasesText} multiline minRows={2} helperText="每行一个，用于校验页面店铺" onChange={(event) => setShopDraft((draft) => ({ ...draft, aliasesText: event.target.value }))} />
         <TextField label="来源" value={editingShop ? sourceLabel(editingShop) : '公司资源 / 抖音电商 / 飞鸽客服'} InputProps={{ readOnly: true }} helperText="来源由系统固定，不参与映射条件" />
         {!editingShop ? <FormControlLabel control={<Switch checked={shopDraft.active} onChange={(_event, checked) => setShopDraft((draft) => ({ ...draft, active: checked }))} />} label="启用店铺" /> : null}
       </Stack></DialogContent>
-      <DialogActions><Button onClick={() => setShopFormOpen(false)} disabled={submitting}>取消</Button><Button variant="contained" onClick={() => void saveShop()} disabled={submitting || !shopDraft.displayName.trim() || !shopDraft.shopKey.trim()}>保存</Button></DialogActions>
+      <DialogActions><Button onClick={() => setShopFormOpen(false)} disabled={submitting}>取消</Button><Button variant="contained" onClick={() => void saveShop()} disabled={submitting || !shopDraft.businessShopId || !shopDraft.shopKey.trim()}>保存</Button></DialogActions>
     </Dialog>
 
     <Dialog open={mappingFormOpen} onClose={() => !submitting && setMappingFormOpen(false)} maxWidth="sm" fullWidth>

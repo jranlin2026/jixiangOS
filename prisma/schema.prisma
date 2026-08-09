@@ -211,6 +211,8 @@ model AiProviderConfig {
 
 model BrowserShopBinding {
   id              String                  @id @db.VarChar(64)
+  businessPlatformId String?               @db.VarChar(64)
+  businessShopId   String?                 @unique @db.VarChar(64)
   platform        String                  @db.VarChar(40)
   shopKey         String                  @db.VarChar(120)
   platformShopId  String?                 @db.VarChar(160)

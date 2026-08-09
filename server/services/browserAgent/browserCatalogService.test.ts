@@ -2,6 +2,35 @@ import assert from 'node:assert/strict';
 import { createBrowserCatalogService, type BrowserCatalogRepository } from './browserCatalogService';
 
 const actor = { id: 'admin-1', name: '管理员', role: 'admin' } as any;
+const businessShops = [{
+  id: 'business-shop-main',
+  platformId: 'business-platform-douyin',
+  platformCode: 'DOUYIN',
+  platformName: '抖音小店',
+  name: '极享新店',
+  active: true,
+}, {
+  id: 'business-shop-legacy',
+  platformId: 'business-platform-douyin',
+  platformCode: 'DOUYIN',
+  platformName: '抖音小店',
+  name: '极享智能体统一店',
+  active: true,
+}, {
+  id: 'business-shop-wechat',
+  platformId: 'business-platform-wechat',
+  platformCode: 'WECHAT',
+  platformName: '微信小店',
+  name: '极享微信店',
+  active: true,
+}, {
+  id: 'business-shop-race',
+  platformId: 'business-platform-douyin',
+  platformCode: 'DOUYIN',
+  platformName: '抖音小店',
+  name: '并发接入店',
+  active: true,
+}];
 const shops = [
   {
     id: 'shop-1', platform: 'DOUYIN', shopKey: 'jx-main', platformShopId: 'dy-shop-1',
@@ -18,6 +47,11 @@ const shops = [
     displayName: '微信店铺', aliases: [], source: '微信', sourceName: '微信客服', sourceType: '公司资源',
     active: true, createdById: 'admin-1', createdByName: '管理员',
   },
+  {
+    id: 'shop-legacy-unlinked', platform: 'DOUYIN', shopKey: 'legacy-unlinked', platformShopId: null,
+    displayName: '待归并旧店', aliases: [], source: '抖音电商', sourceName: '飞鸽客服',
+    sourceType: '公司资源', active: false, createdById: 'admin-1', createdByName: '管理员',
+  },
 ];
 const mappings: any[] = [];
 const products = [
@@ -33,6 +67,7 @@ let maxActiveMappingLocks = 0;
 let catalogWriteCalls = 0;
 let mappingReadCalls = 0;
 let nextLockedShopState: 'MISSING' | 'INACTIVE' | null = null;
+let nextShopUpdateUniqueConflict = false;
 
 async function waitForConcurrentMappingScans() {
   await new Promise<void>((resolve) => {
@@ -46,6 +81,8 @@ async function waitForConcurrentMappingScans() {
 }
 
 const repository: BrowserCatalogRepository = {
+  async listBusinessShops() { return structuredClone(businessShops); },
+  async findBusinessShopById(id) { return structuredClone(businessShops.find((shop) => shop.id === id) || null); },
   async listShops() { return structuredClone(shops); },
   async findShopById(id) { return structuredClone(shops.find((shop) => shop.id === id) || null); },
   async findShopByPlatformAndKey(platform, shopKey) {
@@ -59,6 +96,10 @@ const repository: BrowserCatalogRepository = {
   },
   async updateShop(id, input) {
     catalogWriteCalls += 1;
+    if (nextShopUpdateUniqueConflict) {
+      nextShopUpdateUniqueConflict = false;
+      throw Object.assign(new Error('unique'), { code: 'P2002' });
+    }
     const index = shops.findIndex((shop) => shop.id === id);
     if (index < 0) return null;
     shops[index] = { ...shops[index], ...input } as any;
@@ -120,6 +161,12 @@ const repository: BrowserCatalogRepository = {
 
 const service = createBrowserCatalogService({ repository });
 
+const unsupportedBusinessShop = await service.createShop({
+  businessShopId: 'business-shop-wechat', shopKey: 'wechat-linked', aliases: [], active: true,
+}, actor);
+assert.equal(unsupportedBusinessShop.code, 400);
+assert.match(unsupportedBusinessShop.message, /仅支持抖音/);
+
 const runtime = await service.listRuntimeShops();
 assert.equal(runtime.code, 0);
 assert.deepEqual(runtime.data, {
@@ -129,6 +176,39 @@ assert.deepEqual(runtime.data, {
     sourceType: '公司资源',
   }],
 });
+
+const linkedShop = await service.createShop({
+  businessShopId: 'business-shop-main',
+  shopKey: 'jx-linked',
+  platformShopId: 'dy-linked',
+  aliases: ['极享新店旗舰店'],
+  active: true,
+}, actor);
+assert.equal(linkedShop.code, 0);
+assert.equal(linkedShop.data?.businessShopId, 'business-shop-main');
+assert.equal(linkedShop.data?.businessPlatformId, 'business-platform-douyin');
+assert.equal(linkedShop.data?.platform, 'DOUYIN');
+assert.equal(linkedShop.data?.displayName, '极享新店');
+const duplicateBusinessShop = await service.createShop({
+  businessShopId: 'business-shop-main', shopKey: 'jx-linked-copy', aliases: [], active: true,
+}, actor);
+assert.equal(duplicateBusinessShop.code, 409);
+assert.match(duplicateBusinessShop.message, /已接入/);
+
+const attachedLegacyShop = await service.updateShop('shop-legacy-unlinked', {
+  businessShopId: 'business-shop-legacy',
+  aliases: ['极享官方店'],
+}, actor);
+assert.equal(attachedLegacyShop.code, 0);
+assert.equal(attachedLegacyShop.data?.businessShopId, 'business-shop-legacy');
+assert.equal(attachedLegacyShop.data?.displayName, '极享智能体统一店');
+
+nextShopUpdateUniqueConflict = true;
+const concurrentAttach = await service.updateShop('shop-off', {
+  businessShopId: 'business-shop-race', aliases: [],
+}, actor);
+assert.equal(concurrentAttach.code, 409);
+assert.match(concurrentAttach.message, /已接入/);
 
 const duplicateShop = await service.createShop({
   platform: 'DOUYIN', shopKey: 'jx-main', displayName: '重复店铺', aliases: [], active: true,

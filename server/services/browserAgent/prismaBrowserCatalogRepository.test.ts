@@ -1,5 +1,18 @@
 import assert from 'node:assert/strict';
-import { createPrismaBrowserCatalogRepository } from './prismaBrowserCatalogRepository';
+import { createPrismaBrowserCatalogRepository, matchLegacyBindingToBusinessShop, uniqueLegacyBusinessShopMatches } from './prismaBrowserCatalogRepository';
+
+const directory = [
+  { id: 'business-shop-1', platformId: 'platform-douyin', platformCode: 'DOUYIN', platformName: '抖音小店', name: '极享智能体', active: true },
+  { id: 'business-shop-2', platformId: 'platform-wechat', platformCode: 'WECHAT', platformName: '微信小店', name: '极享智能体', active: true },
+];
+assert.equal(matchLegacyBindingToBusinessShop({ platform: 'DOUYIN', displayName: ' 极享智能体 ' }, directory)?.id, 'business-shop-1');
+assert.equal(matchLegacyBindingToBusinessShop({ platform: 'DOUYIN', displayName: '极享' }, directory), null, '不允许模糊匹配店铺');
+assert.equal(matchLegacyBindingToBusinessShop({ platform: 'DOUYIN', displayName: '极享 智能体' }, directory), null, '自动归并必须是去掉首尾空白后的完全一致');
+assert.equal(matchLegacyBindingToBusinessShop({ platform: 'OTHER', displayName: '极享智能体' }, directory), null, '不允许跨平台匹配');
+assert.deepEqual(uniqueLegacyBusinessShopMatches([
+  { platform: 'DOUYIN', displayName: '极享智能体' },
+  { platform: 'DOUYIN', displayName: '极享智能体' },
+], directory), [null, null], '多个旧绑定匹配同一权威店铺时必须交给管理员处理');
 
 let lockedRows: Array<{ id: string; active: number }> = [];
 const lockQueries: string[] = [];
