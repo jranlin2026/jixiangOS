@@ -239,6 +239,12 @@ async function exerciseRealPageWorkflow() {
   await waitFor('回车键选择一号店铺', () => document.body.textContent?.includes('当前店铺：一号店铺') === true);
   assert.ok(document.querySelector('[aria-label="编辑商品映射 一号店铺商品"]'), '商品映射操作列应提供可读的编辑图标按钮');
   assert.ok(document.querySelector('[aria-label="停用商品映射 一号店铺商品"]'), '商品映射操作列应提供可读的停用图标按钮');
+  const mappingRow = document.querySelector('[data-view="desktop"][data-row-id="mapping-1"]') as HTMLTableRowElement | null;
+  assert.ok(mappingRow);
+  const mappingActionHeader = mappingRow.closest('table')?.querySelector('thead th:last-child') as HTMLTableCellElement | null;
+  const mappingActionCell = mappingRow.querySelector('td:last-child') as HTMLTableCellElement | null;
+  assert.equal(window.getComputedStyle(mappingActionHeader!).position, 'sticky', '商品映射操作表头应固定在右侧');
+  assert.equal(window.getComputedStyle(mappingActionCell!).position, 'sticky', '商品映射行操作区应固定在右侧');
 
   const shopTwoCard = document.querySelector('[data-view="mobile"][data-row-id="shop-2"]') as HTMLElement | null;
   assert.ok(shopTwoCard);

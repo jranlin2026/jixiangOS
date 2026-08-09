@@ -184,6 +184,28 @@ type MappingResultsProps = {
   onPageSizeChange: (pageSize: number) => void;
 };
 
+const mappingActionHeaderSx = {
+  position: 'sticky',
+  right: 0,
+  zIndex: 4,
+  width: 104,
+  minWidth: 104,
+  whiteSpace: 'nowrap',
+  bgcolor: '#f8fafc',
+  boxShadow: '-1px 0 0 #e5e7eb',
+};
+
+const mappingActionCellSx = {
+  position: 'sticky',
+  right: 0,
+  zIndex: 3,
+  width: 104,
+  minWidth: 104,
+  whiteSpace: 'nowrap',
+  bgcolor: '#fff',
+  boxShadow: '-1px 0 0 #e5e7eb',
+};
+
 export function BrowserMappingResults({
   pageResult,
   productPrices,
@@ -196,7 +218,7 @@ export function BrowserMappingResults({
   return <>
     {pageResult.rows.length ? <>
       <TableContainer component={Paper} variant="outlined" sx={{ display: { xs: 'none', md: 'block' } }}>
-        <Table size="small">
+        <Table size="small" sx={{ minWidth: 1040 }}>
           <TableHead><TableRow>
             <TableCell>平台商品名称</TableCell>
             <TableCell>平台商品ID</TableCell>
@@ -205,7 +227,7 @@ export function BrowserMappingResults({
             <TableCell>OS参考价</TableCell>
             <TableCell>状态</TableCell>
             <TableCell>最近更新时间</TableCell>
-            <TableCell align="right">操作</TableCell>
+            <TableCell align="center" sx={mappingActionHeaderSx}>操作</TableCell>
           </TableRow></TableHead>
           <TableBody>{pageResult.rows.map((mapping) => <TableRow data-view="desktop" data-row-id={mapping.id} key={mapping.id} hover>
             <TableCell><Typography variant="body2" fontWeight={600}>{mapping.platformProductName || '-'}</Typography><Typography variant="caption" color="text.secondary">别名：{mapping.aliases.join('、') || '-'}</Typography></TableCell>
@@ -215,7 +237,7 @@ export function BrowserMappingResults({
             <TableCell>{price(mapping)}</TableCell>
             <TableCell>{statusChip(mapping.active)}</TableCell>
             <TableCell>{formatDateTime(mapping.updatedAt || mapping.confirmedAt)}</TableCell>
-            <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+            <TableCell align="center" sx={mappingActionCellSx}>
               <Tooltip title="编辑映射" arrow>
                 <IconButton size="small" color="primary" aria-label={`编辑商品映射 ${mapping.platformProductName}`} onClick={() => onEdit(mapping)}>
                   <EditOutlinedIcon fontSize="small" />
