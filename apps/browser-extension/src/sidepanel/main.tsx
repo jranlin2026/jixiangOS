@@ -18,11 +18,7 @@ import type { FeigePageContext } from '../content/douyinFeigeAdapter';
 import { activeTabCommand } from '../shared/activeTabMessaging';
 import { withWorkerTimeout } from '../shared/workerMessaging';
 import { scriptLibrarySettingsUrl } from '../shared/osSettingsUrl';
-import {
-  matchScript,
-  type ScriptLibraryView,
-  type ScriptMatch,
-} from '../domain/scriptLibrary';
+import type { ScriptLibraryView } from '../domain/scriptLibrary';
 import { isIntakeEligibleOrderStatus } from '../domain/orderCompletion';
 import { ScriptLibrarySection } from './ScriptLibrarySection';
 import { FeedbackDialog } from './FeedbackDialog';
@@ -40,7 +36,6 @@ import {
 } from './orderCompletionPanelState';
 
 type AuthState = { config?: ExtensionConfig; operator?: AuthenticatedOperator };
-type RecognitionSnapshot = { id: number; context: FeigePageContext; hasContact: boolean };
 
 function completionStatus(status: string) {
   if (status === 'SUCCEEDED') return { className: 'success', label: '已完成' };
@@ -128,11 +123,6 @@ function App() {
   } = panel;
   const [scriptView, setScriptView] = useState<ScriptLibraryView | null>(null);
   const [scriptLibraryError, setScriptLibraryError] = useState('');
-  const [recommendationMessage, setRecommendationMessage] = useState('');
-  const [recommendation, setRecommendation] = useState<ScriptMatch | null>(null);
-  const [recognition, setRecognition] = useState<RecognitionSnapshot | null>(null);
-  const recognitionSequence = useRef(0);
-  const evaluatedRecognition = useRef(0);
   const attemptSequence = useRef(0);
   const activeAttempt = useRef<{
     id: number;
@@ -167,9 +157,6 @@ function App() {
     setNotice('');
     setScriptView(null);
     setScriptLibraryError('');
-    setRecommendationMessage('');
-    setRecommendation(null);
-    setRecognition(null);
     if (sessionExpiredMessage) setError(sessionExpiredMessage);
   };
 
@@ -220,18 +207,6 @@ function App() {
     if (form.phone || form.wechat) return '联系方式待确认';
     return '等待联系方式';
   }, [completion?.stage, form.phone, form.wechat, sync]);
-
-  useEffect(() => {
-    if (!recognition || !scriptView || evaluatedRecognition.current === recognition.id) return;
-    evaluatedRecognition.current = recognition.id;
-    const nextRecommendation = matchScript(scriptView.library, {
-      orderStatus: recognition.context.orderStatus,
-      productName: recognition.context.productName,
-      hasContact: recognition.hasContact,
-    });
-    setRecommendation(nextRecommendation);
-    setRecommendationMessage(nextRecommendation ? '点击推荐话术后，将追加到回复框末尾。' : '');
-  }, [recognition, scriptView]);
 
   useEffect(() => {
     const operatorId = auth.operator?.id;
@@ -326,22 +301,11 @@ function App() {
     try {
       const result = await activeTabCommand({ type: 'READ_FEIGE_CONTEXT' });
       if (!('context' in result)) throw new Error('当前页面未返回飞鸽会话信息');
-      const conversationChanged = context?.platformOrderNo !== result.context.platformOrderNo
-        || context?.customerDisplayName !== result.context.customerDisplayName;
-      const detectedHasContact = Boolean(result.detectedContact?.phone || result.detectedContact?.wechat);
       activeProductPreview.current = null;
       dispatchPanel({ type: 'RECOGNIZE_CONTEXT', context: result.context, detectedContact: result.detectedContact });
-      setRecognition({
-        id: ++recognitionSequence.current,
-        context: result.context,
-        hasContact: detectedHasContact || (!conversationChanged && Boolean(form.phone.trim() || form.wechat.trim())),
-      });
     } catch (caught) {
       activeAttempt.current = null;
       dispatchPanel({ type: 'CLEAR_CONTEXT' });
-      setRecognition(null);
-      setRecommendation(null);
-      setRecommendationMessage('');
       setError(caught instanceof Error ? caught.message : '无法读取当前页面');
     }
   };
@@ -609,12 +573,6 @@ function App() {
           detectedContact: latestRecognition.detectedContact,
           preview: latestAuthoritativePreview,
         });
-        setRecognition({
-          id: ++recognitionSequence.current,
-          context: latestRecognition.context,
-          hasContact: Boolean(latestRecognition.detectedContact?.phone || latestRecognition.detectedContact?.wechat)
-            || Boolean(form.phone.trim() || form.wechat.trim()),
-        });
       } else if (latestRecognition && !conversationChanged) {
         dispatchPanel({
           type: 'RECOGNIZE_ATTEMPT_CONTEXT',
@@ -622,12 +580,6 @@ function App() {
           conversationKey: expectedConversationKey,
           context: latestRecognition.context,
           detectedContact: latestRecognition.detectedContact,
-        });
-        setRecognition({
-          id: ++recognitionSequence.current,
-          context: latestRecognition.context,
-          hasContact: Boolean(latestRecognition.detectedContact?.phone || latestRecognition.detectedContact?.wechat)
-            || (!conversationChanged && Boolean(form.phone.trim() || form.wechat.trim())),
         });
       }
       if (result.stage === 'COMPLETED') {
@@ -708,8 +660,6 @@ function App() {
 
     <ScriptLibrarySection
       view={scriptView}
-      match={recommendation}
-      recommendationMessage={recommendationMessage}
       loadError={scriptLibraryError}
       onFill={(text) => void fillScript(text)}
       onManage={() => window.open(scriptLibrarySettingsUrl(apiBaseUrl), '_blank', 'noopener,noreferrer')}

@@ -66,9 +66,7 @@ input:focus, textarea:focus, select:focus { border-color: #5570d9; box-shadow: 0
 .script-button small { color: #3157d5; font-size: 10px; line-height: 1.4; }
 .primary-recommendation { position: relative; padding: 12px; }
 .primary-recommendation .fill-label { justify-self: end; margin-top: 3px; color: #3157d5; font-size: 10px; }
-.script-expand { width: 100%; margin-top: 8px; padding: 5px; border: 0; color: #3157d5; background: transparent; font-size: 11px; font-weight: 700; }
-.script-expand:hover { background: #f7f8ff; }
-.script-all { margin-top: 6px; padding-top: 9px; border-top: 1px solid #edf0f5; }
+.script-all { margin-top: 10px; padding-top: 10px; border-top: 1px solid #edf0f5; }
 .recommendation-message { margin-top: 9px; padding: 8px 9px; border-radius: 8px; color: #3157d5; background: #eef2ff; font-size: 11px; }
 .script-load-error { padding: 10px; border: 1px solid #ffd6d6; border-radius: 9px; color: #a12727; background: #fff6f6; }
 .script-load-error p { margin: 0 0 8px; font-size: 11px; line-height: 1.5; }

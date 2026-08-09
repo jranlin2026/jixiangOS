@@ -76,6 +76,12 @@ const scriptView = {
         id: 'paid-script', title: '付款确认', content: '已收到您的付款。', enabled: true, sortOrder: 1, priority: 10,
         match: { orderStatuses: ['已付款'], productKeywords: [], contactState: 'ANY' },
       }],
+    }, {
+      id: 'after-sale', name: '售后服务', enabled: true, sortOrder: 2,
+      scripts: [{
+        id: 'after-sale-script', title: '售后登记', content: '已经为您登记售后需求。', enabled: true, sortOrder: 1, priority: 0,
+        match: { orderStatuses: [], productKeywords: [], contactState: 'ANY' },
+      }],
     }],
     updatedAt: '', updatedBy: { id: 'u1', name: '客服甲' },
   },
@@ -275,6 +281,10 @@ assert.match(document.body.textContent || '', /聊天中提供/);
 assert.match(document.body.textContent || '', /客服站外补录/);
 assert.match(document.body.textContent || '', /已核对：昵称、联系方式与当前订单属于同一客户/);
 await waitFor('.primary-recommendation', (node) => (node.textContent || '').includes('付款确认'));
+assert.equal(document.body.textContent?.includes('常用'), false, '插件不再暴露没有明确含义的“常用”概念');
+assert.equal(document.body.textContent?.includes('查看全部话术'), false, '全部话术应默认展开，无需额外点击');
+assert.equal(document.body.textContent?.includes('售后服务'), true, '全部话术分组应默认可见');
+assert.equal(document.querySelector('.script-all') !== null, true, '全部话术区域应默认渲染');
 assert.equal(pageMessageTypes.includes('FILL_FEIGE_REPLY_IF_EMPTY'), false, '推荐话术只能由客服点击填入，不得自动改写回复框');
 document.querySelector<HTMLButtonElement>('.primary-recommendation')?.click();
 await waitFor<HTMLElement>('[role="dialog"]', (node) => (node.textContent || '').includes('话术已追加到飞鸽'));
