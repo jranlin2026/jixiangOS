@@ -237,6 +237,8 @@ async function exerciseRealPageWorkflow() {
   const shopOneRow = document.querySelector('[data-view="desktop"][data-row-id="shop-1"]') as HTMLElement;
   dispatchKey(shopOneRow, 'Enter');
   await waitFor('回车键选择一号店铺', () => document.body.textContent?.includes('当前店铺：一号店铺') === true);
+  assert.ok(document.querySelector('[aria-label="编辑商品映射 一号店铺商品"]'), '商品映射操作列应提供可读的编辑图标按钮');
+  assert.ok(document.querySelector('[aria-label="停用商品映射 一号店铺商品"]'), '商品映射操作列应提供可读的停用图标按钮');
 
   const shopTwoCard = document.querySelector('[data-view="mobile"][data-row-id="shop-2"]') as HTMLElement | null;
   assert.ok(shopTwoCard);

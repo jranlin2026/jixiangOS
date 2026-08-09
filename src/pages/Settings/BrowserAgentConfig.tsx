@@ -8,6 +8,7 @@ import {
   DialogActions,
   DialogContent,
   FormControlLabel,
+  IconButton,
   MenuItem,
   Paper,
   Stack,
@@ -19,9 +20,11 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import BlockOutlinedIcon from '@mui/icons-material/BlockOutlined';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
@@ -212,7 +215,18 @@ export function BrowserMappingResults({
             <TableCell>{price(mapping)}</TableCell>
             <TableCell>{statusChip(mapping.active)}</TableCell>
             <TableCell>{formatDateTime(mapping.updatedAt || mapping.confirmedAt)}</TableCell>
-            <TableCell align="right"><Button size="small" onClick={() => onEdit(mapping)}>编辑</Button>{mapping.active ? <Button size="small" color="warning" onClick={() => onDisable(mapping)}>停用</Button> : null}</TableCell>
+            <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+              <Tooltip title="编辑映射" arrow>
+                <IconButton size="small" color="primary" aria-label={`编辑商品映射 ${mapping.platformProductName}`} onClick={() => onEdit(mapping)}>
+                  <EditOutlinedIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              {mapping.active ? <Tooltip title="停用映射" arrow>
+                <IconButton size="small" color="warning" aria-label={`停用商品映射 ${mapping.platformProductName}`} onClick={() => onDisable(mapping)}>
+                  <BlockOutlinedIcon fontSize="small" />
+                </IconButton>
+              </Tooltip> : null}
+            </TableCell>
           </TableRow>)}</TableBody>
         </Table>
       </TableContainer>
@@ -228,7 +242,10 @@ export function BrowserMappingResults({
             <Typography variant="body2">OS参考价：{price(mapping)}</Typography>
             <Typography variant="body2">最近更新时间：{formatDateTime(mapping.updatedAt || mapping.confirmedAt)}</Typography>
           </Stack>
-          <Stack direction="row" justifyContent="flex-end" sx={{ mt: 1 }}><Button size="small" onClick={() => onEdit(mapping)}>编辑</Button>{mapping.active ? <Button size="small" color="warning" onClick={() => onDisable(mapping)}>停用</Button> : null}</Stack>
+          <Stack direction="row" justifyContent="flex-end" sx={{ mt: 1 }}>
+            <Tooltip title="编辑映射" arrow><IconButton size="small" color="primary" aria-label={`编辑商品映射 ${mapping.platformProductName}`} onClick={() => onEdit(mapping)}><EditOutlinedIcon fontSize="small" /></IconButton></Tooltip>
+            {mapping.active ? <Tooltip title="停用映射" arrow><IconButton size="small" color="warning" aria-label={`停用商品映射 ${mapping.platformProductName}`} onClick={() => onDisable(mapping)}><BlockOutlinedIcon fontSize="small" /></IconButton></Tooltip> : null}
+          </Stack>
         </Paper>)}
       </Stack>
     </> : <Paper variant="outlined" sx={{ p: 4, textAlign: 'center', color: '#64748b' }}>暂无符合条件的商品映射</Paper>}
