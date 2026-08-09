@@ -446,11 +446,15 @@ function factMatchNearUniqueLabel(
 }
 
 function paymentAmountFromOrderCard(orderCard: HTMLElement): ParsedPlatformFact<number> {
-  const match = factMatchNearUniqueLabel(
+  const amountPattern = /[¥￥]\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?)(?![\d.,])/g;
+  const paidAmount = factMatchNearUniqueLabel(
     orderCard,
     '实付金额',
-    /[¥￥]\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?)(?![\d.,])/g,
+    amountPattern,
   );
+  const match = paidAmount.status === 'ABSENT' && orderStatusFromElement(orderCard).startsWith('已关闭')
+    ? factMatchNearUniqueLabel(orderCard, '订单金额', amountPattern)
+    : paidAmount;
   if (match.status !== 'FOUND') return match;
   const value = Number(match.value[1].replaceAll(',', ''));
   return Number.isFinite(value) ? { status: 'FOUND', value } : { status: 'INVALID' };

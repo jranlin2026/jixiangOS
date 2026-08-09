@@ -89,6 +89,35 @@ assert.equal(siblingPaymentFacts.paymentAt, '2026-08-08T19:34:20+08:00', '付款
 assert.equal(siblingPaymentFacts.shopDisplayName, '', '飞鸽页面店铺名不再参与识别');
 assert.equal(siblingPaymentFacts.readyForIntake, true, '订单事实完整时不应因页面店铺名缺失而阻止人工绑定入库');
 
+const closedOrderAmountFacts = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已关闭（售后完成）</span><span data-jx-order-no>ORDER-CLOSED-AMOUNT</span>
+    <span data-btm="d5834">淘金AI 多模态创作智能体 读书卡</span>
+    <div><span>订单金额</span><strong>¥299.00</strong></div>
+    <div><span>付款时间</span><strong>2026/08/09 12:55:31 (抖音月付)</strong></div>
+  </section>
+`);
+assert.equal(
+  closedOrderAmountFacts.paymentAmount,
+  299,
+  '已关闭订单应将页面展示的订单金额识别为平台实付金额',
+);
+assert.equal(closedOrderAmountFacts.diagnostics.includes('未识别实付金额'), false);
+
+const openOrderAmountOnlyFacts = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-OPEN-AMOUNT-ONLY</span>
+    <span data-btm="d5834">淘金AI</span>
+    <div><span>订单金额</span><strong>¥399.00</strong></div>
+  </section>
+`);
+assert.equal(
+  openOrderAmountOnlyFacts.paymentAmount,
+  undefined,
+  '非关闭订单不得把订单金额猜成平台实付金额',
+);
+assert.ok(openOrderAmountOnlyFacts.diagnostics.includes('未识别实付金额'));
+
 const paidAmountWithDiscount = readOrderFactsFixture(`
   <section data-testid="order-card">
     <span data-jx-order-status>已发货</span><span data-jx-order-no>ORDER-PAID-WITH-DISCOUNT</span>
