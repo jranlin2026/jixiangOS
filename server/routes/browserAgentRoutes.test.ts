@@ -172,9 +172,7 @@ const requireBrowserCatalogWrite: express.RequestHandler = (req: any, res, next)
     next();
   });
 };
-const app = express();
-app.use(express.json());
-app.use('/api/browser-agent', createBrowserAgentRouter({
+const routerDeps = {
   service, scriptLibrary, catalog,
   authService: {
     authorizeBrowserAgent: async () => ({ code: 0, data: 'grant', message: 'success' }),
@@ -187,12 +185,54 @@ app.use('/api/browser-agent', createBrowserAgentRouter({
   requireScriptLibraryRead: authenticate,
   requireBrowserCatalogRead,
   requireBrowserCatalogWrite,
+};
+const app = express();
+app.use(express.json());
+app.use('/api/browser-agent', createBrowserAgentRouter({
+  ...routerDeps,
+  downloadArchivePath: join(process.cwd(), 'server/assets/browser-agent/jixiang-ai-browser-employee.zip'),
 }));
 const listener = app.listen(0, '127.0.0.1');
 await once(listener, 'listening');
 const address = listener.address() as AddressInfo;
 
 try {
+  const forbiddenDownload = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/download`, {
+    headers: { 'x-test-no-lead-create': '1' },
+  });
+  assert.equal(forbiddenDownload.status, 403, '无新建线索权限不得绕过界面直接下载安装包');
+
+  const download = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/download`);
+  assert.equal(download.status, 200);
+  assert.match(download.headers.get('content-disposition') || '', /jixiang-ai-browser-employee\.zip/);
+  assert.ok((await download.arrayBuffer()).byteLength > 0, '受保护下载接口必须返回插件安装包');
+
+  const missingArchiveApp = express();
+  missingArchiveApp.use('/api/browser-agent', createBrowserAgentRouter({
+    ...routerDeps,
+    downloadArchivePath: join(process.cwd(), 'server/assets/browser-agent/not-found.zip'),
+  }));
+  const missingArchiveListener = missingArchiveApp.listen(0, '127.0.0.1');
+  await once(missingArchiveListener, 'listening');
+  const originalConsoleError = console.error;
+  let missingArchiveLog = '';
+  console.error = (...args: unknown[]) => { missingArchiveLog = args.map(String).join(' '); };
+  try {
+    const missingAddress = missingArchiveListener.address() as AddressInfo;
+    const missingArchive = await fetch(`http://127.0.0.1:${missingAddress.port}/api/browser-agent/download`);
+    assert.equal(missingArchive.status, 503);
+    assert.deepEqual(await missingArchive.json(), {
+      code: 503,
+      data: null,
+      errorCode: 'BROWSER_EMPLOYEE_ARCHIVE_UNAVAILABLE',
+      message: '插件安装包暂不可用，请联系管理员重新发布',
+    });
+  } finally {
+    console.error = originalConsoleError;
+    await new Promise<void>((resolve, reject) => missingArchiveListener.close((error) => error ? reject(error) : resolve()));
+  }
+  assert.match(missingArchiveLog, /Browser employee archive is unavailable/);
+
   const intake = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/lead-intakes`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({

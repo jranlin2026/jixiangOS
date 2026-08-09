@@ -557,6 +557,7 @@ app.use('/api/browser-agent', createBrowserAgentRouter({
   requireScriptLibraryRead: requireBrowserScriptLibraryRead,
   requireBrowserCatalogRead,
   requireBrowserCatalogWrite,
+  downloadArchivePath: path.resolve('server/assets/browser-agent/jixiang-ai-browser-employee.zip'),
 }));
 
 function routeParam(value: string | string[] | undefined): string {

@@ -1,4 +1,5 @@
 import express from 'express';
+import { readFile } from 'node:fs/promises';
 import { bearerToken, type AuthenticatedRequest } from '../middleware/auth';
 import type { createAuthService } from '../services/authService';
 import type { BrowserLeadIntakeService } from '../services/browserAgent/browserLeadIntakeService';
@@ -25,8 +26,25 @@ export function createBrowserAgentRouter(deps: {
   requireScriptLibraryRead: express.RequestHandler;
   requireBrowserCatalogRead: express.RequestHandler;
   requireBrowserCatalogWrite: express.RequestHandler;
+  downloadArchivePath: string;
 }) {
   const router = express.Router();
+
+  router.get('/download', deps.requireLeadCreate, async (_req, res) => {
+    try {
+      const archive = await readFile(deps.downloadArchivePath);
+      res.attachment('jixiang-ai-browser-employee.zip');
+      res.type('application/zip').send(archive);
+    } catch (error) {
+      console.error('Browser employee archive is unavailable', error);
+      res.status(503).json({
+        code: 503,
+        data: null,
+        errorCode: 'BROWSER_EMPLOYEE_ARCHIVE_UNAVAILABLE',
+        message: '插件安装包暂不可用，请联系管理员重新发布',
+      });
+    }
+  });
 
   router.post('/auth/authorize', deps.requireLeadCreate, async (req: AuthenticatedRequest, res) => {
     const result = await deps.authService.authorizeBrowserAgent({

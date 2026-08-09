@@ -70,6 +70,8 @@ EXCLUDE_SUFFIXES = (
     ".zip",
 )
 
+BROWSER_EMPLOYEE_ARCHIVE = "server/assets/browser-agent/jixiang-ai-browser-employee.zip"
+
 
 def run_local(command: list[str], *, cwd: Path = PROJECT_ROOT, env: dict[str, str] | None = None) -> None:
     print(f"\n> {' '.join(command)}")
@@ -95,7 +97,7 @@ def should_include(path: Path) -> bool:
         return False
     if path.name.startswith(".codex-"):
         return False
-    if path.suffix in EXCLUDE_SUFFIXES:
+    if path.suffix in EXCLUDE_SUFFIXES and relative.as_posix() != BROWSER_EMPLOYEE_ARCHIVE:
         return False
     return True
 

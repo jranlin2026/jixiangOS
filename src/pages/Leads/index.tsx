@@ -44,6 +44,7 @@ import LeadBulkImportDialog from './LeadBulkImportDialog';
 import LeadIntakeTab from './LeadIntakeTab';
 import type { Lead, LeadFlowConfig } from '../../types/lead';
 import { leadApi, leadBulkImportApi, leadFlowApi, settingsApi } from '../../api';
+import { downloadBackendFile } from '../../api/backendClient';
 import type { LeadSourceConfig, LifecycleStatusConfig, User } from '../../types/settings';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
@@ -256,6 +257,7 @@ const Leads: React.FC = () => {
   const [assignLead, setAssignLead] = useState<Lead | null>(null);
   const [assignSalesName, setAssignSalesName] = useState('');
   const [templateDownloading, setTemplateDownloading] = useState(false);
+  const [browserEmployeeDownloading, setBrowserEmployeeDownloading] = useState(false);
   const [deleteLeadTarget, setDeleteLeadTarget] = useState<Lead | null>(null);
   const [deleteLeadReason, setDeleteLeadReason] = useState('');
   const [deleteLeadSubmitting, setDeleteLeadSubmitting] = useState(false);
@@ -431,6 +433,17 @@ const Leads: React.FC = () => {
     }
   };
 
+  const handleDownloadBrowserEmployee = async () => {
+    setBrowserEmployeeDownloading(true);
+    try {
+      await downloadBackendFile('/browser-agent/download', '极享AI浏览器员工.zip');
+    } catch (error) {
+      await alert(error instanceof Error ? error.message : '插件下载失败，请稍后重试', '插件下载失败');
+    } finally {
+      setBrowserEmployeeDownloading(false);
+    }
+  };
+
   const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
     const newFilters = { ...filters, search: event.target.value, page: 1, pageSize: pagination.pageSize || 10 };
     setFilters(newFilters);
@@ -533,33 +546,45 @@ const Leads: React.FC = () => {
         description="线索录入、批量入库、分配和转客户。"
         actions={(
           <>
-        {activeTab === 0 && canViewLeadList && (
-          <>
-            <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
-              视图设置
-            </Button>
-            <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleDownloadTemplate} disabled={templateDownloading}>
-              {templateDownloading ? '生成中...' : '\u4e0b\u8f7dExcel\u6a21\u677f'}
-            </Button>
-            {activeTab === 0 && (
-              <PermissionGate permissionKey={PERMISSION_KEYS.LEADS_CREATE} action="write">
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={() => setBulkImportOpen(true)}>
-                    {'\u6279\u91cf\u5165\u5e93'}
-                  </Button>
-                  <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
-                  新增线索入库
-                  </Button>
-                </Box>
-              </PermissionGate>
+            <PermissionGate permissionKey={PERMISSION_KEYS.LEADS_CREATE} action="write">
+              <Tooltip title="下载后解压，在Chrome扩展程序页面选择“加载已解压的扩展程序”安装">
+                <Button
+                  variant="outlined"
+                  startIcon={<DownloadIcon />}
+                  onClick={handleDownloadBrowserEmployee}
+                  disabled={browserEmployeeDownloading}
+                >
+                  {browserEmployeeDownloading ? '下载中...' : '下载浏览器员工'}
+                </Button>
+              </Tooltip>
+            </PermissionGate>
+            {activeTab === 0 && canViewLeadList && (
+              <>
+                <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
+                  视图设置
+                </Button>
+                <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleDownloadTemplate} disabled={templateDownloading}>
+                  {templateDownloading ? '生成中...' : '\u4e0b\u8f7dExcel\u6a21\u677f'}
+                </Button>
+                {activeTab === 0 && (
+                  <PermissionGate permissionKey={PERMISSION_KEYS.LEADS_CREATE} action="write">
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={() => setBulkImportOpen(true)}>
+                        {'\u6279\u91cf\u5165\u5e93'}
+                      </Button>
+                      <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
+                        新增线索入库
+                      </Button>
+                    </Box>
+                  </PermissionGate>
+                )}
+              </>
             )}
-          </>
-        )}
-        {activeTab === 1 && canViewLeadIntake && (
-          <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setIntakeViewSettingsSignal((signal) => signal + 1)}>
-            视图设置
-          </Button>
-        )}
+            {activeTab === 1 && canViewLeadIntake && (
+              <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setIntakeViewSettingsSignal((signal) => signal + 1)}>
+                视图设置
+              </Button>
+            )}
           </>
         )}
       />
