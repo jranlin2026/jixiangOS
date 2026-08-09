@@ -93,27 +93,33 @@ function isVisible(element: HTMLElement | null): element is HTMLElement {
 }
 
 function visibleActiveOrderCards(document: Document) {
-  const visible = uniqueMatches(document, selectors.orderCard).filter(isVisible);
-  return visible.filter((candidate) => !visible.some((other) => (
-    other !== candidate && candidate.contains(other)
-  )));
+  const visible = uniqueMatches(document, selectors.orderCard)
+    .filter(isVisible)
+    .filter((candidate) => {
+      const ownExpanded = candidate.getAttribute('aria-expanded');
+      if (ownExpanded !== null) return ownExpanded === 'true';
+      const nestedExpansionControls = [...candidate.querySelectorAll<HTMLElement>('[aria-expanded]')];
+      if (nestedExpansionControls.length) {
+        return nestedExpansionControls.some((control) => control.getAttribute('aria-expanded') === 'true');
+      }
+      return true;
+    });
+  return visible
+    .filter((candidate) => !visible.some((other) => (
+      other !== candidate && candidate.contains(other)
+    )))
+    .sort((left, right) => {
+      const position = left.compareDocumentPosition(right);
+      const NodeConstructor = left.ownerDocument.defaultView?.Node;
+      if (!NodeConstructor) return 0;
+      if (position & NodeConstructor.DOCUMENT_POSITION_FOLLOWING) return -1;
+      if (position & NodeConstructor.DOCUMENT_POSITION_PRECEDING) return 1;
+      return 0;
+    });
 }
 
-function latestActiveOrderCard(document: Document) {
-  const cards = visibleActiveOrderCards(document);
-  if (cards.length <= 1) return cards[0] || null;
-
-  const datedCards = cards.flatMap((card) => {
-    const paymentTime = paymentTimeFromOrderCard(card);
-    if (paymentTime.status !== 'FOUND') return [];
-    const timestamp = Date.parse(paymentTime.value);
-    return Number.isFinite(timestamp) ? [{ card, timestamp }] : [];
-  });
-  if (!datedCards.length) return null;
-
-  const latestTimestamp = Math.max(...datedCards.map(({ timestamp }) => timestamp));
-  const latestCards = datedCards.filter(({ timestamp }) => timestamp === latestTimestamp);
-  return latestCards.length === 1 ? latestCards[0].card : null;
+function firstActiveOrderCard(document: Document) {
+  return visibleActiveOrderCards(document)[0] || null;
 }
 
 function orderStatusFromElement(root: ParentNode) {
@@ -503,8 +509,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       const scope: ParentNode = root || document;
       const customerDisplayName = text(scope, selectors.customer);
       const shopDisplayName = '';
-      const activeOrderCards = visibleActiveOrderCards(document);
-      const activeOrderCard = latestActiveOrderCard(document);
+      const activeOrderCard = firstActiveOrderCard(document);
       const platformOrderNo = activeOrderCard ? orderNoFromElement(activeOrderCard) : '';
       const orderStatus = activeOrderCard ? orderStatusFromElement(activeOrderCard) : '';
       const productFacts = activeOrderCard
@@ -528,7 +533,6 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         .map((element) => ({ direction: direction(element), text: element.textContent?.trim() || '' }))
         .filter((message) => message.text);
       if (!customerDisplayName) diagnostics.push('未识别客户昵称');
-      if (activeOrderCards.length > 1 && !activeOrderCard) diagnostics.push('当前存在多张可见活动订单卡');
       if (!platformOrderNo) diagnostics.push('未识别平台订单号');
       if (!orderStatus) diagnostics.push('未识别订单状态');
       if (productFacts.ambiguous) diagnostics.push('当前订单商品存在歧义');
@@ -636,15 +640,12 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         };
       }
 
-      const activeCards = visibleActiveOrderCards(document);
-      const orderCard = latestActiveOrderCard(document);
+      const orderCard = firstActiveOrderCard(document);
       if (!orderCard) {
         return {
           ok: false,
-          code: activeCards.length ? 'ACTIVE_ORDER_CARD_AMBIGUOUS' : 'ORDER_CARD_NOT_FOUND',
-          message: activeCards.length
-            ? '当前存在多张可见活动订单卡，未修改订单'
-            : '未找到唯一可见活动订单卡',
+          code: 'ORDER_CARD_NOT_FOUND',
+          message: '未找到已展开的订单卡',
           stage: 'CONTEXT',
         };
       }
@@ -674,7 +675,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         };
       }
       const hasSameBoundContext = () => {
-        const currentActiveCard = latestActiveOrderCard(document);
+        const currentActiveCard = firstActiveOrderCard(document);
         return currentActiveCard === orderCard
           && orderCard.isConnected
           && isVisible(orderCard)

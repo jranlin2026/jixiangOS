@@ -201,13 +201,13 @@ const latestOrderFacts = readOrderFactsFixture(`
     <div>付款时间 <strong>2026/08/08 20:34:20</strong></div>
   </section>
 `, '<div data-testid="shop-name">极享智能体</div><div data-jx-product-name>文档外的商品</div>');
-assert.equal(latestOrderFacts.platformOrderNo, 'ORDER-B', '多张订单卡应识别付款时间最新的订单');
+assert.equal(latestOrderFacts.platformOrderNo, 'ORDER-A', '多张展开订单卡应按页面顺序识别第一张订单');
 assert.equal(latestOrderFacts.orderStatus, '已付款');
-assert.equal(latestOrderFacts.productName, '商品B', '商品必须来自最新订单卡');
-assert.equal(latestOrderFacts.platformProductId, 'PRODUCT-B');
+assert.equal(latestOrderFacts.productName, '商品A', '商品必须来自页面顺序中的第一张展开订单卡');
+assert.equal(latestOrderFacts.platformProductId, 'PRODUCT-A');
 assert.equal(latestOrderFacts.platformSkuId, undefined);
-assert.equal(latestOrderFacts.paymentAmount, 399);
-assert.equal(latestOrderFacts.paymentAt, '2026-08-08T20:34:20+08:00');
+assert.equal(latestOrderFacts.paymentAmount, 299);
+assert.equal(latestOrderFacts.paymentAt, '2026-08-08T19:34:20+08:00');
 assert.equal(latestOrderFacts.diagnostics.includes('当前存在多张可见活动订单卡'), false);
 
 const expandedLatestOrderFacts = readOrderFactsFixture(`
@@ -228,6 +228,61 @@ assert.equal(
 );
 assert.equal(expandedLatestOrderFacts.productName, '最新展开订单');
 assert.equal(expandedLatestOrderFacts.paymentAmount, 299);
+
+function createMultipleExpandedOrdersFixture() {
+  const fixture = new JSDOM(`<!doctype html><html><body>
+    <main data-jx-feige-conversation><span data-jx-customer-name>多订单客户</span></main>
+    <div class="ecom-collapse-item ecom-collapse-item-active" data-order-position="1">
+      <div role="button" aria-expanded="true" class="ecom-collapse-header">
+        <span data-testid="order-status">已发货</span><span data-testid="order-no">ORDER-FIRST</span>
+      </div>
+      <span data-btm="d5834">第一张展开订单</span>
+      <div>实付金额 <strong>¥299.00</strong></div>
+      <div>付款时间 <strong>2026/08/08 19:07:02</strong></div>
+    </div>
+    <div class="ecom-collapse-item" data-order-position="2">
+      <div role="button" aria-expanded="false" class="ecom-collapse-header">
+        <span data-testid="order-status">已关闭</span><span data-testid="order-no">ORDER-SECOND</span>
+      </div>
+    </div>
+    <div class="ecom-collapse-item ecom-collapse-item-active" data-order-position="3">
+      <div role="button" aria-expanded="true" class="ecom-collapse-header">
+        <span data-testid="order-status">已付款</span><span data-testid="order-no">ORDER-THIRD</span>
+      </div>
+      <span data-btm="d5834">第三张展开订单</span>
+      <div>实付金额 <strong>¥999.00</strong></div>
+      <div>付款时间 <strong>2026/08/09 19:07:02</strong></div>
+    </div>
+  </body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
+  const fixtureDocument = fixture.window.document;
+  return {
+    adapter: createDouyinFeigeAdapter(fixtureDocument, fixture.window.location.href),
+    collapseFirstOrder() {
+      const firstCard = fixtureDocument.querySelector('[data-order-position="1"]') as HTMLElement;
+      firstCard.classList.remove('ecom-collapse-item-active');
+      firstCard.querySelector('[aria-expanded]')?.setAttribute('aria-expanded', 'false');
+    },
+  };
+}
+
+const multipleExpandedOrdersFixture = createMultipleExpandedOrdersFixture();
+const firstExpandedOrderContext = multipleExpandedOrdersFixture.adapter.readContext();
+assert.equal(
+  firstExpandedOrderContext.platformOrderNo,
+  'ORDER-FIRST',
+  '多张订单展开时，应按页面顺序读取第一张展开订单卡，而不是付款时间最新的订单',
+);
+assert.equal(firstExpandedOrderContext.productName, '第一张展开订单');
+assert.equal(firstExpandedOrderContext.paymentAmount, 299);
+multipleExpandedOrdersFixture.collapseFirstOrder();
+const nextExpandedOrderContext = multipleExpandedOrdersFixture.adapter.readContext();
+assert.equal(
+  nextExpandedOrderContext.platformOrderNo,
+  'ORDER-THIRD',
+  '第一张订单折叠后，应读取页面顺序中的下一张展开订单卡',
+);
+assert.equal(nextExpandedOrderContext.productName, '第三张展开订单');
+assert.equal(nextExpandedOrderContext.paymentAmount, 999);
 
 const unprovenShop = readOrderFactsFixture(`
   <section data-testid="order-card">
@@ -338,8 +393,8 @@ const ambiguousContext = createDouyinFeigeAdapter(
   ambiguousContextDom.window.document,
   ambiguousContextDom.window.location.href,
 ).readContext();
-assert.equal(ambiguousContext.platformOrderNo, '', '多张可见活动订单卡时必须停止识别');
-assert.equal(ambiguousContext.orderStatus, '', '卡片歧义时不得从文档其他位置拼凑状态');
+assert.equal(ambiguousContext.platformOrderNo, 'ORDER-A', '多张展开订单卡时应读取页面顺序中的第一张');
+assert.equal(ambiguousContext.orderStatus, '已付款', '订单状态必须来自同一张首个展开订单卡');
 
 function createUnsafeOrderBindingFixture(cards: string, staleDocumentMarkup = '') {
   const fixture = new JSDOM(`<!doctype html><html><body>
@@ -414,10 +469,10 @@ const ambiguousCardsResult = await ambiguousCardsFixture.adapter.completeOsOrder
   expectedCustomerDisplayName: '悠然一刻',
   remarkLines: backendRemarkLines,
 });
-assert.equal(ambiguousCardsResult.ok, false, '多张可见活动订单卡必须失败关闭');
-assert.equal(ambiguousCardsFixture.getEditClicks(), 0, '订单卡有歧义时不得点击任何编辑入口');
-assert.equal(ambiguousCardsFixture.getGreenClicks(), 0);
-assert.equal(ambiguousCardsFixture.getSaveClicks(), 0);
+assert.equal(ambiguousCardsResult.ok, false, '平台未返回保存结果时仍不得误报整体成功');
+assert.equal(ambiguousCardsFixture.getEditClicks(), 1, '多张展开订单卡时只操作页面顺序中的第一张');
+assert.equal(ambiguousCardsFixture.getGreenClicks(), 1);
+assert.equal(ambiguousCardsFixture.getSaveClicks(), 1);
 
 const nestedAmbiguousCardsFixture = createUnsafeOrderBindingFixture(`
   <section data-testid="order-card">
@@ -432,17 +487,17 @@ const nestedAmbiguousCardsFixture = createUnsafeOrderBindingFixture(`
   </section>
 `);
 const nestedAmbiguousContext = nestedAmbiguousCardsFixture.adapter.readContext();
-assert.equal(nestedAmbiguousContext.platformOrderNo, '', '外层订单包装含两张可见子订单卡时必须保持歧义');
-assert.equal(nestedAmbiguousContext.orderStatus, '', '嵌套多订单歧义时不得识别任一订单状态');
+assert.equal(nestedAmbiguousContext.platformOrderNo, '6925095897028853458', '嵌套订单包装仍按页面顺序读取第一张展开子订单卡');
+assert.equal(nestedAmbiguousContext.orderStatus, '已付款');
 const nestedAmbiguousCardsResult = await nestedAmbiguousCardsFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
   remarkLines: backendRemarkLines,
 });
-assert.equal(nestedAmbiguousCardsResult.ok, false, '嵌套多订单卡必须失败关闭');
-assert.equal(nestedAmbiguousCardsFixture.getEditClicks(), 0, '嵌套订单卡有歧义时不得点击任何编辑入口');
-assert.equal(nestedAmbiguousCardsFixture.getGreenClicks(), 0);
-assert.equal(nestedAmbiguousCardsFixture.getSaveClicks(), 0);
+assert.equal(nestedAmbiguousCardsResult.ok, false, '平台未返回保存结果时仍不得误报整体成功');
+assert.equal(nestedAmbiguousCardsFixture.getEditClicks(), 1, '嵌套多订单卡只操作第一张展开子订单卡');
+assert.equal(nestedAmbiguousCardsFixture.getGreenClicks(), 1);
+assert.equal(nestedAmbiguousCardsFixture.getSaveClicks(), 1);
 
 const mixedSemanticCardsFixture = createUnsafeOrderBindingFixture(`
   <section data-testid="order-card">
@@ -459,10 +514,10 @@ const mixedSemanticCardsResult = await mixedSemanticCardsFixture.adapter.complet
   expectedCustomerDisplayName: '悠然一刻',
   remarkLines: backendRemarkLines,
 });
-assert.equal(mixedSemanticCardsResult.ok, false, '不同语义选择器各命中一张可见卡时仍属歧义');
-assert.equal(mixedSemanticCardsFixture.getEditClicks(), 0, '订单卡语义混合歧义时不得点击');
-assert.equal(mixedSemanticCardsFixture.getGreenClicks(), 0);
-assert.equal(mixedSemanticCardsFixture.getSaveClicks(), 0);
+assert.equal(mixedSemanticCardsResult.ok, false, '平台未返回保存结果时仍不得误报整体成功');
+assert.equal(mixedSemanticCardsFixture.getEditClicks(), 1, '不同语义订单卡并存时仍按DOM顺序操作第一张');
+assert.equal(mixedSemanticCardsFixture.getGreenClicks(), 1);
+assert.equal(mixedSemanticCardsFixture.getSaveClicks(), 1);
 
 const completionDom = new JSDOM(`<!doctype html><html><body>
   <main data-jx-feige-conversation>
