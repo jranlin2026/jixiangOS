@@ -11,13 +11,13 @@ type MutationMode = 'success' | 'server-error' | 'network-error';
 
 const shops: BrowserShopBinding[] = [
   {
-    id: 'shop-1', platform: 'DOUYIN', shopKey: 'shop-one', platformShopId: 'DY-SHOP-1',
+    id: 'shop-1', businessPlatformId: 'platform-douyin', businessShopId: 'business-shop-1', platform: 'DOUYIN', shopKey: 'shop-one', platformShopId: 'DY-SHOP-1',
     displayName: '一号店铺', aliases: ['店铺一'], sourceType: '公司资源', source: '抖音电商',
     sourceName: '飞鸽客服', active: true, createdById: 'admin-1', createdByName: '管理员',
     createdAt: '2026-08-08T08:00:00.000Z', updatedAt: '2026-08-08T08:00:00.000Z',
   },
   {
-    id: 'shop-2', platform: 'DOUYIN', shopKey: 'shop-two', platformShopId: 'DY-SHOP-2',
+    id: 'shop-2', businessPlatformId: 'platform-douyin', businessShopId: 'business-shop-2', platform: 'DOUYIN', shopKey: 'shop-two', platformShopId: 'DY-SHOP-2',
     displayName: '二号店铺', aliases: ['店铺二'], sourceType: '公司资源', source: '抖音电商',
     sourceName: '飞鸽客服', active: true, createdById: 'admin-1', createdByName: '管理员',
     createdAt: '2026-08-08T08:00:00.000Z', updatedAt: '2026-08-08T08:00:00.000Z',
@@ -90,6 +90,10 @@ function backendFixture() {
     shops: structuredClone(shops),
     mappings: structuredClone(mappings),
     products: products.map(({ id, name, price, isActive }) => ({ id, name, price, isActive })),
+    businessShops: [
+      { id: 'business-shop-1', platformId: 'platform-douyin', platformCode: 'DOUYIN', platformName: '抖音小店', name: '一号店铺', active: true },
+      { id: 'business-shop-2', platformId: 'platform-douyin', platformCode: 'DOUYIN', platformName: '抖音小店', name: '二号店铺', active: true },
+    ],
   };
   const requests: Array<{ url: string; method: string; body: unknown }> = [];
   let nextMappingMutation: MutationMode = 'success';
@@ -195,7 +199,10 @@ async function mountPage(fixture: ReturnType<typeof backendFixture>) {
   mountedRoot = root;
   act(() => { root.render(React.createElement(BrowserAgentConfigPage)); });
   assert.ok(document.querySelector('[role="progressbar"]'), '初始HTTP/产品请求未完成时应显示加载态');
-  await waitFor('店铺目录初始加载', () => document.body.textContent?.includes('当前店铺：一号店铺') === true);
+  await waitFor('店铺目录初始加载', () => document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent === '一号店铺');
+  assert.ok(document.body.textContent?.includes('店铺名称、店铺ID和别名统一在“业务平台与店铺”维护'), '商品映射页应明确店铺主数据的唯一维护入口');
+  assert.ok(![...document.querySelectorAll('button')].some((button) => button.textContent?.trim() === '抖音店铺已全部接入'), '商品映射页不应保留重复接入按钮');
+  assert.equal(document.querySelectorAll('[data-testid="current-browser-shop-label"]').length, 1, '当前店铺标题只能出现一次');
   return root;
 }
 
@@ -211,10 +218,10 @@ async function dismissFeedback() {
 }
 
 async function closeEditDialog() {
-  const dialog = [...document.querySelectorAll('[role="dialog"]')].find((item) => item.textContent?.includes('编辑店铺绑定'));
+  const dialog = [...document.querySelectorAll('[role="dialog"]')].find((item) => item.textContent?.includes('编辑店铺接入'));
   assert.ok(dialog, '键盘激活编辑按钮应打开真实店铺表单');
   dispatchClick(findButton('取消', dialog));
-  await waitFor('店铺编辑弹窗关闭', () => ![...document.querySelectorAll('[role="dialog"]')].some((item) => item.textContent?.includes('编辑店铺绑定')));
+  await waitFor('店铺编辑弹窗关闭', () => ![...document.querySelectorAll('[role="dialog"]')].some((item) => item.textContent?.includes('编辑店铺接入')));
 }
 
 async function exerciseRealPageWorkflow() {
@@ -226,54 +233,48 @@ async function exerciseRealPageWorkflow() {
   assert.equal(shopTwoRow.tabIndex, 0, '店铺行必须可聚焦');
   assert.equal(shopTwoRow.getAttribute('aria-selected'), 'false');
   dispatchKey(shopTwoRow, ' ');
-  await waitFor('空格键选择二号店铺', () => document.body.textContent?.includes('当前店铺：二号店铺') === true);
+  await waitFor('空格键选择二号店铺', () => document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent === '二号店铺');
   assert.equal(shopTwoRow.getAttribute('aria-selected'), 'true');
   assert.ok(document.body.textContent?.includes('二号店铺商品'), '键盘选店后应切换下方映射结果');
 
   const shopOneRow = document.querySelector('[data-view="desktop"][data-row-id="shop-1"]') as HTMLElement;
   dispatchKey(shopOneRow, 'Enter');
-  await waitFor('回车键选择一号店铺', () => document.body.textContent?.includes('当前店铺：一号店铺') === true);
+  await waitFor('回车键选择一号店铺', () => document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent === '一号店铺');
+  assert.ok(document.querySelector('[aria-label="编辑商品映射 一号店铺商品"]'), '商品映射操作列应提供可读的编辑图标按钮');
+  assert.ok(document.querySelector('[aria-label="停用商品映射 一号店铺商品"]'), '商品映射操作列应提供可读的停用图标按钮');
+  const mappingRow = document.querySelector('[data-view="desktop"][data-row-id="mapping-1"]') as HTMLTableRowElement | null;
+  assert.ok(mappingRow);
+  const mappingActionHeader = mappingRow.closest('table')?.querySelector('thead th:last-child') as HTMLTableCellElement | null;
+  const mappingActionCell = mappingRow.querySelector('td:last-child') as HTMLTableCellElement | null;
+  assert.equal(window.getComputedStyle(mappingActionHeader!).position, 'sticky', '商品映射操作表头应固定在右侧');
+  assert.equal(window.getComputedStyle(mappingActionCell!).position, 'sticky', '商品映射行操作区应固定在右侧');
 
   const shopTwoCard = document.querySelector('[data-view="mobile"][data-row-id="shop-2"]') as HTMLElement | null;
   assert.ok(shopTwoCard);
   assert.equal(shopTwoCard.tabIndex, 0, '手机卡片必须可聚焦');
   assert.equal(shopTwoCard.getAttribute('aria-selected'), 'false');
   dispatchKey(shopTwoCard, ' ');
-  await waitFor('手机卡片空格键选择二号店铺', () => document.body.textContent?.includes('当前店铺：二号店铺') === true);
+  await waitFor('手机卡片空格键选择二号店铺', () => document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent === '二号店铺');
   assert.equal(shopTwoCard.getAttribute('aria-selected'), 'true');
   assert.ok(document.body.textContent?.includes('二号店铺商品'), '手机卡片键盘选店后应切换下方映射结果');
 
-  const desktopEdit = findButton('编辑', shopOneRow);
-  dispatchKey(desktopEdit, 'Enter');
-  dispatchClick(desktopEdit);
-  await waitFor('桌面行编辑按钮键盘激活', () => document.body.textContent?.includes('编辑店铺绑定') === true);
-  assert.ok(document.body.textContent?.includes('当前店铺：二号店铺'), '嵌套按钮的Enter不得冒泡选中所在行');
-  await closeEditDialog();
-
-  const shopOneCard = document.querySelector('[data-view="mobile"][data-row-id="shop-1"]') as HTMLElement;
-  const mobileEdit = findButton('编辑', shopOneCard);
-  dispatchKey(mobileEdit, ' ');
-  dispatchClick(mobileEdit);
-  await waitFor('手机卡片编辑按钮键盘激活', () => document.body.textContent?.includes('编辑店铺绑定') === true);
-  assert.ok(document.body.textContent?.includes('当前店铺：二号店铺'), '嵌套按钮的Space不得冒泡选中所在卡片');
-  await closeEditDialog();
-
-  dispatchClick(findButton('停用', shopTwoRow));
-  await waitFor('店铺停用确认', () => document.body.textContent?.includes('停用后插件不能以该店铺创建新线索，历史记录保留') === true);
-  dispatchClick(findButton('确认停用', document.querySelector('[role="dialog"]')!));
-  await waitFor('店铺停用成功反馈', () => document.body.textContent?.includes('店铺已停用') === true);
-  assert.deepEqual(fixture.requests.find((request) => request.url.endsWith('/shops/shop-2') && request.method === 'PUT')?.body, { active: false });
-  await dismissFeedback();
+  const pageButtons = [...document.querySelectorAll('button')].map((button) => button.textContent?.trim());
+  assert.ok(!pageButtons.includes('编辑接入'), '商品映射页不再重复编辑店铺接入资料');
+  assert.ok(!pageButtons.includes('停用店铺'), '店铺启停统一在业务平台与店铺维护');
 
   const refreshedShopOneRow = document.querySelector('[data-view="desktop"][data-row-id="shop-1"]') as HTMLElement;
   dispatchKey(refreshedShopOneRow, 'Enter');
-  await waitFor('回车键选择一号店铺', () => document.body.textContent?.includes('当前店铺：一号店铺') === true);
+  await waitFor('回车键选择一号店铺', () => document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent === '一号店铺');
 
   dispatchClick(findButton('新增商品映射'));
   const mappingDialog = document.querySelector('[role="dialog"]')!;
+  const mappingSelects = mappingDialog.querySelectorAll('[role="combobox"]');
+  assert.equal(mappingSelects.length, 1, '所属店铺来自当前上下文，表单只保留OS产品下拉');
+  assert.ok(mappingDialog.textContent?.includes('当前店铺'));
+  assert.ok(mappingDialog.textContent?.includes('一号店铺'));
   changeValue(findInput('平台商品名称', mappingDialog), '新平台商品');
   changeValue(findInput('平台商品别名', mappingDialog), '别名甲\n别名乙');
-  const productSelect = mappingDialog.querySelector('[role="combobox"]');
+  const productSelect = mappingDialog.querySelectorAll('[role="combobox"]')[0];
   assert.ok(productSelect);
   act(() => { productSelect.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
   let productListbox: Element | undefined;

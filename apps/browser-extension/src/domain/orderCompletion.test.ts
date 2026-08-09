@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { isPaidOrderStatus, mergeOsOrderRemark } from './orderCompletion';
+import { isIntakeEligibleOrderStatus, isPaidOrderStatus, mergeOsOrderRemark } from './orderCompletion';
 
 const remarkLines: [string, string] = [
   '#悠然一刻/手机号：13826459812/微信号：wx_user88（对接：销售小王）',
@@ -64,4 +64,12 @@ assert.equal(isPaidOrderStatus('待发货'), true);
 assert.equal(isPaidOrderStatus('已关闭（售后完成）'), false);
 assert.equal(isPaidOrderStatus('退款成功'), false);
 assert.equal(isPaidOrderStatus(''), false);
+assert.equal(isIntakeEligibleOrderStatus('已关闭（售后完成）'), true);
+assert.equal(isIntakeEligibleOrderStatus('已关闭（退款完成）'), true, '已关闭订单仍可作为客户线索入OS');
+assert.equal(isIntakeEligibleOrderStatus('已关闭（订单取消）'), false);
+assert.equal(isIntakeEligibleOrderStatus('已付款'), true);
+assert.equal(isIntakeEligibleOrderStatus(''), true, '页面未识别状态时不应误阻断');
+assert.equal(isIntakeEligibleOrderStatus('待付款'), false);
+assert.equal(isIntakeEligibleOrderStatus('退款成功'), false);
+assert.equal(isIntakeEligibleOrderStatus('未知状态'), false);
 console.log('browser order completion domain: ok');

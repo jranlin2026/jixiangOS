@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx src/shared/apiBaseUrl.test.ts && tsx src/shared/activeTabMessaging.test.ts && tsx src/shared/workerMessaging.test.ts && tsx src/domain/contactDetection.test.ts && tsx src/domain/orderCompletion.test.ts && tsx src/domain/scriptLibrary.test.ts && tsx src/content/douyinFeigeAdapter.test.ts && tsx src/sidepanel/FeedbackDialog.test.tsx && tsx src/sidepanel/ScriptLibraryEditor.test.ts && tsx src/sidepanel/orderCompletionWorkflow.test.ts && tsx src/sidepanel/orderCompletionPanelState.test.ts && tsx src/sidepanel/main.test.tsx && tsx src/sidepanel/mainAttemptCancellation.test.tsx"
+    "test": "tsx src/shared/apiBaseUrl.test.ts && tsx src/shared/osSettingsUrl.test.ts && tsx src/shared/activeTabMessaging.test.ts && tsx src/shared/workerMessaging.test.ts && tsx src/domain/contactDetection.test.ts && tsx src/domain/orderCompletion.test.ts && tsx src/domain/scriptLibrary.test.ts && tsx src/content/douyinFeigeAdapter.test.ts && tsx src/sidepanel/FeedbackDialog.test.tsx && tsx src/sidepanel/orderCompletionWorkflow.test.ts && tsx src/sidepanel/orderCompletionPanelState.test.ts && tsx src/sidepanel/main.test.tsx && tsx src/sidepanel/mainAttemptCancellation.test.tsx"
   },
   "dependencies": {
     "react": "^18.2.0",

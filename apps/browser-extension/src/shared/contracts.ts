@@ -85,9 +85,9 @@ export type BrowserProductPreviewInput = {
   pageShopDisplayName?: string;
   platformProductId?: string;
   platformSkuId?: string;
-  platformProductName: string;
-  paymentAmount: number;
-  paymentAt: string;
+  platformProductName?: string;
+  paymentAmount?: number;
+  paymentAt?: string;
 };
 
 export type BrowserProductPreviewResponse = {
@@ -96,9 +96,9 @@ export type BrowserProductPreviewResponse = {
   facts: {
     platformProductId?: string;
     platformSkuId?: string;
-    platformProductName: string;
-    paymentAmount: number;
-    paymentAt: string;
+    platformProductName?: string;
+    paymentAmount?: number;
+    paymentAt?: string;
   };
   priceDifference: {
     paymentAmount: number;
@@ -108,21 +108,13 @@ export type BrowserProductPreviewResponse = {
   } | null;
 };
 
-export function hasRequiredOrderFacts(
+export function hasRequiredIntakeContext(
   context: FeigePageContext | null | undefined,
-): context is FeigePageContext & {
-  readyForIntake: true;
-  productName: string;
-  paymentAmount: number;
-  paymentAt: string;
-} {
+): context is FeigePageContext & { readyForIntake: true } {
   return Boolean(
     context?.readyForIntake
-    && context.productName.trim()
-    && typeof context.paymentAmount === 'number'
-    && Number.isFinite(context.paymentAmount)
-    && context.paymentAmount >= 0
-    && context.paymentAt?.trim(),
+    && context.customerDisplayName.trim()
+    && context.platformOrderNo.trim(),
   );
 }
 
@@ -137,9 +129,9 @@ export type BrowserLeadIntakeInput = {
   contactWechat?: string;
   platformProductId?: string;
   platformSkuId?: string;
-  platformProductName: string;
-  paymentAmount: number;
-  paymentAt: string;
+  platformProductName?: string;
+  paymentAmount?: number;
+  paymentAt?: string;
 };
 
 export type LeadIntakeResponse = {
@@ -169,7 +161,15 @@ export type CompleteOsOrderInput = {
 
 export type CompleteOsOrderResult =
   | { ok: true; remarkText: string; remarkStatus: 'SUCCEEDED'; greenFlagStatus: 'SUCCEEDED' }
-  | { ok: false; code: string; message: string; stage: 'CONTEXT' | 'REMARK' | 'GREEN_FLAG' | 'SAVE'; remarkText?: string };
+  | {
+      ok: false;
+      code: string;
+      message: string;
+      stage: 'CONTEXT' | 'REMARK' | 'GREEN_FLAG' | 'SAVE';
+      remarkText?: string;
+      remarkStatus?: 'SUCCEEDED' | 'FAILED';
+      greenFlagStatus?: 'SUCCEEDED' | 'FAILED';
+    };
 
 export type PageCommand =
   | { type: 'READ_FEIGE_CONTEXT' }
@@ -197,7 +197,7 @@ export type PageCommandResult =
 
 export type WorkerCommand =
   | { type: 'AUTH_STATE' }
-  | { type: 'LOGIN'; config: ExtensionConfig; account: string; password: string }
+  | { type: 'CONNECT_OS'; config: ExtensionConfig; interactive: boolean }
   | { type: 'LOGOUT' }
   | { type: 'GET_RUNTIME_CONFIG' }
   | { type: 'PREVIEW_PRODUCT_MAPPING'; input: BrowserProductPreviewInput }

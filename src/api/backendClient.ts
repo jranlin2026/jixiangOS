@@ -99,6 +99,36 @@ export async function backendRequest<T>(path: string, init: RequestInit = {}): P
   };
 }
 
+export async function downloadBackendFile(path: string, filename: string): Promise<void> {
+  const token = readBackendToken();
+  const headers = new Headers();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(`${getBackendBaseUrl()}${path}`, { headers });
+  if (!response.ok) {
+    const text = await response.text();
+    let message = text;
+    if (text && (jsonContentType(response) || jsonLikeText(text))) {
+      try {
+        message = String((JSON.parse(text) as { message?: unknown }).message || text);
+      } catch {
+        message = text;
+      }
+    }
+    if (response.status === 401) clearBackendToken();
+    throw new Error(message && !message.trim().startsWith('<')
+      ? message
+      : `Backend request failed with HTTP ${response.status}`);
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 let storageHydratedAt = 0;
 let storageHydrationPromise: Promise<void> | null = null;
 const scopedStorageHydratedAt = new Map<string, number>();

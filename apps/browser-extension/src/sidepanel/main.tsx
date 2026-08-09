@@ -13,20 +13,17 @@ import type {
   LogoutResult,
   WorkerCommand,
 } from '../shared/contracts';
-import { hasRequiredOrderFacts } from '../shared/contracts';
+import { hasRequiredIntakeContext } from '../shared/contracts';
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
 import { activeTabCommand } from '../shared/activeTabMessaging';
 import { withWorkerTimeout } from '../shared/workerMessaging';
+import { scriptLibrarySettingsUrl } from '../shared/osSettingsUrl';
 import {
   matchScript,
-  recommendationKey,
-  shouldAttemptAutoFill,
-  type ScriptLibrary,
   type ScriptLibraryView,
   type ScriptMatch,
 } from '../domain/scriptLibrary';
-import { isPaidOrderStatus } from '../domain/orderCompletion';
-import { ScriptLibraryEditor } from './ScriptLibraryEditor';
+import { isIntakeEligibleOrderStatus } from '../domain/orderCompletion';
 import { ScriptLibrarySection } from './ScriptLibrarySection';
 import { FeedbackDialog } from './FeedbackDialog';
 import {
@@ -62,18 +59,6 @@ function permissionPattern(apiBaseUrl: string) {
   return `${url.origin}/*`;
 }
 
-function formatMoney(value?: number) {
-  return typeof value === 'number' && Number.isFinite(value) ? `¥${value.toFixed(2)}` : '未识别';
-}
-
-function matchMethodLabel(method?: string) {
-  if (method === 'PLATFORM_PRODUCT_ID') return '店铺商品映射';
-  if (method === 'PLATFORM_SKU_ID') return '店铺SKU映射';
-  if (method === 'SHOP_ALIAS') return '店铺商品别名';
-  if (method === 'EXACT_OS_NAME') return 'OS产品同名';
-  return '待后端确认';
-}
-
 function selectedRuntimeShop(shops: BrowserRuntimeShop[], shopBindingId: string) {
   return shops.find((shop) => shop.id === shopBindingId);
 }
@@ -82,17 +67,42 @@ function normalizedFact(value: unknown) {
   return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ');
 }
 
+function formatPlatformPaymentAmount(value?: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? `¥${value.toFixed(2)}` : '未识别';
+}
+
+function formatPlatformPaymentTime(value?: string) {
+  if (!value) return '未识别';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '未识别';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || '';
+  return `${part('year')}/${part('month')}/${part('day')} ${part('hour')}:${part('minute')}:${part('second')}`;
+}
+
+function sameOptionalInstant(left?: string, right?: string) {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime === rightTime;
+}
+
 function previewRepresentsContext(
   preview: BrowserProductPreviewResponse | null,
   context: FeigePageContext | null,
   shopBindingId: string,
 ) {
-  if (!preview || !hasRequiredOrderFacts(context) || preview.shop.id !== shopBindingId) return false;
+  if (!preview || !hasRequiredIntakeContext(context) || preview.shop.id !== shopBindingId) return false;
   return normalizedFact(preview.facts.platformProductId) === normalizedFact(context.platformProductId)
     && normalizedFact(preview.facts.platformSkuId) === normalizedFact(context.platformSkuId)
     && normalizedFact(preview.facts.platformProductName) === normalizedFact(context.productName)
     && preview.facts.paymentAmount === context.paymentAmount
-    && new Date(preview.facts.paymentAt).getTime() === new Date(context.paymentAt).getTime();
+    && sameOptionalInstant(preview.facts.paymentAt, context.paymentAt);
 }
 
 function App() {
@@ -103,8 +113,6 @@ function App() {
   const [notice, setNotice] = useState('');
   const [auth, setAuth] = useState<AuthState>({});
   const [apiBaseUrl, setApiBaseUrl] = useState('http://127.0.0.1:3001/api');
-  const [account, setAccount] = useState('');
-  const [password, setPassword] = useState('');
   const [panel, dispatchPanel] = useReducer(completionPanelReducer, undefined, createCompletionPanelState);
   const {
     context,
@@ -120,13 +128,9 @@ function App() {
   } = panel;
   const [scriptView, setScriptView] = useState<ScriptLibraryView | null>(null);
   const [scriptLibraryError, setScriptLibraryError] = useState('');
-  const [scriptDraft, setScriptDraft] = useState<ScriptLibrary | null>(null);
-  const [managingScripts, setManagingScripts] = useState(false);
-  const [savingScripts, setSavingScripts] = useState(false);
   const [recommendationMessage, setRecommendationMessage] = useState('');
   const [recommendation, setRecommendation] = useState<ScriptMatch | null>(null);
   const [recognition, setRecognition] = useState<RecognitionSnapshot | null>(null);
-  const attemptedRecommendationKeys = useRef(new Set<string>());
   const recognitionSequence = useRef(0);
   const evaluatedRecognition = useRef(0);
   const attemptSequence = useRef(0);
@@ -163,12 +167,9 @@ function App() {
     setNotice('');
     setScriptView(null);
     setScriptLibraryError('');
-    setScriptDraft(null);
-    setManagingScripts(false);
     setRecommendationMessage('');
     setRecommendation(null);
     setRecognition(null);
-    attemptedRecommendationKeys.current.clear();
     if (sessionExpiredMessage) setError(sessionExpiredMessage);
   };
 
@@ -190,28 +191,29 @@ function App() {
     };
   }, []);
 
-  const paidOrderRecognized = Boolean(context && isPaidOrderStatus(context.orderStatus));
   const completionFormLocked = isCompletionFormLocked(panel);
   const selectedShop = selectedRuntimeShop(runtimeConfig?.shops || [], shopBindingId);
   const productPreview = productPreviewForPanel(panel);
-  const previewResolution = authoritativePreview?.productResolution;
-  const referencePrice = productPreview?.status === 'MATCHED'
-    ? productPreview.osReferencePrice ?? (
-        previewResolution?.status === 'MATCHED'
-        && (!productPreview.osProductId || previewResolution.osProductId === productPreview.osProductId)
-          ? previewResolution.osReferencePrice
-          : undefined
-      )
-    : undefined;
-  const priceDiffers = authoritativePreview?.priceDifference?.differs === true
-    && typeof referencePrice === 'number'
-    && typeof context?.paymentAmount === 'number'
-    && referencePrice !== context.paymentAmount;
-  const orderFactsReady = hasRequiredOrderFacts(context);
+  const criticalDiagnostics = context?.diagnostics.filter((item) => (
+    /客户昵称|平台订单号|多张可见活动订单卡/.test(item)
+  )) || [];
   const canRunAuthoritativePreflight = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
     && (form.phone.trim() || form.wechat.trim()) && selectedShop && contactConfirmed
-    && paidOrderRecognized && orderFactsReady && !loggingOut);
+    && hasRequiredIntakeContext(context) && isIntakeEligibleOrderStatus(context.orderStatus) && !loggingOut);
   const canIntake = canRunAuthoritativePreflight && productPreviewStatus === 'READY';
+  const intakeBlockedReason = sync ? ''
+    : !context ? '请先刷新识别当前会话'
+      : !context.supported ? '当前页面不是受支持的抖店飞鸽会话'
+        : !context.customerDisplayName.trim() ? '未识别客户昵称，请刷新当前会话'
+          : !context.platformOrderNo.trim() ? '未识别平台订单号，请展开订单后刷新'
+            : !hasRequiredIntakeContext(context) ? '订单必要信息尚未识别完整，请展开订单后刷新'
+              : !selectedShop ? '请先选择当前店铺'
+                : !(form.phone.trim() || form.wechat.trim()) ? '请至少填写手机号或微信号'
+                    : !contactConfirmed ? '请先核对并确认客户资料'
+                      : !isIntakeEligibleOrderStatus(context.orderStatus) ? '当前订单状态暂不支持入OS'
+                        : productPreviewStatus === 'LOADING' ? '正在校验订单与商品信息'
+                          : productPreviewStatus === 'FAILED' ? '订单或商品校验失败，请按上方提示处理'
+                            : '请根据上方提示完善信息';
   const workflowLabel = useMemo(() => {
     if (completion?.stage === 'COMPLETED') return '订单闭环已完成';
     if (sync) return '线索已入库，待完成订单';
@@ -222,44 +224,13 @@ function App() {
   useEffect(() => {
     if (!recognition || !scriptView || evaluatedRecognition.current === recognition.id) return;
     evaluatedRecognition.current = recognition.id;
-    if (!isPaidOrderStatus(recognition.context.orderStatus)) {
-      setRecommendation(null);
-      setRecommendationMessage('请先确认当前订单为已付款有效订单');
-      return;
-    }
     const nextRecommendation = matchScript(scriptView.library, {
       orderStatus: recognition.context.orderStatus,
       productName: recognition.context.productName,
       hasContact: recognition.hasContact,
     });
     setRecommendation(nextRecommendation);
-    if (!nextRecommendation) {
-      setRecommendationMessage('');
-      return;
-    }
-    const key = recommendationKey(recognition.context.platformOrderNo, nextRecommendation.script.id);
-    if (!shouldAttemptAutoFill({
-      orderNo: recognition.context.platformOrderNo,
-      orderStatus: recognition.context.orderStatus,
-      key,
-      attemptedKeys: attemptedRecommendationKeys.current,
-    })) return;
-    attemptedRecommendationKeys.current.add(key);
-    void activeTabCommand({
-      type: 'FILL_FEIGE_REPLY_IF_EMPTY',
-      text: nextRecommendation.script.content,
-      expectedOrderNo: recognition.context.platformOrderNo,
-      expectedCustomerDisplayName: recognition.context.customerDisplayName,
-    })
-      .then((result) => {
-        if (!result.ok) {
-          setRecommendationMessage(`已推荐话术，自动填入失败：${result.message}`);
-          return;
-        }
-        if ('filled' in result && result.filled) setRecommendationMessage('已自动填入，请客服确认后发送');
-        else setRecommendationMessage('输入框已有内容，仅提供推荐，未覆盖人工输入');
-      })
-      .catch((caught) => setRecommendationMessage(`已推荐话术，自动填入失败：${caught instanceof Error ? caught.message : '执行失败'}`));
+    setRecommendationMessage(nextRecommendation ? '点击推荐话术后，将追加到回复框末尾。' : '');
   }, [recognition, scriptView]);
 
   useEffect(() => {
@@ -268,7 +239,7 @@ function App() {
     const orderNo = context?.platformOrderNo.trim() || '';
     const customerName = context?.customerDisplayName.trim() || '';
     if (loggingOut || !operatorId || !selectedShopId || !context?.supported || !orderNo || !customerName
-      || !hasRequiredOrderFacts(context)) {
+      || !hasRequiredIntakeContext(context)) {
       activeProductPreview.current = null;
       return;
     }
@@ -302,9 +273,9 @@ function App() {
         shopBindingId: selectedShopId,
         platformProductId: context.platformProductId?.trim() || undefined,
         platformSkuId: context.platformSkuId?.trim() || undefined,
-        platformProductName: context.productName.trim(),
+        platformProductName: context.productName.trim() || undefined,
         paymentAmount: context.paymentAmount,
-        paymentAt: context.paymentAt.trim(),
+        paymentAt: context.paymentAt?.trim() || undefined,
       },
     }).then((result) => {
       if (!requestIsActive()) return;
@@ -415,6 +386,7 @@ function App() {
       }
       setAuth(result.data || {});
       setLoading(false);
+      if (result.code !== 0) setError(result.message || '极享OS连接已失效');
       if (result.data?.operator) {
         void Promise.all([refreshContext(), loadRuntimeConfig(), loadScriptLibrary()])
           .catch((caught) => setError(caught instanceof Error ? caught.message : '初始化失败'));
@@ -422,7 +394,7 @@ function App() {
     });
   }, []);
 
-  const login = async () => {
+  async function connect(interactive = true) {
     if (loggingOutRef.current) return;
     setBusy(true); setError(''); setNotice('');
     try {
@@ -435,18 +407,17 @@ function App() {
         ...(!auth.config?.shopBindingId && auth.config?.shopKey ? { shopKey: auth.config.shopKey } : {}),
       };
       const result = await worker<{ operator: AuthenticatedOperator; config: ExtensionConfig }>({
-        type: 'LOGIN', config, account, password,
+        type: 'CONNECT_OS', config, interactive,
       });
       if (result.code !== 0 || !result.data) throw new Error(result.message);
       loggingOutRef.current = false;
       setAuth(result.data);
-      setPassword('');
-      setNotice(`已以${result.data.operator.name}登录`);
+      setNotice(`已连接极享OS：${result.data.operator.name}`);
       await Promise.all([refreshContext(), loadRuntimeConfig(), loadScriptLibrary()]);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '登录失败');
+      if (interactive) setError(caught instanceof Error ? caught.message : '连接失败');
     } finally { setBusy(false); }
-  };
+  }
 
   const logout = async () => {
     if (loggingOutRef.current) return;
@@ -516,35 +487,6 @@ function App() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : '填入话术失败'); }
   };
 
-  const beginManageScripts = () => {
-    if (!scriptView?.canManage) return;
-    setScriptDraft(structuredClone(scriptView.library));
-    setManagingScripts(true);
-  };
-
-  const saveScripts = async () => {
-    if (!scriptDraft) return;
-    setSavingScripts(true); setError(''); setNotice('');
-    try {
-      const result = await worker<ScriptLibraryView>({ type: 'SAVE_SCRIPT_LIBRARY', library: scriptDraft });
-      if (result.code !== 0 || !result.data) {
-        if (result.code === 409) {
-          await loadScriptLibrary();
-          setManagingScripts(false);
-        }
-        throw new Error(result.message);
-      }
-      setScriptView(result.data);
-      setScriptDraft(structuredClone(result.data.library));
-      setRecommendation(null);
-      setRecommendationMessage('');
-      setManagingScripts(false);
-      setNotice('话术库已更新，公司插件下次加载即使用新版本');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '话术保存失败');
-    } finally { setSavingScripts(false); }
-  };
-
   const completeOrder = async () => {
     if (loggingOutRef.current) return;
     const attempt = completionAttemptSnapshot(panel);
@@ -598,9 +540,9 @@ function App() {
           contactWechat: attempt.wechat, contactSource: attempt.source,
           platformProductId: context.platformProductId || undefined,
           platformSkuId: context.platformSkuId || undefined,
-          platformProductName: context.productName,
-          paymentAmount: context.paymentAmount as number,
-          paymentAt: context.paymentAt || '',
+          ...(context.productName.trim() ? { platformProductName: context.productName.trim() } : {}),
+          ...(typeof context.paymentAmount === 'number' ? { paymentAmount: context.paymentAmount } : {}),
+          ...(context.paymentAt?.trim() ? { paymentAt: context.paymentAt.trim() } : {}),
         } satisfies BrowserLeadIntakeInput,
       }, {
         isAttemptActive,
@@ -690,7 +632,7 @@ function App() {
       }
       if (result.stage === 'COMPLETED') {
         const completedIntake = result.intakeResult;
-        setNotice(`线索编号：${completedIntake?.lead.id || '未知'}；分配销售：${completedIntake?.lead.assignedTo || '暂未分配'}；订单备注、绿色旗帜均已验证`);
+        setNotice(`线索编号：${completedIntake?.lead.id || '未知'}；分配销售：${completedIntake?.lead.assignedTo || '暂未分配'}；订单备注、红色旗帜均已验证`);
       } else if (result.message) setError(result.message);
       if (activeAttempt.current === attemptToken) activeAttempt.current = null;
     } catch (caught) {
@@ -719,17 +661,9 @@ function App() {
     <section className="card login-card">
       <h2>连接极享OS</h2>
       <label>极享OS API地址<input value={apiBaseUrl} onChange={(event) => setApiBaseUrl(event.target.value)} /></label>
-      <label>账号<input value={account} onChange={(event) => setAccount(event.target.value)} /></label>
-      <label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-      <button className="primary" disabled={busy || !account || !password || !apiBaseUrl.trim()} onClick={() => void login()}>{busy ? '正在登录…' : '登录并连接'}</button>
-      <p className="hint">密码仅用于本次登录，不会保存在插件中。</p>
+      <button className="primary" disabled={busy || !apiBaseUrl.trim()} onClick={() => void connect(true)}>{busy ? '正在连接…' : '使用极享OS登录状态连接'}</button>
+      <p className="hint">请先在极享OS网页完成登录。插件只获得浏览器员工专用权限，不会读取或保存您的密码。</p>
     </section>
-    {feedbackDialog}
-  </main>;
-
-  if (managingScripts && scriptDraft) return <main className="shell">
-    <header><span className="brand-mark">JX</span><div><h1>飞鸽客服副驾驶</h1><p>{auth.operator.name}·话术库管理</p></div></header>
-    <ScriptLibraryEditor library={scriptDraft} saving={savingScripts} onChange={setScriptDraft} onSave={() => void saveScripts()} onCancel={() => setManagingScripts(false)} />
     {feedbackDialog}
   </main>;
 
@@ -739,7 +673,7 @@ function App() {
 
     <section className="card context-card">
       <div className="section-title"><h2>当前会话</h2><button className="secondary compact" disabled={busy || loggingOut} onClick={() => void refreshContext()}>刷新识别</button></div>
-      {runtimeConfig && runtimeConfig.shops.length > 0 ? <label>绑定店铺
+      {runtimeConfig && runtimeConfig.shops.length ? <div className="shop-binding-row"><span>绑定店铺</span>
         <select
           aria-label="绑定店铺"
           disabled={busy || loggingOut || completionFormLocked}
@@ -749,35 +683,27 @@ function App() {
           <option value="">请选择当前店铺</option>
           {runtimeConfig.shops.map((shop) => <option key={shop.id} value={shop.id}>{shop.displayName}</option>)}
         </select>
-      </label> : null}
+      </div> : null}
       {context ? <div className="facts">
         <div><span>客户</span><strong>{context.customerDisplayName || '未识别'}</strong></div>
         <div><span>订单</span><strong>{context.platformOrderNo || '未识别'}</strong></div>
         <div><span>订单状态</span><strong>{context.orderStatus || '未识别'}</strong></div>
-        <div><span>绑定店铺</span><strong>{selectedShop?.displayName || '未选择'}</strong></div>
         <div><span>平台商品</span><strong>{context.productName || '未识别'}</strong></div>
-        <div><span>匹配产品</span><strong>{productPreview?.status === 'MATCHED'
-          ? productPreview.osProductName || '待后端确认'
+        <div><span>OS产品</span><strong>{productPreview?.status === 'MATCHED'
+          ? productPreview.osProductName || '已匹配'
           : productPreview?.status === 'UNMATCHED'
-            ? '待匹配（本次仍可录入，平台原名会写入OS备注）'
+            ? '未匹配（不影响入OS）'
             : productPreviewStatus === 'LOADING' ? '正在匹配…' : '待匹配预览'}</strong></div>
-        <div><span>匹配方式</span><strong>{productPreview?.status === 'MATCHED'
-          ? matchMethodLabel(productPreview.method)
-          : productPreviewStatus === 'LOADING' ? '正在匹配…' : '未匹配'}</strong></div>
-        <div><span>OS参考价</span><strong>{typeof referencePrice === 'number' ? formatMoney(referencePrice) : '暂未提供'}</strong></div>
-        <div><span>实付金额</span><strong>{formatMoney(context.paymentAmount)}</strong></div>
-        <div><span>付款时间</span><strong>{context.paymentAt || '未识别'}</strong></div>
-        <div><span>消息</span><strong>{context.messages.length}条</strong></div>
+        <div data-field="platform-payment-amount"><span>平台实付金额</span><strong>{formatPlatformPaymentAmount(context.paymentAmount)}</strong></div>
+        <div data-field="platform-payment-time"><span>平台付款时间</span><strong>{formatPlatformPaymentTime(context.paymentAt)}</strong></div>
       </div> : <p className="empty">请打开抖店飞鸽客服会话，然后点击“刷新识别”。</p>}
-      {context?.diagnostics.length ? <ul className="diagnostics">{context.diagnostics.map((item) => <li key={item}>{item}</li>)}</ul> : null}
+      {criticalDiagnostics.length ? <ul className="diagnostics">{criticalDiagnostics.map((item) => <li key={item}>{item}</li>)}</ul> : null}
       {runtimeConfig && !selectedShop
         ? <div className="alert warning">请先手工选择当前飞鸽账号对应的店铺，选择结果会保存在本机。</div> : null}
-      {context && !orderFactsReady
-        ? <div className="alert warning">请先展开当前唯一订单卡片，再点击“刷新识别”；订单折叠时飞鸽不会提供商品、实付金额和付款时间。</div> : null}
+      {context && !isIntakeEligibleOrderStatus(context.orderStatus)
+        ? <div className="alert warning">当前订单状态不支持入OS；已付款、已发货、已完成和已关闭订单可继续。</div> : null}
       {productPreview?.status === 'UNMATCHED'
-        ? <div className="alert warning">商品尚未匹配OS标准产品，本次仍可录入；平台原名“{productPreview.rawProductName || context?.productName || '未识别'}”将写入OS备注。</div> : null}
-      {priceDiffers
-        ? <div className="alert warning">OS参考价 {formatMoney(referencePrice)}，仅供参考；本次按飞鸽实付 {formatMoney(context?.paymentAmount)} 录入</div> : null}
+        ? <div className="alert warning">商品未匹配OS标准产品，本次仍可入库，不会阻断客服操作。</div> : null}
     </section>
 
     <ScriptLibrarySection
@@ -786,7 +712,7 @@ function App() {
       recommendationMessage={recommendationMessage}
       loadError={scriptLibraryError}
       onFill={(text) => void fillScript(text)}
-      onManage={beginManageScripts}
+      onManage={() => window.open(scriptLibrarySettingsUrl(apiBaseUrl), '_blank', 'noopener,noreferrer')}
       onRetry={() => {
         setError('');
         void loadScriptLibrary().catch((caught) => setError(caught instanceof Error ? caught.message : '话术加载失败'));
@@ -795,13 +721,12 @@ function App() {
 
     <section className="card">
       <div className="section-title"><h2>联系方式</h2><span className={`status ${form.phone || form.wechat ? 'ready' : ''}`}>{form.phone || form.wechat ? '已获取' : '待获取'}</span></div>
-      <div className="source-switch"><button disabled={completionFormLocked} className={form.source === 'CHAT' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'CHAT' })}>客户聊天提供</button><button disabled={completionFormLocked} className={form.source === 'OFF_PLATFORM' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'OFF_PLATFORM' })}>站外已获取</button></div>
-      <label>抖音昵称<input value={form.name} readOnly placeholder="请先刷新识别当前客户" /></label>
+      <div className="source-switch" role="radiogroup" aria-label="联系方式来源"><button role="radio" aria-checked={form.source === 'CHAT'} disabled={completionFormLocked} className={form.source === 'CHAT' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'CHAT' })}>聊天中提供</button><button role="radio" aria-checked={form.source === 'OFF_PLATFORM'} disabled={completionFormLocked} className={form.source === 'OFF_PLATFORM' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'OFF_PLATFORM' })}>客服站外补录</button></div>
+      <p className="source-description">{form.source === 'CHAT' ? '客户在当前飞鸽会话中发送了手机号或微信号。' : '客服通过电话、微信等站外方式取得联系方式后手工补录。'}</p>
+      <div className="customer-summary"><span>客户昵称</span><strong>{form.name || '请先刷新识别当前客户'}</strong></div>
       <label>手机号<input disabled={completionFormLocked} value={form.phone} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'phone', value: event.target.value })} placeholder="手机号和微信至少填一项" /></label>
       <label>微信号<input disabled={completionFormLocked} value={form.wechat} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'wechat', value: event.target.value })} placeholder="可选" /></label>
-      <label className="confirm-row"><input disabled={completionFormLocked} type="checkbox" checked={contactConfirmed} onChange={(event) => dispatchPanel({ type: 'SET_CONTACT_CONFIRMED', value: event.target.checked })} /> 我已确认昵称和联系方式属于当前订单</label>
-      {context && !paidOrderRecognized && <div className="alert warning">请先确认当前订单为已付款有效订单</div>}
-      <button data-action="complete-order" className="primary" disabled={busy || loggingOut || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '一键入OS并完成订单'}</button>
+      <label className="confirm-row contact-confirm"><input disabled={completionFormLocked} type="checkbox" checked={contactConfirmed} onChange={(event) => dispatchPanel({ type: 'SET_CONTACT_CONFIRMED', value: event.target.checked })} /> 已核对：昵称、联系方式与当前订单属于同一客户</label>
     </section>
 
     {(completion || sync) && <section className="card result-card">
@@ -811,7 +736,7 @@ function App() {
         {([
           ['极享OS入库', completion?.osStatus || (sync ? 'SUCCEEDED' : 'NOT_ATTEMPTED')],
           ['订单备注', completion?.orderRemarkStatus || sync?.orderRemarkStatus || 'NOT_ATTEMPTED'],
-          ['绿色旗帜', completion?.greenFlagStatus || sync?.greenFlagStatus || 'NOT_ATTEMPTED'],
+          ['红色旗帜', completion?.greenFlagStatus || sync?.greenFlagStatus || 'NOT_ATTEMPTED'],
         ] as const).map(([label, status]) => {
           const presentation = completionStatus(status);
           return <div key={label}><span>{label}</span><strong className={`status ${presentation.className}`}>{presentation.label}</strong></div>;
@@ -820,9 +745,13 @@ function App() {
       {remarkText && <pre className="remark-preview">{remarkText}</pre>}
       {completion?.stage === 'PLATFORM_FAILED' && sync && <div className="result-actions">
         <button className="secondary" onClick={() => void navigator.clipboard.writeText(remarkText)}>复制备注</button>
-        <button className="secondary" disabled={busy || loggingOut || !canIntake} onClick={() => void completeOrder()}>{busy ? '正在重试…' : '重试订单备注和绿旗'}</button>
+        <button className="secondary" disabled={busy || loggingOut || !canIntake} onClick={() => void completeOrder()}>{busy ? '正在重试…' : '重试订单备注和红旗'}</button>
       </div>}
     </section>}
+    <div className="sticky-primary-action">
+      {!sync && !canIntake && <p className="action-reason">{intakeBlockedReason}</p>}
+      <button data-action="complete-order" className="primary" disabled={busy || loggingOut || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '入OS并写入订单备注'}</button>
+    </div>
   </main>;
 }
 

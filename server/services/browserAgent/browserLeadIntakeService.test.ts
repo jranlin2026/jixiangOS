@@ -17,7 +17,8 @@ const actor = {
 
 const shops = [
   {
-    id: 'binding-a', platform: 'DOUYIN', shopKey: 'jixiang-a', platformShopId: 'dy-a',
+    id: 'binding-a', businessPlatformId: 'business-platform-douyin', businessPlatformName: '抖音小店',
+    businessShopId: 'business-shop-jixiang-a', platform: 'DOUYIN', shopKey: 'jixiang-a', platformShopId: 'dy-a',
     displayName: '极享官方旗舰店', aliases: ['极享官方店'], source: '抖音电商', sourceName: '飞鸽客服',
     sourceType: '公司资源', active: true, createdById: 'admin-1', createdByName: '管理员',
   },
@@ -56,6 +57,8 @@ const mappings = [
 ];
 
 const catalogRepository: BrowserCatalogRepository = {
+  async listBusinessShops() { return []; },
+  async findBusinessShopById() { return null; },
   async listShops() { return structuredClone(shops); },
   async findShopById(id) { return structuredClone(shops.find((shop) => shop.id === id) || null); },
   async findShopByPlatformAndKey(platform, shopKey) {
@@ -250,9 +253,9 @@ assert.deepEqual(createLeadCalls[0].input, {
   source: '抖音电商',
   sourceName: '飞鸽客服',
   sourceType: '公司资源',
-  sourcePlatformId: 'DOUYIN',
-  sourcePlatformName: '抖音',
-  sourceShopId: 'jixiang-a',
+  sourcePlatformId: 'business-platform-douyin',
+  sourcePlatformName: '抖音小店',
+  sourceShopId: 'business-shop-jixiang-a',
   sourceShopName: '极享官方旗舰店',
   platformOrderNo: 'DY-20260808-A001',
   sourceProductId: 'prod-taojin',
@@ -355,23 +358,20 @@ assert.equal(mismatch.code, 0, '人工绑定店铺后不应再由页面店铺名
 assert.equal(mismatch.data?.outcome, 'ALREADY_CREATED');
 assert.equal(createLeadCalls.length, 3, '重复订单仍不得创建第二条线索');
 
-for (const pageShopDisplayName of [undefined, '   ']) {
-  const missingPageShop = await service.intake({
-    ...shopAInput,
-    pageShopDisplayName,
-    platformOrderNo: shopAInput.platformOrderNo,
-  } as any, actor);
-  assert.equal(missingPageShop.code, 0, '页面店铺名缺失时应使用人工绑定店铺');
-  assert.equal(missingPageShop.data?.outcome, 'ALREADY_CREATED');
-}
-assert.equal(createLeadCalls.length, 3, '人工绑定不改变重复订单幂等性');
+const optionalFactsDuplicate = await service.intake({
+  ...shopAInput,
+  pageShopDisplayName: undefined,
+  platformProductId: undefined,
+  platformProductName: undefined,
+  paymentAmount: undefined,
+  paymentAt: undefined,
+} as any, actor);
+assert.equal(optionalFactsDuplicate.code, 0, '页面店铺、商品、实付和付款时间缺失不应阻断入OS');
+assert.equal(optionalFactsDuplicate.data?.outcome, 'ALREADY_CREATED');
+assert.equal(createLeadCalls.length, 3, '重复订单仍不得创建第二条线索');
 
 for (const [label, invalidFacts, expectedMessage] of [
-  ['缺少商品名', { platformProductName: undefined }, /平台商品名称/],
-  ['空白商品名', { platformProductName: '   ' }, /平台商品名称/],
-  ['缺少实付', { paymentAmount: undefined }, /实付金额/],
   ['无效实付', { paymentAmount: Number.NaN }, /非负数且最多两位小数/],
-  ['缺少付款时间', { paymentAt: undefined }, /付款时间/],
   ['无效付款时间', { paymentAt: 'not-a-time' }, /付款时间/],
 ] as const) {
   const beforeResolve = catalogResolveCalls;

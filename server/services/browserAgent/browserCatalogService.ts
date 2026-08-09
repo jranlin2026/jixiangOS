@@ -11,6 +11,9 @@ import { normalizePlatformProductName, resolveBrowserProduct, type BrowserProduc
 
 export type BrowserShopBinding = {
   id: string;
+  businessPlatformId?: string | null;
+  businessPlatformName?: string | null;
+  businessShopId?: string | null;
   platform: string;
   shopKey: string;
   platformShopId?: string | null;
@@ -35,12 +38,24 @@ export type BrowserStoredProductMapping = BrowserStoreProductMapping & {
 };
 
 export type BrowserShopInput = {
+  businessShopId?: string;
   platform?: string;
   shopKey?: string;
   platformShopId?: string | null;
   displayName?: string;
   aliases?: string[];
   active?: boolean;
+};
+
+export type BusinessShopDirectoryEntry = {
+  id: string;
+  platformId: string;
+  platformCode: string;
+  platformName: string;
+  name: string;
+  platformShopId?: string | null;
+  aliases?: string[];
+  active: boolean;
 };
 
 export type BrowserProductMappingInput = {
@@ -63,6 +78,8 @@ export type BrowserShopMappingRepository = {
 export type BrowserLockedShopBinding = Pick<BrowserShopBinding, 'id' | 'active'>;
 
 export type BrowserCatalogRepository = {
+  listBusinessShops(): Promise<BusinessShopDirectoryEntry[]>;
+  findBusinessShopById(id: string): Promise<BusinessShopDirectoryEntry | null>;
   listShops(): Promise<BrowserShopBinding[]>;
   findShopById(id: string): Promise<BrowserShopBinding | null>;
   findShopByPlatformAndKey(platform: string, shopKey: string): Promise<BrowserShopBinding | null>;
@@ -106,15 +123,15 @@ export type BrowserProductPreviewInput = {
   pageShopDisplayName?: string;
   platformProductId?: string;
   platformSkuId?: string;
-  platformProductName: string;
-  paymentAmount: number;
-  paymentAt: string;
+  platformProductName?: string;
+  paymentAmount?: number;
+  paymentAt?: string;
 };
 
 export type BrowserProductPreview = {
   shop: ReturnType<typeof runtimeShop>;
   productResolution: Exclude<BrowserProductResolution, { status: 'CONFIG_CONFLICT' }>;
-  facts: BrowserRequiredOrderFacts & { paymentAt: string };
+  facts: BrowserRequiredOrderFacts & { paymentAt?: string };
   priceDifference: { paymentAmount: number; osReferencePrice: number; amount: number; differs: boolean } | null;
 };
 
@@ -173,6 +190,9 @@ function platformIdentityKey(input: BrowserProductMappingInput, aliases: string[
 function runtimeShop(shop: BrowserShopBinding) {
   return {
     id: shop.id,
+    ...(shop.businessPlatformId ? { businessPlatformId: shop.businessPlatformId } : {}),
+    ...(shop.businessPlatformName ? { businessPlatformName: shop.businessPlatformName } : {}),
+    ...(shop.businessShopId ? { businessShopId: shop.businessShopId } : {}),
     platform: shop.platform,
     shopKey: shop.shopKey,
     platformShopId: shop.platformShopId ?? null,
@@ -190,6 +210,55 @@ function uniqueConflict(error: unknown) {
 
 export function createBrowserCatalogService(deps: { repository: BrowserCatalogRepository }) {
   const { repository } = deps;
+
+  async function syncBusinessShop(
+    businessShopId: string,
+    actor: AuthenticatedUser,
+  ): Promise<BrowserCatalogResponse<BrowserShopBinding>> {
+    const id = cleanText(businessShopId);
+    const businessShop = id ? await repository.findBusinessShopById(id) : null;
+    if (!businessShop) return catalogFailure('业务店铺不存在', 404, 'SHOP_BINDING_NOT_FOUND');
+    if (businessShop.platformCode.toUpperCase() !== 'DOUYIN') {
+      return catalogFailure('当前浏览器员工MVP仅支持抖音店铺', 400, 'INVALID_INPUT');
+    }
+    const existing = (await repository.listShops()).find((shop) => shop.businessShopId === businessShop.id);
+    const platformShopId = businessShop.platformShopId !== undefined
+      ? cleanText(businessShop.platformShopId)
+      : cleanText(existing?.platformShopId);
+    if (!existing && !platformShopId) {
+      return catalogFailure('请先在业务平台与店铺中填写平台店铺ID', 400, 'INVALID_INPUT');
+    }
+    const values = {
+      businessPlatformId: businessShop.platformId,
+      businessShopId: businessShop.id,
+      platform: 'DOUYIN',
+      platformShopId: platformShopId || null,
+      displayName: businessShop.name,
+      aliases: businessShop.aliases !== undefined ? uniqueTexts(businessShop.aliases) : (existing?.aliases || []),
+      source: '抖音电商',
+      sourceName: '飞鸽客服',
+      sourceType: '公司资源',
+      active: businessShop.active,
+    };
+    try {
+      if (existing) {
+        const updated = await repository.updateShop(existing.id, values);
+        return updated ? success(updated) : catalogFailure('店铺绑定不存在', 404, 'SHOP_BINDING_NOT_FOUND');
+      }
+      return success(await repository.createShop({
+        id: randomUUID(),
+        ...values,
+        shopKey: `business-${businessShop.id}`,
+        createdById: actor.id,
+        createdByName: actor.name,
+      }));
+    } catch (error) {
+      if (uniqueConflict(error)) {
+        return catalogFailure('该业务店铺已接入浏览器员工', 409, 'SHOP_KEY_CONFLICT');
+      }
+      throw error;
+    }
+  }
 
   async function saveMapping(
     input: BrowserProductMappingInput,
@@ -285,9 +354,11 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     if (!binding || !binding.active || cleanText(binding.platform).toUpperCase() !== platform) {
       return catalogFailure('店铺绑定不存在或已停用', 409, 'SHOP_BINDING_UNAVAILABLE');
     }
-    const [products, mappings] = await Promise.all([
-      repository.listProducts(), repository.listMappings(binding.id),
+    const [products, allMappings, shops] = await Promise.all([
+      repository.listProducts(), repository.listMappings(), repository.listShops(),
     ]);
+    const activeShopIds = new Set(shops.filter((shop) => shop.active).map((shop) => shop.id));
+    const mappings = allMappings.filter((mapping) => activeShopIds.has(mapping.shopBindingId));
     const resolution = resolveBrowserProduct({
       shopBindingId: binding.id,
       facts: input.facts,
@@ -323,29 +394,21 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     const shopBindingId = cleanText(input.shopBindingId);
     if (!shopBindingId) return catalogFailure('店铺绑定不能为空', 400, 'INVALID_INPUT');
     const platformProductName = cleanText(input.platformProductName);
-    if (!platformProductName) {
-      return catalogFailure('平台商品名称不能为空，请刷新飞鸽订单后重试', 400, 'INVALID_INPUT');
-    }
-    if (input.paymentAmount === undefined || input.paymentAmount === null) {
-      return catalogFailure('实付金额不能为空，请刷新飞鸽订单后重试', 400, 'INVALID_INPUT');
-    }
-    const paymentCents = browserPaymentAmountInCents(input.paymentAmount);
-    if (paymentCents === null) {
+    const hasPaymentAmount = input.paymentAmount !== undefined && input.paymentAmount !== null;
+    const paymentCents = hasPaymentAmount ? browserPaymentAmountInCents(input.paymentAmount) : null;
+    if (hasPaymentAmount && paymentCents === null) {
       return catalogFailure('实付金额必须为非负数且最多两位小数', 400, 'INVALID_INPUT');
     }
     const paymentAt = cleanText(input.paymentAt);
-    if (!paymentAt) {
-      return catalogFailure('付款时间不能为空，请刷新飞鸽订单后重试', 400, 'INVALID_INPUT');
-    }
-    const paymentAtDate = browserPaymentAtDate(paymentAt);
-    if (!paymentAtDate) {
+    const paymentAtDate = paymentAt ? browserPaymentAtDate(paymentAt) : null;
+    if (paymentAt && !paymentAtDate) {
       return catalogFailure('付款时间格式不正确', 400, 'INVALID_INPUT');
     }
     const facts = {
       ...(cleanText(input.platformProductId) ? { platformProductId: cleanText(input.platformProductId) } : {}),
       ...(cleanText(input.platformSkuId) ? { platformSkuId: cleanText(input.platformSkuId) } : {}),
-      platformProductName,
-      paymentAmount: paymentCents / 100,
+      ...(platformProductName ? { platformProductName } : {}),
+      ...(paymentCents !== null ? { paymentAmount: paymentCents / 100 } : {}),
     };
     const resolved = await resolveForIntake({
       platform: 'DOUYIN',
@@ -369,13 +432,14 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       productResolution: resolved.data.resolution as BrowserProductPreview['productResolution'],
       facts: {
         ...facts,
-        paymentAt: paymentAtDate.toISOString(),
+        ...(paymentAtDate ? { paymentAt: paymentAtDate.toISOString() } : {}),
       },
       priceDifference: resolved.data.priceDifference,
     });
   }
 
   return {
+    syncBusinessShop,
     async listRuntimeShops() {
       const shops = (await repository.listShops())
         .filter((shop) => shop.active && cleanText(shop.platform).toUpperCase() === 'DOUYIN')
@@ -386,16 +450,27 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     previewProductMapping,
 
     async listCatalog() {
-      const [shops, mappings, products] = await Promise.all([
-        repository.listShops(), repository.listMappings(), repository.listProducts(),
+      const [shops, mappings, products, businessShops] = await Promise.all([
+        repository.listShops(), repository.listMappings(), repository.listProducts(), repository.listBusinessShops(),
       ]);
-      return success({ shops, mappings, products });
+      return success({ shops, mappings, products, businessShops });
     },
 
     async createShop(input: BrowserShopInput, actor: AuthenticatedUser): Promise<BrowserCatalogResponse<BrowserShopBinding>> {
-      const platform = cleanText(input.platform).toUpperCase();
+      const businessShopId = cleanText(input.businessShopId);
+      const businessShop = businessShopId ? await repository.findBusinessShopById(businessShopId) : null;
+      if (businessShopId && (!businessShop || !businessShop.active)) {
+        return catalogFailure('业务店铺不存在或已停用，请先在业务平台与店铺中维护', 409, 'SHOP_BINDING_UNAVAILABLE');
+      }
+      if (businessShop && businessShop.platformCode.toUpperCase() !== 'DOUYIN') {
+        return catalogFailure('当前浏览器员工MVP仅支持抖音店铺', 400, 'INVALID_INPUT');
+      }
+      if (businessShopId && (await repository.listShops()).some((shop) => shop.businessShopId === businessShopId)) {
+        return catalogFailure('该业务店铺已接入平台商品映射，请直接编辑原配置', 409, 'SHOP_KEY_CONFLICT');
+      }
+      const platform = businessShop?.platformCode || cleanText(input.platform).toUpperCase();
       const shopKey = cleanText(input.shopKey);
-      const displayName = cleanText(input.displayName);
+      const displayName = businessShop?.name || cleanText(input.displayName);
       if (!platform || !shopKey || !displayName) {
         return catalogFailure('平台、稳定店铺标识和店铺名称不能为空', 400, 'INVALID_INPUT');
       }
@@ -405,6 +480,8 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       try {
         return success(await repository.createShop({
           id: randomUUID(),
+          businessPlatformId: businessShop?.platformId || null,
+          businessShopId: businessShop?.id || null,
           platform,
           shopKey,
           platformShopId: cleanText(input.platformShopId) || null,
@@ -432,17 +509,49 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
         || (input.platform !== undefined && cleanText(input.platform).toUpperCase() !== existing.platform)) {
         return catalogFailure('平台和稳定店铺标识创建后不可修改', 409, 'SHOP_KEY_IMMUTABLE');
       }
-      const displayName = input.displayName === undefined ? existing.displayName : cleanText(input.displayName);
+      const requestedBusinessShopId = input.businessShopId === undefined
+        ? cleanText(existing.businessShopId)
+        : cleanText(input.businessShopId);
+      if (existing.businessShopId && requestedBusinessShopId !== cleanText(existing.businessShopId)) {
+        return catalogFailure('已接入的业务店铺不能更换，请停用后重新接入', 409, 'SHOP_KEY_IMMUTABLE');
+      }
+      const businessShop = requestedBusinessShopId
+        ? await repository.findBusinessShopById(requestedBusinessShopId)
+        : null;
+      if (requestedBusinessShopId && (!businessShop || !businessShop.active)) {
+        return catalogFailure('业务店铺不存在或已停用，请先在业务平台与店铺中维护', 409, 'SHOP_BINDING_UNAVAILABLE');
+      }
+      if (businessShop && businessShop.platformCode.toUpperCase() !== 'DOUYIN') {
+        return catalogFailure('当前浏览器员工MVP仅支持抖音店铺', 400, 'INVALID_INPUT');
+      }
+      if (!existing.businessShopId && requestedBusinessShopId
+        && (await repository.listShops()).some((shop) => shop.id !== id && shop.businessShopId === requestedBusinessShopId)) {
+        return catalogFailure('该业务店铺已接入平台商品映射，请直接编辑原配置', 409, 'SHOP_KEY_CONFLICT');
+      }
+      const displayName = businessShop?.name
+        || (input.displayName === undefined ? existing.displayName : cleanText(input.displayName));
       if (!displayName) return catalogFailure('店铺名称不能为空', 400, 'INVALID_INPUT');
-      const updated = await repository.updateShop(id, {
-        displayName,
-        platformShopId: input.platformShopId === undefined
-          ? existing.platformShopId
-          : (cleanText(input.platformShopId) || null),
-        aliases: input.aliases === undefined ? existing.aliases : uniqueTexts(input.aliases),
-        active: input.active === undefined ? existing.active : Boolean(input.active),
-      });
-      return updated ? success(updated) : catalogFailure('店铺绑定不存在', 404, 'SHOP_BINDING_NOT_FOUND');
+      try {
+        const updated = await repository.updateShop(id, {
+          ...(businessShop ? {
+            businessPlatformId: businessShop.platformId,
+            businessShopId: businessShop.id,
+            platform: businessShop.platformCode,
+          } : {}),
+          displayName,
+          platformShopId: input.platformShopId === undefined
+            ? existing.platformShopId
+            : (cleanText(input.platformShopId) || null),
+          aliases: input.aliases === undefined ? existing.aliases : uniqueTexts(input.aliases),
+          active: input.active === undefined ? existing.active : Boolean(input.active),
+        });
+        return updated ? success(updated) : catalogFailure('店铺绑定不存在', 404, 'SHOP_BINDING_NOT_FOUND');
+      } catch (error) {
+        if (uniqueConflict(error)) {
+          return catalogFailure('该业务店铺已接入平台商品映射，请直接编辑原配置', 409, 'SHOP_KEY_CONFLICT');
+        }
+        throw error;
+      }
     },
 
     async deleteShop(id: string, _actor: AuthenticatedUser): Promise<BrowserCatalogResponse<BrowserShopBinding & { deleted?: boolean }>> {

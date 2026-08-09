@@ -110,6 +110,10 @@ const catalog = {
     return { code: 0, data: { shops: [], mappings: [], products: [] }, message: 'success' };
   },
   previewProductMapping,
+  async syncBusinessShop(id: string, actor: any) {
+    calls.push({ method: 'catalog:sync-business-shop', id, actor });
+    return { code: 0, data: { id: 'binding-synced', businessShopId: id, active: true }, message: 'success' };
+  },
   async createShop(input: any, actor: any) {
     calls.push({ method: 'catalog:create-shop', input, actor });
     return { code: 0, data: { id: 'shop-2', ...input }, message: 'success' };
@@ -168,20 +172,67 @@ const requireBrowserCatalogWrite: express.RequestHandler = (req: any, res, next)
     next();
   });
 };
+const routerDeps = {
+  service, scriptLibrary, catalog,
+  authService: {
+    authorizeBrowserAgent: async () => ({ code: 0, data: 'grant', message: 'success' }),
+    exchangeBrowserAgentGrant: async () => ({ code: 0, data: { token: 'browser-token', user: { id: 'user-1', name: '客服小李' } }, message: 'success' }),
+    logoutBrowserAgent: async () => ({ code: 0, data: true, message: 'success' }),
+  } as any,
+  requireAuthenticated: authenticate,
+  requireLeadCreate,
+  requireBrowserEmployeeUse: requireLeadCreate,
+  requireScriptLibraryRead: authenticate,
+  requireBrowserCatalogRead,
+  requireBrowserCatalogWrite,
+};
 const app = express();
 app.use(express.json());
 app.use('/api/browser-agent', createBrowserAgentRouter({
-  service, scriptLibrary, catalog,
-  requireAuthenticated: authenticate,
-  requireLeadCreate,
-  requireBrowserCatalogRead,
-  requireBrowserCatalogWrite,
+  ...routerDeps,
+  downloadArchivePath: join(process.cwd(), 'server/assets/browser-agent/jixiang-ai-browser-employee.zip'),
 }));
 const listener = app.listen(0, '127.0.0.1');
 await once(listener, 'listening');
 const address = listener.address() as AddressInfo;
 
 try {
+  const forbiddenDownload = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/download`, {
+    headers: { 'x-test-no-lead-create': '1' },
+  });
+  assert.equal(forbiddenDownload.status, 403, '无新建线索权限不得绕过界面直接下载安装包');
+
+  const download = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/download`);
+  assert.equal(download.status, 200);
+  assert.match(download.headers.get('content-disposition') || '', /jixiang-ai-browser-employee\.zip/);
+  assert.ok((await download.arrayBuffer()).byteLength > 0, '受保护下载接口必须返回插件安装包');
+
+  const missingArchiveApp = express();
+  missingArchiveApp.use('/api/browser-agent', createBrowserAgentRouter({
+    ...routerDeps,
+    downloadArchivePath: join(process.cwd(), 'server/assets/browser-agent/not-found.zip'),
+  }));
+  const missingArchiveListener = missingArchiveApp.listen(0, '127.0.0.1');
+  await once(missingArchiveListener, 'listening');
+  const originalConsoleError = console.error;
+  let missingArchiveLog = '';
+  console.error = (...args: unknown[]) => { missingArchiveLog = args.map(String).join(' '); };
+  try {
+    const missingAddress = missingArchiveListener.address() as AddressInfo;
+    const missingArchive = await fetch(`http://127.0.0.1:${missingAddress.port}/api/browser-agent/download`);
+    assert.equal(missingArchive.status, 503);
+    assert.deepEqual(await missingArchive.json(), {
+      code: 503,
+      data: null,
+      errorCode: 'BROWSER_EMPLOYEE_ARCHIVE_UNAVAILABLE',
+      message: '插件安装包暂不可用，请联系管理员重新发布',
+    });
+  } finally {
+    console.error = originalConsoleError;
+    await new Promise<void>((resolve, reject) => missingArchiveListener.close((error) => error ? reject(error) : resolve()));
+  }
+  assert.match(missingArchiveLog, /Browser employee archive is unavailable/);
+
   const intake = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/lead-intakes`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -247,7 +298,6 @@ try {
     headers: {
       'content-type': 'application/json',
       'x-test-no-product-read': '1',
-      'x-test-no-lead-create': '1',
     },
     body: JSON.stringify({
       platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
@@ -255,7 +305,7 @@ try {
       paymentAmount: 349, paymentAt: '2026-08-08T19:34:20+08:00',
     }),
   });
-  assert.equal(preview.status, 200, '商品预览只需已认证，不应要求线索创建或产品设置权限');
+  assert.equal(preview.status, 200, '有线索创建权限的浏览器员工无需产品设置权限即可预览商品');
   const previewPayload = await preview.json();
   assert.deepEqual(previewPayload, {
     code: 0,
@@ -297,6 +347,13 @@ try {
     headers: { 'x-test-no-product-read': '1' },
   });
   assert.equal(deniedCatalog.status, 403, '无产品设置读权限不能读取管理目录');
+
+  const syncedBusinessShop = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog/business-shops/business-shop-1/sync`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+  });
+  assert.equal(syncedBusinessShop.status, 200);
+  assert.equal((await syncedBusinessShop.json()).data.businessShopId, 'business-shop-1');
+  assert.ok(calls.some((call) => call.method === 'catalog:sync-business-shop' && call.id === 'business-shop-1'));
 
   const createdShop = await fetch(`http://127.0.0.1:${address.port}/api/browser-agent/catalog/shops`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -354,7 +411,7 @@ try {
   assert.equal(deniedCompletion.status, 403, '平台完成上报必须校验线索录入权限');
   assert.deepEqual(calls.map((call) => call.method), [
     'intake', 'remark', 'platform-completion', 'script-library:get', 'script-library:update', 'script-library:get',
-    'catalog:runtime', 'catalog:preview', 'catalog:preview', 'catalog:create-shop', 'catalog:update-shop',
+    'catalog:runtime', 'catalog:preview', 'catalog:preview', 'catalog:sync-business-shop', 'catalog:create-shop', 'catalog:update-shop',
     'catalog:create-mapping', 'catalog:create-mapping', 'catalog:delete-mapping',
   ]);
 } finally {

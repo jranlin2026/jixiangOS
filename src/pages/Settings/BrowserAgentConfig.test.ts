@@ -79,16 +79,17 @@ test('桌面表格和手机卡片共用同一页结果与唯一分页器', () =>
   assert.match(html, /跳转页码/);
 });
 
-test('店铺结果展示稳定标识和只读来源链路', () => {
+test('店铺选择区只展示业务店铺上下文和映射数量', () => {
   const html = renderComponent('BrowserShopBindingList', `{
     rows: ${JSON.stringify(shops)}, selectedShopId: 'shop-1',
     onSelect() {}, onEdit() {}, onToggleActive() {}
   }`);
 
-  for (const label of ['店铺名称', '稳定店铺标识', '平台店铺ID', '店铺别名', '来源', '状态']) {
-    assert.match(html, new RegExp(label));
-  }
-  assert.match(html, /公司资源 \/ 抖音电商 \/ 飞鸽客服/);
+  assert.match(html, /极享官方旗舰店/);
+  assert.match(html, /抖店/);
+  assert.match(html, /已启用/);
+  assert.match(html, /0 个映射/);
+  assert.doesNotMatch(html, /稳定店铺标识|公司资源 \/ 抖音电商 \/ 飞鸽客服/);
 });
 
 await testAsync('管理API保留服务端中文错误和结构化errorCode', async () => {
@@ -142,8 +143,20 @@ await testAsync('管理API保留服务端中文错误和结构化errorCode', asy
   }
 });
 
-execFileSync('npm', ['exec', '--', 'vitest', 'run', 'src/pages/Settings/BrowserAgentConfig.dom.spec.tsx'], {
+execFileSync(
+  'npm',
+  [
+    'exec',
+    '--',
+    'vitest',
+    'run',
+    'src/pages/Settings/BrowserAgentConfig.dom.spec.tsx',
+    '--exclude',
+    '.worktrees/**',
+  ],
+  {
   cwd: process.cwd(),
   stdio: 'inherit',
   maxBuffer: 5 * 1024 * 1024,
-});
+  },
+);

@@ -1,6 +1,6 @@
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
-import { isPaidOrderStatus } from '../domain/orderCompletion';
 import { normalizePhoneForComparison } from '../../../../src/shared/utils/phoneNumber';
+import { isIntakeEligibleOrderStatus } from '../domain/orderCompletion';
 import type {
   ApiEnvelope,
   BrowserProductPreviewInput,
@@ -10,7 +10,6 @@ import type {
   CompleteOsOrderResult,
   LeadIntakeResponse,
 } from '../shared/contracts';
-import { hasRequiredOrderFacts } from '../shared/contracts';
 
 export type OrderCompletionStage =
   | 'READY'
@@ -108,9 +107,6 @@ function previewMatchesDisplayed(
 
 type ReadyFeigePageContext = FeigePageContext & {
   readyForIntake: true;
-  productName: string;
-  paymentAmount: number;
-  paymentAt: string;
 };
 
 function latestIntakeInput(input: OrderCompletionInput, current: ReadyFeigePageContext) {
@@ -132,9 +128,9 @@ function latestIntakeInput(input: OrderCompletionInput, current: ReadyFeigePageC
     contactName: current.customerDisplayName.trim(),
     platformProductId: current.platformProductId?.trim() || undefined,
     platformSkuId: current.platformSkuId?.trim() || undefined,
-    platformProductName: current.productName.trim(),
-    paymentAmount: current.paymentAmount,
-    paymentAt: current.paymentAt.trim(),
+    ...(current.productName.trim() ? { platformProductName: current.productName.trim() } : {}),
+    ...(typeof current.paymentAmount === 'number' ? { paymentAmount: current.paymentAmount } : {}),
+    ...(current.paymentAt?.trim() ? { paymentAt: current.paymentAt.trim() } : {}),
   };
 }
 
@@ -162,14 +158,20 @@ function duplicateContactMismatch(
   return `极享OS已有资料与本次提交不一致（抖音昵称或用于订单备注的${contactLabel}不一致），请先在极享OS核对并统一资料后重试；未操作飞鸽订单`;
 }
 
-function failedPageStatuses(stage: Extract<CompleteOsOrderResult, { ok: false }>['stage']): Pick<
+function failedPageStatuses(result: Extract<CompleteOsOrderResult, { ok: false }>): Pick<
   ReportInput,
   'orderRemarkStatus' | 'greenFlagStatus'
 > {
-  if (stage === 'GREEN_FLAG') {
+  if (result.remarkStatus || result.greenFlagStatus) {
+    return {
+      orderRemarkStatus: result.remarkStatus || 'FAILED',
+      greenFlagStatus: result.greenFlagStatus || 'FAILED',
+    };
+  }
+  if (result.stage === 'GREEN_FLAG') {
     return { orderRemarkStatus: 'FAILED', greenFlagStatus: 'FAILED' };
   }
-  if (stage === 'SAVE') {
+  if (result.stage === 'SAVE') {
     return { orderRemarkStatus: 'FAILED', greenFlagStatus: 'FAILED' };
   }
   return { orderRemarkStatus: 'FAILED', greenFlagStatus: 'NOT_ATTEMPTED' };
@@ -274,14 +276,8 @@ export async function runOrderCompletion(
     || current.customerDisplayName.trim() !== input.expectedCustomerDisplayName.trim()) {
     return stopForContext('当前飞鸽客户或订单已切换，请刷新识别并重新确认客户资料');
   }
-  if (!isPaidOrderStatus(current.orderStatus)) {
-    return stopForContext('请先确认当前订单为已付款有效订单');
-  }
-  if (!hasRequiredOrderFacts(current)) {
-    return stopForContext(
-      '当前订单的平台商品名称、实付金额或付款时间未完整唯一识别，请等待订单加载完成后刷新识别',
-      'ORDER_FACTS_UNAVAILABLE',
-    );
+  if (!isIntakeEligibleOrderStatus(current.orderStatus)) {
+    return stopForContext('当前订单状态不支持入OS，请核对订单后重试');
   }
   let latestPreview: BrowserProductPreviewResponse | undefined;
   if (input.shop) {
@@ -293,9 +289,9 @@ export async function runOrderCompletion(
         shopBindingId: input.shop.id,
         platformProductId: current.platformProductId?.trim() || undefined,
         platformSkuId: current.platformSkuId?.trim() || undefined,
-        platformProductName: current.productName.trim(),
+        platformProductName: current.productName.trim() || undefined,
         paymentAmount: current.paymentAmount,
-        paymentAt: current.paymentAt.trim(),
+        paymentAt: current.paymentAt?.trim() || undefined,
       });
     } catch (error) {
       if (!isAttemptActive()) return aborted();
@@ -317,7 +313,7 @@ export async function runOrderCompletion(
     emit(deps, { ...initial, stage: 'INTAKING', osStatus: 'IN_PROGRESS' });
     let intake: ApiEnvelope<LeadIntakeResponse>;
     try {
-      intake = await deps.intake(latestIntakeInput(input, current));
+      intake = await deps.intake(latestIntakeInput(input, current as ReadyFeigePageContext));
     } catch (error) {
       if (!isAttemptActive()) return aborted();
       return emit(deps, {
@@ -389,7 +385,7 @@ export async function runOrderCompletion(
     });
   } catch (error) {
     if (!isAttemptActive()) return aborted();
-    const message = errorMessage(error, '订单备注和绿色旗帜处理失败');
+    const message = errorMessage(error, '订单备注和红色旗帜处理失败');
     const report = await guardedReport({
       syncId: intakeResult.syncId,
       orderRemarkStatus: 'FAILED',
@@ -408,7 +404,7 @@ export async function runOrderCompletion(
   }
   if (!isAttemptActive()) return aborted();
   if (!pageResult.ok) {
-    const failedStatuses = failedPageStatuses(pageResult.stage);
+    const failedStatuses = failedPageStatuses(pageResult);
     const report = await guardedReport({
       syncId: intakeResult.syncId,
       ...failedStatuses,

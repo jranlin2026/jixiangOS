@@ -4,6 +4,7 @@ import { Box, Paper, Tab, Tabs, Typography } from '@mui/material';
 import RolePermission from './RolePermission';
 import ProductConfigPage from './ProductConfig';
 import BrowserAgentConfigPage from './BrowserAgentConfig';
+import BrowserScriptLibraryConfigPage from './BrowserScriptLibraryConfig';
 import EmployeeDepartmentManagement from './EmployeeDepartmentManagement';
 import PositionManagement from './PositionManagement';
 import PositionGovernance from './PositionGovernance';
@@ -32,6 +33,7 @@ interface TabPanelProps {
 }
 
 type SettingsTabConfig = {
+  key?: string;
   label: string;
   permissionKey: string;
   permissionKeys?: string[];
@@ -55,6 +57,7 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => (
 const Settings: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedGroupKey = searchParams.get('group') || 'organization';
+  const requestedTabKey = searchParams.get('tab');
   const [tabValue, setTabValue] = useState(0);
   const currentUser = useAuthStore((state) => state.currentUser);
 
@@ -89,7 +92,8 @@ const Settings: React.FC = () => {
       description: '产品配置和订单类型配置',
       tabs: [
         { label: '产品配置', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <ProductConfigPage /> },
-        { label: '平台商品映射', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <BrowserAgentConfigPage /> },
+        { key: 'businessShops', label: '业务平台与店铺', permissionKey: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES, component: <AfterSalesSourceConfigPage /> },
+        { key: 'platformMapping', label: '平台商品映射', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <BrowserAgentConfigPage /> },
         { label: '订单类型', permissionKey: PERMISSION_KEYS.SETTINGS_ORDER_TYPES, component: <OrderTypeConfigPage /> },
       ],
     },
@@ -102,7 +106,6 @@ const Settings: React.FC = () => {
         { label: '客户生命周期', permissionKey: PERMISSION_KEYS.SETTINGS_LIFECYCLE, component: <LifecycleStatusConfigPage /> },
         { label: '客户标签', permissionKey: PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, component: <CustomerTagConfig /> },
         { label: '线索来源', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, component: <LeadSourceConfigPage /> },
-        { label: '业务平台与店铺', permissionKey: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES, component: <AfterSalesSourceConfigPage /> },
         { label: '线索流转', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, component: <LeadFlowConfigTab /> },
       ],
     },
@@ -112,6 +115,20 @@ const Settings: React.FC = () => {
       description: '客户成功自动分配规则',
       tabs: [
         { label: '客户成功分配', permissionKey: PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT, component: <DeliveryAssignmentConfig /> },
+      ],
+    },
+    {
+      key: 'aiEmployee',
+      label: 'AI员工设置',
+      description: '浏览器客服员工的话术和执行规则',
+      tabs: [
+        {
+          key: 'scriptLibrary',
+          label: '浏览器客服话术',
+          permissionKey: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE,
+          superAdminOnly: true,
+          component: <BrowserScriptLibraryConfigPage />,
+        },
       ],
     },
     {
@@ -152,12 +169,24 @@ const Settings: React.FC = () => {
   }, [groups, requestedGroupKey, setSearchParams]);
 
   useEffect(() => {
-    setTabValue((current) => (current >= tabs.length ? 0 : current));
-  }, [tabs.length]);
+    const requestedIndex = requestedTabKey ? tabs.findIndex((tab) => tab.key === requestedTabKey) : -1;
+    setTabValue(requestedIndex >= 0 ? requestedIndex : 0);
+  }, [activeGroup?.key, requestedTabKey, tabs]);
 
-  useEffect(() => {
-    setTabValue(0);
-  }, [activeGroup?.key]);
+  const handleTabChange = (value: number) => {
+    setTabValue(value);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      const key = tabs[value]?.key;
+      if (key) next.set('tab', key);
+      else next.delete('tab');
+      if (key !== 'platformMapping') {
+        next.delete('shopId');
+        next.delete('businessShopId');
+      }
+      return next;
+    });
+  };
 
   return (
     <ModulePage>
@@ -178,7 +207,7 @@ const Settings: React.FC = () => {
                 </Typography>
                 <ModuleTabs
                   value={tabs.length ? tabValue : false}
-                  onChange={(_, value) => setTabValue(value)}
+                  onChange={(_, value) => handleTabChange(value)}
                   variant="scrollable"
                   scrollButtons="auto"
                   sx={{ mb: 0 }}

@@ -26,7 +26,8 @@ const Login: React.FC = () => {
   const [remember, setRemember] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
 
-  const from = (location.state as { from?: Location })?.from?.pathname || '/';
+  const requestedLocation = (location.state as { from?: Location })?.from;
+  const from = requestedLocation ? `${requestedLocation.pathname}${requestedLocation.search || ''}` : '/';
 
   useEffect(() => {
     clearError();

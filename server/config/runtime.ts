@@ -73,6 +73,32 @@ export function getBusinessImportSecret(env: NodeJS.ProcessEnv = process.env): s
   return 'local-business-import-signing-key-only';
 }
 
+export function getBrowserAgentAuthSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = readEnv(env, 'JIXIANG_BROWSER_AGENT_AUTH_SECRET');
+  if (configured) return configured;
+  if (isProductionRuntime(env)) throw new Error('JIXIANG_BROWSER_AGENT_AUTH_SECRET must be configured before running jixiangOS in production.');
+  return 'local-browser-agent-auth-secret-only-change-in-production';
+}
+
+export function getBrowserAgentRedirectUris(env: NodeJS.ProcessEnv = process.env): string[] {
+  const configured = readEnv(env, 'JIXIANG_BROWSER_AGENT_REDIRECT_URIS').split(',').map((value) => value.trim()).filter(Boolean);
+  if (configured.length) return configured;
+  if (isProductionRuntime(env)) throw new Error('JIXIANG_BROWSER_AGENT_REDIRECT_URIS must be configured before running jixiangOS in production.');
+  return ['https://ibocdkdaleenngfdmmcnfongfhnolgkd.chromiumapp.org/browser-agent'];
+}
+
+export function validateBrowserAgentAuthConfig(env: NodeJS.ProcessEnv = process.env): void {
+  if (getBrowserAgentAuthSecret(env).length < 32) {
+    throw new Error('JIXIANG_BROWSER_AGENT_AUTH_SECRET must be at least 32 characters.');
+  }
+  for (const redirectUri of getBrowserAgentRedirectUris(env)) {
+    const url = new URL(redirectUri);
+    if (url.protocol !== 'https:' || !url.hostname.endsWith('.chromiumapp.org') || url.pathname !== '/browser-agent') {
+      throw new Error('JIXIANG_BROWSER_AGENT_REDIRECT_URIS contains an invalid Chrome extension redirect URI.');
+    }
+  }
+}
+
 /** Location for original enablement Markdown. This directory is never public. */
 export function getEnablementPrivateStorageDir(
   env: NodeJS.ProcessEnv = process.env,
@@ -192,4 +218,5 @@ export function validateRuntimeConfig(env: NodeJS.ProcessEnv = process.env): voi
   if (getBusinessImportSecret(env).length < 32) {
     throw new Error('BUSINESS_IMPORT_SIGNING_KEY must be at least 32 characters.');
   }
+  validateBrowserAgentAuthConfig(env);
 }

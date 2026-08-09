@@ -177,6 +177,7 @@ export const PERMISSION_KEYS = {
   SETTINGS_LEAD_SOURCES: '系统设置/客户设置/线索来源',
   SETTINGS_LEAD_FLOW: '系统设置/客户设置/线索流转',
   SETTINGS_DELIVERY_ASSIGNMENT: '系统设置/交付设置/客户成功分配',
+  // 持久化权限键不随设置页归属调整而改名，避免旧角色授权失效。
   SETTINGS_AFTER_SALES_SOURCES: '系统设置/售后设置/来源平台与店铺',
   SETTINGS_AI_CONFIG: '系统设置/系统维护/AI大脑',
   SETTINGS_DATA_MAINTENANCE: '系统设置/系统维护/业务回收与CRM迁移',

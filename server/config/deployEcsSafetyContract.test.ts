@@ -69,6 +69,12 @@ assert.match(archiveExcludes, /"uploads"/);
 assert.match(archiveExcludes, /"private_uploads"/);
 assert.match(deploySource, /path\.name\.startswith\("\.env\."\)/);
 assert.match(deploySource, /\.env\.example/);
+assert.match(deploySource, /BROWSER_EMPLOYEE_ARCHIVE = "server\/assets\/browser-agent\/jixiang-ai-browser-employee\.zip"/);
+assert.match(
+  deploySource,
+  /path\.suffix in EXCLUDE_SUFFIXES and relative\.as_posix\(\) != BROWSER_EMPLOYEE_ARCHIVE/,
+  '发布包排除普通ZIP时必须精确保留浏览器员工安装包',
+);
 assert.match(remote, /NODE_ENV_VALUE/);
 assert.match(remote, /NODE_ENV_VALUE[^\n]*production|production[^\n]*NODE_ENV_VALUE/);
 

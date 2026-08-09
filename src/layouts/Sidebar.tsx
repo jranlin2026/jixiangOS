@@ -258,6 +258,12 @@ const navItems: NavItem[] = [
         permissionKeys: [PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT],
       },
       {
+        label: 'AI员工设置',
+        path: `${ROUTES.SETTINGS}?group=aiEmployee`,
+        permissionKeys: [PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE],
+        superAdminOnly: true,
+      },
+      {
         label: '消息与提醒',
         path: `${ROUTES.SETTINGS}?group=notifications`,
         permissionKeys: [PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE],

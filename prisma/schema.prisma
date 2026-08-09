@@ -88,6 +88,8 @@ model User {
   updatedAt          DateTime  @updatedAt
 
   sessions AuthSession[]
+  browserAgentGrants BrowserAgentAuthGrant[]
+  browserAgentSessions BrowserAgentSession[]
 
   @@index([departmentId])
   @@index([roleId])
@@ -107,6 +109,41 @@ model AuthSession {
 
   @@index([userId])
   @@map("auth_sessions")
+}
+
+model BrowserAgentAuthGrant {
+  jti             String    @id @db.VarChar(64)
+  userId          String    @db.VarChar(64)
+  parentSessionId String    @db.VarChar(64)
+  deviceId        String    @db.VarChar(128)
+  redirectUri     String    @db.VarChar(255)
+  codeChallenge   String    @db.VarChar(100)
+  expiresAt       DateTime
+  usedAt          DateTime?
+  createdAt       DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([parentSessionId])
+  @@map("browser_agent_auth_grants")
+}
+
+model BrowserAgentSession {
+  jti             String    @id @db.VarChar(64)
+  userId          String    @db.VarChar(64)
+  parentSessionId String    @db.VarChar(64)
+  deviceId        String    @db.VarChar(128)
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  lastUsedAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([parentSessionId])
+  @@map("browser_agent_sessions")
 }
 
 model PositionMappingBatch {
@@ -211,6 +248,8 @@ model AiProviderConfig {
 
 model BrowserShopBinding {
   id              String                  @id @db.VarChar(64)
+  businessPlatformId String?               @db.VarChar(64)
+  businessShopId   String?                 @unique @db.VarChar(64)
   platform        String                  @db.VarChar(40)
   shopKey         String                  @db.VarChar(120)
   platformShopId  String?                 @db.VarChar(160)

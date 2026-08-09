@@ -69,6 +69,10 @@ export interface AfterSalesSourceConfig {
   id: ID;
   name: string;
   parentId?: ID;
+  /** 店铺在外部业务平台中的唯一 ID，仅店铺使用。 */
+  platformShopId?: string;
+  /** 平台页面可能出现的其他店铺名称，仅店铺使用。 */
+  aliases?: string[];
   isActive: boolean;
   sortOrder: number;
   createdAt: Timestamp;

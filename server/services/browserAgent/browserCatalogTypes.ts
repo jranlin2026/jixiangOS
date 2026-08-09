@@ -25,7 +25,4 @@ export type BrowserPlatformProductFacts = {
   paymentAmount?: number | null;
 };
 
-export type BrowserRequiredOrderFacts = BrowserPlatformProductFacts & {
-  platformProductName: string;
-  paymentAmount: number;
-};
+export type BrowserRequiredOrderFacts = BrowserPlatformProductFacts;

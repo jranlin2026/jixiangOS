@@ -10,7 +10,7 @@ chrome.runtime.onMessage.addListener((message: PageCommand, _sender, sendRespons
       .catch((error) => sendResponse({
         ok: false,
         code: 'ORDER_COMPLETION_FAILED',
-        message: error instanceof Error ? error.message : '订单备注与绿旗处理失败',
+        message: error instanceof Error ? error.message : '订单备注与红旗处理失败',
         stage: 'SAVE',
       }));
     return true;

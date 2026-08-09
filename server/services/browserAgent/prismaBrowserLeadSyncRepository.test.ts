@@ -742,11 +742,11 @@ const retried = await repository.reportPlatformCompletion(
   { orderRemarkStatus: 'FAILED', greenFlagStatus: 'FAILED', errorMessage: longError },
 );
 assert.equal(retried?.orderRemarkStatus, 'SUCCEEDED', '备注成功后不得被失败重试降级');
-assert.equal(retried?.greenFlagStatus, 'SUCCEEDED', '绿旗成功后不得被失败重试降级');
+assert.equal(retried?.greenFlagStatus, 'SUCCEEDED', '红旗成功后不得被失败重试降级');
 assert.equal(row.orderRemarkedAt, firstOrderRemarkedAt, '备注重试失败不得清空历史成功时间');
-assert.equal(row.greenFlaggedAt, firstGreenFlaggedAt, '绿旗重试失败不得清空历史成功时间');
+assert.equal(row.greenFlaggedAt, firstGreenFlaggedAt, '红旗重试失败不得清空历史成功时间');
 assert.equal(row.orderRemarkError, null, '备注成功后不得被重试错误覆盖');
-assert.equal(row.greenFlagError, null, '绿旗成功后不得被重试错误覆盖');
+assert.equal(row.greenFlagError, null, '红旗成功后不得被重试错误覆盖');
 
 const legacyRetried = await repository.reportOrderRemark(
   row.id,
@@ -828,7 +828,7 @@ assert.ok(
 );
 assert.ok(
   updateManyCalls.some((call) => call.where.greenFlagStatus?.not === 'SUCCEEDED'),
-  '绿旗更新必须使用数据库条件守卫',
+  '红旗更新必须使用数据库条件守卫',
 );
 
 console.log('browser lead sync repository reservation: ok');

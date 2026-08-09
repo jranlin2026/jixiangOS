@@ -122,7 +122,7 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
         remarkOperatorId: operator.id,
         remarkOperatorName: operator.name,
         greenFlagError: status === 'FAILED'
-          ? (errorMessage || '绿色旗帜设置失败').slice(0, 1000)
+          ? (errorMessage || '红色旗帜设置失败').slice(0, 1000)
           : null,
         ...(status === 'SUCCEEDED' ? { greenFlaggedAt: new Date() } : {}),
       },

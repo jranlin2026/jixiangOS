@@ -14,6 +14,9 @@ export type BrowserCatalogErrorCode =
 
 export type BrowserShopBinding = {
   id: string;
+  businessPlatformId?: string | null;
+  businessPlatformName?: string | null;
+  businessShopId?: string | null;
   platform: string;
   shopKey: string;
   platformShopId?: string | null;
@@ -54,13 +57,26 @@ export type BrowserCatalogProduct = {
   isActive: boolean;
 };
 
+export type BusinessShopDirectoryEntry = {
+  id: string;
+  platformId: string;
+  platformCode: string;
+  platformName: string;
+  name: string;
+  platformShopId?: string | null;
+  aliases?: string[];
+  active: boolean;
+};
+
 export type BrowserAgentCatalog = {
   shops: BrowserShopBinding[];
   mappings: BrowserProductMapping[];
   products: BrowserCatalogProduct[];
+  businessShops?: BusinessShopDirectoryEntry[];
 };
 
 export type BrowserShopInput = {
+  businessShopId?: string;
   platform?: string;
   shopKey?: string;
   platformShopId?: string;
@@ -84,4 +100,41 @@ export type BrowserCatalogApiResponse<T> = {
   data: T | null;
   message: string;
   errorCode?: BrowserCatalogErrorCode;
+};
+
+export type BrowserScriptContactState = 'ANY' | 'MISSING' | 'PRESENT';
+
+export type BrowserScriptTemplate = {
+  id: string;
+  title: string;
+  content: string;
+  enabled: boolean;
+  sortOrder: number;
+  priority: number;
+  match: {
+    orderStatuses: string[];
+    productKeywords: string[];
+    contactState: BrowserScriptContactState;
+  };
+};
+
+export type BrowserScriptGroup = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  sortOrder: number;
+  scripts: BrowserScriptTemplate[];
+};
+
+export type BrowserScriptLibrary = {
+  schemaVersion: 1;
+  revision: number;
+  groups: BrowserScriptGroup[];
+  updatedAt: string;
+  updatedBy: { id: string; name: string };
+};
+
+export type BrowserScriptLibraryView = {
+  library: BrowserScriptLibrary;
+  canManage: boolean;
 };

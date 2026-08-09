@@ -8,6 +8,7 @@ import {
   getEnablementPrivateStorageDir,
   getCustomerDataExchangeSecret,
   parseCorsOrigins,
+  validateBrowserAgentAuthConfig,
   validateRuntimeConfig,
 } from './runtime';
 
@@ -17,6 +18,17 @@ assert.deepEqual(parseCorsOrigins({ CORS_ORIGINS: 'https://crm.example.com, http
 ]);
 
 assert.ok(getAllowedCorsOrigins({ NODE_ENV: 'development' }).includes('http://127.0.0.1:3000'));
+assert.throws(() => validateBrowserAgentAuthConfig({ NODE_ENV: 'production' }), /JIXIANG_BROWSER_AGENT_AUTH_SECRET/);
+assert.throws(() => validateBrowserAgentAuthConfig({
+  NODE_ENV: 'production',
+  JIXIANG_BROWSER_AGENT_AUTH_SECRET: 'short',
+  JIXIANG_BROWSER_AGENT_REDIRECT_URIS: 'https://ibocdkdaleenngfdmmcnfongfhnolgkd.chromiumapp.org/browser-agent',
+}), /at least 32/);
+assert.throws(() => validateBrowserAgentAuthConfig({
+  NODE_ENV: 'production',
+  JIXIANG_BROWSER_AGENT_AUTH_SECRET: 'StrongBrowserAgentAuthSecret-123456789',
+  JIXIANG_BROWSER_AGENT_REDIRECT_URIS: 'https://evil.example.com/browser-agent',
+}), /invalid Chrome extension redirect URI/);
 const localExtensionOrigin = `chrome-extension://${'a'.repeat(32)}`;
 const publishedExtensionOrigin = `chrome-extension://${'b'.repeat(32)}`;
 assert.equal(isCorsOriginAllowed(localExtensionOrigin, [], { NODE_ENV: 'development' }), true);
@@ -217,4 +229,6 @@ assert.doesNotThrow(() => validateRuntimeConfig({
   CUSTOMER_MERGE_SNAPSHOT_KEYS_JSON: JSON.stringify({ 1: Buffer.alloc(32, 3).toString('base64') }),
   CUSTOMER_DATA_EXCHANGE_SIGNING_KEY: 'StrongCustomerDataExchangeSigningKey-123',
   BUSINESS_IMPORT_SIGNING_KEY: 'StrongBusinessImportSigningKey-123',
+  JIXIANG_BROWSER_AGENT_AUTH_SECRET: 'StrongBrowserAgentAuthSecret-123456789',
+  JIXIANG_BROWSER_AGENT_REDIRECT_URIS: 'https://ibocdkdaleenngfdmmcnfongfhnolgkd.chromiumapp.org/browser-agent',
 }));
