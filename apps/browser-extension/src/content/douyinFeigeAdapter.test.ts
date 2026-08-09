@@ -187,7 +187,7 @@ assert.equal(missingProductName.readyForIntake, true, '未识别商品不应阻�
 assert.ok(missingProductName.diagnostics.includes('未识别平台商品名称'));
 assert.equal(missingProductName.paymentAmount, 0, '实付为0是有效平台事实');
 
-const ambiguousOrderFacts = readOrderFactsFixture(`
+const latestOrderFacts = readOrderFactsFixture(`
   <section data-testid="order-card">
     <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-A</span>
     <span data-btm="d5834" data-product-id="PRODUCT-A">商品A</span>
@@ -201,12 +201,33 @@ const ambiguousOrderFacts = readOrderFactsFixture(`
     <div>付款时间 <strong>2026/08/08 20:34:20</strong></div>
   </section>
 `, '<div data-testid="shop-name">极享智能体</div><div data-jx-product-name>文档外的商品</div>');
-assert.equal(ambiguousOrderFacts.productName, '', '多张活动订单卡时不得回退到页面其他商品');
-assert.equal(ambiguousOrderFacts.platformProductId, undefined);
-assert.equal(ambiguousOrderFacts.platformSkuId, undefined);
-assert.equal(ambiguousOrderFacts.paymentAmount, undefined);
-assert.equal(ambiguousOrderFacts.paymentAt, undefined);
-assert.ok(ambiguousOrderFacts.diagnostics.includes('当前存在多张可见活动订单卡'));
+assert.equal(latestOrderFacts.platformOrderNo, 'ORDER-B', '多张订单卡应识别付款时间最新的订单');
+assert.equal(latestOrderFacts.orderStatus, '已付款');
+assert.equal(latestOrderFacts.productName, '商品B', '商品必须来自最新订单卡');
+assert.equal(latestOrderFacts.platformProductId, 'PRODUCT-B');
+assert.equal(latestOrderFacts.platformSkuId, undefined);
+assert.equal(latestOrderFacts.paymentAmount, 399);
+assert.equal(latestOrderFacts.paymentAt, '2026-08-08T20:34:20+08:00');
+assert.equal(latestOrderFacts.diagnostics.includes('当前存在多张可见活动订单卡'), false);
+
+const expandedLatestOrderFacts = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已发货</span><span data-jx-order-no>ORDER-LATEST</span>
+    <span data-btm="d5834">最新展开订单</span>
+    <div>实付金额 <strong>¥299.00</strong></div>
+    <div>付款时间 <strong>2026/08/09 19:07:02</strong></div>
+  </section>
+  <section data-testid="order-card">
+    <span data-jx-order-status>已关闭（售后完成）</span><span data-jx-order-no>ORDER-COLLAPSED</span>
+  </section>
+`);
+assert.equal(
+  expandedLatestOrderFacts.platformOrderNo,
+  'ORDER-LATEST',
+  '其他折叠订单缺少付款时间时，应选择唯一带付款时间的展开最新订单',
+);
+assert.equal(expandedLatestOrderFacts.productName, '最新展开订单');
+assert.equal(expandedLatestOrderFacts.paymentAmount, 299);
 
 const unprovenShop = readOrderFactsFixture(`
   <section data-testid="order-card">

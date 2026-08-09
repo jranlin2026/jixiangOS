@@ -99,9 +99,21 @@ function visibleActiveOrderCards(document: Document) {
   )));
 }
 
-function uniqueActiveOrderCard(document: Document) {
+function latestActiveOrderCard(document: Document) {
   const cards = visibleActiveOrderCards(document);
-  return cards.length === 1 ? cards[0] : null;
+  if (cards.length <= 1) return cards[0] || null;
+
+  const datedCards = cards.flatMap((card) => {
+    const paymentTime = paymentTimeFromOrderCard(card);
+    if (paymentTime.status !== 'FOUND') return [];
+    const timestamp = Date.parse(paymentTime.value);
+    return Number.isFinite(timestamp) ? [{ card, timestamp }] : [];
+  });
+  if (!datedCards.length) return null;
+
+  const latestTimestamp = Math.max(...datedCards.map(({ timestamp }) => timestamp));
+  const latestCards = datedCards.filter(({ timestamp }) => timestamp === latestTimestamp);
+  return latestCards.length === 1 ? latestCards[0].card : null;
 }
 
 function orderStatusFromElement(root: ParentNode) {
@@ -492,7 +504,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       const customerDisplayName = text(scope, selectors.customer);
       const shopDisplayName = '';
       const activeOrderCards = visibleActiveOrderCards(document);
-      const activeOrderCard = activeOrderCards.length === 1 ? activeOrderCards[0] : null;
+      const activeOrderCard = latestActiveOrderCard(document);
       const platformOrderNo = activeOrderCard ? orderNoFromElement(activeOrderCard) : '';
       const orderStatus = activeOrderCard ? orderStatusFromElement(activeOrderCard) : '';
       const productFacts = activeOrderCard
@@ -516,7 +528,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         .map((element) => ({ direction: direction(element), text: element.textContent?.trim() || '' }))
         .filter((message) => message.text);
       if (!customerDisplayName) diagnostics.push('未识别客户昵称');
-      if (activeOrderCards.length > 1) diagnostics.push('当前存在多张可见活动订单卡');
+      if (activeOrderCards.length > 1 && !activeOrderCard) diagnostics.push('当前存在多张可见活动订单卡');
       if (!platformOrderNo) diagnostics.push('未识别平台订单号');
       if (!orderStatus) diagnostics.push('未识别订单状态');
       if (productFacts.ambiguous) diagnostics.push('当前订单商品存在歧义');
@@ -535,7 +547,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         readyForIntake: Boolean(
           root
           && customerDisplayName.trim()
-          && activeOrderCards.length === 1
+          && activeOrderCard
           && platformOrderNo.trim()
         ),
         pageUrl,
@@ -625,7 +637,8 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       }
 
       const activeCards = visibleActiveOrderCards(document);
-      if (activeCards.length !== 1) {
+      const orderCard = latestActiveOrderCard(document);
+      if (!orderCard) {
         return {
           ok: false,
           code: activeCards.length ? 'ACTIVE_ORDER_CARD_AMBIGUOUS' : 'ORDER_CARD_NOT_FOUND',
@@ -635,7 +648,6 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           stage: 'CONTEXT',
         };
       }
-      const orderCard = activeCards[0];
       const initialOrderNo = orderNoFromElement(orderCard);
       if (!initialOrderNo) {
         return {
@@ -662,7 +674,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         };
       }
       const hasSameBoundContext = () => {
-        const currentActiveCard = uniqueActiveOrderCard(document);
+        const currentActiveCard = latestActiveOrderCard(document);
         return currentActiveCard === orderCard
           && orderCard.isConnected
           && isVisible(orderCard)
