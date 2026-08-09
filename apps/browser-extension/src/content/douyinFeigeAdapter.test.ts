@@ -87,6 +87,20 @@ const siblingPaymentFacts = readOrderFactsFixture(`
 assert.equal(siblingPaymentFacts.paymentAmount, 299, '实付值是语义标签的同级节点时仍必须读取');
 assert.equal(siblingPaymentFacts.paymentAt, '2026-08-08T19:34:20+08:00', '付款时间是标签同级节点时仍必须读取');
 
+const paidAmountWithDiscount = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已发货</span><span data-jx-order-no>ORDER-PAID-WITH-DISCOUNT</span>
+    <span data-btm="d5834">极享口播智能体 读书卡</span>
+    <div class="payment-row">
+      <span>实付金额</span><strong>¥999.00</strong>
+      <span>优惠</span><del>¥300.00</del>
+    </div>
+    <div><span>付款时间</span><strong>2026/08/09 12:22:46 (支付宝)</strong></div>
+  </section>
+`);
+assert.equal(paidAmountWithDiscount.paymentAmount, 999, '实付金额同行展示优惠金额时，应读取紧邻实付标签的金额');
+assert.equal(paidAmountWithDiscount.paymentAt, '2026-08-09T12:22:46+08:00');
+
 const ambiguousPaymentRows = readOrderFactsFixture(`
   <section data-testid="order-card">
     <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-AMBIGUOUS-PAYMENT-ROWS</span>

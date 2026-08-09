@@ -386,6 +386,22 @@ function textWithNodeBoundaries(node: Node): string {
   return [...node.childNodes].map(textWithNodeBoundaries).join(' ');
 }
 
+function factMatchInAdjacentValue(
+  labelElement: HTMLElement,
+  pattern: RegExp,
+): ParsedPlatformFact<RegExpMatchArray> | null {
+  let sibling: ChildNode | null = labelElement.nextSibling;
+  while (sibling) {
+    const content = textWithNodeBoundaries(sibling);
+    const matches = [...content.matchAll(pattern)];
+    if (matches.length > 1) return { status: 'AMBIGUOUS' };
+    if (matches.length === 1) return { status: 'FOUND', value: matches[0] };
+    if (content.replace(/[\s:：-]/g, '')) return { status: 'INVALID' };
+    sibling = sibling.nextSibling;
+  }
+  return null;
+}
+
 function factMatchNearUniqueLabel(
   orderCard: HTMLElement,
   label: string,
@@ -395,6 +411,12 @@ function factMatchNearUniqueLabel(
   const labels = semanticLabelElements(orderContainer, label);
   if (!labels.length) return { status: 'ABSENT' };
   if (labels.length > 1) return { status: 'AMBIGUOUS' };
+
+  const labelContentMatches = [...textWithNodeBoundaries(labels[0]).matchAll(pattern)];
+  if (!labelContentMatches.length) {
+    const adjacentValue = factMatchInAdjacentValue(labels[0], pattern);
+    if (adjacentValue) return adjacentValue;
+  }
 
   let current: HTMLElement | null = labels[0];
   while (current) {
