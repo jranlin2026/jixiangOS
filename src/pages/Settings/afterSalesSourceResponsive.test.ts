@@ -6,12 +6,18 @@ const source = readFileSync(join(process.cwd(), 'src/pages/Settings/AfterSalesSo
 
 assert.match(
   source,
-  /flexDirection:\s*\{\s*xs:\s*'column',\s*sm:\s*'row'\s*\}/,
-  'The add-platform controls should stack on narrow screens instead of squeezing the action button.',
+  /display:\s*\{\s*xs:\s*'none',\s*md:\s*'block'\s*\}/,
+  'The grouped shop table should only render as a table on desktop.',
 );
 
 assert.match(
   source,
-  /data-testid="add-after-sales-platform"[\s\S]*?minWidth:\s*112[\s\S]*?whiteSpace:\s*'nowrap'[\s\S]*?flexShrink:\s*0/,
-  'The add-platform button should keep a stable width and render its label on one line.',
+  /display:\s*\{\s*xs:\s*'flex',\s*md:\s*'none'\s*\}/,
+  'The grouped shop directory should switch to cards on mobile.',
+);
+
+assert.match(
+  source,
+  /data-testid="add-after-sales-platform"[\s\S]*?>新增业务平台</,
+  'The primary platform action should be explicit instead of an inline blank input.',
 );

@@ -32,6 +32,7 @@ interface TabPanelProps {
 }
 
 type SettingsTabConfig = {
+  key?: string;
   label: string;
   permissionKey: string;
   permissionKeys?: string[];
@@ -55,6 +56,7 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => (
 const Settings: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedGroupKey = searchParams.get('group') || 'organization';
+  const requestedTabKey = searchParams.get('tab');
   const [tabValue, setTabValue] = useState(0);
   const currentUser = useAuthStore((state) => state.currentUser);
 
@@ -89,8 +91,8 @@ const Settings: React.FC = () => {
       description: '产品配置和订单类型配置',
       tabs: [
         { label: '产品配置', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <ProductConfigPage /> },
-        { label: '业务平台与店铺', permissionKey: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES, component: <AfterSalesSourceConfigPage /> },
-        { label: '平台商品映射', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <BrowserAgentConfigPage /> },
+        { key: 'businessShops', label: '业务平台与店铺', permissionKey: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES, component: <AfterSalesSourceConfigPage /> },
+        { key: 'platformMapping', label: '平台商品映射', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <BrowserAgentConfigPage /> },
         { label: '订单类型', permissionKey: PERMISSION_KEYS.SETTINGS_ORDER_TYPES, component: <OrderTypeConfigPage /> },
       ],
     },
@@ -152,12 +154,24 @@ const Settings: React.FC = () => {
   }, [groups, requestedGroupKey, setSearchParams]);
 
   useEffect(() => {
-    setTabValue((current) => (current >= tabs.length ? 0 : current));
-  }, [tabs.length]);
+    const requestedIndex = requestedTabKey ? tabs.findIndex((tab) => tab.key === requestedTabKey) : -1;
+    setTabValue(requestedIndex >= 0 ? requestedIndex : 0);
+  }, [activeGroup?.key, requestedTabKey, tabs]);
 
-  useEffect(() => {
-    setTabValue(0);
-  }, [activeGroup?.key]);
+  const handleTabChange = (value: number) => {
+    setTabValue(value);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      const key = tabs[value]?.key;
+      if (key) next.set('tab', key);
+      else next.delete('tab');
+      if (key !== 'platformMapping') {
+        next.delete('shopId');
+        next.delete('businessShopId');
+      }
+      return next;
+    });
+  };
 
   return (
     <ModulePage>
@@ -178,7 +192,7 @@ const Settings: React.FC = () => {
                 </Typography>
                 <ModuleTabs
                   value={tabs.length ? tabValue : false}
-                  onChange={(_, value) => setTabValue(value)}
+                  onChange={(_, value) => handleTabChange(value)}
                   variant="scrollable"
                   scrollButtons="auto"
                   sx={{ mb: 0 }}

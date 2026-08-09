@@ -22,8 +22,11 @@ import {
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import LinkOutlinedIcon from '@mui/icons-material/LinkOutlined';
+import StorefrontOutlinedIcon from '@mui/icons-material/StorefrontOutlined';
 import { browserAgentConfigApi, productApi } from '../../api';
 import type { Product } from '../../types/product';
 import type {
@@ -112,13 +115,14 @@ function statusChip(active: boolean) {
 type ShopListProps = {
   rows: BrowserShopBinding[];
   selectedShopId: string;
+  mappingCounts: Map<string, number>;
   onSelect: (shop: BrowserShopBinding) => void;
-  onEdit: (shop: BrowserShopBinding) => void;
-  onToggleActive: (shop: BrowserShopBinding) => void;
 };
 
-export function BrowserShopBindingList({ rows, selectedShopId, onSelect, onEdit, onToggleActive }: ShopListProps) {
-  if (!rows.length) return <Paper variant="outlined" sx={{ p: 4, textAlign: 'center', color: '#64748b' }}>暂无符合条件的店铺绑定</Paper>;
+const platformLabel = (platform: string) => platform.toUpperCase() === 'DOUYIN' ? '抖音小店' : platform;
+
+export function BrowserShopBindingList({ rows, selectedShopId, mappingCounts, onSelect }: ShopListProps) {
+  if (!rows.length) return <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', color: '#64748b', borderStyle: 'dashed' }}>没有找到符合条件的店铺</Paper>;
 
   const selectWithKeyboard = (event: React.KeyboardEvent, shop: BrowserShopBinding) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -129,64 +133,42 @@ export function BrowserShopBindingList({ rows, selectedShopId, onSelect, onEdit,
     onSelect(shop);
   };
 
-  return <>
-    <TableContainer component={Paper} variant="outlined" sx={{ display: { xs: 'none', md: 'block' } }}>
-      <Table size="small">
-        <TableHead><TableRow>
-          <TableCell>店铺名称</TableCell>
-          <TableCell>稳定店铺标识</TableCell>
-          <TableCell>平台店铺ID</TableCell>
-          <TableCell>店铺别名</TableCell>
-          <TableCell>来源</TableCell>
-          <TableCell>状态</TableCell>
-          <TableCell align="right">操作</TableCell>
-        </TableRow></TableHead>
-        <TableBody role="listbox" aria-label="店铺绑定">{rows.map((shop) => <TableRow
-          data-view="desktop" data-row-id={shop.id} key={shop.id} hover selected={selectedShopId === shop.id}
-          role="option" tabIndex={0} aria-selected={selectedShopId === shop.id}
-          aria-label={`选择店铺 ${shop.displayName}`}
-          onClick={() => onSelect(shop)} onKeyDown={(event) => selectWithKeyboard(event, shop)} sx={{ cursor: 'pointer' }}
-        >
-          <TableCell sx={{ fontWeight: 700 }}>{shop.displayName}</TableCell>
-          <TableCell>{shop.shopKey}</TableCell>
-          <TableCell>{shop.platformShopId || '-'}</TableCell>
-          <TableCell>{shop.aliases.join('、') || '-'}</TableCell>
-          <TableCell>{sourceLabel(shop)}</TableCell>
-          <TableCell>{statusChip(shop.active)}</TableCell>
-          <TableCell align="right" onClick={(event) => event.stopPropagation()}>
-            <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => onEdit(shop)}>编辑</Button>
-            <Button size="small" color={shop.active ? 'warning' : 'success'} onClick={() => onToggleActive(shop)}>
-              {shop.active ? '停用' : '启用'}
-            </Button>
-          </TableCell>
-        </TableRow>)}</TableBody>
-      </Table>
-    </TableContainer>
-
-    <Stack spacing={1.25} role="listbox" aria-label="店铺绑定" sx={{ display: { xs: 'flex', md: 'none' } }}>
-      {rows.map((shop) => <Paper
-        data-view="mobile" data-row-id={shop.id} key={shop.id} variant="outlined"
-        role="option" tabIndex={0} aria-selected={selectedShopId === shop.id}
+  const list = (view: 'desktop' | 'mobile') => <Stack role="listbox" aria-label="店铺绑定" spacing={1}>
+    {rows.map((shop) => {
+      const selected = selectedShopId === shop.id;
+      return <Paper
+        data-view={view} data-row-id={shop.id} key={shop.id} variant="outlined"
+        role="option" tabIndex={0} aria-selected={selected}
         aria-label={`选择店铺 ${shop.displayName}`}
         onClick={() => onSelect(shop)} onKeyDown={(event) => selectWithKeyboard(event, shop)}
-        sx={{ p: 2, borderColor: selectedShopId === shop.id ? 'primary.main' : undefined }}
+        sx={{
+          position: 'relative', p: 1.75, pl: 2, cursor: 'pointer', overflow: 'hidden',
+          borderColor: selected ? 'primary.main' : '#e2e8f0',
+          bgcolor: selected ? '#eff6ff' : '#fff',
+          boxShadow: selected ? '0 8px 24px rgba(37, 99, 235, 0.10)' : 'none',
+          transition: 'border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease',
+          '&::before': selected ? { content: '""', position: 'absolute', inset: '0 auto 0 0', width: 4, bgcolor: 'primary.main' } : undefined,
+          '&:hover': { borderColor: selected ? 'primary.main' : '#93c5fd', bgcolor: selected ? '#eff6ff' : '#f8fbff' },
+          '&:focus-visible': { outline: '3px solid rgba(37, 99, 235, 0.24)', outlineOffset: 2 },
+        }}
       >
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={1}>
-          <Box><Typography fontWeight={700}>{shop.displayName}</Typography><Typography variant="caption" color="text.secondary">{shop.platform}</Typography></Box>
-          {statusChip(shop.active)}
+          <Box sx={{ minWidth: 0 }}>
+            <Stack direction="row" alignItems="center" spacing={0.75}>
+              <Typography fontWeight={800} noWrap>{shop.displayName}</Typography>
+              {selected ? <CheckCircleRoundedIcon color="primary" sx={{ fontSize: 18 }} /> : null}
+            </Stack>
+            <Typography variant="caption" color="text.secondary">{platformLabel(shop.platform)} · {shop.active ? '已启用' : '已停用'}</Typography>
+          </Box>
+          <Chip size="small" label={`${mappingCounts.get(shop.id) || 0} 个映射`} sx={{ bgcolor: selected ? '#dbeafe' : '#f1f5f9', color: selected ? '#1d4ed8' : '#475569', fontWeight: 700 }} />
         </Stack>
-        <Stack spacing={0.5} sx={{ mt: 1.5 }}>
-          <Typography variant="body2">稳定店铺标识：{shop.shopKey}</Typography>
-          <Typography variant="body2">平台店铺ID：{shop.platformShopId || '-'}</Typography>
-          <Typography variant="body2">店铺别名：{shop.aliases.join('、') || '-'}</Typography>
-          <Typography variant="body2">来源：{sourceLabel(shop)}</Typography>
-        </Stack>
-        <Stack direction="row" justifyContent="flex-end" sx={{ mt: 1 }} onClick={(event) => event.stopPropagation()}>
-          <Button size="small" onClick={() => onEdit(shop)}>编辑</Button>
-          <Button size="small" color={shop.active ? 'warning' : 'success'} onClick={() => onToggleActive(shop)}>{shop.active ? '停用' : '启用'}</Button>
-        </Stack>
-      </Paper>)}
-    </Stack>
+      </Paper>;
+    })}
+  </Stack>;
+
+  return <>
+    <Box sx={{ display: { xs: 'none', md: 'block' } }}>{list('desktop')}</Box>
+    <Box sx={{ display: { xs: 'block', md: 'none' } }}>{list('mobile')}</Box>
   </>;
 }
 
@@ -277,6 +259,7 @@ type MappingDraft = BrowserProductMappingInput & { aliasesText: string };
 
 const emptyCatalog: BrowserAgentCatalog = { shops: [], mappings: [], products: [] };
 const emptyShopDraft: ShopDraft = { businessShopId: '', shopKey: '', platformShopId: '', aliasesText: '', active: true };
+const selectedShopStorageKey = 'jixiangos_browser_mapping_selected_shop';
 
 const splitLines = (value: string) => [...new Set(value.split(/[\n，,]/).map((item) => item.trim()).filter(Boolean))];
 
@@ -287,8 +270,6 @@ const BrowserAgentConfigPage: React.FC = () => {
   const [selectedShopId, setSelectedShopId] = useState('');
   const [shopQuery, setShopQuery] = useState('');
   const [shopStatus, setShopStatus] = useState<StatusFilter>('all');
-  const [shopPage, setShopPage] = useState(0);
-  const [shopPageSize, setShopPageSize] = useState(5);
   const [mappingQuery, setMappingQuery] = useState('');
   const [mappingStatus, setMappingStatus] = useState<StatusFilter>('all');
   const [mappingPage, setMappingPage] = useState(0);
@@ -315,9 +296,15 @@ const BrowserAgentConfigPage: React.FC = () => {
       }
       setCatalog(catalogResponse.data);
       if (productResponse.code === 0) setProducts(productResponse.data);
-      setSelectedShopId((current) => catalogResponse.data!.shops.some((shop) => shop.id === (preferredShopId || current))
-        ? (preferredShopId || current)
-        : (catalogResponse.data!.shops[0]?.id || ''));
+      setSelectedShopId((current) => {
+        const params = new URLSearchParams(window.location.search);
+        const requestedShopId = preferredShopId || params.get('shopId') || current || localStorage.getItem(selectedShopStorageKey) || '';
+        const requestedBusinessShopId = params.get('businessShopId') || '';
+        const requestedShop = catalogResponse.data!.shops.find((shop) => (
+          shop.id === requestedShopId || (requestedBusinessShopId && shop.businessShopId === requestedBusinessShopId)
+        ));
+        return requestedShop?.id || catalogResponse.data!.shops.find((shop) => shop.active)?.id || catalogResponse.data!.shops[0]?.id || '';
+      });
       return true;
     } catch (error) {
       await alert(error instanceof Error ? error.message : '平台商品映射加载失败', '加载失败');
@@ -337,8 +324,8 @@ const BrowserAgentConfigPage: React.FC = () => {
   };
 
   const shopResult = useMemo(
-    () => buildBrowserShopPage(catalog.shops, { query: shopQuery, status: shopStatus }, shopPage, shopPageSize),
-    [catalog.shops, shopPage, shopPageSize, shopQuery, shopStatus],
+    () => buildBrowserShopPage(catalog.shops, { query: shopQuery, status: shopStatus }, 0, Math.max(catalog.shops.length, 1)),
+    [catalog.shops, shopQuery, shopStatus],
   );
   const selectedShop = catalog.shops.find((shop) => shop.id === selectedShopId) || null;
   const mappingResult = useMemo(() => buildBrowserMappingPage(
@@ -359,9 +346,23 @@ const BrowserAgentConfigPage: React.FC = () => {
     ...catalog.products.map((product) => [product.id, product.price] as const),
     ...products.map((product) => [product.id, product.price] as const),
   ]), [catalog.products, products]);
+  const mappingCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    catalog.mappings.forEach((mapping) => counts.set(mapping.shopBindingId, (counts.get(mapping.shopBindingId) || 0) + 1));
+    return counts;
+  }, [catalog.mappings]);
 
-  useEffect(() => { if (shopResult.page !== shopPage) setShopPage(shopResult.page); }, [shopPage, shopResult.page]);
   useEffect(() => { if (mappingResult.page !== mappingPage) setMappingPage(mappingResult.page); }, [mappingPage, mappingResult.page]);
+
+  const selectShop = (shop: BrowserShopBinding) => {
+    setSelectedShopId(shop.id);
+    setMappingPage(0);
+    localStorage.setItem(selectedShopStorageKey, shop.id);
+    const url = new URL(window.location.href);
+    url.searchParams.set('shopId', shop.id);
+    url.searchParams.delete('businessShopId');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  };
 
   const openShopForm = (shop?: BrowserShopBinding) => {
     setEditingShop(shop || null);
@@ -472,33 +473,86 @@ const BrowserAgentConfigPage: React.FC = () => {
       <Button variant="contained" startIcon={<AddIcon />} onClick={() => openShopForm()} disabled={!selectableBusinessShops.length}>接入已有业务店铺</Button>
     </Stack>
 
-    {loading ? <Box sx={{ py: 8, textAlign: 'center' }}><CircularProgress size={28} /></Box> : <>
-      <Box sx={{ mt: 3 }}>
-        <Typography variant="subtitle1" fontWeight={700}>店铺接入配置</Typography>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ my: 1.5 }}>
-          <TextField size="small" label="搜索店铺" value={shopQuery} onChange={(event) => { setShopQuery(event.target.value); setShopPage(0); }} sx={{ minWidth: 240 }} />
-          <TextField select size="small" label="状态" value={shopStatus} onChange={(event) => { setShopStatus(event.target.value as StatusFilter); setShopPage(0); }} sx={{ minWidth: 120 }}>
-            <MenuItem value="all">全部</MenuItem><MenuItem value="active">启用</MenuItem><MenuItem value="inactive">停用</MenuItem>
-          </TextField>
+    {loading ? <Box sx={{ py: 8, textAlign: 'center' }}><CircularProgress size={28} /></Box> : <Box
+      sx={{ mt: 3, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2.5, alignItems: 'stretch' }}
+    >
+      <Paper
+        variant="outlined"
+        component="aside"
+        aria-label="店铺导航"
+        sx={{ width: { xs: '100%', md: 300 }, flexShrink: 0, p: 2, bgcolor: '#f8fafc', borderColor: '#e2e8f0', borderRadius: 2.5 }}
+      >
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+          <StorefrontOutlinedIcon color="primary" />
+          <Typography variant="subtitle1" fontWeight={800}>选择店铺</Typography>
+          <Chip size="small" label={`${shopResult.total} 家`} sx={{ ml: 'auto', bgcolor: '#e2e8f0', fontWeight: 700 }} />
         </Stack>
-        <BrowserShopBindingList rows={shopResult.rows} selectedShopId={selectedShopId} onSelect={(shop) => { setSelectedShopId(shop.id); setMappingPage(0); }} onEdit={openShopForm} onToggleActive={(shop) => void toggleShop(shop)} />
-        <TablePagination count={shopResult.total} page={shopResult.page} rowsPerPage={shopResult.pageSize} rowsPerPageOptions={[5, 10, 20, 50]} onPageChange={(_event, page) => setShopPage(page)} onRowsPerPageChange={(event) => { setShopPageSize(Number(event.target.value)); setShopPage(0); }} labelRowsPerPage="每页条数" labelDisplayedRows={formatPaginationRows} sx={{ mt: 1.5 }} />
-      </Box>
+        <Typography variant="caption" color="text.secondary">选择后，右侧只显示该店铺的商品映射。</Typography>
 
-      <Box sx={{ mt: 4 }}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={1}>
-          <Box><Typography variant="subtitle1" fontWeight={700}>商品映射</Typography><Typography variant="body2" color="text.secondary">当前店铺：{selectedShop?.displayName || '未选择'}</Typography></Box>
-          <Button variant="outlined" startIcon={<LinkOutlinedIcon />} disabled={!selectedShopId || activeProducts.length === 0} onClick={() => openMappingForm()}>新增商品映射</Button>
-        </Stack>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ my: 1.5 }}>
-          <TextField size="small" label="搜索平台商品或OS产品" value={mappingQuery} onChange={(event) => { setMappingQuery(event.target.value); setMappingPage(0); }} sx={{ minWidth: 280 }} />
-          <TextField select size="small" label="状态" value={mappingStatus} onChange={(event) => { setMappingStatus(event.target.value as StatusFilter); setMappingPage(0); }} sx={{ minWidth: 120 }}>
-            <MenuItem value="all">全部</MenuItem><MenuItem value="active">启用</MenuItem><MenuItem value="inactive">停用</MenuItem>
-          </TextField>
-        </Stack>
-        <BrowserMappingResults pageResult={mappingResult} productPrices={productPrices} onEdit={openMappingForm} onDisable={(mapping) => void disableMapping(mapping)} onPageChange={setMappingPage} onPageSizeChange={(value) => { setMappingPageSize(value); setMappingPage(0); }} />
-      </Box>
-    </>}
+        <TextField
+          size="small" placeholder="搜索店铺" value={shopQuery}
+          onChange={(event) => setShopQuery(event.target.value)}
+          fullWidth sx={{ mt: 2, bgcolor: '#fff' }}
+        />
+        <TextField
+          select size="small" label="店铺状态" value={shopStatus}
+          onChange={(event) => setShopStatus(event.target.value as StatusFilter)}
+          fullWidth sx={{ mt: 1, bgcolor: '#fff' }}
+        >
+          <MenuItem value="all">全部状态</MenuItem><MenuItem value="active">已启用</MenuItem><MenuItem value="inactive">已停用</MenuItem>
+        </TextField>
+
+        <Box sx={{ mt: 1.5, maxHeight: { md: 560 }, overflowY: { md: 'auto' }, pr: { md: 0.5 } }}>
+          <BrowserShopBindingList rows={shopResult.rows} selectedShopId={selectedShopId} mappingCounts={mappingCounts} onSelect={selectShop} />
+        </Box>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ flex: 1, minWidth: 0, borderColor: '#dbe4f0', borderRadius: 2.5, overflow: 'hidden' }}>
+        {selectedShop ? <>
+          <Box sx={{ px: { xs: 2, sm: 2.5 }, py: 2.25, bgcolor: '#f8fbff', borderBottom: '1px solid #dbe4f0' }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'flex-start' }} gap={2}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="overline" color="primary.main" fontWeight={800} letterSpacing={1}>当前店铺</Typography>
+                <Typography variant="h5" fontWeight={800} sx={{ lineHeight: 1.25 }}>{selectedShop.displayName}</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>当前店铺：{selectedShop.displayName}</Typography>
+                <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mt: 1.25 }}>
+                  <Chip size="small" label={platformLabel(selectedShop.platform)} variant="outlined" />
+                  {statusChip(selectedShop.active)}
+                  <Chip size="small" icon={<Inventory2OutlinedIcon />} label={`${mappingCounts.get(selectedShop.id) || 0} 个商品映射`} sx={{ bgcolor: '#eaf2ff', color: '#1d4ed8', fontWeight: 700 }} />
+                  <Chip size="small" label={selectedShop.platformShopId ? `店铺ID：${selectedShop.platformShopId}` : '未填写平台店铺ID'} variant="outlined" />
+                </Stack>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => openShopForm(selectedShop)}>编辑接入</Button>
+                <Button size="small" color={selectedShop.active ? 'warning' : 'success'} onClick={() => void toggleShop(selectedShop)}>
+                  {selectedShop.active ? '停用店铺' : '启用店铺'}
+                </Button>
+                <Button variant="contained" size="small" startIcon={<LinkOutlinedIcon />} disabled={!selectedShop.active || activeProducts.length === 0} onClick={() => openMappingForm()}>新增商品映射</Button>
+              </Stack>
+            </Stack>
+          </Box>
+
+          <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={1.5}>
+              <Box><Typography variant="subtitle1" fontWeight={800}>商品映射</Typography><Typography variant="body2" color="text.secondary">平台商品识别后，将自动匹配到对应的OS标准产品。</Typography></Box>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <TextField size="small" placeholder="搜索平台商品或OS产品" value={mappingQuery} onChange={(event) => { setMappingQuery(event.target.value); setMappingPage(0); }} sx={{ minWidth: { sm: 260 } }} />
+                <TextField select size="small" label="状态" value={mappingStatus} onChange={(event) => { setMappingStatus(event.target.value as StatusFilter); setMappingPage(0); }} sx={{ minWidth: 120 }}>
+                  <MenuItem value="all">全部</MenuItem><MenuItem value="active">启用</MenuItem><MenuItem value="inactive">停用</MenuItem>
+                </TextField>
+              </Stack>
+            </Stack>
+            <Box sx={{ mt: 2 }}>
+              <BrowserMappingResults pageResult={mappingResult} productPrices={productPrices} onEdit={openMappingForm} onDisable={(mapping) => void disableMapping(mapping)} onPageChange={setMappingPage} onPageSizeChange={(value) => { setMappingPageSize(value); setMappingPage(0); }} />
+            </Box>
+          </Box>
+        </> : <Box sx={{ py: 10, px: 3, textAlign: 'center' }}>
+          <StorefrontOutlinedIcon sx={{ fontSize: 48, color: '#94a3b8' }} />
+          <Typography variant="h6" fontWeight={800} sx={{ mt: 1 }}>请先选择店铺</Typography>
+          <Typography variant="body2" color="text.secondary">选择左侧店铺后，即可配置接入参数和商品映射。</Typography>
+        </Box>}
+      </Paper>
+    </Box>}
 
     <Dialog open={shopFormOpen} onClose={() => !submitting && setShopFormOpen(false)} maxWidth="sm" fullWidth>
       <DialogCloseTitle onClose={() => setShopFormOpen(false)} closeDisabled={submitting}>{editingShop ? '编辑店铺接入' : '接入已有业务店铺'}</DialogCloseTitle>
