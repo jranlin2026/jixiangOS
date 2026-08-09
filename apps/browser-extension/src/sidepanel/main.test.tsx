@@ -152,7 +152,7 @@ const chromeMock = {
               platformSkuId: message.input.platformSkuId,
               platformProductName: message.input.platformProductName,
               paymentAmount: message.input.paymentAmount,
-              paymentAt: message.input.paymentAt,
+              paymentAt: message.input.paymentAt ? new Date(message.input.paymentAt).toISOString() : undefined,
             },
             priceDifference: unmatched ? null : {
               paymentAmount: 399, osReferencePrice: 299, amount: 100, differs: true,
@@ -263,14 +263,9 @@ assert.equal(completeButton.disabled, true, '权威预览加载中必须禁用�
 assert.equal(intakeInputs.length, 0);
 releaseInitialPreview();
 assert.match(document.body.textContent || '', /绑定店铺极享官方店/);
-assert.match(document.body.textContent || '', /页面店铺极享官方店/);
 assert.match(document.body.textContent || '', /平台商品淘金AI 多模态创作智能体 读书卡/);
-await waitFor('.context-card', (node) => (node.textContent || '').includes('匹配产品淘金AI'));
-assert.match(document.body.textContent || '', /匹配产品淘金AI/);
-assert.match(document.body.textContent || '', /匹配方式店铺商品映射/);
-assert.match(document.body.textContent || '', /OS参考价¥299\.00/);
-assert.match(document.body.textContent || '', /实付金额¥399\.00/);
-assert.match(document.body.textContent || '', /OS参考价 ¥299\.00，仅供参考；本次按飞鸽实付 ¥399\.00 录入/);
+await waitFor('.context-card', (node) => (node.textContent || '').includes('OS产品淘金AI'));
+assert.match(document.body.textContent || '', /OS产品淘金AI/);
 assert.equal(intakeInputs.length, 0, '权威匹配预览必须发生在线索创建之前');
 assert.equal(previewInputs.length > 0, true);
 
@@ -288,23 +283,23 @@ pageContext = {
   platformProductId: 'DY-CURRENT-B',
 };
 document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
-await waitFor('.context-card', (node) => (node.textContent || '').includes('页面店铺极享二店'));
+await waitFor('.context-card', (node) => (node.textContent || '').includes('订单ORDER-CURRENT-B'));
 shopSelect.value = 'shop-2';
 shopSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-await waitFor('.context-card', (node) => (node.textContent || '').includes('匹配产品二店标准产品'));
+await waitFor('.context-card', (node) => (node.textContent || '').includes('OS产品二店标准产品'));
 const savedConfigCountBeforeStaleResponse = savedConfigs.length;
 releaseStaleUnavailablePreview();
 await new Promise((resolve) => setTimeout(resolve, 10));
 assert.equal(shopSelect.value, 'shop-2', '旧店铺的迟到停用响应不得清空当前店铺');
 assert.equal(savedConfigs.length, savedConfigCountBeforeStaleResponse, '迟到响应不得覆盖当前持久化配置');
-assert.match(document.body.textContent || '', /匹配产品二店标准产品/);
+assert.match(document.body.textContent || '', /OS产品二店标准产品/);
 
 pageContext = context;
 document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
-await waitFor('.context-card', (node) => (node.textContent || '').includes('页面店铺极享官方店'));
+await waitFor('.context-card', (node) => (node.textContent || '').includes('订单ORDER-RENDER-1'));
 shopSelect.value = 'shop-1';
 shopSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-await waitFor('.context-card', (node) => (node.textContent || '').includes('匹配产品淘金AI'));
+await waitFor('.context-card', (node) => (node.textContent || '').includes('OS产品淘金AI'));
 
 pageContext = {
   ...context,
@@ -374,7 +369,7 @@ pageContext = {
   paymentAmount: 188,
 };
 document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
-await waitFor('.context-card', (node) => (node.textContent || '').includes('平台原名“完全未配置的平台商品”将写入OS备注'));
+await waitFor('.context-card', (node) => (node.textContent || '').includes('商品未匹配OS标准产品，本次仍可入库'));
 assert.equal(intakeInputs.length, 1, '未匹配警告必须在客服点击入库前出现');
 
 document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
@@ -393,9 +388,8 @@ const successDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (n
 assert.match(successDialog.textContent || '', /线索编号：lead-render-1/);
 assert.match(successDialog.textContent || '', /分配销售：销售小王/);
 assert.match(successDialog.textContent || '', /订单备注、绿色旗帜均已验证/);
-assert.match(document.body.textContent || '', /匹配产品待匹配（本次仍可录入，平台原名会写入OS备注）/);
-assert.match(document.body.textContent || '', /平台原名“完全未配置的平台商品”将写入OS备注/);
-assert.match(document.body.textContent || '', /OS参考价暂未提供/);
+assert.match(document.body.textContent || '', /OS产品未匹配（不影响入OS）/);
+assert.match(document.body.textContent || '', /商品未匹配OS标准产品，本次仍可入库/);
 assert.equal(intakeInputs.length, 3);
 assert.deepEqual(intakeInputs.at(-1), {
   platform: 'DOUYIN',
@@ -459,8 +453,6 @@ assert.deepEqual(
   '商品、实付或付款时间变化后的首次点击不得入库、改页面或上报',
 );
 assert.match(document.body.textContent || '', /平台商品点击时最新商品/);
-assert.match(document.body.textContent || '', /实付金额¥188\.25/);
-assert.match(document.body.textContent || '', /2026-08-09T10:30:00\+08:00/);
 assert.equal(document.querySelector<HTMLInputElement>('.confirm-row input')?.checked, false, '事实变化后必须重新确认');
 latestFactsChangedDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
 document.querySelector<HTMLInputElement>('.confirm-row input')?.click();

@@ -4,7 +4,7 @@ import type {
   BrowserStoreProductMapping,
 } from './browserCatalogTypes';
 
-export type ProductMatchMethod = 'PLATFORM_PRODUCT_ID' | 'PLATFORM_SKU_ID' | 'SHOP_ALIAS' | 'EXACT_OS_NAME';
+export type ProductMatchMethod = 'PLATFORM_PRODUCT_ID' | 'PLATFORM_SKU_ID' | 'SHOP_ALIAS' | 'COMPANY_ALIAS' | 'EXACT_OS_NAME';
 
 export type BrowserProductResolution =
   | { status: 'MATCHED'; method: ProductMatchMethod; osProductId: string; osProductName: string; osReferencePrice: number }
@@ -111,6 +111,14 @@ export function resolveBrowserProduct(input: ResolveBrowserProductInput): Browse
     (mapping) => mapping.aliases.some((alias) => normalizePlatformProductName(alias) === normalizedProductName),
   );
   if (aliasResolution) return aliasResolution;
+
+  const companyAliasResolution = mappingResolution(
+    input.mappings,
+    productsById,
+    'COMPANY_ALIAS',
+    (mapping) => mapping.aliases.some((alias) => normalizePlatformProductName(alias) === normalizedProductName),
+  );
+  if (companyAliasResolution) return companyAliasResolution;
 
   const exactProducts = input.products.filter((product) => (
     product.isActive && normalizePlatformProductName(product.name) === normalizedProductName

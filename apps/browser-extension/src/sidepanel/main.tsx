@@ -13,7 +13,7 @@ import type {
   LogoutResult,
   WorkerCommand,
 } from '../shared/contracts';
-import { hasRequiredOrderFacts } from '../shared/contracts';
+import { hasRequiredIntakeContext } from '../shared/contracts';
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
 import { activeTabCommand } from '../shared/activeTabMessaging';
 import { withWorkerTimeout } from '../shared/workerMessaging';
@@ -25,7 +25,7 @@ import {
   type ScriptLibraryView,
   type ScriptMatch,
 } from '../domain/scriptLibrary';
-import { isPaidOrderStatus } from '../domain/orderCompletion';
+import { isIntakeEligibleOrderStatus } from '../domain/orderCompletion';
 import { ScriptLibraryEditor } from './ScriptLibraryEditor';
 import { ScriptLibrarySection } from './ScriptLibrarySection';
 import { FeedbackDialog } from './FeedbackDialog';
@@ -63,18 +63,6 @@ function permissionPattern(apiBaseUrl: string) {
   return `${url.origin}/*`;
 }
 
-function formatMoney(value?: number) {
-  return typeof value === 'number' && Number.isFinite(value) ? `¥${value.toFixed(2)}` : '未识别';
-}
-
-function matchMethodLabel(method?: string) {
-  if (method === 'PLATFORM_PRODUCT_ID') return '店铺商品映射';
-  if (method === 'PLATFORM_SKU_ID') return '店铺SKU映射';
-  if (method === 'SHOP_ALIAS') return '店铺商品别名';
-  if (method === 'EXACT_OS_NAME') return 'OS产品同名';
-  return '待后端确认';
-}
-
 function selectedRuntimeShop(shops: BrowserRuntimeShop[], shopBindingId: string) {
   return shops.find((shop) => shop.id === shopBindingId);
 }
@@ -83,17 +71,25 @@ function normalizedFact(value: unknown) {
   return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ');
 }
 
+function sameOptionalInstant(left?: string, right?: string) {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime === rightTime;
+}
+
 function previewRepresentsContext(
   preview: BrowserProductPreviewResponse | null,
   context: FeigePageContext | null,
   shopBindingId: string,
 ) {
-  if (!preview || !hasRequiredOrderFacts(context) || preview.shop.id !== shopBindingId) return false;
+  if (!preview || !hasRequiredIntakeContext(context) || preview.shop.id !== shopBindingId) return false;
   return normalizedFact(preview.facts.platformProductId) === normalizedFact(context.platformProductId)
     && normalizedFact(preview.facts.platformSkuId) === normalizedFact(context.platformSkuId)
     && normalizedFact(preview.facts.platformProductName) === normalizedFact(context.productName)
     && preview.facts.paymentAmount === context.paymentAmount
-    && new Date(preview.facts.paymentAt).getTime() === new Date(context.paymentAt).getTime();
+    && sameOptionalInstant(preview.facts.paymentAt, context.paymentAt);
 }
 
 function App() {
@@ -191,29 +187,17 @@ function App() {
     };
   }, []);
 
-  const paidOrderRecognized = Boolean(context && isPaidOrderStatus(context.orderStatus));
   const completionFormLocked = isCompletionFormLocked(panel);
   const selectedShop = selectedRuntimeShop(runtimeConfig?.shops || [], shopBindingId);
   const productPreview = productPreviewForPanel(panel);
-  const previewResolution = authoritativePreview?.productResolution;
-  const referencePrice = productPreview?.status === 'MATCHED'
-    ? productPreview.osReferencePrice ?? (
-        previewResolution?.status === 'MATCHED'
-        && (!productPreview.osProductId || previewResolution.osProductId === productPreview.osProductId)
-          ? previewResolution.osReferencePrice
-          : undefined
-      )
-    : undefined;
-  const priceDiffers = authoritativePreview?.priceDifference?.differs === true
-    && typeof referencePrice === 'number'
-    && typeof context?.paymentAmount === 'number'
-    && referencePrice !== context.paymentAmount;
   const pageShopMismatch = Boolean(context?.shopDisplayName && selectedShop
     && !pageShopMatchesBinding(context.shopDisplayName, selectedShop));
-  const orderFactsReady = hasRequiredOrderFacts(context);
+  const criticalDiagnostics = context?.diagnostics.filter((item) => (
+    /客户昵称|平台订单号|多张可见活动订单卡/.test(item)
+  )) || [];
   const canRunAuthoritativePreflight = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
     && (form.phone.trim() || form.wechat.trim()) && selectedShop && contactConfirmed
-    && paidOrderRecognized && context.shopDisplayName?.trim() && orderFactsReady && !loggingOut);
+    && hasRequiredIntakeContext(context) && isIntakeEligibleOrderStatus(context.orderStatus) && !loggingOut);
   const canIntake = canRunAuthoritativePreflight
     && (productPreviewStatus === 'READY' || pageShopMismatch);
   const workflowLabel = useMemo(() => {
@@ -226,11 +210,6 @@ function App() {
   useEffect(() => {
     if (!recognition || !scriptView || evaluatedRecognition.current === recognition.id) return;
     evaluatedRecognition.current = recognition.id;
-    if (!isPaidOrderStatus(recognition.context.orderStatus)) {
-      setRecommendation(null);
-      setRecommendationMessage('请先确认当前订单为已付款有效订单');
-      return;
-    }
     const nextRecommendation = matchScript(scriptView.library, {
       orderStatus: recognition.context.orderStatus,
       productName: recognition.context.productName,
@@ -273,8 +252,8 @@ function App() {
     const customerName = context?.customerDisplayName.trim() || '';
     const pageShopDisplayName = context?.shopDisplayName?.trim() || '';
     if (loggingOut || !operatorId || !selectedShopId || !context?.supported || !orderNo || !customerName
-      || !hasRequiredOrderFacts(context)
-      || !pageShopDisplayName || pageShopMismatch) {
+      || !hasRequiredIntakeContext(context)
+      || pageShopMismatch) {
       activeProductPreview.current = null;
       return;
     }
@@ -307,12 +286,12 @@ function App() {
       input: {
         platform: 'DOUYIN',
         shopBindingId: selectedShopId,
-        pageShopDisplayName,
+        pageShopDisplayName: pageShopDisplayName || undefined,
         platformProductId: context.platformProductId?.trim() || undefined,
         platformSkuId: context.platformSkuId?.trim() || undefined,
-        platformProductName: context.productName.trim(),
+        platformProductName: context.productName.trim() || undefined,
         paymentAmount: context.paymentAmount,
-        paymentAt: context.paymentAt.trim(),
+        paymentAt: context.paymentAt?.trim() || undefined,
       },
     }).then((result) => {
       if (!requestIsActive()) return;
@@ -604,15 +583,15 @@ function App() {
         existingIntake: attempt.existingIntake,
         intakeInput: {
           platform: 'DOUYIN', shopBindingId: attempt.shopBindingId,
-          pageShopDisplayName: context.shopDisplayName || '',
+          ...(context.shopDisplayName?.trim() ? { pageShopDisplayName: context.shopDisplayName.trim() } : {}),
           platformOrderNo: attempt.expectedOrderNo,
           contactName: attempt.expectedCustomerDisplayName, contactPhone: attempt.phone,
           contactWechat: attempt.wechat, contactSource: attempt.source,
           platformProductId: context.platformProductId || undefined,
           platformSkuId: context.platformSkuId || undefined,
-          platformProductName: context.productName,
-          paymentAmount: context.paymentAmount as number,
-          paymentAt: context.paymentAt || '',
+          ...(context.productName.trim() ? { platformProductName: context.productName.trim() } : {}),
+          ...(typeof context.paymentAmount === 'number' ? { paymentAmount: context.paymentAmount } : {}),
+          ...(context.paymentAt?.trim() ? { paymentAt: context.paymentAt.trim() } : {}),
         } satisfies BrowserLeadIntakeInput,
       }, {
         isAttemptActive,
@@ -767,34 +746,22 @@ function App() {
         <div><span>订单</span><strong>{context.platformOrderNo || '未识别'}</strong></div>
         <div><span>订单状态</span><strong>{context.orderStatus || '未识别'}</strong></div>
         <div><span>绑定店铺</span><strong>{selectedShop?.displayName || '未选择'}</strong></div>
-        <div><span>页面店铺</span><strong>{context.shopDisplayName || '未识别'}</strong></div>
         <div><span>平台商品</span><strong>{context.productName || '未识别'}</strong></div>
-        <div><span>匹配产品</span><strong>{productPreview?.status === 'MATCHED'
-          ? productPreview.osProductName || '待后端确认'
+        <div><span>OS产品</span><strong>{productPreview?.status === 'MATCHED'
+          ? productPreview.osProductName || '已匹配'
           : productPreview?.status === 'UNMATCHED'
-            ? '待匹配（本次仍可录入，平台原名会写入OS备注）'
+            ? '未匹配（不影响入OS）'
             : productPreviewStatus === 'LOADING' ? '正在匹配…' : '待匹配预览'}</strong></div>
-        <div><span>匹配方式</span><strong>{productPreview?.status === 'MATCHED'
-          ? matchMethodLabel(productPreview.method)
-          : productPreviewStatus === 'LOADING' ? '正在匹配…' : '未匹配'}</strong></div>
-        <div><span>OS参考价</span><strong>{typeof referencePrice === 'number' ? formatMoney(referencePrice) : '暂未提供'}</strong></div>
-        <div><span>实付金额</span><strong>{formatMoney(context.paymentAmount)}</strong></div>
-        <div><span>付款时间</span><strong>{context.paymentAt || '未识别'}</strong></div>
-        <div><span>消息</span><strong>{context.messages.length}条</strong></div>
       </div> : <p className="empty">请打开抖店飞鸽客服会话，然后点击“刷新识别”。</p>}
-      {context?.diagnostics.length ? <ul className="diagnostics">{context.diagnostics.map((item) => <li key={item}>{item}</li>)}</ul> : null}
+      {criticalDiagnostics.length ? <ul className="diagnostics">{criticalDiagnostics.map((item) => <li key={item}>{item}</li>)}</ul> : null}
       {runtimeConfig && runtimeConfig.shops.length > 1 && !selectedShop
         ? <div className="alert warning">当前有多个启用店铺，请手工选择后再入库。</div> : null}
       {pageShopMismatch
         ? <div className="alert warning">当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试。</div> : null}
-      {context && selectedShop && !context.shopDisplayName?.trim()
-        ? <div className="alert warning">当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别。</div> : null}
-      {context && !orderFactsReady
-        ? <div className="alert warning">当前订单的平台商品名称、实付金额或付款时间未完整唯一识别，请等待订单加载完成后刷新识别。</div> : null}
+      {context && !isIntakeEligibleOrderStatus(context.orderStatus)
+        ? <div className="alert warning">当前订单状态不支持入OS；已付款、已发货、已完成和已关闭订单可继续。</div> : null}
       {productPreview?.status === 'UNMATCHED'
-        ? <div className="alert warning">商品尚未匹配OS标准产品，本次仍可录入；平台原名“{productPreview.rawProductName || context?.productName || '未识别'}”将写入OS备注。</div> : null}
-      {priceDiffers
-        ? <div className="alert warning">OS参考价 {formatMoney(referencePrice)}，仅供参考；本次按飞鸽实付 {formatMoney(context?.paymentAmount)} 录入</div> : null}
+        ? <div className="alert warning">商品未匹配OS标准产品，本次仍可入库，不会阻断客服操作。</div> : null}
     </section>
 
     <ScriptLibrarySection
@@ -817,8 +784,7 @@ function App() {
       <label>手机号<input disabled={completionFormLocked} value={form.phone} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'phone', value: event.target.value })} placeholder="手机号和微信至少填一项" /></label>
       <label>微信号<input disabled={completionFormLocked} value={form.wechat} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'wechat', value: event.target.value })} placeholder="可选" /></label>
       <label className="confirm-row"><input disabled={completionFormLocked} type="checkbox" checked={contactConfirmed} onChange={(event) => dispatchPanel({ type: 'SET_CONTACT_CONFIRMED', value: event.target.checked })} /> 我已确认昵称和联系方式属于当前订单</label>
-      {context && !paidOrderRecognized && <div className="alert warning">请先确认当前订单为已付款有效订单</div>}
-      <button data-action="complete-order" className="primary" disabled={busy || loggingOut || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '一键入OS并完成订单'}</button>
+      <button data-action="complete-order" className="primary" disabled={busy || loggingOut || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '一键入OS并备注订单'}</button>
     </section>
 
     {(completion || sync) && <section className="card result-card">

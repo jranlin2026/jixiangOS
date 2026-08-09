@@ -15,7 +15,7 @@ export type ExistingLeadState = 'ACTIVE' | 'RECYCLED' | 'MISSING';
 export type BrowserLeadIntakeInput = {
   platform: 'DOUYIN';
   shopBindingId: string;
-  pageShopDisplayName: string;
+  pageShopDisplayName?: string;
   platformOrderNo: string;
   contactName: string;
   contactSource: 'CHAT' | 'OFF_PLATFORM';
@@ -23,9 +23,9 @@ export type BrowserLeadIntakeInput = {
   contactWechat?: string;
   platformProductId?: string;
   platformSkuId?: string;
-  platformProductName: string;
-  paymentAmount: number;
-  paymentAt: string;
+  platformProductName?: string;
+  paymentAmount?: number;
+  paymentAt?: string;
 };
 
 export type BrowserLeadSyncRecord = {
@@ -306,22 +306,14 @@ export function createBrowserLeadIntakeService(deps: {
         return failure<BrowserLeadIntakeResult>('手机号或微信至少填写一项', 400);
       }
       const platformProductName = String(input.platformProductName || '').trim();
-      if (!platformProductName) {
-        return failure<BrowserLeadIntakeResult>('平台商品名称不能为空，请刷新飞鸽订单后重试', 400);
-      }
-      if (input.paymentAmount === undefined || input.paymentAmount === null) {
-        return failure<BrowserLeadIntakeResult>('实付金额不能为空，请刷新飞鸽订单后重试', 400);
-      }
-      const paymentCents = browserPaymentAmountInCents(input.paymentAmount);
-      if (paymentCents === null) {
+      const hasPaymentAmount = input.paymentAmount !== undefined && input.paymentAmount !== null;
+      const paymentCents = hasPaymentAmount ? browserPaymentAmountInCents(input.paymentAmount) : null;
+      if (hasPaymentAmount && paymentCents === null) {
         return failure<BrowserLeadIntakeResult>('实付金额必须为非负数且最多两位小数', 400);
       }
       const paymentAt = String(input.paymentAt || '').trim();
-      if (!paymentAt) {
-        return failure<BrowserLeadIntakeResult>('付款时间不能为空，请刷新飞鸽订单后重试', 400);
-      }
-      const paymentAtDate = browserPaymentAtDate(paymentAt);
-      if (!paymentAtDate) {
+      const paymentAtDate = paymentAt ? browserPaymentAtDate(paymentAt) : null;
+      if (paymentAt && !paymentAtDate) {
         return failure<BrowserLeadIntakeResult>('付款时间格式不正确', 400);
       }
       const normalized = {
@@ -334,9 +326,9 @@ export function createBrowserLeadIntakeService(deps: {
         contactWechat: input.contactWechat?.trim() || undefined,
         platformProductId: input.platformProductId?.trim() || undefined,
         platformSkuId: input.platformSkuId?.trim() || undefined,
-        platformProductName,
-        paymentAmount: paymentCents / 100,
-        paymentAt,
+        platformProductName: platformProductName || undefined,
+        paymentAmount: paymentCents !== null ? paymentCents / 100 : undefined,
+        paymentAt: paymentAt || undefined,
       };
       const catalogResolution = await deps.catalog.resolveForIntake({
         platform: normalized.platform,
@@ -366,14 +358,14 @@ export function createBrowserLeadIntakeService(deps: {
         shopDisplayName: binding.displayName,
         platformProductId: normalized.platformProductId,
         platformSkuId: normalized.platformSkuId,
-        sourceProductName: normalized.platformProductName,
+        ...(normalized.platformProductName ? { sourceProductName: normalized.platformProductName } : {}),
         ...(resolution.status === 'MATCHED' ? {
           matchedProductId: resolution.osProductId,
           matchedProductName: resolution.osProductName,
           productMatchMethod: resolution.method,
         } : {}),
-        sourcePaymentAmount: normalized.paymentAmount,
-        sourcePaymentAt: paymentAtDate,
+        ...(normalized.paymentAmount !== undefined ? { sourcePaymentAmount: normalized.paymentAmount } : {}),
+        ...(paymentAtDate ? { sourcePaymentAt: paymentAtDate } : {}),
         operatorId: actor.id,
         operatorName: actor.name,
         contactSource: input.contactSource,

@@ -275,9 +275,25 @@ async function exerciseRealPageWorkflow() {
 
   dispatchClick(findButton('新增商品映射'));
   const mappingDialog = document.querySelector('[role="dialog"]')!;
+  const mappingSelects = mappingDialog.querySelectorAll('[role="combobox"]');
+  assert.equal(mappingSelects.length, 2, '新增映射时应可直接选择所属店铺和OS产品');
+  act(() => { mappingSelects[0].dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
+  let shopListbox: Element | undefined;
+  await waitFor('所属店铺下拉展开', () => {
+    shopListbox = [...document.querySelectorAll('[role="listbox"]')].find((item) => (
+      [...item.querySelectorAll('[role="option"]')].some((option) => option.textContent?.trim() === '一号店铺')
+    ));
+    return Boolean(shopListbox);
+  });
+  assert.deepEqual(
+    [...shopListbox!.querySelectorAll('[role="option"]')].map((option) => option.textContent?.trim()),
+    ['一号店铺', '二号店铺（已停用）'],
+    '所属店铺下拉应列出所有已接入店铺',
+  );
+  dispatchClick([...shopListbox!.querySelectorAll('[role="option"]')].find((option) => option.textContent?.trim() === '一号店铺')!);
   changeValue(findInput('平台商品名称', mappingDialog), '新平台商品');
   changeValue(findInput('平台商品别名', mappingDialog), '别名甲\n别名乙');
-  const productSelect = mappingDialog.querySelector('[role="combobox"]');
+  const productSelect = mappingDialog.querySelectorAll('[role="combobox"]')[1];
   assert.ok(productSelect);
   act(() => { productSelect.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
   let productListbox: Element | undefined;

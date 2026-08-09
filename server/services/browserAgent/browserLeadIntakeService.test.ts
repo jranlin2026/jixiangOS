@@ -358,23 +358,20 @@ assert.equal(mismatch.code, 409);
 assert.equal(mismatch.errorCode, 'SHOP_CONTEXT_MISMATCH');
 assert.equal(createLeadCalls.length, 3, '页面店铺不匹配时不得创建线索');
 
-for (const pageShopDisplayName of [undefined, '   ']) {
-  const missingPageShop = await service.intake({
-    ...shopAInput,
-    pageShopDisplayName,
-    platformOrderNo: `DY-20260808-MISSING-SHOP-${String(pageShopDisplayName)}`,
-  } as any, actor);
-  assert.equal(missingPageShop.code, 409);
-  assert.equal(missingPageShop.errorCode, 'SHOP_CONTEXT_MISMATCH');
-}
-assert.equal(createLeadCalls.length, 3, '页面店铺缺失或歧义时不得预留或创建线索');
+const optionalFactsDuplicate = await service.intake({
+  ...shopAInput,
+  pageShopDisplayName: undefined,
+  platformProductId: undefined,
+  platformProductName: undefined,
+  paymentAmount: undefined,
+  paymentAt: undefined,
+} as any, actor);
+assert.equal(optionalFactsDuplicate.code, 0, '页面店铺、商品、实付和付款时间缺失不应阻断入OS');
+assert.equal(optionalFactsDuplicate.data?.outcome, 'ALREADY_CREATED');
+assert.equal(createLeadCalls.length, 3, '重复订单仍不得创建第二条线索');
 
 for (const [label, invalidFacts, expectedMessage] of [
-  ['缺少商品名', { platformProductName: undefined }, /平台商品名称/],
-  ['空白商品名', { platformProductName: '   ' }, /平台商品名称/],
-  ['缺少实付', { paymentAmount: undefined }, /实付金额/],
   ['无效实付', { paymentAmount: Number.NaN }, /非负数且最多两位小数/],
-  ['缺少付款时间', { paymentAt: undefined }, /付款时间/],
   ['无效付款时间', { paymentAt: 'not-a-time' }, /付款时间/],
 ] as const) {
   const beforeResolve = catalogResolveCalls;

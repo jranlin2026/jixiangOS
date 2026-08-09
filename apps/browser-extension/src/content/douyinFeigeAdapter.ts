@@ -1,4 +1,4 @@
-import { isPaidOrderStatus, mergeOsOrderRemark } from '../domain/orderCompletion';
+import { isIntakeEligibleOrderStatus, mergeOsOrderRemark } from '../domain/orderCompletion';
 import type {
   CompleteOsOrderInput,
   CompleteOsOrderResult,
@@ -495,16 +495,8 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         readyForIntake: Boolean(
           root
           && customerDisplayName.trim()
-          && shopDisplayName.trim()
           && activeOrderCards.length === 1
           && platformOrderNo.trim()
-          && orderStatus.trim()
-          && productName.trim()
-          && !productFacts.ambiguous
-          && !productFacts.productIdConflict
-          && !productFacts.skuIdConflict
-          && paymentAmountFact.status === 'FOUND'
-          && paymentTimeFact.status === 'FOUND'
         ),
         pageUrl,
         customerDisplayName,
@@ -605,12 +597,11 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       }
       const orderCard = activeCards[0];
       const initialOrderNo = orderNoFromElement(orderCard);
-      const initialOrderStatus = orderStatusFromElement(orderCard);
-      if (!initialOrderNo || !initialOrderStatus) {
+      if (!initialOrderNo) {
         return {
           ok: false,
           code: 'CONTEXT_NOT_VERIFIED',
-          message: '当前活动订单卡的订单号或订单状态无法校验，未修改订单',
+          message: '当前活动订单卡的订单号无法校验，未修改订单',
           stage: 'CONTEXT',
         };
       }
@@ -622,23 +613,22 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           stage: 'CONTEXT',
         };
       }
-      if (!isPaidOrderStatus(initialOrderStatus)) {
+      if (!isIntakeEligibleOrderStatus(orderStatusFromElement(orderCard))) {
         return {
           ok: false,
-          code: 'ORDER_STATUS_NOT_PAID',
-          message: '当前活动订单不是已付款有效订单，未修改订单',
+          code: 'ORDER_STATUS_NOT_ELIGIBLE',
+          message: '当前订单状态不支持备注和绿旗操作',
           stage: 'CONTEXT',
         };
       }
-
       const hasSameBoundContext = () => {
         const currentActiveCard = uniqueActiveOrderCard(document);
         return currentActiveCard === orderCard
           && orderCard.isConnected
           && isVisible(orderCard)
           && orderNoFromElement(orderCard) === expectedOrderNo
-          && isPaidOrderStatus(orderStatusFromElement(orderCard))
-          && currentCustomer() === expectedCustomer;
+          && currentCustomer() === expectedCustomer
+          && isIntakeEligibleOrderStatus(orderStatusFromElement(orderCard));
       };
 
       const edit = first(orderCard, selectors.orderRemarkEdit)

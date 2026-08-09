@@ -121,15 +121,15 @@ export type BrowserProductPreviewInput = {
   pageShopDisplayName?: string;
   platformProductId?: string;
   platformSkuId?: string;
-  platformProductName: string;
-  paymentAmount: number;
-  paymentAt: string;
+  platformProductName?: string;
+  paymentAmount?: number;
+  paymentAt?: string;
 };
 
 export type BrowserProductPreview = {
   shop: ReturnType<typeof runtimeShop>;
   productResolution: Exclude<BrowserProductResolution, { status: 'CONFIG_CONFLICT' }>;
-  facts: BrowserRequiredOrderFacts & { paymentAt: string };
+  facts: BrowserRequiredOrderFacts & { paymentAt?: string };
   priceDifference: { paymentAmount: number; osReferencePrice: number; amount: number; differs: boolean } | null;
 };
 
@@ -304,16 +304,15 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       return catalogFailure('店铺绑定不存在或已停用', 409, 'SHOP_BINDING_UNAVAILABLE');
     }
     const pageShopName = normalizePlatformProductName(cleanText(input.pageShopDisplayName));
-    if (!pageShopName) {
-      return catalogFailure('当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别后重试', 409, 'SHOP_CONTEXT_MISMATCH');
-    }
     const acceptedShopNames = [binding.displayName, ...binding.aliases].map(normalizePlatformProductName);
-    if (!acceptedShopNames.includes(pageShopName)) {
+    if (pageShopName && !acceptedShopNames.includes(pageShopName)) {
       return catalogFailure('当前页面店铺与已选店铺绑定不一致', 409, 'SHOP_CONTEXT_MISMATCH');
     }
-    const [products, mappings] = await Promise.all([
-      repository.listProducts(), repository.listMappings(binding.id),
+    const [products, allMappings, shops] = await Promise.all([
+      repository.listProducts(), repository.listMappings(), repository.listShops(),
     ]);
+    const activeShopIds = new Set(shops.filter((shop) => shop.active).map((shop) => shop.id));
+    const mappings = allMappings.filter((mapping) => activeShopIds.has(mapping.shopBindingId));
     const resolution = resolveBrowserProduct({
       shopBindingId: binding.id,
       facts: input.facts,
@@ -349,29 +348,21 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     const shopBindingId = cleanText(input.shopBindingId);
     if (!shopBindingId) return catalogFailure('店铺绑定不能为空', 400, 'INVALID_INPUT');
     const platformProductName = cleanText(input.platformProductName);
-    if (!platformProductName) {
-      return catalogFailure('平台商品名称不能为空，请刷新飞鸽订单后重试', 400, 'INVALID_INPUT');
-    }
-    if (input.paymentAmount === undefined || input.paymentAmount === null) {
-      return catalogFailure('实付金额不能为空，请刷新飞鸽订单后重试', 400, 'INVALID_INPUT');
-    }
-    const paymentCents = browserPaymentAmountInCents(input.paymentAmount);
-    if (paymentCents === null) {
+    const hasPaymentAmount = input.paymentAmount !== undefined && input.paymentAmount !== null;
+    const paymentCents = hasPaymentAmount ? browserPaymentAmountInCents(input.paymentAmount) : null;
+    if (hasPaymentAmount && paymentCents === null) {
       return catalogFailure('实付金额必须为非负数且最多两位小数', 400, 'INVALID_INPUT');
     }
     const paymentAt = cleanText(input.paymentAt);
-    if (!paymentAt) {
-      return catalogFailure('付款时间不能为空，请刷新飞鸽订单后重试', 400, 'INVALID_INPUT');
-    }
-    const paymentAtDate = browserPaymentAtDate(paymentAt);
-    if (!paymentAtDate) {
+    const paymentAtDate = paymentAt ? browserPaymentAtDate(paymentAt) : null;
+    if (paymentAt && !paymentAtDate) {
       return catalogFailure('付款时间格式不正确', 400, 'INVALID_INPUT');
     }
     const facts = {
       ...(cleanText(input.platformProductId) ? { platformProductId: cleanText(input.platformProductId) } : {}),
       ...(cleanText(input.platformSkuId) ? { platformSkuId: cleanText(input.platformSkuId) } : {}),
-      platformProductName,
-      paymentAmount: paymentCents / 100,
+      ...(platformProductName ? { platformProductName } : {}),
+      ...(paymentCents !== null ? { paymentAmount: paymentCents / 100 } : {}),
     };
     const resolved = await resolveForIntake({
       platform: 'DOUYIN',
@@ -395,7 +386,7 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       productResolution: resolved.data.resolution as BrowserProductPreview['productResolution'],
       facts: {
         ...facts,
-        paymentAt: paymentAtDate.toISOString(),
+        ...(paymentAtDate ? { paymentAt: paymentAtDate.toISOString() } : {}),
       },
       priceDifference: resolved.data.priceDifference,
     });

@@ -1,6 +1,6 @@
 import type { FeigePageContext } from '../content/douyinFeigeAdapter';
-import { isPaidOrderStatus } from '../domain/orderCompletion';
 import { normalizePhoneForComparison } from '../../../../src/shared/utils/phoneNumber';
+import { isIntakeEligibleOrderStatus } from '../domain/orderCompletion';
 import type {
   ApiEnvelope,
   BrowserProductPreviewInput,
@@ -10,7 +10,6 @@ import type {
   CompleteOsOrderResult,
   LeadIntakeResponse,
 } from '../shared/contracts';
-import { hasRequiredOrderFacts } from '../shared/contracts';
 
 export type OrderCompletionStage =
   | 'READY'
@@ -111,9 +110,6 @@ function previewMatchesDisplayed(
 
 type ReadyFeigePageContext = FeigePageContext & {
   readyForIntake: true;
-  productName: string;
-  paymentAmount: number;
-  paymentAt: string;
 };
 
 function latestIntakeInput(input: OrderCompletionInput, current: ReadyFeigePageContext) {
@@ -131,14 +127,14 @@ function latestIntakeInput(input: OrderCompletionInput, current: ReadyFeigePageC
   return {
     ...stableInput,
     ...(input.shop ? { shopBindingId: input.shop.id } : {}),
-    pageShopDisplayName: String(current.shopDisplayName || '').trim(),
+    ...(String(current.shopDisplayName || '').trim() ? { pageShopDisplayName: String(current.shopDisplayName).trim() } : {}),
     platformOrderNo: current.platformOrderNo.trim(),
     contactName: current.customerDisplayName.trim(),
     platformProductId: current.platformProductId?.trim() || undefined,
     platformSkuId: current.platformSkuId?.trim() || undefined,
-    platformProductName: current.productName.trim(),
-    paymentAmount: current.paymentAmount,
-    paymentAt: current.paymentAt.trim(),
+    ...(current.productName.trim() ? { platformProductName: current.productName.trim() } : {}),
+    ...(typeof current.paymentAmount === 'number' ? { paymentAmount: current.paymentAmount } : {}),
+    ...(current.paymentAt?.trim() ? { paymentAt: current.paymentAt.trim() } : {}),
   };
 }
 
@@ -285,20 +281,8 @@ export async function runOrderCompletion(
     || current.customerDisplayName.trim() !== input.expectedCustomerDisplayName.trim()) {
     return stopForContext('当前飞鸽客户或订单已切换，请刷新识别并重新确认客户资料');
   }
-  if (!isPaidOrderStatus(current.orderStatus)) {
-    return stopForContext('请先确认当前订单为已付款有效订单');
-  }
-  if (!hasRequiredOrderFacts(current)) {
-    return stopForContext(
-      '当前订单的平台商品名称、实付金额或付款时间未完整唯一识别，请等待订单加载完成后刷新识别',
-      'ORDER_FACTS_UNAVAILABLE',
-    );
-  }
-  if (input.shop && !current.shopDisplayName?.trim()) {
-    return stopForContext(
-      '当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别后重试',
-      'SHOP_CONTEXT_UNAVAILABLE',
-    );
+  if (!isIntakeEligibleOrderStatus(current.orderStatus)) {
+    return stopForContext('当前订单状态不支持入OS，请核对订单后重试');
   }
   if (input.shop && !pageShopMatchesBinding(current.shopDisplayName, input.shop)) {
     return stopForContext(
@@ -315,12 +299,12 @@ export async function runOrderCompletion(
       preview = await deps.preview({
         platform: 'DOUYIN',
         shopBindingId: input.shop.id,
-        pageShopDisplayName: String(current.shopDisplayName || '').trim(),
+        pageShopDisplayName: String(current.shopDisplayName || '').trim() || undefined,
         platformProductId: current.platformProductId?.trim() || undefined,
         platformSkuId: current.platformSkuId?.trim() || undefined,
-        platformProductName: current.productName.trim(),
+        platformProductName: current.productName.trim() || undefined,
         paymentAmount: current.paymentAmount,
-        paymentAt: current.paymentAt.trim(),
+        paymentAt: current.paymentAt?.trim() || undefined,
       });
     } catch (error) {
       if (!isAttemptActive()) return aborted();
@@ -342,7 +326,7 @@ export async function runOrderCompletion(
     emit(deps, { ...initial, stage: 'INTAKING', osStatus: 'IN_PROGRESS' });
     let intake: ApiEnvelope<LeadIntakeResponse>;
     try {
-      intake = await deps.intake(latestIntakeInput(input, current));
+      intake = await deps.intake(latestIntakeInput(input, current as ReadyFeigePageContext));
     } catch (error) {
       if (!isAttemptActive()) return aborted();
       return emit(deps, {

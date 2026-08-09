@@ -59,12 +59,26 @@ assert.deepEqual(resolveBrowserProduct({
   osProductId: 'prod-taojin', osProductName: '淘金AI', osReferencePrice: 299,
 }, '同店铺别名规范化后必须命中映射');
 
-assert.equal(resolveBrowserProduct({
+assert.deepEqual(resolveBrowserProduct({
   shopBindingId: 'shop-2',
   facts: { platformProductName: '淘金AI 学习卡' },
   products,
   mappings: [{ ...taojinMapping, aliases: ['淘金AI 学习卡'] }],
-}).status, 'UNMATCHED', '其他店铺的别名不能泄漏到当前店铺');
+}), {
+  status: 'MATCHED', method: 'COMPANY_ALIAS',
+  osProductId: 'prod-taojin', osProductName: '淘金AI', osReferencePrice: 299,
+}, '当前店铺未配置时，全公司唯一商品别名应自动匹配');
+
+const companyAliasConflict = resolveBrowserProduct({
+  shopBindingId: 'shop-3',
+  facts: { platformProductName: '淘金AI 学习卡' },
+  products,
+  mappings: [
+    { ...taojinMapping, aliases: ['淘金AI 学习卡'] },
+    { ...taojinMapping, id: 'map-company-conflict', shopBindingId: 'shop-2', aliases: ['淘金AI 学习卡'], osProductId: 'prod-other', osProductName: '其他产品' },
+  ],
+});
+assert.equal(companyAliasConflict.status, 'CONFIG_CONFLICT', '跨店铺同名映射指向不同OS产品时必须人工处理');
 
 assert.deepEqual(resolveBrowserProduct({
   facts: { platformProductName: ' ｔＡｏｊｉｎＡＩ ' },

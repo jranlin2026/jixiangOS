@@ -82,12 +82,12 @@ export type BrowserLeadProductResolutionAudit = {
 export type BrowserProductPreviewInput = {
   platform: 'DOUYIN';
   shopBindingId: string;
-  pageShopDisplayName: string;
+  pageShopDisplayName?: string;
   platformProductId?: string;
   platformSkuId?: string;
-  platformProductName: string;
-  paymentAmount: number;
-  paymentAt: string;
+  platformProductName?: string;
+  paymentAmount?: number;
+  paymentAt?: string;
 };
 
 export type BrowserProductPreviewResponse = {
@@ -96,9 +96,9 @@ export type BrowserProductPreviewResponse = {
   facts: {
     platformProductId?: string;
     platformSkuId?: string;
-    platformProductName: string;
-    paymentAmount: number;
-    paymentAt: string;
+    platformProductName?: string;
+    paymentAmount?: number;
+    paymentAt?: string;
   };
   priceDifference: {
     paymentAmount: number;
@@ -108,28 +108,20 @@ export type BrowserProductPreviewResponse = {
   } | null;
 };
 
-export function hasRequiredOrderFacts(
+export function hasRequiredIntakeContext(
   context: FeigePageContext | null | undefined,
-): context is FeigePageContext & {
-  readyForIntake: true;
-  productName: string;
-  paymentAmount: number;
-  paymentAt: string;
-} {
+): context is FeigePageContext & { readyForIntake: true } {
   return Boolean(
     context?.readyForIntake
-    && context.productName.trim()
-    && typeof context.paymentAmount === 'number'
-    && Number.isFinite(context.paymentAmount)
-    && context.paymentAmount >= 0
-    && context.paymentAt?.trim(),
+    && context.customerDisplayName.trim()
+    && context.platformOrderNo.trim(),
   );
 }
 
 export type BrowserLeadIntakeInput = {
   platform: 'DOUYIN';
   shopBindingId: string;
-  pageShopDisplayName: string;
+  pageShopDisplayName?: string;
   platformOrderNo: string;
   contactName: string;
   contactSource: 'CHAT' | 'OFF_PLATFORM';
@@ -137,9 +129,9 @@ export type BrowserLeadIntakeInput = {
   contactWechat?: string;
   platformProductId?: string;
   platformSkuId?: string;
-  platformProductName: string;
-  paymentAmount: number;
-  paymentAt: string;
+  platformProductName?: string;
+  paymentAmount?: number;
+  paymentAt?: string;
 };
 
 export type LeadIntakeResponse = {

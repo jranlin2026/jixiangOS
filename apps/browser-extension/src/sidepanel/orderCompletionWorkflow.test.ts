@@ -334,7 +334,6 @@ assert.deepEqual(
 
 for (const latestShopContext of [
   { label: '预检时店铺已切换', context: { ...currentContext, shopDisplayName: '其他店铺' }, code: 'SHOP_CONTEXT_MISMATCH' },
-  { label: '预检时店铺缺失或歧义', context: { ...currentContext, shopDisplayName: '' }, code: 'SHOP_CONTEXT_UNAVAILABLE' },
 ] as const) {
   let latestIntakeCalls = 0;
   let latestPageCalls = 0;
@@ -365,7 +364,6 @@ for (const latestShopContext of [
 
 for (const retryShopContext of [
   { label: '已有入库结果时权威店铺切换', context: { ...currentContext, shopDisplayName: '其他店铺' }, code: 'SHOP_CONTEXT_MISMATCH' },
-  { label: '已有入库结果时权威店铺缺失', context: { ...currentContext, shopDisplayName: '' }, code: 'SHOP_CONTEXT_UNAVAILABLE' },
 ] as const) {
   let retryShopReportCalls = 0;
   const retryShopResult = await runCompletion({
@@ -796,22 +794,43 @@ assert.equal(changedRetry.stage, 'PLATFORM_FAILED');
 assert.equal(changedRetry.osStatus, 'SUCCEEDED', '权威重读失败不得回退已完成的 OS 入库状态');
 assert.equal(changedRetryReports, 0, '权威重读失败未验证当前页面，已有 syncId 也不得上报平台完成结果');
 
-for (const invalidPaidStatus of ['待付款', '退款中', '已关闭']) {
-  let invalidStatusIntakeCalls = 0;
-  let invalidStatusPageCalls = 0;
-  const invalidStatusResult = await runCompletion({
+{
+  let closedOrderIntakeCalls = 0;
+  let closedOrderPageCalls = 0;
+  const closedContext = {
+    ...currentContext,
+    readyForIntake: true,
+    orderStatus: '已关闭（售后完成）',
+    shopDisplayName: undefined,
+    platformProductId: undefined,
+    platformSkuId: undefined,
+    productName: '',
+    paymentAmount: undefined,
+    paymentAt: undefined,
+    diagnostics: ['未识别页面店铺', '未识别实付金额'],
+  };
+  const optionalFactsPreview = {
+    shop: selectedShop,
+    productResolution: { status: 'UNMATCHED' as const, rawProductName: '' },
+    facts: { platformProductName: '' },
+    priceDifference: null,
+  };
+  const closedOrderResult = await runCompletion({
     expectedOrderNo: currentContext.platformOrderNo,
     expectedCustomerDisplayName: currentContext.customerDisplayName,
     phone: '13826459812',
+    shop: selectedShop,
+    displayedPreview: optionalFactsPreview as any,
     intakeInput: { platform: 'DOUYIN' },
   }, {
-    readContext: async () => ({ ...currentContext, orderStatus: invalidPaidStatus }),
+    readContext: async () => closedContext as any,
+    preview: async () => ({ code: 0, data: optionalFactsPreview as any, message: 'success' }),
     intake: async () => {
-      invalidStatusIntakeCalls += 1;
+      closedOrderIntakeCalls += 1;
       return { code: 0, data: intakeResult, message: 'success' };
     },
     completePage: async () => {
-      invalidStatusPageCalls += 1;
+      closedOrderPageCalls += 1;
       return {
         ok: true,
         remarkText: '',
@@ -821,9 +840,30 @@ for (const invalidPaidStatus of ['待付款', '退款中', '已关闭']) {
     },
     report: async () => ({ code: 0, data: completionResult, message: 'success' }),
   });
-  assert.equal(invalidStatusResult.message, '请先确认当前订单为已付款有效订单');
-  assert.equal(invalidStatusIntakeCalls, 0, `${invalidPaidStatus} 不得入库`);
-  assert.equal(invalidStatusPageCalls, 0, `${invalidPaidStatus} 不得修改页面`);
+  assert.equal(closedOrderResult.stage, 'COMPLETED', '已关闭订单也应完成OS入库和页面备注');
+  assert.equal(closedOrderIntakeCalls, 1, '已关闭订单应调用OS入库');
+  assert.equal(closedOrderPageCalls, 1, '已关闭订单应写入备注和绿旗');
+}
+
+{
+  let unpaidIntakeCalls = 0;
+  const unpaidResult = await runCompletion({
+    expectedOrderNo: currentContext.platformOrderNo,
+    expectedCustomerDisplayName: currentContext.customerDisplayName,
+    phone: '13826459812',
+    intakeInput: { platform: 'DOUYIN' },
+  }, {
+    readContext: async () => ({ ...currentContext, orderStatus: '待付款' }),
+    intake: async () => {
+      unpaidIntakeCalls += 1;
+      return { code: 0, data: intakeResult, message: 'success' };
+    },
+    completePage: async () => { throw new Error('待付款订单不得操作页面'); },
+    report: async () => { throw new Error('待付款订单不得上报完成'); },
+  });
+  assert.equal(unpaidResult.stage, 'READY');
+  assert.match(unpaidResult.message || '', /订单状态不支持/);
+  assert.equal(unpaidIntakeCalls, 0, '待付款订单不得入OS');
 }
 
 let retryIntakeCalls = 0;

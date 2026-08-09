@@ -225,64 +225,30 @@ async function loginAndPrepare(orderNo: string) {
 
 const module = await import('./main');
 await loginAndPrepare('ORDER-AUTHORITATIVE-A');
-const mandatoryFactsPreviewBaseline = previewCalls;
-for (const invalidContext of [
-  {
-    ...baseContext,
-    platformOrderNo: 'ORDER-AUTHORITATIVE-A',
-    shopDisplayName: shop.displayName,
-    readyForIntake: false,
-    productName: '',
-    diagnostics: ['未识别平台商品名称'],
-  },
-  {
-    ...baseContext,
-    platformOrderNo: 'ORDER-AUTHORITATIVE-A',
-    shopDisplayName: shop.displayName,
-    readyForIntake: false,
-    paymentAmount: undefined,
-    diagnostics: ['实付金额存在歧义'],
-  },
-  {
-    ...baseContext,
-    platformOrderNo: 'ORDER-AUTHORITATIVE-A',
-    shopDisplayName: shop.displayName,
-    readyForIntake: false,
-    paymentAt: undefined,
-    diagnostics: ['付款时间格式无效'],
-  },
-]) {
-  pageContext = invalidContext;
-  document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
-  await waitFor('.context-card', (node) => (
-    (node.textContent || '').includes('平台商品名称、实付金额或付款时间未完整唯一识别')
-  ));
-  assert.equal(
-    document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.disabled,
-    true,
-    '必填订单事实缺失、歧义或无效时UI必须禁用入库',
-  );
-  assert.equal(previewCalls, mandatoryFactsPreviewBaseline, '事实不完整时不得请求权威预览');
-}
+const optionalFactsPreviewBaseline = previewCalls;
 pageContext = {
   ...baseContext,
   platformOrderNo: 'ORDER-AUTHORITATIVE-A',
-  shopDisplayName: shop.displayName,
+  shopDisplayName: undefined,
+  productName: '',
+  platformProductId: undefined,
+  paymentAmount: undefined,
+  paymentAt: undefined,
+  diagnostics: ['未识别页面店铺', '未识别平台商品名称', '实付金额存在歧义'],
 };
 document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
-await waitFor('.context-card', (node) => (node.textContent || '').includes('平台商品取消测试商品'));
-await new Promise((resolve) => setTimeout(resolve, 15));
-assert.equal(previewCalls, mandatoryFactsPreviewBaseline + 1, '必填事实加载完成后必须重新权威预览');
+await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', () => previewCalls === optionalFactsPreviewBaseline + 1);
+assert.equal(document.body.textContent?.includes('平台商品名称、实付金额或付款时间未完整唯一识别'), false);
 assert.equal(
   document.querySelector<HTMLInputElement>('.confirm-row input')?.checked,
   false,
-  '订单事实从不完整变为完整后必须由客服重新确认',
+  '订单快照变化后仍必须由客服重新确认',
 );
 document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
 assert.equal(
   document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.disabled,
   false,
-  '必填事实加载完成且预览成功后应恢复入库操作',
+  '昵称、订单号、联系方式和绑定店铺齐全即应允许入OS',
 );
 const changedConversationCallBaseline = [previewCalls, intakeCalls, completePageCalls, reportCalls];
 pageContext = {

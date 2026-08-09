@@ -302,7 +302,7 @@ const BrowserAgentConfigPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
-  const load = async (): Promise<boolean> => {
+  const load = async (preferredShopId?: string): Promise<boolean> => {
     setLoading(true);
     try {
       const [catalogResponse, productResponse] = await Promise.all([
@@ -315,8 +315,8 @@ const BrowserAgentConfigPage: React.FC = () => {
       }
       setCatalog(catalogResponse.data);
       if (productResponse.code === 0) setProducts(productResponse.data);
-      setSelectedShopId((current) => catalogResponse.data!.shops.some((shop) => shop.id === current)
-        ? current
+      setSelectedShopId((current) => catalogResponse.data!.shops.some((shop) => shop.id === (preferredShopId || current))
+        ? (preferredShopId || current)
         : (catalogResponse.data!.shops[0]?.id || ''));
       return true;
     } catch (error) {
@@ -447,7 +447,7 @@ const BrowserAgentConfigPage: React.FC = () => {
         : await browserAgentConfigApi.createMapping(input);
       if (response.code !== 0) return void await alert(response.message, '保存失败');
       setMappingFormOpen(false);
-      if (await load()) void alert('商品映射已保存', '保存成功');
+      if (await load(input.shopBindingId)) void alert('商品映射已保存', '保存成功');
     } catch (error) {
       await showMutationTransportError(error, '保存失败');
     } finally {
@@ -518,7 +518,9 @@ const BrowserAgentConfigPage: React.FC = () => {
     <Dialog open={mappingFormOpen} onClose={() => !submitting && setMappingFormOpen(false)} maxWidth="sm" fullWidth>
       <DialogCloseTitle onClose={() => setMappingFormOpen(false)} closeDisabled={submitting}>{editingMapping ? '编辑商品映射' : '新增商品映射'}</DialogCloseTitle>
       <DialogContent dividers>{mappingDraft ? <Stack spacing={2}>
-        <TextField label="所属店铺" value={selectedShop?.displayName || ''} InputProps={{ readOnly: true }} />
+        <TextField select label="所属店铺" value={mappingDraft.shopBindingId} disabled={Boolean(editingMapping)} onChange={(event) => setMappingDraft((draft) => draft && ({ ...draft, shopBindingId: event.target.value }))} helperText={editingMapping ? '商品映射创建后不能换店；需要换店请新建映射' : '可直接选择要配置的店铺'}>
+          {catalog.shops.map((shop) => <MenuItem key={shop.id} value={shop.id} disabled={!shop.active && shop.id !== mappingDraft.shopBindingId}>{shop.displayName}{shop.active ? '' : '（已停用）'}</MenuItem>)}
+        </TextField>
         <TextField label="平台商品名称" value={mappingDraft.platformProductName} onChange={(event) => setMappingDraft((draft) => draft && ({ ...draft, platformProductName: event.target.value }))} />
         <TextField label="平台商品ID" value={mappingDraft.platformProductId || ''} onChange={(event) => setMappingDraft((draft) => draft && ({ ...draft, platformProductId: event.target.value }))} />
         <TextField label="SKU" value={mappingDraft.platformSkuId || ''} onChange={(event) => setMappingDraft((draft) => draft && ({ ...draft, platformSkuId: event.target.value }))} />

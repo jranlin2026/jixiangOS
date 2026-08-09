@@ -254,6 +254,18 @@ assert.equal(savedMapping.data?.osProductName, '淘金AI');
 assert.deepEqual(savedMapping.data?.aliases, ['淘金ai 多模态', '读书卡']);
 
 products.push({ id: 'prod-other', name: '其他产品', price: 399, isActive: true });
+mappings.push({
+  id: 'map-disabled-shop-alias', shopBindingId: 'shop-off', platformIdentityKey: 'name:停用店专属别名',
+  platformProductId: null, platformSkuId: null, platformProductName: '停用店商品', aliases: ['停用店专属别名'],
+  osProductId: 'prod-other', osProductName: '其他产品', active: true,
+  confirmedById: 'admin-1', confirmedByName: '管理员', confirmedAt: new Date(),
+});
+const disabledShopAlias = await service.resolveForIntake({
+  platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
+  facts: { platformProductName: '停用店专属别名' },
+});
+assert.equal(disabledShopAlias.code, 0);
+assert.equal(disabledShopAlias.data?.resolution.status, 'UNMATCHED', '停用店铺的映射不得参与公司范围匹配');
 const aliasConflict = await service.saveMapping({
   shopBindingId: 'shop-1', platformProductId: 'DY-200', platformProductName: '别的商品',
   aliases: ['ＤＹ－ＡＩ　同款'], osProductId: 'prod-other', active: true,
@@ -425,11 +437,14 @@ const zeroPaymentPreview = await service.previewProductMapping({
 assert.equal(zeroPaymentPreview.code, 0, '精确0元实付是允许的业务事实');
 assert.equal(zeroPaymentPreview.data?.facts.paymentAmount, 0);
 
+const optionalFactsPreview = await service.previewProductMapping({
+  platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: undefined,
+});
+assert.equal(optionalFactsPreview.code, 0, '页面店铺、商品、实付和付款时间缺失不应阻断入OS预检');
+assert.deepEqual(optionalFactsPreview.data?.productResolution, { status: 'UNMATCHED', rawProductName: '' });
+
 for (const [label, invalidFacts, expectedMessage] of [
-  ['缺少商品名', { platformProductName: undefined, paymentAmount: 299, paymentAt: '2026-08-08T19:34:20+08:00' }, /平台商品名称/],
-  ['空白商品名', { platformProductName: '   ', paymentAmount: 299, paymentAt: '2026-08-08T19:34:20+08:00' }, /平台商品名称/],
-  ['缺少实付', { platformProductName: '商品', paymentAmount: undefined, paymentAt: '2026-08-08T19:34:20+08:00' }, /实付金额/],
-  ['缺少付款时间', { platformProductName: '商品', paymentAmount: 299, paymentAt: undefined }, /付款时间/],
+  ['无效实付', { platformProductName: '商品', paymentAmount: Number.NaN }, /实付金额/],
   ['无效付款时间', { platformProductName: '商品', paymentAmount: 299, paymentAt: 'not-a-time' }, /付款时间/],
 ] as const) {
   const beforeWrites = catalogWriteCalls;
@@ -437,7 +452,7 @@ for (const [label, invalidFacts, expectedMessage] of [
     platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
     ...invalidFacts,
   } as any);
-  assert.equal(invalidPreview.code, 400, `${label}时权威预览必须失败关闭`);
+  assert.equal(invalidPreview.code, 400, `${label}时不得静默录入错误快照`);
   assert.equal(invalidPreview.errorCode, 'INVALID_INPUT');
   assert.match(invalidPreview.message, expectedMessage);
   assert.equal(catalogWriteCalls, beforeWrites, `${label}时不得写目录`);
@@ -457,9 +472,7 @@ for (const pageShopDisplayName of [undefined, '   ']) {
     platformProductName: '淘金AI 多模态', paymentAmount: 299,
     paymentAt: '2026-08-08T19:34:20+08:00',
   });
-  assert.equal(previewMissingShopContext.code, 409);
-  assert.equal(previewMissingShopContext.errorCode, 'SHOP_CONTEXT_MISMATCH');
-  assert.match(previewMissingShopContext.message, /页面店铺未识别/);
+  assert.equal(previewMissingShopContext.code, 0, '页面店铺未识别时以客服绑定店铺为准');
 }
 
 const previewUnavailable = await service.previewProductMapping({

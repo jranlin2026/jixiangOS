@@ -26,7 +26,7 @@ const dom = new JSDOM(`<!doctype html><html><body>
 const adapter = createDouyinFeigeAdapter(dom.window.document, dom.window.location.href);
 const context = adapter.readContext();
 assert.equal(context.supported, true);
-assert.equal(context.readyForIntake, false, '飞鸽根节点存在不等于订单事实完整');
+assert.equal(context.readyForIntake, true, '昵称和唯一订单号齐全即可入OS，金额和付款时间不阻断');
 assert.ok(context.diagnostics.includes('未识别实付金额'));
 assert.ok(context.diagnostics.includes('未识别付款时间'));
 assert.equal(context.customerDisplayName, '张先生');
@@ -58,7 +58,7 @@ assert.equal(realOrderFacts.platformProductId, 'DY-TAOJIN-100');
 assert.equal(realOrderFacts.platformSkuId, undefined);
 assert.equal(realOrderFacts.paymentAmount, 299, '实付金额必须保留平台展示事实');
 assert.equal(realOrderFacts.paymentAt, '2026-08-08T19:34:20+08:00');
-assert.equal(realOrderFacts.readyForIntake, true, '唯一商品名、精确实付和有效付款时间齐全才可入库');
+assert.equal(realOrderFacts.readyForIntake, true, '昵称和唯一订单号齐全即可入库');
 
 const ancestorProductIdentityDom = new JSDOM(`<!doctype html><html><body>
   <main data-jx-feige-conversation><span data-jx-customer-name>海盗船长</span></main>
@@ -101,7 +101,7 @@ assert.equal(ambiguousPaymentRows.paymentAmount, undefined, '多个实付语义�
 assert.ok(ambiguousPaymentRows.diagnostics.includes('实付金额存在歧义'));
 assert.equal(ambiguousPaymentRows.paymentAt, undefined, '多个付款时间语义行时必须失败关闭');
 assert.ok(ambiguousPaymentRows.diagnostics.includes('付款时间存在歧义'));
-assert.equal(ambiguousPaymentRows.readyForIntake, false);
+assert.equal(ambiguousPaymentRows.readyForIntake, true, '付款信息歧义只影响可选快照，不阻断入OS');
 
 const conflictingProductIdentity = readOrderFactsFixture(`
   <section data-testid="order-card">
@@ -115,7 +115,7 @@ assert.equal(conflictingProductIdentity.platformProductId, undefined, '商品节
 assert.ok(conflictingProductIdentity.diagnostics.includes('当前订单商品ID存在冲突'));
 assert.equal(conflictingProductIdentity.platformSkuId, undefined, '商品节点与祖先的 SKU ID 冲突时不得选首值');
 assert.ok(conflictingProductIdentity.diagnostics.includes('当前订单SKU ID存在冲突'));
-assert.equal(conflictingProductIdentity.readyForIntake, false, '商品身份诊断冲突时不得继续入库');
+assert.equal(conflictingProductIdentity.readyForIntake, true, '商品身份冲突时不猜测商品，但仍允许客户入OS');
 
 function readOrderFactsFixture(orderMarkup: string, pageMarkup = '') {
   const fixture = new JSDOM(`<!doctype html><html><body>
@@ -158,7 +158,7 @@ assert.equal(invalidPaymentFacts.paymentAmount, undefined, '无人民币符号�
 assert.ok(invalidPaymentFacts.diagnostics.includes('实付金额格式无效'));
 assert.equal(invalidPaymentFacts.paymentAt, undefined, '无效日历日期不得转换为付款时间');
 assert.ok(invalidPaymentFacts.diagnostics.includes('付款时间格式无效'));
-assert.equal(invalidPaymentFacts.readyForIntake, false);
+assert.equal(invalidPaymentFacts.readyForIntake, true);
 
 const missingProductName = readOrderFactsFixture(`
   <section data-testid="order-card">
@@ -167,7 +167,7 @@ const missingProductName = readOrderFactsFixture(`
     <div>付款时间 <strong>2026/08/08 19:34:20</strong></div>
   </section>
 `);
-assert.equal(missingProductName.readyForIntake, false);
+assert.equal(missingProductName.readyForIntake, true, '未识别商品不应阻断客户入OS');
 assert.ok(missingProductName.diagnostics.includes('未识别平台商品名称'));
 assert.equal(missingProductName.paymentAmount, 0, '实付为0是有效平台事实');
 
@@ -1045,11 +1045,11 @@ const calibratedMissingGreenResult = await calibratedPaidOrderFixture.adapter.co
 assert.equal(calibratedMissingGreenResult.ok, false);
 assert.equal(
   calibratedMissingGreenResult.ok ? '' : calibratedMissingGreenResult.code,
-  'CONTEXT_NOT_VERIFIED',
-  '真实卡片未校准订单状态时必须在打开抽屉前失败关闭',
+  'GREEN_FLAG_NOT_FOUND',
+  '订单状态未识别不阻断备注，只在绿旗控件缺失时返回清晰结果',
 );
-assert.equal(calibratedPaidOrderFixture.getEditClicks(), 0, '订单状态未知时不得打开备注抽屉');
-assert.equal(calibratedPaidOrderFixture.input.value, '');
+assert.equal(calibratedPaidOrderFixture.getEditClicks(), 1, '订单状态未知仍应打开备注抽屉');
+assert.equal(calibratedPaidOrderFixture.input.value, '#悠然一刻/13826459812\n#入EC\n#直接退群');
 assert.equal(calibratedPaidOrderFixture.getConfirmClicks(), 0, '绿旗语义缺失时不得点击“确定”');
 
 const calibratedMissingConfirmFixture = createCalibratedPaidOrderFixture({ includeConfirm: false });
@@ -1061,10 +1061,11 @@ const calibratedMissingConfirmResult = await calibratedMissingConfirmFixture.ada
 assert.equal(calibratedMissingConfirmResult.ok, false);
 assert.equal(
   calibratedMissingConfirmResult.ok ? '' : calibratedMissingConfirmResult.code,
-  'CONTEXT_NOT_VERIFIED',
-  '订单状态未知时必须先于提交控件检查停止',
+  'ORDER_REMARK_SAVE_NOT_FOUND',
+  '订单状态未知不阻断备注，但仍必须验证保存控件',
 );
 assert.equal(calibratedMissingConfirmFixture.getConfirmClicks(), 0);
-assert.equal(calibratedMissingConfirmFixture.input.value, '');
+assert.equal(calibratedMissingConfirmFixture.getEditClicks(), 1);
+assert.equal(calibratedMissingConfirmFixture.input.value, '#悠然一刻/13826459812\n#入EC\n#直接退群');
 
 console.log('douyin feige page adapter: ok');
