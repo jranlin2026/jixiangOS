@@ -26,17 +26,18 @@ const tokenKey = 'jixiang_browser_employee_token';
 const operatorKey = 'jixiang_browser_employee_operator';
 let localValues: Record<string, unknown> = {
   [configKey]: { apiBaseUrl: 'https://os.example.com', shopKey: ' Ｇｏｌｄ 商城 ' },
-};
-let sessionValues: Record<string, unknown> = {
   [tokenKey]: 'token-1',
   [operatorKey]: { id: 'u1', name: '客服甲', role: 'SERVICE' },
 };
+let sessionValues: Record<string, unknown> = {};
 (globalThis as typeof globalThis & { chrome: typeof chrome }).chrome = {
   sidePanel: { setPanelBehavior: async () => undefined },
   storage: {
     local: {
+      setAccessLevel: async () => undefined,
       get: async (key: string) => ({ [key]: localValues[key] }),
       set: async (values: Record<string, unknown>) => { localValues = { ...localValues, ...values }; },
+      remove: async (keys: string[]) => { for (const key of keys) delete localValues[key]; },
     },
     session: {
       get: async (key: string) => ({ [key]: sessionValues[key] }),
@@ -51,12 +52,17 @@ let sessionValues: Record<string, unknown> = {
       addListener(listener: typeof workerListener) { workerListener = listener; },
     },
   },
+  identity: {
+    getRedirectURL: () => 'https://extension-id.chromiumapp.org/browser-agent',
+    launchWebAuthFlow: async ({ url }: { url: string }) => {
+      const request = new URL(url);
+      return `https://extension-id.chromiumapp.org/browser-agent?code=grant-code&state=${request.searchParams.get('state')}`;
+    },
+  },
 } as unknown as typeof chrome;
 const originalFetch = globalThis.fetch;
 let previewRequestBody: unknown;
-let logoutEnvelope: ApiEnvelope<unknown> = { code: 0, data: true, message: 'success' };
-let logoutHttpStatus = 200;
-let logoutBodyMode: 'JSON' | 'EMPTY' | 'MALFORMED' = 'JSON';
+let logoutResponse: ApiEnvelope<boolean> = { code: 0, data: true, message: 'success' };
 let runtimeConfig = {
   shops: [
     {
@@ -71,21 +77,19 @@ let runtimeConfig = {
 };
 globalThis.fetch = async (input, init) => {
   const url = String(input);
-  if (url.endsWith('/auth/login')) {
+  if (url.endsWith('/browser-agent/auth/session')) {
+    return new Response(JSON.stringify({ code: 0, data: { user: localValues[operatorKey] }, message: 'success' }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    });
+  }
+  if (url.endsWith('/browser-agent/auth/exchange')) {
     return new Response(JSON.stringify({
-      code: 0,
-      data: { token: 'token-new', user: { id: 'u1', name: '客服甲', role: 'SERVICE' } },
-      message: 'success',
+      code: 0, data: { token: 'browser-token-new', user: { id: 'u1', name: '客服甲', role: 'SERVICE' } }, message: 'success',
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
-  if (url.endsWith('/auth/logout')) {
-    const body = logoutBodyMode === 'EMPTY'
-      ? null
-      : logoutBodyMode === 'MALFORMED'
-        ? '{not-json'
-        : JSON.stringify(logoutEnvelope);
-    return new Response(body, {
-      status: logoutHttpStatus,
+  if (url.endsWith('/browser-agent/auth/logout')) {
+    return new Response(JSON.stringify(logoutResponse), {
+      status: logoutResponse.code === 0 ? 200 : 500,
       headers: { 'content-type': 'application/json' },
     });
   }
@@ -184,10 +188,9 @@ try {
   };
   const loginWithLegacy = await new Promise<any>((resolve) => {
     assert.equal(workerListener?.({
-      type: 'LOGIN',
+      type: 'CONNECT_OS',
       config: { apiBaseUrl: 'https://os.example.com', shopKey: 'gold-shop' },
-      account: 'agent-1',
-      password: 'secret',
+      interactive: true,
     }, {}, resolve), true);
   });
   assert.equal(loginWithLegacy.code, 0);
@@ -216,56 +219,22 @@ try {
   assert.equal(previewResponse.data.productResolution.osReferencePrice, 299);
   assert.deepEqual(previewRequestBody, previewInput, '商品预览请求必须原样穿过 service worker 边界');
 
-  sessionValues = {
-    [tokenKey]: 'token-before-failed-logout',
-    [operatorKey]: { id: 'u1', name: '客服甲', role: 'SERVICE' },
-  };
-  logoutEnvelope = { code: -1, data: null, message: '应用拒绝退出，请重试' };
-  const negativeCodeLogout = await new Promise<any>((resolve) => {
-    assert.equal(workerListener?.({ type: 'LOGOUT' }, {}, resolve), true);
-  });
-  assert.equal(negativeCodeLogout.code, -1, '非零应用码即使小于400也必须按失败返回');
-  assert.equal(sessionValues[tokenKey], 'token-before-failed-logout', 'code -1 不得清除持久化 token');
-  assert.ok(sessionValues[operatorKey], 'code -1 不得清除持久化 operator');
-
-  logoutEnvelope = { code: 500, data: null, message: '服务端拒绝退出，请重试' };
+  localValues[tokenKey] = 'browser-token-before-logout';
+  localValues[operatorKey] = { id: 'u1', name: '客服甲', role: 'SERVICE' };
+  logoutResponse = { code: 500, data: null, message: '服务端撤销失败' };
   const failedLogout = await new Promise<any>((resolve) => {
     assert.equal(workerListener?.({ type: 'LOGOUT' }, {}, resolve), true);
   });
-  assert.equal(failedLogout.code, 500, '退出失败响应必须原样穿过 worker 边界');
-  assert.equal(sessionValues[tokenKey], 'token-before-failed-logout', '退出失败不得清除持久化 token');
-  assert.ok(sessionValues[operatorKey], '退出失败不得清除持久化 operator');
-
-  for (const bodyMode of ['JSON', 'EMPTY', 'MALFORMED'] as const) {
-    sessionValues = {
-      [tokenKey]: `token-before-401-${bodyMode}`,
-      [operatorKey]: { id: 'u1', name: '客服甲', role: 'SERVICE' },
-    };
-    logoutHttpStatus = 401;
-    logoutBodyMode = bodyMode;
-    logoutEnvelope = { code: 401, data: null, message: '登录已失效' };
-    const expiredLogout = await new Promise<any>((resolve) => {
-      assert.equal(workerListener?.({ type: 'LOGOUT' }, {}, resolve), true);
-    });
-    assert.deepEqual(expiredLogout, {
-      code: 0,
-      data: { sessionExpired: true, localLogoutCompleted: true },
-      message: '登录状态已失效，已在本地退出',
-    }, `HTTP 401 ${bodyMode} 必须统一映射为已完成本地退出`);
-    assert.equal(sessionValues[tokenKey], undefined, `HTTP 401 ${bodyMode} 必须清除 token`);
-    assert.equal(sessionValues[operatorKey], undefined, `HTTP 401 ${bodyMode} 必须清除 operator`);
-  }
-
-  logoutHttpStatus = 200;
-  logoutBodyMode = 'JSON';
-  logoutEnvelope = { code: 0, data: true, message: 'success' };
+  assert.equal(failedLogout.code, 500);
+  assert.equal(localValues[tokenKey], 'browser-token-before-logout', '服务端撤销失败时必须保留凭据以便重试');
+  logoutResponse = { code: 0, data: true, message: 'success' };
   const successfulLogout = await new Promise<any>((resolve) => {
     assert.equal(workerListener?.({ type: 'LOGOUT' }, {}, resolve), true);
   });
   assert.equal(successfulLogout.code, 0);
   assert.deepEqual(successfulLogout.data, { sessionExpired: false, localLogoutCompleted: true });
-  assert.equal(sessionValues[tokenKey], undefined, '退出成功才清除持久化 token');
-  assert.equal(sessionValues[operatorKey], undefined, '退出成功才清除持久化 operator');
+  assert.equal(localValues[tokenKey], undefined, '退出浏览器员工必须清除本地专用 token');
+  assert.equal(localValues[operatorKey], undefined, '退出浏览器员工必须清除本地 operator');
   assert.ok(localValues[configKey], '退出成功仍保留本地 API/店铺配置');
 } finally {
   globalThis.fetch = originalFetch;

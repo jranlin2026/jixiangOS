@@ -32,6 +32,7 @@ const Notifications = React.lazy(() => import('./pages/Notifications'));
 const Login = React.lazy(() => import('./pages/Login'));
 const NoPermission = React.lazy(() => import('./pages/NoPermission'));
 const SystemSetup = React.lazy(() => import('./pages/SystemSetup'));
+const BrowserAgentConnect = React.lazy(() => import('./pages/BrowserAgentConnect'));
 
 const PageLoader: React.FC = () => (
   <Box
@@ -118,6 +119,7 @@ const App: React.FC = () => {
           )}
         />
         <Route element={<ProtectedRoute />}>
+          <Route path="/browser-agent/connect" element={<Suspense fallback={<PageLoader />}><BrowserAgentConnect /></Suspense>} />
           <Route path="/" element={<AppLayout />}>
           <Route path={ROUTES.NOTIFICATIONS} element={<Suspense fallback={<PageLoader />}><Notifications /></Suspense>} />
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.HOME} />}>

@@ -20,6 +20,8 @@ const validProductionEnv: NodeJS.ProcessEnv = {
   CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY: 'StrongPermissionMigrationSigningKey-123',
   CUSTOMER_DATA_EXCHANGE_SIGNING_KEY: 'StrongCustomerDataExchangeSigningKey-123',
   BUSINESS_IMPORT_SIGNING_KEY: 'StrongBusinessImportSigningKey-123',
+  JIXIANG_BROWSER_AGENT_AUTH_SECRET: 'StrongBrowserAgentAuthSecret-123456789',
+  JIXIANG_BROWSER_AGENT_REDIRECT_URIS: 'https://ibocdkdaleenngfdmmcnfongfhnolgkd.chromiumapp.org/browser-agent',
   JIXIANG_DEPLOY_BACKUP: 'true',
   JIXIANG_MYSQL_PASSWORD: 'StrongDatabasePassword123!',
   JIXIANG_BACKUP_DIR: '/var/backups/jixiang-os',

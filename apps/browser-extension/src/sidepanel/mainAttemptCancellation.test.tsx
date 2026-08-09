@@ -79,7 +79,8 @@ const chromeMock = {
       if (message.type === 'AUTH_STATE') {
         return { code: 0, data: { config: { apiBaseUrl: 'https://os.example.com/api' } }, message: 'success' };
       }
-      if (message.type === 'LOGIN') {
+      if (message.type === 'CONNECT_OS') {
+        if (!message.interactive) return { code: 401, data: null, message: '请连接已登录的极享OS' };
         return {
           code: 0,
           data: {
@@ -214,9 +215,6 @@ function inputValue(input: HTMLInputElement, value: string) {
 async function loginAndPrepare(orderNo: string) {
   pageContext = { ...baseContext, platformOrderNo: orderNo, shopDisplayName: shop.displayName };
   const loginCard = await waitFor('.login-card');
-  const inputs = [...loginCard.querySelectorAll<HTMLInputElement>('input')];
-  inputValue(inputs[1], 'agent-cancel');
-  inputValue(inputs[2], 'password');
   loginCard.querySelector<HTMLButtonElement>('.primary')?.click();
   await waitFor('.context-card', (node) => (node.textContent || '').includes(orderNo));
   document.querySelector<HTMLInputElement>('.confirm-row input')?.click();

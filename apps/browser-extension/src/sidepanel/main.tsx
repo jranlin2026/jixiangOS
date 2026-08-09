@@ -114,8 +114,6 @@ function App() {
   const [notice, setNotice] = useState('');
   const [auth, setAuth] = useState<AuthState>({});
   const [apiBaseUrl, setApiBaseUrl] = useState('http://127.0.0.1:3001/api');
-  const [account, setAccount] = useState('');
-  const [password, setPassword] = useState('');
   const [panel, dispatchPanel] = useReducer(completionPanelReducer, undefined, createCompletionPanelState);
   const {
     context,
@@ -400,6 +398,7 @@ function App() {
       }
       setAuth(result.data || {});
       setLoading(false);
+      if (result.code !== 0) setError(result.message || '极享OS连接已失效');
       if (result.data?.operator) {
         void Promise.all([refreshContext(), loadRuntimeConfig(), loadScriptLibrary()])
           .catch((caught) => setError(caught instanceof Error ? caught.message : '初始化失败'));
@@ -407,7 +406,7 @@ function App() {
     });
   }, []);
 
-  const login = async () => {
+  async function connect(interactive = true) {
     if (loggingOutRef.current) return;
     setBusy(true); setError(''); setNotice('');
     try {
@@ -420,18 +419,17 @@ function App() {
         ...(!auth.config?.shopBindingId && auth.config?.shopKey ? { shopKey: auth.config.shopKey } : {}),
       };
       const result = await worker<{ operator: AuthenticatedOperator; config: ExtensionConfig }>({
-        type: 'LOGIN', config, account, password,
+        type: 'CONNECT_OS', config, interactive,
       });
       if (result.code !== 0 || !result.data) throw new Error(result.message);
       loggingOutRef.current = false;
       setAuth(result.data);
-      setPassword('');
-      setNotice(`已以${result.data.operator.name}登录`);
+      setNotice(`已连接极享OS：${result.data.operator.name}`);
       await Promise.all([refreshContext(), loadRuntimeConfig(), loadScriptLibrary()]);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '登录失败');
+      if (interactive) setError(caught instanceof Error ? caught.message : '连接失败');
     } finally { setBusy(false); }
-  };
+  }
 
   const logout = async () => {
     if (loggingOutRef.current) return;
@@ -677,10 +675,8 @@ function App() {
     <section className="card login-card">
       <h2>连接极享OS</h2>
       <label>极享OS API地址<input value={apiBaseUrl} onChange={(event) => setApiBaseUrl(event.target.value)} /></label>
-      <label>账号<input value={account} onChange={(event) => setAccount(event.target.value)} /></label>
-      <label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-      <button className="primary" disabled={busy || !account || !password || !apiBaseUrl.trim()} onClick={() => void login()}>{busy ? '正在登录…' : '登录并连接'}</button>
-      <p className="hint">密码仅用于本次登录，不会保存在插件中。</p>
+      <button className="primary" disabled={busy || !apiBaseUrl.trim()} onClick={() => void connect(true)}>{busy ? '正在连接…' : '使用极享OS登录状态连接'}</button>
+      <p className="hint">请先在极享OS网页完成登录。插件只获得浏览器员工专用权限，不会读取或保存您的密码。</p>
     </section>
     {feedbackDialog}
   </main>;

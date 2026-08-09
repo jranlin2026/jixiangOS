@@ -18,7 +18,7 @@ import {
 } from './config/runtime';
 import { getScopedStorageKeys } from './config/storageScopes';
 import { prisma, checkDatabaseConnection } from './db/client';
-import { createRequireAnyPermission, createRequireAuth, bearerToken, type AuthenticatedRequest } from './middleware/auth';
+import { createRequireAnyPermission, createRequireAuth, createRequireBrowserAgentOrOsAuth, createRequireBrowserAgentPermission, bearerToken, type AuthenticatedRequest } from './middleware/auth';
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
 import { createSystemInstallationGate } from './middleware/systemInstallationGate';
 import { createAuthService } from './services/authService';
@@ -423,6 +423,8 @@ const requireOrderImportAccess = createRequireAuth(authService, PERMISSION_KEYS.
 const requireRecoveryImportAccess = createRequireAuth(authService, PERMISSION_KEYS.AFTER_SALES_RECOVERY_IMPORT, 'write');
 const requireLeadListAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_LIST);
 const requireLeadCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CREATE, 'write');
+const requireBrowserEmployeeUse = createRequireBrowserAgentPermission(authService, PERMISSION_KEYS.LEADS_CREATE, 'write');
+const requireBrowserScriptLibraryRead = createRequireBrowserAgentOrOsAuth(authService, PERMISSION_KEYS.LEADS_CREATE, 'write');
 const requireLeadConvertAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CONVERT, 'write');
 const requireLeadEditAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_EDIT, 'write');
 const requireLeadFollowAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_FOLLOW, 'write');
@@ -548,8 +550,11 @@ app.use('/api/browser-agent', createBrowserAgentRouter({
   service: browserLeadIntakeService,
   scriptLibrary: browserScriptLibraryService,
   catalog: browserCatalogService,
+  authService,
   requireAuthenticated,
   requireLeadCreate: requireLeadCreateAccess,
+  requireBrowserEmployeeUse,
+  requireScriptLibraryRead: requireBrowserScriptLibraryRead,
   requireBrowserCatalogRead,
   requireBrowserCatalogWrite,
 }));

@@ -55,6 +55,9 @@ const roles = [
 let createdSessionToken = '';
 let createdSessionExpiresAt: Date | null = null;
 let expiredSessionCleanupCount = 0;
+let createdSessionId = 'session-001';
+let browserGrant: any = null;
+let browserSession: any = null;
 
 const prisma = {
   user: {
@@ -76,13 +79,32 @@ const prisma = {
     create: async ({ data }: any) => {
       createdSessionToken = data.token;
       createdSessionExpiresAt = data.expiresAt;
-      return { ...data, id: 'session-001' };
+      return { ...data, id: createdSessionId };
     },
     findUnique: async ({ where }: any) => (
-      where.token === createdSessionToken ? { token: createdSessionToken, userId: 'user-admin', expiresAt: createdSessionExpiresAt, user: users[0] } : null
+      where.token === createdSessionToken || where.id === createdSessionId
+        ? { id: createdSessionId, token: createdSessionToken, userId: 'user-admin', expiresAt: createdSessionExpiresAt, user: users[0] }
+        : null
     ),
     deleteMany: async ({ where }: any = {}) => {
       if (where?.expiresAt?.lte) expiredSessionCleanupCount += 1;
+      return { count: 1 };
+    },
+  },
+  browserAgentAuthGrant: {
+    create: async ({ data }: any) => { browserGrant = { ...data, usedAt: null }; return browserGrant; },
+    updateMany: async ({ where, data }: any) => {
+      if (!browserGrant || browserGrant.jti !== where.jti || browserGrant.usedAt) return { count: 0 };
+      browserGrant = { ...browserGrant, ...data };
+      return { count: 1 };
+    },
+  },
+  browserAgentSession: {
+    create: async ({ data }: any) => { browserSession = { ...data, revokedAt: null, lastUsedAt: new Date() }; return browserSession; },
+    findUnique: async ({ where }: any) => browserSession?.jti === where.jti ? browserSession : null,
+    updateMany: async ({ where, data }: any) => {
+      if (!browserSession || browserSession.jti !== where.jti || browserSession.revokedAt) return { count: 0 };
+      browserSession = { ...browserSession, ...data };
       return { count: 1 };
     },
   },
@@ -116,6 +138,39 @@ assert.equal(
   true,
   '迁移写入默认超级管理员的显式 CUSTOMER_DELETE 必须穿过真实 authService 链保留',
 );
+
+const verifier = 'browser-agent-verifier-with-enough-entropy';
+const { createHash } = await import('node:crypto');
+const codeChallenge = createHash('sha256').update(verifier).digest('base64url');
+assert.equal((await service.authorizeBrowserAgent({
+  parentToken: createdSessionToken,
+  userId: 'user-admin',
+  deviceId: 'extension-device-1',
+  redirectUri: 'https://malicious-extension.chromiumapp.org/browser-agent',
+  codeChallenge,
+})).code, 400, '授权回调必须精确绑定已发布的插件ID');
+const grant = await service.authorizeBrowserAgent({
+  parentToken: createdSessionToken,
+  userId: 'user-admin',
+  deviceId: 'extension-device-1',
+  redirectUri: 'https://ibocdkdaleenngfdmmcnfongfhnolgkd.chromiumapp.org/browser-agent',
+  codeChallenge,
+});
+assert.equal(grant.code, 0);
+const exchanged = await service.exchangeBrowserAgentGrant({
+  code: grant.data!, verifier, deviceId: 'extension-device-1',
+  redirectUri: 'https://ibocdkdaleenngfdmmcnfongfhnolgkd.chromiumapp.org/browser-agent',
+});
+assert.equal(exchanged.code, 0);
+assert.match(exchanged.data?.token || '', /^browser-agent\./);
+assert.equal((await service.getCurrentUser(exchanged.data?.token)).data, null, '浏览器员工令牌不能访问普通OS接口');
+assert.equal((await service.getBrowserAgentUser(exchanged.data?.token)).data?.id, 'user-admin');
+assert.equal((await service.logoutBrowserAgent(exchanged.data?.token)).code, 0);
+assert.equal((await service.getBrowserAgentUser(exchanged.data?.token)).data, null, '退出插件后专用令牌必须立即被服务端撤销');
+assert.equal((await service.exchangeBrowserAgentGrant({
+  code: grant.data!, verifier, deviceId: 'extension-device-1',
+  redirectUri: 'https://ibocdkdaleenngfdmmcnfongfhnolgkd.chromiumapp.org/browser-agent',
+})).code, 401, '一次性授权码不可重复兑换');
 
 const wrongCurrentPassword = await service.changePassword('user-admin', 'wrong', 'new-password-2026');
 assert.equal(wrongCurrentPassword.code, 400);

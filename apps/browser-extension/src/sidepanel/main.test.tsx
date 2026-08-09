@@ -99,7 +99,8 @@ const chromeMock = {
       if (message.type === 'AUTH_STATE') {
         return { code: 0, data: { config: { apiBaseUrl: 'https://os.example.com/api' } }, message: 'success' };
       }
-      if (message.type === 'LOGIN') {
+      if (message.type === 'CONNECT_OS') {
+        if (!message.interactive) return { code: 401, data: null, message: '请连接已登录的极享OS' };
         return {
           code: 0,
           data: {
@@ -256,11 +257,9 @@ function inputValue(input: HTMLInputElement, value: string) {
 
 await import('./main');
 await waitFor('.login-card');
-assert.equal(document.body.textContent?.includes('店铺标识'), false, '登录只允许输入API地址、账号和密码');
 const loginInputs = [...document.querySelectorAll<HTMLInputElement>('.login-card input')];
-assert.equal(loginInputs.length, 3);
-inputValue(loginInputs[1], 'agent-1');
-inputValue(loginInputs[2], 'password');
+assert.equal(loginInputs.length, 1);
+assert.equal([...document.querySelectorAll('.login-card label')].some((label) => /账号|密码/.test(label.textContent || '')), false, '插件不得再次索要极享OS账号密码');
 document.querySelector<HTMLButtonElement>('.login-card .primary')?.click();
 
 const shopSelect = await waitFor<HTMLSelectElement>('select[aria-label="绑定店铺"]');

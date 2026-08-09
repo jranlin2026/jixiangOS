@@ -9,25 +9,28 @@ import type {
   WorkerCommand,
 } from '../shared/contracts';
 import { normalizedApiBaseUrl } from '../shared/apiBaseUrl';
+import { browserAgentConnectUrl } from '../shared/osSettingsUrl';
 
 const CONFIG_KEY = 'jixiang_browser_employee_config';
 const TOKEN_KEY = 'jixiang_browser_employee_token';
 const OPERATOR_KEY = 'jixiang_browser_employee_operator';
+const DEVICE_KEY = 'jixiang_browser_employee_device_id';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
+chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => undefined);
 
 async function stored<T>(area: chrome.storage.StorageArea, key: string): Promise<T | undefined> {
   return (await area.get(key))[key] as T | undefined;
 }
 
 async function clearSessionAuth() {
-  await chrome.storage.session.remove([TOKEN_KEY, OPERATOR_KEY]);
+  await chrome.storage.local.remove([TOKEN_KEY, OPERATOR_KEY]);
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T>> {
   const config = await stored<ExtensionConfig>(chrome.storage.local, CONFIG_KEY);
   if (!config?.apiBaseUrl) return { code: 400, data: null, message: '请先配置极享OS地址' };
-  const token = await stored<string>(chrome.storage.session, TOKEN_KEY);
+  const token = await stored<string>(chrome.storage.local, TOKEN_KEY);
   const headers = new Headers(init.headers);
   if (init.body) headers.set('content-type', 'application/json');
   if (token) headers.set('authorization', `Bearer ${token}`);
@@ -44,6 +47,27 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnve
       };
     }
     return payload || { code: response.status, data: null, message: `极享OS返回了HTTP ${response.status}` };
+  } catch (error) {
+    return { code: 503, data: null, message: error instanceof Error ? error.message : '无法连接极享OS' };
+  }
+}
+
+function randomBase64Url(bytes = 32) {
+  const value = crypto.getRandomValues(new Uint8Array(bytes));
+  return btoa(String.fromCharCode(...value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function sha256Base64Url(value: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function exchangeBrowserAgentCode(config: ExtensionConfig, input: Record<string, string>) {
+  try {
+    const response = await fetch(`${normalizedApiBaseUrl(config.apiBaseUrl)}/browser-agent/auth/exchange`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
+    });
+    return await response.json() as ApiEnvelope<{ token: string; user: AuthenticatedOperator }>;
   } catch (error) {
     return { code: 503, data: null, message: error instanceof Error ? error.message : '无法连接极享OS' };
   }
@@ -77,9 +101,16 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
     if (message.type === 'AUTH_STATE') {
       const [config, operator, token] = await Promise.all([
         stored<ExtensionConfig>(chrome.storage.local, CONFIG_KEY),
-        stored<AuthenticatedOperator>(chrome.storage.session, OPERATOR_KEY),
-        stored<string>(chrome.storage.session, TOKEN_KEY),
+        stored<AuthenticatedOperator>(chrome.storage.local, OPERATOR_KEY),
+        stored<string>(chrome.storage.local, TOKEN_KEY),
       ]);
+      if (config && token && operator) {
+        const result = await request<{ user: AuthenticatedOperator }>('/browser-agent/auth/session');
+        if (result.code !== 0) {
+          sendResponse({ ...result, data: { config } });
+          return;
+        }
+      }
       sendResponse({ code: 0, data: { config, operator: token ? operator : undefined }, message: 'success' });
       return;
     }
@@ -89,7 +120,7 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
       sendResponse({ code: 0, data: config, message: 'success' });
       return;
     }
-    if (message.type === 'LOGIN') {
+    if (message.type === 'CONNECT_OS') {
       const config: ExtensionConfig = {
         ...storedConfig(message.config.apiBaseUrl, message.config.shopBindingId),
         ...(!message.config.shopBindingId && message.config.shopKey?.trim()
@@ -97,11 +128,45 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
           : {}),
       };
       await chrome.storage.local.set({ [CONFIG_KEY]: config });
-      const result = await request<{ token: string; user: AuthenticatedOperator }>('/auth/login', {
-        method: 'POST', body: JSON.stringify({ account: message.account, password: message.password, remember: false }),
+      const deviceId = await stored<string>(chrome.storage.local, DEVICE_KEY) || crypto.randomUUID();
+      await chrome.storage.local.set({ [DEVICE_KEY]: deviceId });
+      const state = randomBase64Url(24);
+      const verifier = randomBase64Url(48);
+      const redirectUri = chrome.identity.getRedirectURL('browser-agent');
+      let redirected: string | undefined;
+      try {
+        redirected = await chrome.identity.launchWebAuthFlow({
+          url: browserAgentConnectUrl(config.apiBaseUrl, {
+            state,
+            code_challenge: await sha256Base64Url(verifier),
+            redirect_uri: redirectUri,
+            device_id: deviceId,
+          }),
+          interactive: message.interactive,
+        });
+      } catch (error) {
+        sendResponse({
+          code: 401,
+          data: null,
+          message: message.interactive && error instanceof Error ? error.message : '请连接已登录的极享OS',
+          errorCode: 'BROWSER_AGENT_OS_LOGIN_REQUIRED',
+        });
+        return;
+      }
+      if (!redirected) {
+        sendResponse({ code: 401, data: null, message: '未收到极享OS授权结果', errorCode: 'BROWSER_AGENT_OS_LOGIN_REQUIRED' });
+        return;
+      }
+      const resultUrl = new URL(redirected);
+      if (resultUrl.searchParams.get('state') !== state || !resultUrl.searchParams.get('code')) {
+        sendResponse({ code: 401, data: null, message: '极享OS授权校验失败，请重试' });
+        return;
+      }
+      const result = await exchangeBrowserAgentCode(config, {
+        code: resultUrl.searchParams.get('code')!, verifier, redirectUri, deviceId,
       });
       if (result.code === 0 && result.data) {
-        await chrome.storage.session.set({ [TOKEN_KEY]: result.data.token, [OPERATOR_KEY]: result.data.user });
+        await chrome.storage.local.set({ [TOKEN_KEY]: result.data.token, [OPERATOR_KEY]: result.data.user });
         sendResponse({ code: 0, data: { operator: result.data.user, config }, message: 'success' });
         return;
       }
@@ -109,24 +174,18 @@ chrome.runtime.onMessage.addListener((message: WorkerCommand, _sender, sendRespo
       return;
     }
     if (message.type === 'LOGOUT') {
-      const result = await request<boolean>('/auth/logout', { method: 'POST' });
-      if (result.authOutcome === 'SESSION_EXPIRED_LOCAL_LOGOUT') {
-        sendResponse({
-          code: 0,
-          data: { sessionExpired: true, localLogoutCompleted: true } satisfies LogoutResult,
-          message: '登录状态已失效，已在本地退出',
-        });
-        return;
-      }
-      if (result.code !== 0) {
-        sendResponse(result);
+      const result = await request<boolean>('/browser-agent/auth/logout', { method: 'POST' });
+      if (result.code !== 0 && result.authOutcome !== 'SESSION_EXPIRED_LOCAL_LOGOUT') {
+        sendResponse({ ...result, message: result.message || '浏览器员工会话撤销失败，请重试' });
         return;
       }
       await clearSessionAuth();
       sendResponse({
         code: 0,
-        data: { sessionExpired: false, localLogoutCompleted: true } satisfies LogoutResult,
-        message: result.message,
+        data: { sessionExpired: result.authOutcome === 'SESSION_EXPIRED_LOCAL_LOGOUT', localLogoutCompleted: true } satisfies LogoutResult,
+        message: result.authOutcome === 'SESSION_EXPIRED_LOCAL_LOGOUT'
+          ? '登录状态已失效，已完成本地退出'
+          : '已退出浏览器员工，极享OS登录不受影响',
       });
       return;
     }

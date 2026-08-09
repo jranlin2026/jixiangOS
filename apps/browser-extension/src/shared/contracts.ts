@@ -197,7 +197,7 @@ export type PageCommandResult =
 
 export type WorkerCommand =
   | { type: 'AUTH_STATE' }
-  | { type: 'LOGIN'; config: ExtensionConfig; account: string; password: string }
+  | { type: 'CONNECT_OS'; config: ExtensionConfig; interactive: boolean }
   | { type: 'LOGOUT' }
   | { type: 'GET_RUNTIME_CONFIG' }
   | { type: 'PREVIEW_PRODUCT_MAPPING'; input: BrowserProductPreviewInput }

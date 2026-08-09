@@ -176,8 +176,15 @@ const app = express();
 app.use(express.json());
 app.use('/api/browser-agent', createBrowserAgentRouter({
   service, scriptLibrary, catalog,
+  authService: {
+    authorizeBrowserAgent: async () => ({ code: 0, data: 'grant', message: 'success' }),
+    exchangeBrowserAgentGrant: async () => ({ code: 0, data: { token: 'browser-token', user: { id: 'user-1', name: '客服小李' } }, message: 'success' }),
+    logoutBrowserAgent: async () => ({ code: 0, data: true, message: 'success' }),
+  } as any,
   requireAuthenticated: authenticate,
   requireLeadCreate,
+  requireBrowserEmployeeUse: requireLeadCreate,
+  requireScriptLibraryRead: authenticate,
   requireBrowserCatalogRead,
   requireBrowserCatalogWrite,
 }));
@@ -251,7 +258,6 @@ try {
     headers: {
       'content-type': 'application/json',
       'x-test-no-product-read': '1',
-      'x-test-no-lead-create': '1',
     },
     body: JSON.stringify({
       platform: 'DOUYIN', shopBindingId: 'shop-1', pageShopDisplayName: '极享智能体',
@@ -259,7 +265,7 @@ try {
       paymentAmount: 349, paymentAt: '2026-08-08T19:34:20+08:00',
     }),
   });
-  assert.equal(preview.status, 200, '商品预览只需已认证，不应要求线索创建或产品设置权限');
+  assert.equal(preview.status, 200, '有线索创建权限的浏览器员工无需产品设置权限即可预览商品');
   const previewPayload = await preview.json();
   assert.deepEqual(previewPayload, {
     code: 0,
