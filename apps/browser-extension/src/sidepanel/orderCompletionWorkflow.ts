@@ -169,14 +169,20 @@ function duplicateContactMismatch(
   return `极享OS已有资料与本次提交不一致（抖音昵称或用于订单备注的${contactLabel}不一致），请先在极享OS核对并统一资料后重试；未操作飞鸽订单`;
 }
 
-function failedPageStatuses(stage: Extract<CompleteOsOrderResult, { ok: false }>['stage']): Pick<
+function failedPageStatuses(result: Extract<CompleteOsOrderResult, { ok: false }>): Pick<
   ReportInput,
   'orderRemarkStatus' | 'greenFlagStatus'
 > {
-  if (stage === 'GREEN_FLAG') {
+  if (result.remarkStatus || result.greenFlagStatus) {
+    return {
+      orderRemarkStatus: result.remarkStatus || 'FAILED',
+      greenFlagStatus: result.greenFlagStatus || 'FAILED',
+    };
+  }
+  if (result.stage === 'GREEN_FLAG') {
     return { orderRemarkStatus: 'FAILED', greenFlagStatus: 'FAILED' };
   }
-  if (stage === 'SAVE') {
+  if (result.stage === 'SAVE') {
     return { orderRemarkStatus: 'FAILED', greenFlagStatus: 'FAILED' };
   }
   return { orderRemarkStatus: 'FAILED', greenFlagStatus: 'NOT_ATTEMPTED' };
@@ -398,7 +404,7 @@ export async function runOrderCompletion(
     });
   } catch (error) {
     if (!isAttemptActive()) return aborted();
-    const message = errorMessage(error, '订单备注和绿色旗帜处理失败');
+    const message = errorMessage(error, '订单备注和红色旗帜处理失败');
     const report = await guardedReport({
       syncId: intakeResult.syncId,
       orderRemarkStatus: 'FAILED',
@@ -417,7 +423,7 @@ export async function runOrderCompletion(
   }
   if (!isAttemptActive()) return aborted();
   if (!pageResult.ok) {
-    const failedStatuses = failedPageStatuses(pageResult.stage);
+    const failedStatuses = failedPageStatuses(pageResult);
     const report = await guardedReport({
       syncId: intakeResult.syncId,
       ...failedStatuses,

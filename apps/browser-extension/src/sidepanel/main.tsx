@@ -681,7 +681,7 @@ function App() {
       }
       if (result.stage === 'COMPLETED') {
         const completedIntake = result.intakeResult;
-        setNotice(`线索编号：${completedIntake?.lead.id || '未知'}；分配销售：${completedIntake?.lead.assignedTo || '暂未分配'}；订单备注、绿色旗帜均已验证`);
+        setNotice(`线索编号：${completedIntake?.lead.id || '未知'}；分配销售：${completedIntake?.lead.assignedTo || '暂未分配'}；订单备注、红色旗帜均已验证`);
       } else if (result.message) setError(result.message);
       if (activeAttempt.current === attemptToken) activeAttempt.current = null;
     } catch (caught) {
@@ -794,7 +794,7 @@ function App() {
         {([
           ['极享OS入库', completion?.osStatus || (sync ? 'SUCCEEDED' : 'NOT_ATTEMPTED')],
           ['订单备注', completion?.orderRemarkStatus || sync?.orderRemarkStatus || 'NOT_ATTEMPTED'],
-          ['绿色旗帜', completion?.greenFlagStatus || sync?.greenFlagStatus || 'NOT_ATTEMPTED'],
+          ['红色旗帜', completion?.greenFlagStatus || sync?.greenFlagStatus || 'NOT_ATTEMPTED'],
         ] as const).map(([label, status]) => {
           const presentation = completionStatus(status);
           return <div key={label}><span>{label}</span><strong className={`status ${presentation.className}`}>{presentation.label}</strong></div>;
@@ -803,7 +803,7 @@ function App() {
       {remarkText && <pre className="remark-preview">{remarkText}</pre>}
       {completion?.stage === 'PLATFORM_FAILED' && sync && <div className="result-actions">
         <button className="secondary" onClick={() => void navigator.clipboard.writeText(remarkText)}>复制备注</button>
-        <button className="secondary" disabled={busy || loggingOut || !canIntake} onClick={() => void completeOrder()}>{busy ? '正在重试…' : '重试订单备注和绿旗'}</button>
+        <button className="secondary" disabled={busy || loggingOut || !canIntake} onClick={() => void completeOrder()}>{busy ? '正在重试…' : '重试订单备注和红旗'}</button>
       </div>}
     </section>}
   </main>;

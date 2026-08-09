@@ -387,7 +387,7 @@ completeButton.click();
 const successDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (node.textContent || '').includes('操作成功'));
 assert.match(successDialog.textContent || '', /线索编号：lead-render-1/);
 assert.match(successDialog.textContent || '', /分配销售：销售小王/);
-assert.match(successDialog.textContent || '', /订单备注、绿色旗帜均已验证/);
+assert.match(successDialog.textContent || '', /订单备注、红色旗帜均已验证/);
 assert.match(document.body.textContent || '', /OS产品未匹配（不影响入OS）/);
 assert.match(document.body.textContent || '', /商品未匹配OS标准产品，本次仍可入库/);
 assert.equal(intakeInputs.length, 3);

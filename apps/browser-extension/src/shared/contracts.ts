@@ -161,7 +161,15 @@ export type CompleteOsOrderInput = {
 
 export type CompleteOsOrderResult =
   | { ok: true; remarkText: string; remarkStatus: 'SUCCEEDED'; greenFlagStatus: 'SUCCEEDED' }
-  | { ok: false; code: string; message: string; stage: 'CONTEXT' | 'REMARK' | 'GREEN_FLAG' | 'SAVE'; remarkText?: string };
+  | {
+      ok: false;
+      code: string;
+      message: string;
+      stage: 'CONTEXT' | 'REMARK' | 'GREEN_FLAG' | 'SAVE';
+      remarkText?: string;
+      remarkStatus?: 'SUCCEEDED' | 'FAILED';
+      greenFlagStatus?: 'SUCCEEDED' | 'FAILED';
+    };
 
 export type PageCommand =
   | { type: 'READ_FEIGE_CONTEXT' }

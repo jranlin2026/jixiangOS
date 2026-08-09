@@ -311,7 +311,7 @@ function createUnsafeOrderBindingFixture(cards: string, staleDocumentMarkup = ''
     ${cards}
     <div role="dialog" aria-label="添加备注" hidden>
       <div>订单标记</div>
-      <button aria-label="绿色旗帜" data-flag-color="green"></button>
+      <button aria-label="红色旗帜" data-flag-color="red"></button>
       <textarea data-testid="order-remark-input"></textarea>
       <button data-testid="order-remark-save">保存</button>
     </div>
@@ -330,7 +330,7 @@ function createUnsafeOrderBindingFixture(cards: string, staleDocumentMarkup = ''
       dialog.hidden = false;
     });
   });
-  document.querySelector('[data-flag-color="green"]')?.addEventListener('click', () => { greenClicks += 1; });
+  document.querySelector('[data-flag-color="red"]')?.addEventListener('click', () => { greenClicks += 1; });
   document.querySelector('[data-testid="order-remark-save"]')?.addEventListener('click', () => { saveClicks += 1; });
   return {
     adapter: createDouyinFeigeAdapter(document, fixture.window.location.href),
@@ -440,8 +440,9 @@ const completionDom = new JSDOM(`<!doctype html><html><body>
   </section>
   <div role="dialog" aria-label="添加备注" hidden>
     <div>订单标记</div>
-    <button aria-label="绿色旗帜" data-flag-color="green"></button>
+    <button aria-label="红色旗帜" data-flag-color="red"></button>
     <textarea data-testid="order-remark-input"></textarea>
+    <label><input data-testid="remark-signature" type="checkbox" checked />自动添加备注人和时间到末尾</label>
     <button data-testid="order-remark-save">保存</button>
   </div>
 </body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
@@ -450,19 +451,20 @@ const completionDialog = completionDocument.querySelector('[role="dialog"]') as 
 const completionSummary = completionDocument.querySelector('[data-testid="order-remark-summary"]') as HTMLElement;
 const completionInput = completionDocument.querySelector('[data-testid="order-remark-input"]') as HTMLTextAreaElement;
 const completionFlag = completionDocument.querySelector('[data-testid="current-order-flag"]') as HTMLElement;
+const completionSignature = completionDocument.querySelector('[data-testid="remark-signature"]') as HTMLInputElement;
 let selectedFlag = '';
 let completionSaveClicks = 0;
 completionDocument.querySelector('[data-testid="edit-order-remark"]')?.addEventListener('click', () => {
   completionDialog.hidden = false;
   completionInput.value = completionSummary.textContent || '';
 });
-completionDocument.querySelector('[data-flag-color="green"]')?.addEventListener('click', () => {
-  selectedFlag = 'green';
+completionDocument.querySelector('[data-flag-color="red"]')?.addEventListener('click', () => {
+  selectedFlag = 'red';
 });
 completionDocument.querySelector('[data-testid="order-remark-save"]')?.addEventListener('click', () => {
   completionSaveClicks += 1;
   completionSummary.textContent = completionInput.value;
-  completionFlag.dataset.currentFlag = 'green';
+  completionFlag.dataset.currentFlag = 'red';
   completionDialog.hidden = true;
 });
 
@@ -478,7 +480,8 @@ assert.deepEqual(completionResult, {
   remarkStatus: 'SUCCEEDED',
   greenFlagStatus: 'SUCCEEDED',
 });
-assert.equal(selectedFlag, 'green');
+assert.equal(selectedFlag, 'red');
+assert.equal(completionSignature.checked, false, '插件保存前必须取消飞鸽自动追加备注人和时间');
 
 const repeatedCompletionResult = await completionAdapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
@@ -512,7 +515,7 @@ function createIncompleteCompletionFixture(options: { green: boolean; save: bool
     </section>
     <div role="dialog" aria-label="添加备注" hidden>
       <div>订单标记</div>
-      ${options.green ? '<button aria-label="绿色旗帜" data-flag-color="green"></button>' : '<button aria-label="红色旗帜" data-flag-color="red"></button>'}
+      ${options.green ? '<button aria-label="红色旗帜" data-flag-color="red"></button>' : '<button aria-label="橙色旗帜" data-flag-color="orange"></button>'}
       <textarea data-testid="order-remark-input"></textarea>
       ${options.save ? '<button data-testid="order-remark-save">保存</button>' : '<button>取消</button>'}
     </div>
@@ -527,7 +530,7 @@ function createIncompleteCompletionFixture(options: { green: boolean; save: bool
     dialog.hidden = false;
     input.value = summary.textContent || '';
   });
-  fixtureDocument.querySelector('[data-flag-color="green"]')?.addEventListener('click', () => { greenClicks += 1; });
+  fixtureDocument.querySelector('[data-flag-color="red"]')?.addEventListener('click', () => { greenClicks += 1; });
   fixtureDocument.querySelector('[data-testid="order-remark-save"]')?.addEventListener('click', () => { saveClicks += 1; });
   return {
     adapter: createDouyinFeigeAdapter(fixtureDocument, fixture.window.location.href),
@@ -546,8 +549,8 @@ const missingGreenResult = await missingGreenFixture.adapter.completeOsOrder({
 });
 assert.equal(missingGreenResult.ok, false);
 assert.equal(missingGreenResult.ok ? '' : missingGreenResult.code, 'GREEN_FLAG_NOT_FOUND');
-assert.equal(missingGreenFixture.getSaveClicks(), 0, '缺少语义绿旗时不得点击保存');
-assert.equal(missingGreenFixture.input.value, '#入EC\n#销售：小王', '缺少语义绿旗时不得改写备注');
+assert.equal(missingGreenFixture.getSaveClicks(), 0, '缺少语义红旗时不得点击保存');
+assert.equal(missingGreenFixture.input.value, '#入EC\n#销售：小王', '缺少语义红旗时不得改写备注');
 assert.equal(missingGreenFixture.dialog.hidden, false, '校验失败后应保持弹窗打开');
 
 const missingSaveFixture = createIncompleteCompletionFixture({ green: true, save: false });
@@ -590,7 +593,7 @@ function createGuardBoundaryFixture(options: {
     ${options.beforeRemarkDialog ?? ''}
     <div role="dialog" data-test-remark-dialog ${options.remarkDialogAriaLabel === null ? '' : `aria-label="${options.remarkDialogAriaLabel ?? '添加备注'}"`} hidden>
       <div>订单标记</div>
-      ${options.greenMarkup ?? '<button data-test-green-control aria-label="绿色旗帜" data-flag-color="green"></button>'}
+      ${options.greenMarkup ?? '<button data-test-green-control aria-label="红色旗帜" data-flag-color="red"></button>'}
       <textarea data-testid="order-remark-input"></textarea>
       <button data-testid="order-remark-save">保存</button>
     </div>
@@ -618,7 +621,7 @@ function createGuardBoundaryFixture(options: {
   fixtureDocument.querySelector('[data-testid="order-remark-save"]')?.addEventListener('click', () => {
     saveClicks += 1;
     summary.textContent = options.savedRemark?.(input.value) ?? input.value;
-    currentFlag.dataset.currentFlag = options.savedCurrentFlag ?? 'green';
+    currentFlag.dataset.currentFlag = options.savedCurrentFlag ?? 'red';
     if (options.removeEditorAfterSave) input.remove();
     if (!options.keepDialogVisibleAfterSave) dialog.hidden = true;
     options.onSaveClick?.(fixtureDocument);
@@ -644,7 +647,7 @@ const inputContextSwitchResult = await inputContextSwitchFixture.adapter.complet
 });
 assert.equal(inputContextSwitchResult.ok, false);
 assert.equal(inputContextSwitchResult.ok ? '' : inputContextSwitchResult.code, 'CONTEXT_CHANGED');
-assert.equal(inputContextSwitchFixture.getGreenClicks(), 0, '备注写入期间上下文切换后不得点击绿旗');
+assert.equal(inputContextSwitchFixture.getGreenClicks(), 0, '备注写入期间上下文切换后不得点击红旗');
 assert.equal(inputContextSwitchFixture.getSaveClicks(), 0, '备注写入期间上下文切换后不得保存');
 
 const changeContextSwitchFixture = createGuardBoundaryFixture({
@@ -660,7 +663,7 @@ const changeContextSwitchResult = await changeContextSwitchFixture.adapter.compl
 });
 assert.equal(changeContextSwitchResult.ok, false);
 assert.equal(changeContextSwitchResult.ok ? '' : changeContextSwitchResult.code, 'CONTEXT_CHANGED');
-assert.equal(changeContextSwitchFixture.getGreenClicks(), 0, '`change` 事件切换订单后不得点击绿旗');
+assert.equal(changeContextSwitchFixture.getGreenClicks(), 0, '`change` 事件切换订单后不得点击红旗');
 assert.equal(changeContextSwitchFixture.getSaveClicks(), 0, '`change` 事件切换订单后不得保存');
 
 const replacedCardFixture = createGuardBoundaryFixture({
@@ -675,7 +678,7 @@ const replacedCardResult = await replacedCardFixture.adapter.completeOsOrder({
   remarkLines: backendRemarkLines,
 });
 assert.equal(replacedCardResult.ok, false, '内容相同的新卡片也不得替代本次操作已绑定的 DOM 卡片');
-assert.equal(replacedCardFixture.getGreenClicks(), 0, '已绑定卡片被替换后不得点击绿旗');
+assert.equal(replacedCardFixture.getGreenClicks(), 0, '已绑定卡片被替换后不得点击红旗');
 assert.equal(replacedCardFixture.getSaveClicks(), 0, '已绑定卡片被替换后不得保存');
 
 const greenContextSwitchFixture = createGuardBoundaryFixture({
@@ -691,8 +694,8 @@ const greenContextSwitchResult = await greenContextSwitchFixture.adapter.complet
 });
 assert.equal(greenContextSwitchResult.ok, false);
 assert.equal(greenContextSwitchResult.ok ? '' : greenContextSwitchResult.code, 'CONTEXT_CHANGED');
-assert.equal(greenContextSwitchFixture.getGreenClicks(), 1, '上下文是在绿旗点击事件中切换');
-assert.equal(greenContextSwitchFixture.getSaveClicks(), 0, '绿旗点击期间上下文切换后不得保存');
+assert.equal(greenContextSwitchFixture.getGreenClicks(), 1, '上下文是在红旗点击事件中切换');
+assert.equal(greenContextSwitchFixture.getSaveClicks(), 0, '红旗点击期间上下文切换后不得保存');
 
 const saveContextSwitchFixture = createGuardBoundaryFixture({
   onSaveClick(document) {
@@ -738,71 +741,89 @@ const droppedHistoryResult = await droppedHistoryFixture.adapter.completeOsOrder
 assert.equal(droppedHistoryResult.ok, false, '平台丢失历史备注行时不得报告成功');
 assert.equal(droppedHistoryResult.ok ? '' : droppedHistoryResult.code, 'ORDER_COMPLETION_NOT_VERIFIED');
 
+const appendedSignatureFixture = createGuardBoundaryFixture({
+  savedRemark(remarkText) {
+    return `${remarkText}【林恩光 08-09 13:26】`;
+  },
+});
+const appendedSignatureResult = await appendedSignatureFixture.adapter.completeOsOrder({
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: backendRemarkLines,
+});
+assert.equal(appendedSignatureResult.ok, false, '飞鸽本次新追加备注人和时间时不得报告成功');
+if (!appendedSignatureResult.ok) {
+  assert.equal(appendedSignatureResult.code, 'ORDER_COMPLETION_NOT_VERIFIED');
+  assert.match(appendedSignatureResult.message, /自动追加了备注人和时间/);
+  assert.equal(appendedSignatureResult.remarkStatus, 'FAILED');
+  assert.equal(appendedSignatureResult.greenFlagStatus, 'SUCCEEDED');
+}
+
 const hiddenGreenFixture = createGuardBoundaryFixture({
-  greenMarkup: '<button data-test-green-control aria-label="绿色旗帜" data-flag-color="green" hidden></button>',
+  greenMarkup: '<button data-test-green-control aria-label="红色旗帜" data-flag-color="red" hidden></button>',
 });
 const hiddenGreenResult = await hiddenGreenFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
   remarkLines: backendRemarkLines,
 });
-assert.equal(hiddenGreenResult.ok, false, '隐藏的绿旗控件不得被选中');
+assert.equal(hiddenGreenResult.ok, false, '隐藏的红旗控件不得被选中');
 assert.equal(hiddenGreenResult.ok ? '' : hiddenGreenResult.code, 'GREEN_FLAG_NOT_FOUND');
-assert.equal(hiddenGreenFixture.getSaveClicks(), 0, '绿旗不可用时不得保存');
+assert.equal(hiddenGreenFixture.getSaveClicks(), 0, '红旗不可用时不得保存');
 
 const disabledGreenFixture = createGuardBoundaryFixture({
-  greenMarkup: '<button data-test-green-control aria-label="绿色旗帜" data-flag-color="green" disabled></button>',
+  greenMarkup: '<button data-test-green-control aria-label="红色旗帜" data-flag-color="red" disabled></button>',
 });
 const disabledGreenResult = await disabledGreenFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
   remarkLines: backendRemarkLines,
 });
-assert.equal(disabledGreenResult.ok, false, '禁用的绿旗控件不得被选中');
+assert.equal(disabledGreenResult.ok, false, '禁用的红旗控件不得被选中');
 assert.equal(disabledGreenResult.ok ? '' : disabledGreenResult.code, 'GREEN_FLAG_NOT_FOUND');
-assert.equal(disabledGreenFixture.getSaveClicks(), 0, '绿旗禁用时不得保存');
+assert.equal(disabledGreenFixture.getSaveClicks(), 0, '红旗禁用时不得保存');
 
 const nonGreenLabelFixture = createGuardBoundaryFixture({
-  greenMarkup: '<button data-test-green-control aria-label="非绿色旗帜"></button>',
+  greenMarkup: '<button data-test-green-control aria-label="非红色旗帜"></button>',
 });
 const nonGreenLabelResult = await nonGreenLabelFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
   remarkLines: backendRemarkLines,
 });
-assert.equal(nonGreenLabelResult.ok, false, '“非绿色旗帜”不得被子串误判为绿旗');
+assert.equal(nonGreenLabelResult.ok, false, '“非红色旗帜”不得被子串误判为红旗');
 assert.equal(nonGreenLabelFixture.getSaveClicks(), 0);
 
 const inactiveGreenFixture = createGuardBoundaryFixture({
-  greenMarkup: '<button data-test-green-control aria-label="绿色旗帜" data-flag-color="green-inactive"></button>',
+  greenMarkup: '<button data-test-green-control aria-label="红色旗帜" data-flag-color="red-inactive"></button>',
 });
 const inactiveGreenResult = await inactiveGreenFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
   remarkLines: backendRemarkLines,
 });
-assert.equal(inactiveGreenResult.ok, false, '`green-inactive` 不得通过精确绿旗语义校验');
+assert.equal(inactiveGreenResult.ok, false, '`red-inactive` 不得通过精确红旗语义校验');
 assert.equal(inactiveGreenFixture.getSaveClicks(), 0);
 
 const ambiguousGreenFixture = createGuardBoundaryFixture({
-  greenMarkup: '<button data-test-green-control aria-label="绿色旗帜"></button><button data-test-green-control data-flag-color="green"></button>',
+  greenMarkup: '<button data-test-green-control aria-label="红色旗帜"></button><button data-test-green-control data-flag-color="red"></button>',
 });
 const ambiguousGreenResult = await ambiguousGreenFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
   remarkLines: backendRemarkLines,
 });
-assert.equal(ambiguousGreenResult.ok, false, '多个合格绿旗控件时必须因歧义停止');
+assert.equal(ambiguousGreenResult.ok, false, '多个合格红旗控件时必须因歧义停止');
 assert.equal(ambiguousGreenFixture.getGreenClicks(), 0);
 assert.equal(ambiguousGreenFixture.getSaveClicks(), 0);
 
-const inexactActiveFlagFixture = createGuardBoundaryFixture({ savedCurrentFlag: 'not-green' });
+const inexactActiveFlagFixture = createGuardBoundaryFixture({ savedCurrentFlag: 'not-red' });
 const inexactActiveFlagResult = await inexactActiveFlagFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',
   expectedCustomerDisplayName: '悠然一刻',
   remarkLines: backendRemarkLines,
 });
-assert.equal(inexactActiveFlagResult.ok, false, '`not-green` 不得通过绿旗激活状态验证');
+assert.equal(inexactActiveFlagResult.ok, false, '`not-red` 不得通过红旗激活状态验证');
 assert.equal(inexactActiveFlagResult.ok ? '' : inexactActiveFlagResult.code, 'ORDER_COMPLETION_NOT_VERIFIED');
 
 const unrelatedDialogFixture = createGuardBoundaryFixture({
@@ -852,7 +873,7 @@ assert.equal(malformedLinesResult.ok, false, '后端备注 tuple 含换行时必
 assert.equal(malformedLinesResult.ok ? '' : malformedLinesResult.code, 'ORDER_REMARK_INVALID');
 assert.match(malformedLinesResult.ok ? '' : malformedLinesResult.message, /极享OS返回的订单备注格式不正确/);
 assert.equal(malformedLinesFixture.input.value, '#入EC\n#销售：小王', '畸形 tuple 不得改写备注');
-assert.equal(malformedLinesFixture.getGreenClicks(), 0, '畸形 tuple 不得点击绿旗');
+assert.equal(malformedLinesFixture.getGreenClicks(), 0, '畸形 tuple 不得点击红旗');
 assert.equal(malformedLinesFixture.getSaveClicks(), 0, '畸形 tuple 不得保存');
 
 const visibleOpenedDialogFixture = createGuardBoundaryFixture({
@@ -928,6 +949,7 @@ function createLiveGreenFlagCompletionFixture() {
       <label><input type="radio" value="5"><span class="i-icon i-icon-flag"><svg><path fill="#FF3B52"></path></svg></span></label>
       <label><input type="radio" value="0"><span class="i-icon i-icon-flag"><svg><path fill="#69718C"></path></svg></span></label>
       <textarea id="textareaID" placeholder="请输入备注信息，使用Enter保存，使用⌘+Enter换行"></textarea>
+      <label><input data-real-signature type="checkbox" checked />自动添加备注人和时间到末尾</label>
       <button type="button">确定</button>
       <button type="button">取消</button>
     </div>
@@ -937,6 +959,7 @@ function createLiveGreenFlagCompletionFixture() {
   const input = fixtureDocument.querySelector('#textareaID') as HTMLTextAreaElement;
   const summaryLines = fixtureDocument.querySelector('[data-real-remark-lines]') as HTMLElement;
   const currentFlag = fixtureDocument.querySelector('[data-real-current-flag]') as HTMLElement;
+  const signature = fixtureDocument.querySelector('[data-real-signature]') as HTMLInputElement;
   fixtureDocument.querySelector('button[render_type="feature_button"]')?.addEventListener('click', () => {
     drawer.hidden = false;
     input.value = summaryLines.textContent || '';
@@ -944,8 +967,8 @@ function createLiveGreenFlagCompletionFixture() {
   [...drawer.querySelectorAll('button')]
     .find((button) => button.textContent?.trim() === '确定')
     ?.addEventListener('click', () => {
-      summaryLines.textContent = `${input.value}\n#0808/platform-generated`;
-      currentFlag.style.color = 'rgb(0, 200, 127)';
+      summaryLines.textContent = signature.checked ? `${input.value}【林恩光 08-09 13:26】` : input.value;
+      currentFlag.style.color = 'rgb(255, 59, 82)';
       drawer.hidden = true;
     });
   return createDouyinFeigeAdapter(fixtureDocument, fixture.window.location.href);
@@ -961,7 +984,7 @@ assert.deepEqual(liveGreenFlagCompletionResult, {
   remarkText: `#销售：小王\n${backendRemarkLines.join('\n')}`,
   remarkStatus: 'SUCCEEDED',
   greenFlagStatus: 'SUCCEEDED',
-}, '应识别飞鸽真实绿色旗帜并允许平台在保存后追加备注人和时间行');
+}, '应识别飞鸽真实红色旗帜并取消平台自动追加备注人和时间');
 
 function createCalibratedPaidOrderFixture(options: { includeConfirm?: boolean } = {}) {
   const fixture = new JSDOM(`<!doctype html><html><body>
@@ -1016,7 +1039,7 @@ function createCalibratedPaidOrderFixture(options: { includeConfirm?: boolean } 
     ?.addEventListener('click', () => {
       confirmClicks += 1;
       summary.textContent = input.value;
-      currentFlag.dataset.currentFlag = 'green';
+      currentFlag.dataset.currentFlag = 'red';
       drawer.hidden = true;
     });
   return {
@@ -1046,11 +1069,11 @@ assert.equal(calibratedMissingGreenResult.ok, false);
 assert.equal(
   calibratedMissingGreenResult.ok ? '' : calibratedMissingGreenResult.code,
   'GREEN_FLAG_NOT_FOUND',
-  '订单状态未识别不阻断备注，只在绿旗控件缺失时返回清晰结果',
+  '订单状态未识别不阻断备注，只在红旗控件缺失时返回清晰结果',
 );
 assert.equal(calibratedPaidOrderFixture.getEditClicks(), 1, '订单状态未知仍应打开备注抽屉');
 assert.equal(calibratedPaidOrderFixture.input.value, '#悠然一刻/13826459812\n#入EC\n#直接退群');
-assert.equal(calibratedPaidOrderFixture.getConfirmClicks(), 0, '绿旗语义缺失时不得点击“确定”');
+assert.equal(calibratedPaidOrderFixture.getConfirmClicks(), 0, '红旗语义缺失时不得点击“确定”');
 
 const calibratedMissingConfirmFixture = createCalibratedPaidOrderFixture({ includeConfirm: false });
 const calibratedMissingConfirmResult = await calibratedMissingConfirmFixture.adapter.completeOsOrder({

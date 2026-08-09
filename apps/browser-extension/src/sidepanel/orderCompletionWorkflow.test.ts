@@ -432,7 +432,7 @@ for (const terminalErrorCode of [
     }),
     completePage: async () => {
       terminalPageCalls += 1;
-      throw new Error('OS终止失败后不得写备注或设置绿旗');
+      throw new Error('OS终止失败后不得写备注或设置红旗');
     },
     report: async () => {
       terminalReportCalls += 1;
@@ -446,7 +446,7 @@ for (const terminalErrorCode of [
   assert.equal(terminalResult.greenFlagStatus, 'NOT_ATTEMPTED');
   assert.equal(terminalResult.errorCode, terminalErrorCode);
   assert.equal(terminalResult.message, `终止错误：${terminalErrorCode}`);
-  assert.equal(terminalPageCalls, 0, `${terminalErrorCode} 不得写备注或设置绿旗`);
+  assert.equal(terminalPageCalls, 0, `${terminalErrorCode} 不得写备注或设置红旗`);
   assert.equal(terminalReportCalls, 0, `${terminalErrorCode} 不得上报平台完成结果`);
   assert.equal(terminalStates.includes('OS_COMPLETED'), false);
   assert.equal(terminalStates.includes('PLATFORM_COMPLETING'), false);
@@ -518,7 +518,7 @@ const greenFlagFailure = await runCompletion({
   completePage: async () => ({
     ok: false,
     code: 'GREEN_FLAG_NOT_FOUND',
-    message: '未找到绿色旗帜',
+    message: '未找到红色旗帜',
     stage: 'GREEN_FLAG',
     remarkText: backendRemarkText,
   }),
@@ -539,10 +539,50 @@ assert.deepEqual(greenFlagFailureReport, {
   syncId: 'sync-1',
   orderRemarkStatus: 'FAILED',
   greenFlagStatus: 'FAILED',
-  errorMessage: '未找到绿色旗帜',
+  errorMessage: '未找到红色旗帜',
 });
 assert.equal(greenFlagFailure.orderRemarkStatus, 'FAILED');
 assert.equal(greenFlagFailure.greenFlagStatus, 'FAILED');
+
+let partialPageFailureReport: unknown;
+const partialPageFailure = await runCompletion({
+  expectedOrderNo: currentContext.platformOrderNo,
+  expectedCustomerDisplayName: currentContext.customerDisplayName,
+  phone: '13826459812',
+  intakeInput: { platform: 'DOUYIN' },
+}, {
+  readContext: async () => currentContext,
+  intake: async () => ({ code: 0, data: intakeResult, message: 'success' }),
+  completePage: async () => ({
+    ok: false,
+    code: 'ORDER_COMPLETION_NOT_VERIFIED',
+    message: '页面验证结果：订单备注已成功，红色旗帜未确认',
+    stage: 'SAVE',
+    remarkText: backendRemarkText,
+    remarkStatus: 'SUCCEEDED',
+    greenFlagStatus: 'FAILED',
+  }),
+  report: async (input) => {
+    partialPageFailureReport = input;
+    return {
+      code: 0,
+      data: {
+        syncId: input.syncId,
+        orderRemarkStatus: input.orderRemarkStatus,
+        greenFlagStatus: input.greenFlagStatus,
+      },
+      message: 'success',
+    };
+  },
+});
+assert.deepEqual(partialPageFailureReport, {
+  syncId: 'sync-1',
+  orderRemarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'FAILED',
+  errorMessage: '页面验证结果：订单备注已成功，红色旗帜未确认',
+});
+assert.equal(partialPageFailure.orderRemarkStatus, 'SUCCEEDED', '备注已验证时必须如实展示成功');
+assert.equal(partialPageFailure.greenFlagStatus, 'FAILED');
 
 let pageContextFailureReport: unknown;
 const pageContextFailure = await runCompletion({
@@ -605,7 +645,7 @@ const alreadyCreated = await runCompletion({
   report: async () => ({ code: 0, data: completionResult, message: 'success' }),
 });
 assert.equal(alreadyCreated.stage, 'COMPLETED');
-assert.equal(alreadyCreatedPageCalls, 1, '已入库订单仍需继续补齐备注和绿旗');
+assert.equal(alreadyCreatedPageCalls, 1, '已入库订单仍需继续补齐备注和红旗');
 
 for (const mismatch of [
   {
@@ -842,7 +882,7 @@ assert.equal(changedRetryReports, 0, '权威重读失败未验证当前页面，
   });
   assert.equal(closedOrderResult.stage, 'COMPLETED', '已关闭订单也应完成OS入库和页面备注');
   assert.equal(closedOrderIntakeCalls, 1, '已关闭订单应调用OS入库');
-  assert.equal(closedOrderPageCalls, 1, '已关闭订单应写入备注和绿旗');
+  assert.equal(closedOrderPageCalls, 1, '已关闭订单应写入备注和红旗');
 }
 
 {
@@ -913,7 +953,7 @@ const reportOnlyRetry = await runCompletion({
   },
   completePage: async () => {
     reportOnlyPageCalls += 1;
-    throw new Error('页面已完成时不得再次点击备注或绿旗');
+    throw new Error('页面已完成时不得再次点击备注或红旗');
   },
   report: async () => {
     reportOnlyReportCalls += 1;
@@ -991,7 +1031,7 @@ assert.equal(reportOnlyMismatchReadCalls, 0, '资料不一致时不得读取飞�
 assert.equal(reportOnlyMismatchReportCalls, 0, '资料不一致时不得上报成功');
 assert.equal(reportOnlyMismatch.stage, 'PLATFORM_FAILED');
 assert.equal(reportOnlyMismatch.orderRemarkStatus, 'SUCCEEDED', '资料不一致不得回退已成功的备注状态');
-assert.equal(reportOnlyMismatch.greenFlagStatus, 'SUCCEEDED', '资料不一致不得回退已成功的绿旗状态');
+assert.equal(reportOnlyMismatch.greenFlagStatus, 'SUCCEEDED', '资料不一致不得回退已成功的红旗状态');
 assert.match(reportOnlyMismatch.message || '', /极享OS已有资料与本次提交不一致/);
 
 let createdReportOnlyMismatchReadCalls = 0;
@@ -1032,7 +1072,7 @@ assert.equal(createdReportOnlyMismatchPageCalls, 0, '已创建资料不一致时
 assert.equal(createdReportOnlyMismatchReportCalls, 0, '已创建资料不一致时不得上报成功');
 assert.equal(createdReportOnlyMismatch.stage, 'PLATFORM_FAILED');
 assert.equal(createdReportOnlyMismatch.orderRemarkStatus, 'SUCCEEDED', '已创建资料不一致不得回退已成功的备注状态');
-assert.equal(createdReportOnlyMismatch.greenFlagStatus, 'SUCCEEDED', '已创建资料不一致不得回退已成功的绿旗状态');
+assert.equal(createdReportOnlyMismatch.greenFlagStatus, 'SUCCEEDED', '已创建资料不一致不得回退已成功的红旗状态');
 assert.match(createdReportOnlyMismatch.message || '', /极享OS已有资料与本次提交不一致/);
 
 let exceptionReportCalls = 0;

@@ -514,7 +514,7 @@ export function createBrowserLeadIntakeService(deps: {
           syncId: string;
           orderRemarkStatus: BrowserLeadSyncRecord['orderRemarkStatus'];
           greenFlagStatus: BrowserLeadSyncRecord['greenFlagStatus'];
-        }>('绿色旗帜结果不正确', 400);
+        }>('红色旗帜结果不正确', 400);
       }
       const updated = await deps.repository.reportPlatformCompletion(
         syncId,

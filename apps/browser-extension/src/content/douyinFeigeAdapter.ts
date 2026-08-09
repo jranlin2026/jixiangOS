@@ -35,7 +35,7 @@ const selectors = {
   orderRemarkSummary: ['[data-testid="order-remark-summary"]', '[class*="remark-content"]'],
   orderRemarkEdit: ['[data-testid="edit-order-remark"]'],
   orderRemarkDialog: ['[role="dialog"][aria-label*="备注"]', '[role="dialog"]'],
-  greenFlag: ['[data-flag-color="green"]', '[aria-label*="绿色旗帜"]', '[title*="绿色旗帜"]'],
+  greenFlag: ['[data-flag-color="red"]', '[aria-label*="红色旗帜"]', '[title*="红色旗帜"]'],
   currentOrderFlag: ['[data-testid="current-order-flag"]', '[data-current-flag]'],
 };
 
@@ -129,9 +129,9 @@ function uniqueMatches(root: ParentNode, candidates: string[]) {
 
 function hasExactGreenSemantic(element: HTMLElement) {
   const semantics = [
-    ['data-flag-color', 'green'],
-    ['aria-label', '绿色旗帜'],
-    ['title', '绿色旗帜'],
+    ['data-flag-color', 'red'],
+    ['aria-label', '红色旗帜'],
+    ['title', '红色旗帜'],
   ] as const;
   let exactMatch = false;
   for (const [attribute, expected] of semantics) {
@@ -150,7 +150,20 @@ function hasLiveGreenFlagSemantic(element: HTMLElement) {
   const colors = [...label.querySelectorAll('.i-icon-flag svg path[fill]')]
     .map((path) => path.getAttribute('fill')?.trim().toLowerCase() || '')
     .filter(Boolean);
-  return colors.length === 1 && colors[0] === '#00c87f';
+  return colors.length === 1 && colors[0] === '#ff3b52';
+}
+
+function disablePlatformRemarkSignature(dialog: HTMLElement) {
+  const candidates = [...dialog.querySelectorAll<HTMLElement>('label')]
+    .filter((label) => (label.textContent || '').includes('自动添加备注人和时间到末尾'))
+    .filter(isVisible)
+    .map((label) => label.querySelector<HTMLInputElement>('input[type="checkbox"]'))
+    .filter((input): input is HTMLInputElement => Boolean(input));
+  if (candidates.length > 1) return false;
+  const checkbox = candidates[0];
+  if (!checkbox || !checkbox.checked) return true;
+  checkbox.click();
+  return !checkbox.checked;
 }
 
 function findUniqueGreenFlag(dialog: HTMLElement) {
@@ -238,27 +251,41 @@ async function waitForElement(
 function isGreenActive(orderCard: HTMLElement) {
   const currentFlags = uniqueMatches(orderCard, selectors.currentOrderFlag).filter(isVisible);
   if (currentFlags.length === 1
-    && currentFlags[0].dataset.currentFlag?.trim().toLowerCase() === 'green') return true;
+    && currentFlags[0].dataset.currentFlag?.trim().toLowerCase() === 'red') return true;
   const liveGreenFlags = [...orderCard.querySelectorAll<HTMLElement>('.i-icon-flag')]
     .filter(isVisible)
     .filter((icon) => {
       const window = icon.ownerDocument.defaultView;
       const iconColor = window?.getComputedStyle(icon).color.replace(/\s/g, '').toLowerCase();
       const paths = [...icon.querySelectorAll<HTMLElement>('svg path[fill]')];
-      return iconColor === 'rgb(0,200,127)'
-        || paths.some((path) => path.getAttribute('fill')?.trim().toLowerCase() === '#00c87f')
-        || paths.some((path) => window?.getComputedStyle(path).fill.replace(/\s/g, '').toLowerCase() === 'rgb(0,200,127)');
+      return iconColor === 'rgb(255,59,82)'
+        || paths.some((path) => path.getAttribute('fill')?.trim().toLowerCase() === '#ff3b52')
+        || paths.some((path) => window?.getComputedStyle(path).fill.replace(/\s/g, '').toLowerCase() === 'rgb(255,59,82)');
     });
   return liveGreenFlags.length === 1;
 }
 
-function hasSavedRemark(orderCard: HTMLElement, remarkText: string) {
-  const summary = text(orderCard, selectors.orderRemarkSummary) || orderCard.textContent || '';
+function savedRemarkSummary(orderCard: HTMLElement) {
+  return text(orderCard, selectors.orderRemarkSummary) || orderCard.textContent || '';
+}
+
+function platformRemarkSignatures(value: string) {
+  return value.match(/(?:【|\[)[^【】\[\]\r\n]{1,50}\s+\d{2}-\d{2}\s+\d{2}:\d{2}(?:】|\])/g) || [];
+}
+
+function hasNewPlatformRemarkSignature(existing: string, saved: string) {
+  return platformRemarkSignatures(saved).length > platformRemarkSignatures(existing).length;
+}
+
+function hasSavedRemark(orderCard: HTMLElement, remarkText: string, existing: string) {
+  const summary = savedRemarkSummary(orderCard);
   const requiredLines = remarkText
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  return requiredLines.length > 0 && requiredLines.every((line) => summary.includes(line));
+  return requiredLines.length > 0
+    && requiredLines.every((line) => summary.includes(line))
+    && !hasNewPlatformRemarkSignature(existing, summary);
 }
 
 function direction(element: HTMLElement): BrowserChatMessage['direction'] {
@@ -617,7 +644,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         return {
           ok: false,
           code: 'ORDER_STATUS_NOT_ELIGIBLE',
-          message: '当前订单状态不支持备注和绿旗操作',
+          message: '当前订单状态不支持备注和红旗操作',
           stage: 'CONTEXT',
         };
       }
@@ -707,7 +734,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         return {
           ok: false,
           code: 'GREEN_FLAG_NOT_FOUND',
-          message: '未找到语义明确的绿色旗帜，请人工确认',
+          message: '未找到语义明确的红色旗帜，请人工确认',
           stage: 'GREEN_FLAG',
           remarkText,
         };
@@ -735,6 +762,15 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           remarkText,
         };
       }
+      if (!disablePlatformRemarkSignature(dialog)) {
+        return {
+          ok: false,
+          code: 'ORDER_REMARK_SIGNATURE_NOT_DISABLED',
+          message: '无法取消飞鸽自动追加备注人和时间，未保存',
+          stage: 'REMARK',
+          remarkText,
+        };
+      }
       const dialogAfterFill = findUniqueRemarkDialog(document);
       const greenAfterFill = dialogAfterFill ? findUniqueGreenFlag(dialogAfterFill) : null;
       const saveAfterFill = dialogAfterFill ? findUniqueSave(dialogAfterFill) : null;
@@ -742,7 +778,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         return {
           ok: false,
           code: 'ORDER_CONTROLS_CHANGED',
-          message: '备注写入后绿色旗帜或保存控件已变化，未保存',
+          message: '备注写入后红色旗帜或保存控件已变化，未保存',
           stage: !greenAfterFill ? 'GREEN_FLAG' : 'SAVE',
           remarkText,
         };
@@ -751,7 +787,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         return {
           ok: false,
           code: 'CONTEXT_CHANGED',
-          message: '点击绿色旗帜前当前活动订单卡已变化，未保存订单修改',
+          message: '点击红色旗帜前当前活动订单卡已变化，未保存订单修改',
           stage: 'CONTEXT',
           remarkText,
         };
@@ -772,7 +808,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         return {
           ok: false,
           code: 'ORDER_REMARK_SAVE_CHANGED',
-          message: '选择绿色旗帜后保存控件已变化，未保存',
+          message: '选择红色旗帜后保存控件已变化，未保存',
           stage: 'SAVE',
           remarkText,
         };
@@ -801,18 +837,26 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       const verified = await waitForElement(document, () => {
         if (!hasSameBoundContext()) return null;
         const closed = !dialog.isConnected || !isVisible(dialog);
-        return closed && hasSavedRemark(orderCard, remarkText)
+        return closed && hasSavedRemark(orderCard, remarkText, existing)
           && isGreenActive(orderCard)
           ? orderCard
           : null;
       });
       if (!verified) {
+        const savedSummary = savedRemarkSummary(orderCard);
+        const signatureAppended = hasNewPlatformRemarkSignature(existing, savedSummary);
+        const remarkSaved = hasSavedRemark(orderCard, remarkText, existing);
+        const redFlagSaved = isGreenActive(orderCard);
         return {
           ok: false,
           code: 'ORDER_COMPLETION_NOT_VERIFIED',
-          message: '订单备注或绿色旗帜未完成页面验证',
+          message: signatureAppended
+            ? '飞鸽自动追加了备注人和时间，请手工删除该签名并核对红色旗帜'
+            : `页面验证结果：订单备注${remarkSaved ? '已成功' : '未确认'}，红色旗帜${redFlagSaved ? '已成功' : '未确认'}`,
           stage: 'SAVE',
           remarkText,
+          remarkStatus: remarkSaved ? 'SUCCEEDED' : 'FAILED',
+          greenFlagStatus: redFlagSaved ? 'SUCCEEDED' : 'FAILED',
         };
       }
       if (!hasSameBoundContext()) {
