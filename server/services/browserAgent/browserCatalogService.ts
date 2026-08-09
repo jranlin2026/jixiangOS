@@ -285,14 +285,6 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     if (!binding || !binding.active || cleanText(binding.platform).toUpperCase() !== platform) {
       return catalogFailure('店铺绑定不存在或已停用', 409, 'SHOP_BINDING_UNAVAILABLE');
     }
-    const pageShopName = normalizePlatformProductName(cleanText(input.pageShopDisplayName));
-    if (!pageShopName) {
-      return catalogFailure('当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别后重试', 409, 'SHOP_CONTEXT_MISMATCH');
-    }
-    const acceptedShopNames = [binding.displayName, ...binding.aliases].map(normalizePlatformProductName);
-    if (!acceptedShopNames.includes(pageShopName)) {
-      return catalogFailure('当前页面店铺与已选店铺绑定不一致', 409, 'SHOP_CONTEXT_MISMATCH');
-    }
     const [products, mappings] = await Promise.all([
       repository.listProducts(), repository.listMappings(binding.id),
     ]);

@@ -133,7 +133,6 @@ function productPreviewContextKey(context: FeigePageContext | null) {
     context.platformOrderNo.trim(),
     context.customerDisplayName.trim(),
     context.readyForIntake,
-    context.shopDisplayName?.trim() || '',
     context.platformProductId?.trim() || '',
     context.platformSkuId?.trim() || '',
     context.productName.trim(),

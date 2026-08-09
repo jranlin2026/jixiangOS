@@ -52,73 +52,13 @@ const realOrderFacts = createDouyinFeigeAdapter(
   realOrderFactsDom.window.document,
   realOrderFactsDom.window.location.href,
 ).readContext();
-assert.equal(realOrderFacts.shopDisplayName, '极享智能体', '店铺名必须来自明确的页面店铺区域');
+assert.equal(realOrderFacts.shopDisplayName, '', '店铺只使用人工绑定，不再读取页面店铺名称');
 assert.equal(realOrderFacts.productName, '淘金AI 多模态创作智能体 读书卡');
 assert.equal(realOrderFacts.platformProductId, 'DY-TAOJIN-100');
 assert.equal(realOrderFacts.platformSkuId, undefined);
 assert.equal(realOrderFacts.paymentAmount, 299, '实付金额必须保留平台展示事实');
 assert.equal(realOrderFacts.paymentAt, '2026-08-08T19:34:20+08:00');
 assert.equal(realOrderFacts.readyForIntake, true, '唯一商品名、精确实付和有效付款时间齐全才可入库');
-
-const liveAccountPopoverShopDom = new JSDOM(`<!doctype html><html><body>
-  <main id="workspace-chat"><span data-jx-customer-name>御康源健康管理</span></main>
-  <div data-btm="c4455" role="button">
-    <div>
-      <div aria-hidden="true"></div>
-      <div>
-        <div style="overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1;">林恩光</div>
-        <div style="overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1;">
-          <div class="rmrc7AcICV34ReetAMIQ">极享智能体</div>
-        </div>
-      </div>
-    </div>
-    <div>切换状态</div>
-  </div>
-</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
-const liveAccountPopoverShop = createDouyinFeigeAdapter(
-  liveAccountPopoverShopDom.window.document,
-  liveAccountPopoverShopDom.window.location.href,
-).readContext();
-assert.equal(
-  liveAccountPopoverShop.shopDisplayName,
-  '极享智能体',
-  '飞鸽账号状态弹层中客服姓名下方的第二行应识别为店铺名',
-);
-
-const incompleteAccountPopoverDom = new JSDOM(`<!doctype html><html><body>
-  <main id="workspace-chat"></main>
-  <div data-btm="c4455" role="button">
-    <div style="display: -webkit-box; -webkit-line-clamp: 1;">林恩光</div>
-  </div>
-</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
-assert.equal(
-  createDouyinFeigeAdapter(
-    incompleteAccountPopoverDom.window.document,
-    incompleteAccountPopoverDom.window.location.href,
-  ).readContext().shopDisplayName,
-  '',
-  '账号区域只有客服姓名时不得猜测店铺',
-);
-
-const ambiguousAccountPopoverDom = new JSDOM(`<!doctype html><html><body>
-  <main id="workspace-chat"></main>
-  <div data-btm="c4455" role="button">
-    <div style="display: -webkit-box; -webkit-line-clamp: 1;">林恩光</div>
-    <div style="display: -webkit-box; -webkit-line-clamp: 1;">极享智能体</div>
-  </div>
-  <div data-btm="c4455" role="button">
-    <div style="display: -webkit-box; -webkit-line-clamp: 1;">其他客服</div>
-    <div style="display: -webkit-box; -webkit-line-clamp: 1;">其他店铺</div>
-  </div>
-</body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
-assert.equal(
-  createDouyinFeigeAdapter(
-    ambiguousAccountPopoverDom.window.document,
-    ambiguousAccountPopoverDom.window.location.href,
-  ).readContext().shopDisplayName,
-  '',
-  '同时存在多个可见账号区域时必须失败关闭',
-);
 
 const ancestorProductIdentityDom = new JSDOM(`<!doctype html><html><body>
   <main data-jx-feige-conversation><span data-jx-customer-name>海盗船长</span></main>
@@ -146,6 +86,8 @@ const siblingPaymentFacts = readOrderFactsFixture(`
 `);
 assert.equal(siblingPaymentFacts.paymentAmount, 299, '实付值是语义标签的同级节点时仍必须读取');
 assert.equal(siblingPaymentFacts.paymentAt, '2026-08-08T19:34:20+08:00', '付款时间是标签同级节点时仍必须读取');
+assert.equal(siblingPaymentFacts.shopDisplayName, '', '飞鸽页面店铺名不再参与识别');
+assert.equal(siblingPaymentFacts.readyForIntake, true, '订单事实完整时不应因页面店铺名缺失而阻止人工绑定入库');
 
 const ambiguousPaymentRows = readOrderFactsFixture(`
   <section data-testid="order-card">
@@ -259,7 +201,7 @@ const unprovenShop = readOrderFactsFixture(`
   </section>
 `, '<div data-testid="operator-name">客服小王</div>');
 assert.equal(unprovenShop.shopDisplayName, '', '客户、商品和客服姓名都不能充当店铺名');
-assert.ok(unprovenShop.diagnostics.includes('未识别页面店铺'));
+assert.equal(unprovenShop.diagnostics.includes('未识别页面店铺'), false, '页面店铺不再属于识别诊断');
 
 assert.deepEqual(adapter.fillReply('已收到，我们尽快联系您。'), { ok: true });
 assert.equal((dom.window.document.querySelector('[data-jx-reply-input]') as HTMLTextAreaElement).value, '已收到，我们尽快联系您。');

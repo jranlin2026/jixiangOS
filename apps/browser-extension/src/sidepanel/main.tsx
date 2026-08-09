@@ -41,7 +41,6 @@ import {
   isCompletionFormLocked,
   productPreviewForPanel,
 } from './orderCompletionPanelState';
-import { pageShopMatchesBinding } from './orderCompletionWorkflow';
 
 type AuthState = { config?: ExtensionConfig; operator?: AuthenticatedOperator };
 type RecognitionSnapshot = { id: number; context: FeigePageContext; hasContact: boolean };
@@ -208,14 +207,11 @@ function App() {
     && typeof referencePrice === 'number'
     && typeof context?.paymentAmount === 'number'
     && referencePrice !== context.paymentAmount;
-  const pageShopMismatch = Boolean(context?.shopDisplayName && selectedShop
-    && !pageShopMatchesBinding(context.shopDisplayName, selectedShop));
   const orderFactsReady = hasRequiredOrderFacts(context);
   const canRunAuthoritativePreflight = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
     && (form.phone.trim() || form.wechat.trim()) && selectedShop && contactConfirmed
-    && paidOrderRecognized && context.shopDisplayName?.trim() && orderFactsReady && !loggingOut);
-  const canIntake = canRunAuthoritativePreflight
-    && (productPreviewStatus === 'READY' || pageShopMismatch);
+    && paidOrderRecognized && orderFactsReady && !loggingOut);
+  const canIntake = canRunAuthoritativePreflight && productPreviewStatus === 'READY';
   const workflowLabel = useMemo(() => {
     if (completion?.stage === 'COMPLETED') return '订单闭环已完成';
     if (sync) return '线索已入库，待完成订单';
@@ -271,10 +267,8 @@ function App() {
     const selectedShopId = selectedShop?.id;
     const orderNo = context?.platformOrderNo.trim() || '';
     const customerName = context?.customerDisplayName.trim() || '';
-    const pageShopDisplayName = context?.shopDisplayName?.trim() || '';
     if (loggingOut || !operatorId || !selectedShopId || !context?.supported || !orderNo || !customerName
-      || !hasRequiredOrderFacts(context)
-      || !pageShopDisplayName || pageShopMismatch) {
+      || !hasRequiredOrderFacts(context)) {
       activeProductPreview.current = null;
       return;
     }
@@ -287,7 +281,6 @@ function App() {
       selectedShopId,
       orderNo,
       customerName,
-      pageShopDisplayName,
       context.platformProductId?.trim() || '',
       context.platformSkuId?.trim() || '',
       context.productName.trim(),
@@ -307,7 +300,6 @@ function App() {
       input: {
         platform: 'DOUYIN',
         shopBindingId: selectedShopId,
-        pageShopDisplayName,
         platformProductId: context.platformProductId?.trim() || undefined,
         platformSkuId: context.platformSkuId?.trim() || undefined,
         platformProductName: context.productName.trim(),
@@ -344,7 +336,6 @@ function App() {
     context?.readyForIntake,
     context?.platformOrderNo,
     context?.customerDisplayName,
-    context?.shopDisplayName,
     context?.platformProductId,
     context?.platformSkuId,
     context?.productName,
@@ -352,7 +343,6 @@ function App() {
     context?.paymentAt,
     productPreviewStatus,
     authoritativePreview,
-    pageShopMismatch,
     loggingOut,
   ]);
 
@@ -599,12 +589,10 @@ function App() {
         phone: attempt.phone,
         wechat: attempt.wechat,
         shop: attemptShop,
-        pageShopDisplayName: context.shopDisplayName,
         displayedPreview: authoritativePreview || undefined,
         existingIntake: attempt.existingIntake,
         intakeInput: {
           platform: 'DOUYIN', shopBindingId: attempt.shopBindingId,
-          pageShopDisplayName: context.shopDisplayName || '',
           platformOrderNo: attempt.expectedOrderNo,
           contactName: attempt.expectedCustomerDisplayName, contactPhone: attempt.phone,
           contactWechat: attempt.wechat, contactSource: attempt.source,
@@ -751,7 +739,7 @@ function App() {
 
     <section className="card context-card">
       <div className="section-title"><h2>当前会话</h2><button className="secondary compact" disabled={busy || loggingOut} onClick={() => void refreshContext()}>刷新识别</button></div>
-      {runtimeConfig && runtimeConfig.shops.length > 1 ? <label>绑定店铺
+      {runtimeConfig && runtimeConfig.shops.length > 0 ? <label>绑定店铺
         <select
           aria-label="绑定店铺"
           disabled={busy || loggingOut || completionFormLocked}
@@ -767,7 +755,6 @@ function App() {
         <div><span>订单</span><strong>{context.platformOrderNo || '未识别'}</strong></div>
         <div><span>订单状态</span><strong>{context.orderStatus || '未识别'}</strong></div>
         <div><span>绑定店铺</span><strong>{selectedShop?.displayName || '未选择'}</strong></div>
-        <div><span>页面店铺</span><strong>{context.shopDisplayName || '未识别'}</strong></div>
         <div><span>平台商品</span><strong>{context.productName || '未识别'}</strong></div>
         <div><span>匹配产品</span><strong>{productPreview?.status === 'MATCHED'
           ? productPreview.osProductName || '待后端确认'
@@ -783,14 +770,10 @@ function App() {
         <div><span>消息</span><strong>{context.messages.length}条</strong></div>
       </div> : <p className="empty">请打开抖店飞鸽客服会话，然后点击“刷新识别”。</p>}
       {context?.diagnostics.length ? <ul className="diagnostics">{context.diagnostics.map((item) => <li key={item}>{item}</li>)}</ul> : null}
-      {runtimeConfig && runtimeConfig.shops.length > 1 && !selectedShop
-        ? <div className="alert warning">当前有多个启用店铺，请手工选择后再入库。</div> : null}
-      {pageShopMismatch
-        ? <div className="alert warning">当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试。</div> : null}
-      {context && selectedShop && !context.shopDisplayName?.trim()
-        ? <div className="alert warning">当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别。</div> : null}
+      {runtimeConfig && !selectedShop
+        ? <div className="alert warning">请先手工选择当前飞鸽账号对应的店铺，选择结果会保存在本机。</div> : null}
       {context && !orderFactsReady
-        ? <div className="alert warning">当前订单的平台商品名称、实付金额或付款时间未完整唯一识别，请等待订单加载完成后刷新识别。</div> : null}
+        ? <div className="alert warning">请先展开当前唯一订单卡片，再点击“刷新识别”；订单折叠时飞鸽不会提供商品、实付金额和付款时间。</div> : null}
       {productPreview?.status === 'UNMATCHED'
         ? <div className="alert warning">商品尚未匹配OS标准产品，本次仍可录入；平台原名“{productPreview.rawProductName || context?.productName || '未识别'}”将写入OS备注。</div> : null}
       {priceDiffers

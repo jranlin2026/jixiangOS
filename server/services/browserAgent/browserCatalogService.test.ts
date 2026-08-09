@@ -368,8 +368,8 @@ const previewMismatch = await service.previewProductMapping({
   platformProductName: '淘金AI 多模态', paymentAmount: 299,
   paymentAt: '2026-08-08T19:34:20+08:00',
 });
-assert.equal(previewMismatch.code, 409);
-assert.equal(previewMismatch.errorCode, 'SHOP_CONTEXT_MISMATCH');
+assert.equal(previewMismatch.code, 0, '人工选择的启用店铺绑定应是唯一店铺依据');
+assert.equal(previewMismatch.data?.shop.id, 'shop-1');
 
 for (const pageShopDisplayName of [undefined, '   ']) {
   const previewMissingShopContext = await service.previewProductMapping({
@@ -377,9 +377,8 @@ for (const pageShopDisplayName of [undefined, '   ']) {
     platformProductName: '淘金AI 多模态', paymentAmount: 299,
     paymentAt: '2026-08-08T19:34:20+08:00',
   });
-  assert.equal(previewMissingShopContext.code, 409);
-  assert.equal(previewMissingShopContext.errorCode, 'SHOP_CONTEXT_MISMATCH');
-  assert.match(previewMissingShopContext.message, /页面店铺未识别/);
+  assert.equal(previewMissingShopContext.code, 0, '页面没有店铺名称时仍应使用人工绑定店铺');
+  assert.equal(previewMissingShopContext.data?.shop.id, 'shop-1');
 }
 
 const previewUnavailable = await service.previewProductMapping({

@@ -255,7 +255,7 @@ for (const invalidContext of [
   pageContext = invalidContext;
   document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
   await waitFor('.context-card', (node) => (
-    (node.textContent || '').includes('平台商品名称、实付金额或付款时间未完整唯一识别')
+    (node.textContent || '').includes('请先展开当前唯一订单卡片')
   ));
   assert.equal(
     document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.disabled,

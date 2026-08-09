@@ -171,7 +171,7 @@ try {
   const singleRuntime = await new Promise<any>((resolve) => {
     assert.equal(workerListener?.({ type: 'GET_RUNTIME_CONFIG' }, {}, resolve), true);
   });
-  assert.equal(singleRuntime.data.selectedShopBindingId, 'shop-gold', '无旧配置且只有一个启用店铺时应自动选中');
+  assert.equal(singleRuntime.data.selectedShopBindingId, undefined, '即使只有一个启用店铺也必须由客服首次手工绑定');
 
   runtimeConfig = {
     shops: [

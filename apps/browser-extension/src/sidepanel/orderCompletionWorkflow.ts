@@ -50,6 +50,7 @@ export type OrderCompletionInput = {
   intakeInput: Record<string, unknown>;
   existingIntake?: LeadIntakeResponse;
   shop?: BrowserRuntimeShop;
+  /** Legacy page fact retained only for backwards-compatible callers; manual shop binding is authoritative. */
   pageShopDisplayName?: string;
   displayedPreview?: BrowserProductPreviewResponse;
 };
@@ -78,10 +79,6 @@ function emit(deps: OrderCompletionDependencies, state: OrderCompletionState) {
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
-}
-
-function normalizedShopName(value: string) {
-  return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('zh-CN');
 }
 
 function normalizedFactText(value: unknown) {
@@ -131,7 +128,6 @@ function latestIntakeInput(input: OrderCompletionInput, current: ReadyFeigePageC
   return {
     ...stableInput,
     ...(input.shop ? { shopBindingId: input.shop.id } : {}),
-    pageShopDisplayName: String(current.shopDisplayName || '').trim(),
     platformOrderNo: current.platformOrderNo.trim(),
     contactName: current.customerDisplayName.trim(),
     platformProductId: current.platformProductId?.trim() || undefined,
@@ -140,13 +136,6 @@ function latestIntakeInput(input: OrderCompletionInput, current: ReadyFeigePageC
     paymentAmount: current.paymentAmount,
     paymentAt: current.paymentAt.trim(),
   };
-}
-
-export function pageShopMatchesBinding(pageShopDisplayName: string | undefined, shop: BrowserRuntimeShop) {
-  const pageName = normalizedShopName(pageShopDisplayName || '');
-  if (!pageName) return true;
-  return [shop.displayName, ...shop.aliases]
-    .some((candidate) => normalizedShopName(candidate) === pageName);
 }
 
 function duplicateContactMismatch(
@@ -294,19 +283,6 @@ export async function runOrderCompletion(
       'ORDER_FACTS_UNAVAILABLE',
     );
   }
-  if (input.shop && !current.shopDisplayName?.trim()) {
-    return stopForContext(
-      '当前页面店铺未识别或存在歧义，请刷新飞鸽页面并重新识别后重试',
-      'SHOP_CONTEXT_UNAVAILABLE',
-    );
-  }
-  if (input.shop && !pageShopMatchesBinding(current.shopDisplayName, input.shop)) {
-    return stopForContext(
-      '当前页面店铺与已选店铺绑定不一致，请切换店铺或刷新识别后重试',
-      'SHOP_CONTEXT_MISMATCH',
-    );
-  }
-
   let latestPreview: BrowserProductPreviewResponse | undefined;
   if (input.shop) {
     if (!isAttemptActive()) return aborted();
@@ -315,7 +291,6 @@ export async function runOrderCompletion(
       preview = await deps.preview({
         platform: 'DOUYIN',
         shopBindingId: input.shop.id,
-        pageShopDisplayName: String(current.shopDisplayName || '').trim(),
         platformProductId: current.platformProductId?.trim() || undefined,
         platformSkuId: current.platformSkuId?.trim() || undefined,
         platformProductName: current.productName.trim(),

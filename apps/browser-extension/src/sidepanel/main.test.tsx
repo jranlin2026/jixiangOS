@@ -20,7 +20,7 @@ const context = {
   readyForIntake: true,
   pageUrl: 'https://fxg.jinritemai.com/im',
   customerDisplayName: '海盗船长',
-  shopDisplayName: '极享官方店',
+  shopDisplayName: '',
   platformOrderNo: 'ORDER-RENDER-1',
   orderStatus: '已付款',
   platformProductId: 'DY-TAOJIN-100',
@@ -263,7 +263,6 @@ assert.equal(completeButton.disabled, true, '权威预览加载中必须禁用�
 assert.equal(intakeInputs.length, 0);
 releaseInitialPreview();
 assert.match(document.body.textContent || '', /绑定店铺极享官方店/);
-assert.match(document.body.textContent || '', /页面店铺极享官方店/);
 assert.match(document.body.textContent || '', /平台商品淘金AI 多模态创作智能体 读书卡/);
 await waitFor('.context-card', (node) => (node.textContent || '').includes('匹配产品淘金AI'));
 assert.match(document.body.textContent || '', /匹配产品淘金AI/);
@@ -288,7 +287,7 @@ pageContext = {
   platformProductId: 'DY-CURRENT-B',
 };
 document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
-await waitFor('.context-card', (node) => (node.textContent || '').includes('页面店铺极享二店'));
+await waitFor('.context-card', (node) => (node.textContent || '').includes('订单ORDER-CURRENT-B'));
 shopSelect.value = 'shop-2';
 shopSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
 await waitFor('.context-card', (node) => (node.textContent || '').includes('匹配产品二店标准产品'));
@@ -301,7 +300,7 @@ assert.match(document.body.textContent || '', /匹配产品二店标准产品/);
 
 pageContext = context;
 document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
-await waitFor('.context-card', (node) => (node.textContent || '').includes('页面店铺极享官方店'));
+await waitFor('.context-card', (node) => (node.textContent || '').includes('订单ORDER-RENDER-1'));
 shopSelect.value = 'shop-1';
 shopSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
 await waitFor('.context-card', (node) => (node.textContent || '').includes('匹配产品淘金AI'));
@@ -313,40 +312,23 @@ pageContext = {
   platformProductId: 'DY-CACHED-MISMATCH',
 };
 document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
-await waitFor('.context-card', (node) => (node.textContent || '').includes('当前页面店铺与已选店铺绑定不一致'));
+await waitFor('.context-card', (node) => (node.textContent || '').includes('订单ORDER-CACHED-MISMATCH'));
+await waitFor('.context-card', (node) => (node.textContent || '').includes('匹配产品淘金AI'));
 document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
-pageContext = {
-  ...context,
-  platformOrderNo: 'ORDER-CACHED-MISMATCH',
-  platformProductId: 'DY-CACHED-MISMATCH',
-};
 await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
 const previewCountBeforeCachedMismatchClick = previewInputs.length;
 const productCallCountBeforeCachedMismatchClick = productWorkerCallOrder.length;
 intakeSucceeds = true;
 completeButton.click();
-const cachedMismatchReconfirm = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
-  (node.textContent || '').includes('订单信息已变化，请确认后重试')
-));
-assert.equal(previewInputs.length >= previewCountBeforeCachedMismatchClick + 1, true, '缓存店铺不一致时，最新页面预检后仍必须在创建线索前权威预览');
-assert.equal(previewInputs[previewCountBeforeCachedMismatchClick]?.pageShopDisplayName, '极享官方店');
-assert.deepEqual(productWorkerCallOrder.slice(productCallCountBeforeCachedMismatchClick), [
-  'PREVIEW_PRODUCT_MAPPING',
-], '页面店铺从不匹配恢复后，首次点击只能更新预览并要求重新确认');
-assert.equal(intakeInputs.length, 0, '首次点击未展示过最新预览时不得入库');
-cachedMismatchReconfirm.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
-document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
-await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
-completeButton.click();
 const cachedMismatchSuccess = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
   (node.textContent || '').includes('操作成功')
 ));
+assert.equal(previewInputs.length >= previewCountBeforeCachedMismatchClick + 1, true, '最终提交前仍必须用人工绑定店铺执行权威预览');
 assert.deepEqual(productWorkerCallOrder.slice(productCallCountBeforeCachedMismatchClick), [
   'PREVIEW_PRODUCT_MAPPING',
-  'PREVIEW_PRODUCT_MAPPING',
   'CREATE_LEAD_INTAKE',
-], '重新确认后仍必须先再做一次权威预览，才能创建线索');
-assert.equal(intakeInputs.at(-1)?.pageShopDisplayName, '极享官方店', '点击后必须使用最新预检店铺');
+], '人工绑定店铺后仍必须先做权威预览，才能创建线索');
+assert.equal('pageShopDisplayName' in (intakeInputs.at(-1) || {}), false, '入库不得再提交页面店铺名');
 cachedMismatchSuccess.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
 intakeSucceeds = false;
 await new Promise((resolve) => setTimeout(resolve, 10));
@@ -400,7 +382,6 @@ assert.equal(intakeInputs.length, 3);
 assert.deepEqual(intakeInputs.at(-1), {
   platform: 'DOUYIN',
   shopBindingId: 'shop-1',
-  pageShopDisplayName: '极享官方店',
   platformOrderNo: 'ORDER-RENDER-3',
   contactName: '海盗船长',
   contactPhone: '13800138000',
@@ -472,7 +453,6 @@ const latestFactsSuccessDialog = await waitFor<HTMLElement>('[role="dialog"]', (
 assert.deepEqual(intakeInputs.at(-1), {
   platform: 'DOUYIN',
   shopBindingId: 'shop-1',
-  pageShopDisplayName: '极享官方店',
   platformOrderNo: 'ORDER-LATEST-FACTS',
   contactName: '海盗船长',
   contactPhone: '13800138000',

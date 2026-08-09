@@ -348,23 +348,23 @@ assert.equal(createLeadCalls.length, 3, '仅提交旧 shopKey 合同不得进入
 
 const mismatch = await service.intake({
   ...shopAInput,
-  platformOrderNo: 'DY-20260808-MISMATCH',
+  platformOrderNo: shopAInput.platformOrderNo,
   pageShopDisplayName: '完全不相关的店铺',
 }, actor);
-assert.equal(mismatch.code, 409);
-assert.equal(mismatch.errorCode, 'SHOP_CONTEXT_MISMATCH');
-assert.equal(createLeadCalls.length, 3, '页面店铺不匹配时不得创建线索');
+assert.equal(mismatch.code, 0, '人工绑定店铺后不应再由页面店铺名否决入库');
+assert.equal(mismatch.data?.outcome, 'ALREADY_CREATED');
+assert.equal(createLeadCalls.length, 3, '重复订单仍不得创建第二条线索');
 
 for (const pageShopDisplayName of [undefined, '   ']) {
   const missingPageShop = await service.intake({
     ...shopAInput,
     pageShopDisplayName,
-    platformOrderNo: `DY-20260808-MISSING-SHOP-${String(pageShopDisplayName)}`,
+    platformOrderNo: shopAInput.platformOrderNo,
   } as any, actor);
-  assert.equal(missingPageShop.code, 409);
-  assert.equal(missingPageShop.errorCode, 'SHOP_CONTEXT_MISMATCH');
+  assert.equal(missingPageShop.code, 0, '页面店铺名缺失时应使用人工绑定店铺');
+  assert.equal(missingPageShop.data?.outcome, 'ALREADY_CREATED');
 }
-assert.equal(createLeadCalls.length, 3, '页面店铺缺失或歧义时不得预留或创建线索');
+assert.equal(createLeadCalls.length, 3, '人工绑定不改变重复订单幂等性');
 
 for (const [label, invalidFacts, expectedMessage] of [
   ['缺少商品名', { platformProductName: undefined }, /平台商品名称/],

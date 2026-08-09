@@ -62,7 +62,7 @@ function selectedBindingId(config: ExtensionConfig, shops: BrowserRuntimeShop[])
       .some((candidate) => normalizedBindingLookup(candidate) === legacy));
     return matches.length === 1 ? matches[0].id : undefined;
   }
-  return shops.length === 1 ? shops[0].id : undefined;
+  return undefined;
 }
 
 function storedConfig(apiBaseUrl: string, shopBindingId?: string): ExtensionConfig {

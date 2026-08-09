@@ -15,7 +15,7 @@ export type ExistingLeadState = 'ACTIVE' | 'RECYCLED' | 'MISSING';
 export type BrowserLeadIntakeInput = {
   platform: 'DOUYIN';
   shopBindingId: string;
-  pageShopDisplayName: string;
+  pageShopDisplayName?: string;
   platformOrderNo: string;
   contactName: string;
   contactSource: 'CHAT' | 'OFF_PLATFORM';

@@ -82,7 +82,7 @@ export type BrowserLeadProductResolutionAudit = {
 export type BrowserProductPreviewInput = {
   platform: 'DOUYIN';
   shopBindingId: string;
-  pageShopDisplayName: string;
+  pageShopDisplayName?: string;
   platformProductId?: string;
   platformSkuId?: string;
   platformProductName: string;
@@ -129,7 +129,7 @@ export function hasRequiredOrderFacts(
 export type BrowserLeadIntakeInput = {
   platform: 'DOUYIN';
   shopBindingId: string;
-  pageShopDisplayName: string;
+  pageShopDisplayName?: string;
   platformOrderNo: string;
   contactName: string;
   contactSource: 'CHAT' | 'OFF_PLATFORM';

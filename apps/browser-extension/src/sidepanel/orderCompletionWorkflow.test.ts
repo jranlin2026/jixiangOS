@@ -8,7 +8,7 @@ const currentContext = {
   customerDisplayName: '悠然一刻',
   platformOrderNo: 'ORDER-20260808-1',
   orderStatus: '已付款',
-  shopDisplayName: '极享官方店',
+  shopDisplayName: '',
   platformProductId: 'PRODUCT-OLD',
   platformSkuId: 'SKU-OLD',
   productName: '体验套餐',
@@ -139,7 +139,6 @@ assert.equal(result.remarkText, backendRemarkText);
 assert.deepEqual(firstIntakeInput, {
   platform: 'DOUYIN',
   shopBindingId: selectedShop.id,
-  pageShopDisplayName: '极享官方店',
   platformOrderNo: currentContext.platformOrderNo,
   contactName: currentContext.customerDisplayName,
   platformProductId: currentContext.platformProductId,
@@ -236,7 +235,6 @@ assert.equal(changedFactsFirstClick.message, '订单信息已变化，请确认�
 assert.deepEqual(changedFactsPreviewInput, {
   platform: 'DOUYIN',
   shopBindingId: selectedShop.id,
-  pageShopDisplayName: changedFactsContext.shopDisplayName,
   platformProductId: changedFactsContext.platformProductId,
   platformSkuId: changedFactsContext.platformSkuId,
   platformProductName: changedFactsContext.productName,
@@ -289,7 +287,6 @@ assert.deepEqual(confirmedLatestIntake, {
   contactName: changedFactsContext.customerDisplayName,
   contactPhone: '13826459812',
   contactSource: 'CHAT',
-  pageShopDisplayName: changedFactsContext.shopDisplayName,
   platformProductId: changedFactsContext.platformProductId,
   platformSkuId: changedFactsContext.platformSkuId,
   platformProductName: changedFactsContext.productName,
@@ -331,65 +328,6 @@ assert.deepEqual(
   [1, 1, 1, 1],
   '缓存店铺不一致不得跳过权威预检；最新页面已匹配时应继续',
 );
-
-for (const latestShopContext of [
-  { label: '预检时店铺已切换', context: { ...currentContext, shopDisplayName: '其他店铺' }, code: 'SHOP_CONTEXT_MISMATCH' },
-  { label: '预检时店铺缺失或歧义', context: { ...currentContext, shopDisplayName: '' }, code: 'SHOP_CONTEXT_UNAVAILABLE' },
-] as const) {
-  let latestIntakeCalls = 0;
-  let latestPageCalls = 0;
-  let latestReportCalls = 0;
-  const latestResult = await runCompletion({
-    expectedOrderNo: currentContext.platformOrderNo,
-    expectedCustomerDisplayName: currentContext.customerDisplayName,
-    phone: '13826459812',
-    shop: selectedShop,
-    pageShopDisplayName: currentContext.shopDisplayName,
-    intakeInput: { platform: 'DOUYIN', shopBindingId: selectedShop.id, pageShopDisplayName: currentContext.shopDisplayName },
-  }, {
-    readContext: async () => latestShopContext.context,
-    intake: async () => { latestIntakeCalls += 1; return { code: 0, data: intakeResult, message: 'success' }; },
-    completePage: async () => {
-      latestPageCalls += 1;
-      throw new Error('店铺预检失败后不得操作页面');
-    },
-    report: async () => {
-      latestReportCalls += 1;
-      return { code: 0, data: completionResult, message: 'success' };
-    },
-  });
-  assert.equal(latestResult.stage, 'OS_FAILED', latestShopContext.label);
-  assert.equal(latestResult.errorCode, latestShopContext.code, latestShopContext.label);
-  assert.deepEqual([latestIntakeCalls, latestPageCalls, latestReportCalls], [0, 0, 0], latestShopContext.label);
-}
-
-for (const retryShopContext of [
-  { label: '已有入库结果时权威店铺切换', context: { ...currentContext, shopDisplayName: '其他店铺' }, code: 'SHOP_CONTEXT_MISMATCH' },
-  { label: '已有入库结果时权威店铺缺失', context: { ...currentContext, shopDisplayName: '' }, code: 'SHOP_CONTEXT_UNAVAILABLE' },
-] as const) {
-  let retryShopReportCalls = 0;
-  const retryShopResult = await runCompletion({
-    expectedOrderNo: currentContext.platformOrderNo,
-    expectedCustomerDisplayName: currentContext.customerDisplayName,
-    phone: '13826459812',
-    shop: selectedShop,
-    pageShopDisplayName: currentContext.shopDisplayName,
-    intakeInput: { platform: 'DOUYIN', shopBindingId: selectedShop.id },
-    existingIntake: intakeResult,
-  }, {
-    readContext: async () => retryShopContext.context,
-    intake: async () => { throw new Error('已有入库结果不得重新入库'); },
-    completePage: async () => { throw new Error('权威店铺失败不得操作页面'); },
-    report: async () => {
-      retryShopReportCalls += 1;
-      return { code: 0, data: completionResult, message: 'success' };
-    },
-  });
-  assert.equal(retryShopResult.stage, 'PLATFORM_FAILED', retryShopContext.label);
-  assert.equal(retryShopResult.osStatus, 'SUCCEEDED', retryShopContext.label);
-  assert.equal(retryShopResult.errorCode, retryShopContext.code, retryShopContext.label);
-  assert.equal(retryShopReportCalls, 0, `${retryShopContext.label}未验证当前页面，不得上报`);
-}
 
 let pageCallsAfterOsFailure = 0;
 const osFailure = await runCompletion({

@@ -13,7 +13,6 @@ export type { FeigePageContext, PageWriteResult, SafeReplyFillResult } from '../
 const selectors = {
   root: ['[data-jx-feige-conversation]', '#workspace-chat', '[data-testid="conversation-panel"]', '[class*="conversation"]'],
   customer: ['[data-jx-customer-name]', '#topbar-left-info span', '[data-testid="conversation-customer-name"]', '[class*="customer-name"]'],
-  shop: ['[data-jx-shop-name]', '[data-testid="shop-name"]', '[data-shop-name]'],
   orderNo: ['[data-jx-order-no]', '[data-testid="order-no"]', '[data-order-no]'],
   orderStatus: ['[data-jx-order-status]', '[data-testid="order-status"]'],
   product: ['[data-jx-product-name]', '[data-testid="product-name"]', '[class*="product-name"]'],
@@ -272,26 +271,6 @@ function direction(element: HTMLElement): BrowserChatMessage['direction'] {
   return 'SYSTEM';
 }
 
-function shopDisplayNameFromPage(document: Document) {
-  const candidates = uniqueMatches(document, selectors.shop)
-    .filter(isVisible)
-    .filter((element) => Boolean(element.textContent?.trim()));
-  if (candidates.length === 1) return candidates[0].textContent?.trim() || '';
-  if (candidates.length > 1) return '';
-
-  const accountRegions = [...document.querySelectorAll<HTMLElement>('[data-btm="c4455"][role="button"]')]
-    .filter(isVisible);
-  if (accountRegions.length !== 1) return '';
-
-  const identityLines = [...accountRegions[0].querySelectorAll<HTMLElement>('[style]')]
-    .filter(isVisible)
-    .filter((element) => element.style.getPropertyValue('-webkit-line-clamp').trim() === '1')
-    .map((element) => element.textContent?.trim() || '')
-    .filter(Boolean);
-  const uniqueIdentityLines = [...new Set(identityLines)];
-  return uniqueIdentityLines.length === 2 ? uniqueIdentityLines[1] : '';
-}
-
 function activeOrderContainer(orderCard: HTMLElement) {
   return orderCard.closest<HTMLElement>('.ecom-collapse-item') || orderCard;
 }
@@ -462,7 +441,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       if (!root) diagnostics.push('未找到飞鸽会话区域');
       const scope: ParentNode = root || document;
       const customerDisplayName = text(scope, selectors.customer);
-      const shopDisplayName = shopDisplayNameFromPage(document);
+      const shopDisplayName = '';
       const activeOrderCards = visibleActiveOrderCards(document);
       const activeOrderCard = activeOrderCards.length === 1 ? activeOrderCards[0] : null;
       const platformOrderNo = activeOrderCard ? orderNoFromElement(activeOrderCard) : '';
@@ -488,7 +467,6 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         .map((element) => ({ direction: direction(element), text: element.textContent?.trim() || '' }))
         .filter((message) => message.text);
       if (!customerDisplayName) diagnostics.push('未识别客户昵称');
-      if (!shopDisplayName) diagnostics.push('未识别页面店铺');
       if (activeOrderCards.length > 1) diagnostics.push('当前存在多张可见活动订单卡');
       if (!platformOrderNo) diagnostics.push('未识别平台订单号');
       if (!orderStatus) diagnostics.push('未识别订单状态');
@@ -508,7 +486,6 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         readyForIntake: Boolean(
           root
           && customerDisplayName.trim()
-          && shopDisplayName.trim()
           && activeOrderCards.length === 1
           && platformOrderNo.trim()
           && orderStatus.trim()
