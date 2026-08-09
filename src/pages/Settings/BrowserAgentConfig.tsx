@@ -40,6 +40,7 @@ import type {
   BrowserShopInput,
 } from '../../types/browserAgent';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import BusinessPlatformBrand from '../../shared/components/BusinessPlatformBrand';
 import TablePagination from '../../shared/components/TablePagination';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { formatCurrency, formatDateTime, formatPaginationRows } from '../../shared/utils/formatters';
@@ -122,8 +123,6 @@ type ShopListProps = {
   onSelect: (shop: BrowserShopBinding) => void;
 };
 
-const platformLabel = (platform: string) => platform.toUpperCase() === 'DOUYIN' ? '抖音小店' : platform;
-
 export function BrowserShopBindingList({ rows, selectedShopId, mappingCounts, onSelect }: ShopListProps) {
   if (!rows.length) return <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', color: '#64748b', borderStyle: 'dashed' }}>没有找到符合条件的店铺</Paper>;
 
@@ -161,7 +160,10 @@ export function BrowserShopBindingList({ rows, selectedShopId, mappingCounts, on
               <Typography fontWeight={800} noWrap>{shop.displayName}</Typography>
               {selected ? <CheckCircleRoundedIcon color="primary" sx={{ fontSize: 18 }} /> : null}
             </Stack>
-            <Typography variant="caption" color="text.secondary">{platformLabel(shop.platform)} · {shop.active ? '已启用' : '已停用'}</Typography>
+            <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mt: 0.25 }}>
+              <BusinessPlatformBrand platform={shop.platform} compact />
+              <Typography variant="caption" color="text.secondary">· {shop.active ? '已启用' : '已停用'}</Typography>
+            </Stack>
           </Box>
           <Chip size="small" label={`${mappingCounts.get(shop.id) || 0} 个映射`} sx={{ bgcolor: selected ? '#dbeafe' : '#f1f5f9', color: selected ? '#1d4ed8' : '#475569', fontWeight: 700 }} />
         </Stack>
@@ -508,8 +510,13 @@ const BrowserAgentConfigPage: React.FC = () => {
 
   return <Box>
     <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={1}>
-      <Box><Typography variant="h6" fontWeight={700}>平台商品映射</Typography><Typography variant="body2" color="text.secondary">店铺统一来自“业务平台与店铺”，本页只配置插件识别参数和商品映射。</Typography></Box>
-      <Button variant="contained" startIcon={<AddIcon />} onClick={() => openShopForm()} disabled={!selectableBusinessShops.length}>接入已有业务店铺</Button>
+      <Box>
+        <Typography variant="h6" fontWeight={700}>平台商品映射</Typography>
+        <Typography variant="body2" color="text.secondary">店铺统一来自“业务平台与店铺”。当前浏览器员工仅支持抖音飞鸽，其他平台可先维护店铺，待对应插件上线后再接入。</Typography>
+      </Box>
+      <Button variant="contained" startIcon={<AddIcon />} onClick={() => openShopForm()} disabled={!selectableBusinessShops.length}>
+        {selectableBusinessShops.length ? '接入抖音店铺' : businessShops.length ? '抖音店铺已全部接入' : '暂无可接入抖音店铺'}
+      </Button>
     </Stack>
 
     {loading ? <Box sx={{ py: 8, textAlign: 'center' }}><CircularProgress size={28} /></Box> : <Box
@@ -551,11 +558,10 @@ const BrowserAgentConfigPage: React.FC = () => {
           <Box sx={{ px: { xs: 2, sm: 2.5 }, py: 2.25, bgcolor: '#f8fbff', borderBottom: '1px solid #dbe4f0' }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'flex-start' }} gap={2}>
               <Box sx={{ minWidth: 0 }}>
-                <Typography variant="overline" color="primary.main" fontWeight={800} letterSpacing={1}>当前店铺</Typography>
-                <Typography variant="h5" fontWeight={800} sx={{ lineHeight: 1.25 }}>{selectedShop.displayName}</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>当前店铺：{selectedShop.displayName}</Typography>
+                <Typography data-testid="current-browser-shop-label" variant="overline" color="primary.main" fontWeight={800} letterSpacing={1}>当前店铺</Typography>
+                <Typography data-testid="current-browser-shop-name" variant="h5" fontWeight={800} sx={{ lineHeight: 1.25 }}>{selectedShop.displayName}</Typography>
                 <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mt: 1.25 }}>
-                  <Chip size="small" label={platformLabel(selectedShop.platform)} variant="outlined" />
+                  <BusinessPlatformBrand platform={selectedShop.platform} compact />
                   {statusChip(selectedShop.active)}
                   <Chip size="small" icon={<Inventory2OutlinedIcon />} label={`${mappingCounts.get(selectedShop.id) || 0} 个商品映射`} sx={{ bgcolor: '#eaf2ff', color: '#1d4ed8', fontWeight: 700 }} />
                   <Chip size="small" label={selectedShop.platformShopId ? `店铺ID：${selectedShop.platformShopId}` : '未填写平台店铺ID'} variant="outlined" />

@@ -199,7 +199,10 @@ async function mountPage(fixture: ReturnType<typeof backendFixture>) {
   mountedRoot = root;
   act(() => { root.render(React.createElement(BrowserAgentConfigPage)); });
   assert.ok(document.querySelector('[role="progressbar"]'), '初始HTTP/产品请求未完成时应显示加载态');
-  await waitFor('店铺目录初始加载', () => document.body.textContent?.includes('当前店铺：一号店铺') === true);
+  await waitFor('店铺目录初始加载', () => document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent === '一号店铺');
+  assert.ok(document.body.textContent?.includes('当前浏览器员工仅支持抖音飞鸽'), '商品映射页应明确当前插件的支持范围');
+  assert.equal(findButton('抖音店铺已全部接入').disabled, true, '无可接入抖音店铺时应说明原因，而不是显示含糊的灰色按钮');
+  assert.equal(document.querySelectorAll('[data-testid="current-browser-shop-label"]').length, 1, '当前店铺标题只能出现一次');
   return root;
 }
 
@@ -230,13 +233,13 @@ async function exerciseRealPageWorkflow() {
   assert.equal(shopTwoRow.tabIndex, 0, '店铺行必须可聚焦');
   assert.equal(shopTwoRow.getAttribute('aria-selected'), 'false');
   dispatchKey(shopTwoRow, ' ');
-  await waitFor('空格键选择二号店铺', () => document.body.textContent?.includes('当前店铺：二号店铺') === true);
+  await waitFor('空格键选择二号店铺', () => document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent === '二号店铺');
   assert.equal(shopTwoRow.getAttribute('aria-selected'), 'true');
   assert.ok(document.body.textContent?.includes('二号店铺商品'), '键盘选店后应切换下方映射结果');
 
   const shopOneRow = document.querySelector('[data-view="desktop"][data-row-id="shop-1"]') as HTMLElement;
   dispatchKey(shopOneRow, 'Enter');
-  await waitFor('回车键选择一号店铺', () => document.body.textContent?.includes('当前店铺：一号店铺') === true);
+  await waitFor('回车键选择一号店铺', () => document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent === '一号店铺');
   assert.ok(document.querySelector('[aria-label="编辑商品映射 一号店铺商品"]'), '商品映射操作列应提供可读的编辑图标按钮');
   assert.ok(document.querySelector('[aria-label="停用商品映射 一号店铺商品"]'), '商品映射操作列应提供可读的停用图标按钮');
   const mappingRow = document.querySelector('[data-view="desktop"][data-row-id="mapping-1"]') as HTMLTableRowElement | null;
@@ -251,14 +254,14 @@ async function exerciseRealPageWorkflow() {
   assert.equal(shopTwoCard.tabIndex, 0, '手机卡片必须可聚焦');
   assert.equal(shopTwoCard.getAttribute('aria-selected'), 'false');
   dispatchKey(shopTwoCard, ' ');
-  await waitFor('手机卡片空格键选择二号店铺', () => document.body.textContent?.includes('当前店铺：二号店铺') === true);
+  await waitFor('手机卡片空格键选择二号店铺', () => document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent === '二号店铺');
   assert.equal(shopTwoCard.getAttribute('aria-selected'), 'true');
   assert.ok(document.body.textContent?.includes('二号店铺商品'), '手机卡片键盘选店后应切换下方映射结果');
 
   const desktopEdit = findButton('编辑接入');
   dispatchClick(desktopEdit);
   await waitFor('当前店铺编辑按钮打开表单', () => document.body.textContent?.includes('编辑店铺接入') === true);
-  assert.ok(document.body.textContent?.includes('当前店铺：二号店铺'), '编辑当前店铺不得改变店铺上下文');
+  assert.equal(document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent, '二号店铺', '编辑当前店铺不得改变店铺上下文');
   await closeEditDialog();
 
   dispatchClick(findButton('停用店铺'));
@@ -270,7 +273,7 @@ async function exerciseRealPageWorkflow() {
 
   const refreshedShopOneRow = document.querySelector('[data-view="desktop"][data-row-id="shop-1"]') as HTMLElement;
   dispatchKey(refreshedShopOneRow, 'Enter');
-  await waitFor('回车键选择一号店铺', () => document.body.textContent?.includes('当前店铺：一号店铺') === true);
+  await waitFor('回车键选择一号店铺', () => document.querySelector('[data-testid="current-browser-shop-name"]')?.textContent === '一号店铺');
 
   dispatchClick(findButton('新增商品映射'));
   const mappingDialog = document.querySelector('[role="dialog"]')!;

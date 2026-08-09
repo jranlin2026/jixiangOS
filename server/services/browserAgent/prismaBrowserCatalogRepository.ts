@@ -29,10 +29,12 @@ type LegacySourceConfig = {
   isActive?: unknown;
 };
 
-function platformCode(name: string) {
+export function businessPlatformCode(name: string) {
   const normalized = name.trim().toLocaleLowerCase('zh-CN');
   if (/(抖音|douyin)/i.test(normalized)) return 'DOUYIN';
   if (/(微信|wechat|weixin)/i.test(normalized)) return 'WECHAT';
+  if (/(快手|kuaishou)/i.test(normalized)) return 'KUAISHOU';
+  if (/(小红书|xiaohongshu|rednote)/i.test(normalized)) return 'XIAOHONGSHU';
   return normalized.replace(/[^a-z0-9\u4e00-\u9fff]+/gi, '-').replace(/^-|-$/g, '').toUpperCase();
 }
 
@@ -86,7 +88,7 @@ async function listBusinessShops(prisma: Pick<BrowserCatalogDataClient, 'appStor
     return [{
       id,
       platformId,
-      platformCode: platformCode(platformName),
+      platformCode: businessPlatformCode(platformName),
       platformName,
       name,
       active: item.isActive !== false && platform?.isActive !== false,

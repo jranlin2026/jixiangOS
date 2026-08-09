@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import { createPrismaBrowserCatalogRepository, matchLegacyBindingToBusinessShop, uniqueLegacyBusinessShopMatches } from './prismaBrowserCatalogRepository';
+import { businessPlatformCode, createPrismaBrowserCatalogRepository, matchLegacyBindingToBusinessShop, uniqueLegacyBusinessShopMatches } from './prismaBrowserCatalogRepository';
+
+assert.equal(businessPlatformCode('抖音小店'), 'DOUYIN');
+assert.equal(businessPlatformCode('微信小店'), 'WECHAT');
+assert.equal(businessPlatformCode('快手小店'), 'KUAISHOU');
+assert.equal(businessPlatformCode('小红书电商'), 'XIAOHONGSHU');
 
 const directory = [
   { id: 'business-shop-1', platformId: 'platform-douyin', platformCode: 'DOUYIN', platformName: '抖音小店', name: '极享智能体', active: true },

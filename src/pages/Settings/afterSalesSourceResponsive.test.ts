@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const source = readFileSync(join(process.cwd(), 'src/pages/Settings/AfterSalesSourceConfig.tsx'), 'utf8');
+const brandSource = readFileSync(join(process.cwd(), 'src/shared/components/BusinessPlatformBrand.tsx'), 'utf8');
 
 assert.match(
   source,
@@ -20,4 +21,14 @@ assert.match(
   source,
   /data-testid="add-after-sales-platform"[\s\S]*?>新增业务平台</,
   'The primary platform action should be explicit instead of an inline blank input.',
+);
+
+for (const platformName of ['抖音小店', '微信小店', '快手小店', '小红书电商', '第三方平台']) {
+  assert.ok(`${source}\n${brandSource}`.includes(platformName), `The platform chooser should expose ${platformName}.`);
+}
+
+assert.match(
+  source,
+  /business-platform-preset-/,
+  'Preset platforms should be clickable choices instead of free-form names.',
 );

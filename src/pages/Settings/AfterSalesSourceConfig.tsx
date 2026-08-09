@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
+  ButtonBase,
   Chip,
   Dialog,
   DialogActions,
@@ -19,20 +20,27 @@ import {
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import LinkOutlinedIcon from '@mui/icons-material/LinkOutlined';
-import StorefrontOutlinedIcon from '@mui/icons-material/StorefrontOutlined';
+import LanguageOutlinedIcon from '@mui/icons-material/LanguageOutlined';
 import { settingsApi } from '../../api';
 import type { AfterSalesSourceConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import OperationFeedbackDialog, { type OperationFeedbackSeverity } from '../../shared/components/OperationFeedbackDialog';
+import BusinessPlatformBrand, {
+  BUSINESS_PLATFORM_PRESETS,
+  findBusinessPlatformPreset,
+  type BusinessPlatformPresetKey,
+} from '../../shared/components/BusinessPlatformBrand';
 
 type EditorState = {
   kind: 'platform' | 'shop';
   item: AfterSalesSourceConfig | null;
   parentId?: string;
   name: string;
+  platformChoice?: BusinessPlatformPresetKey | 'custom';
 };
 
 const emptyEditor: EditorState = { kind: 'platform', item: null, name: '' };
@@ -54,7 +62,14 @@ const AfterSalesSourceConfigPage: React.FC = () => {
   useEffect(() => { void load(); }, []);
 
   const openEditor = (kind: EditorState['kind'], item?: AfterSalesSourceConfig, parentId?: string) => {
-    setEditor({ kind, item: item || null, parentId: parentId || item?.parentId, name: item?.name || '' });
+    const preset = kind === 'platform' ? findBusinessPlatformPreset(item?.name) : undefined;
+    setEditor({
+      kind,
+      item: item || null,
+      parentId: parentId || item?.parentId,
+      name: item?.name || '',
+      platformChoice: kind === 'platform' && item ? (preset?.key || 'custom') : undefined,
+    });
     setEditorOpen(true);
   };
 
@@ -93,6 +108,8 @@ const AfterSalesSourceConfigPage: React.FC = () => {
     return !normalizedQuery || platform.name.toLocaleLowerCase('zh-CN').includes(normalizedQuery)
       || shops.some((shop) => shop.name.toLocaleLowerCase('zh-CN').includes(normalizedQuery));
   });
+  const existingPresetKeys = new Set(platforms.map((platform) => findBusinessPlatformPreset(platform.name)?.key).filter(Boolean));
+  const customPlatformExists = platforms.some((platform) => !findBusinessPlatformPreset(platform.name));
 
   return <Box>
     <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={1.5}>
@@ -117,7 +134,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
             sx={{ px: { xs: 2, sm: 2.5 }, py: 2, bgcolor: '#f8fbff', borderBottom: '1px solid #dbe4f0' }}
           >
             <Stack direction="row" alignItems="center" spacing={1.25}>
-              <Box sx={{ width: 38, height: 38, display: 'grid', placeItems: 'center', borderRadius: 2, bgcolor: '#eaf2ff', color: '#2563eb' }}><HubOutlinedIcon /></Box>
+              <BusinessPlatformBrand platform={platform.name} compact />
               <Box>
                 <Stack direction="row" alignItems="center" spacing={1}>
                   <Typography variant="subtitle1" fontWeight={800}>{platform.name}</Typography>
@@ -139,7 +156,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
               <Table size="small">
                 <TableHead><TableRow><TableCell>店铺名称</TableCell><TableCell>所属平台</TableCell><TableCell>状态</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
                 <TableBody>{shops.map((shop) => <TableRow key={shop.id} hover>
-                  <TableCell><Stack direction="row" alignItems="center" spacing={1}><StorefrontOutlinedIcon color="action" fontSize="small" /><Typography fontWeight={700}>{shop.name}</Typography></Stack></TableCell>
+                  <TableCell><Stack direction="row" alignItems="center" spacing={1}><BusinessPlatformBrand platform={platform.name} compact /><Typography fontWeight={700}>{shop.name}</Typography></Stack></TableCell>
                   <TableCell>{platform.name}</TableCell>
                   <TableCell><Chip size="small" color={shop.isActive ? 'success' : 'default'} variant={shop.isActive ? 'filled' : 'outlined'} label={shop.isActive ? '启用' : '停用'} /></TableCell>
                   <TableCell align="right">
@@ -154,7 +171,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
             <Stack spacing={1} sx={{ display: { xs: 'flex', md: 'none' }, p: 1.5 }}>
               {shops.map((shop) => <Paper key={shop.id} variant="outlined" sx={{ p: 1.5 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={1}>
-                  <Box><Typography fontWeight={800}>{shop.name}</Typography><Typography variant="caption" color="text.secondary">{platform.name}</Typography></Box>
+                  <Box><Stack direction="row" alignItems="center" spacing={0.75}><BusinessPlatformBrand platform={platform.name} compact /><Typography fontWeight={800}>{shop.name}</Typography></Stack><Typography variant="caption" color="text.secondary">{platform.name}</Typography></Box>
                   <Chip size="small" color={shop.isActive ? 'success' : 'default'} label={shop.isActive ? '启用' : '停用'} />
                 </Stack>
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
@@ -181,11 +198,63 @@ const AfterSalesSourceConfigPage: React.FC = () => {
     <Dialog open={editorOpen} onClose={() => !submitting && setEditorOpen(false)} maxWidth="xs" fullWidth>
       <DialogCloseTitle onClose={() => setEditorOpen(false)} closeDisabled={submitting}>{editor.item ? '编辑' : '新增'}{editor.kind === 'platform' ? '业务平台' : '店铺'}</DialogCloseTitle>
       <DialogContent dividers>
-        <TextField
-          autoFocus fullWidth label={editor.kind === 'platform' ? '平台名称' : '店铺名称'} value={editor.name}
+        {editor.kind === 'platform' && !editor.item ? <Stack spacing={2}>
+          <Box>
+            <Typography fontWeight={800}>选择业务平台</Typography>
+            <Typography variant="body2" color="text.secondary">常用平台直接选择；只有接入其他平台时才需要填写名称。</Typography>
+          </Box>
+          <Box data-testid="business-platform-preset-list" sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.25 }}>
+            {BUSINESS_PLATFORM_PRESETS.map((preset) => {
+              const added = existingPresetKeys.has(preset.key);
+              const selected = editor.platformChoice === preset.key;
+              return <ButtonBase
+                data-testid={`business-platform-preset-${preset.key}`}
+                key={preset.key}
+                disabled={added}
+                onClick={() => setEditor((current) => ({ ...current, platformChoice: preset.key, name: preset.name }))}
+                sx={{
+                  minHeight: 88, px: 2, py: 1.5, border: '1px solid', borderRadius: 2, textAlign: 'left', justifyContent: 'space-between',
+                  borderColor: selected ? 'primary.main' : '#dbe4f0', bgcolor: selected ? '#eff6ff' : '#fff',
+                  '&:hover': { borderColor: '#60a5fa', bgcolor: '#f8fbff' },
+                  '&.Mui-disabled': { opacity: 0.58 },
+                }}
+              >
+                <BusinessPlatformBrand platform={preset.name} />
+                {added ? <Chip size="small" label="已添加" /> : selected ? <CheckCircleRoundedIcon color="primary" /> : null}
+              </ButtonBase>;
+            })}
+            <ButtonBase
+              data-testid="business-platform-preset-custom"
+              disabled={customPlatformExists}
+              onClick={() => setEditor((current) => ({ ...current, platformChoice: 'custom', name: '' }))}
+              sx={{
+                minHeight: 88, px: 2, py: 1.5, border: '1px solid', borderRadius: 2, textAlign: 'left', justifyContent: 'space-between',
+                borderColor: editor.platformChoice === 'custom' ? 'primary.main' : '#dbe4f0', bgcolor: editor.platformChoice === 'custom' ? '#eff6ff' : '#fff',
+                '&:hover': { borderColor: '#60a5fa', bgcolor: '#f8fbff' }, '&.Mui-disabled': { opacity: 0.58 },
+              }}
+            >
+              <Stack direction="row" alignItems="center" spacing={1.25}><Box sx={{ width: 38, height: 38, display: 'grid', placeItems: 'center', borderRadius: 2, bgcolor: '#eef2f7', color: '#64748b' }}><LanguageOutlinedIcon /></Box><Box><Typography fontWeight={800}>第三方平台</Typography><Typography variant="caption" color="text.secondary">最多添加 1 个自定义平台</Typography></Box></Stack>
+              {customPlatformExists ? <Chip size="small" label="已添加" /> : editor.platformChoice === 'custom' ? <CheckCircleRoundedIcon color="primary" /> : null}
+            </ButtonBase>
+          </Box>
+          {editor.platformChoice === 'custom' ? <TextField
+            autoFocus fullWidth label="第三方平台名称" value={editor.name}
+            onChange={(event) => setEditor((current) => ({ ...current, name: event.target.value }))}
+            helperText="请填写对外使用的正式平台名称"
+          /> : null}
+        </Stack> : editor.kind === 'platform' ? <Stack spacing={1.5}>
+          {findBusinessPlatformPreset(editor.name) ? <BusinessPlatformBrand platform={editor.name} /> : null}
+          <TextField
+            autoFocus fullWidth label="平台名称" value={editor.name}
+            disabled={Boolean(findBusinessPlatformPreset(editor.name))}
+            onChange={(event) => setEditor((current) => ({ ...current, name: event.target.value }))}
+            helperText={findBusinessPlatformPreset(editor.name) ? '系统预设平台名称固定，避免插件和商品映射失去关联' : '可修改第三方平台名称'}
+          />
+        </Stack> : <TextField
+          autoFocus fullWidth label="店铺名称" value={editor.name}
           onChange={(event) => setEditor((current) => ({ ...current, name: event.target.value }))}
-          helperText={editor.kind === 'platform' ? '例如：抖音小店、微信小店' : '请输入客户能够辨认的真实店铺名称'}
-        />
+          helperText="请输入客户能够辨认的真实店铺名称"
+        />}
       </DialogContent>
       <DialogActions><Button onClick={() => setEditorOpen(false)} disabled={submitting}>取消</Button><Button variant="contained" onClick={() => void save()} disabled={submitting || !editor.name.trim()}>保存</Button></DialogActions>
     </Dialog>
