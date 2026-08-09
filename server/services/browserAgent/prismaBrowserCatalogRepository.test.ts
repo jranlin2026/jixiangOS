@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { businessPlatformCode, createPrismaBrowserCatalogRepository, matchLegacyBindingToBusinessShop, uniqueLegacyBusinessShopMatches } from './prismaBrowserCatalogRepository';
 
 assert.equal(businessPlatformCode('抖音小店'), 'DOUYIN');
+assert.equal(businessPlatformCode('抖店'), 'DOUYIN');
 assert.equal(businessPlatformCode('微信小店'), 'WECHAT');
 assert.equal(businessPlatformCode('快手小店'), 'KUAISHOU');
 assert.equal(businessPlatformCode('小红书电商'), 'XIAOHONGSHU');

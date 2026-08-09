@@ -23,7 +23,7 @@ assert.match(
   'The primary platform action should be explicit instead of an inline blank input.',
 );
 
-for (const platformName of ['抖音小店', '微信小店', '快手小店', '小红书电商', '第三方平台']) {
+for (const platformName of ['抖店', '微信小店', '快手小店', '小红书电商', '第三方平台']) {
   assert.ok(`${source}\n${brandSource}`.includes(platformName), `The platform chooser should expose ${platformName}.`);
 }
 
@@ -38,3 +38,8 @@ for (const field of ['店铺名称', '平台店铺ID', '店铺别名', '启用�
 }
 assert.match(source, /syncBusinessShop/, 'Saving a Douyin business shop should automatically sync its hidden browser binding.');
 assert.match(source, /保存后系统会自动创建或更新飞鸽客服接入/, 'The editor should explain automatic Feige access.');
+assert.match(source, /position:\s*'sticky',[\s\S]*?right:\s*0/, 'The desktop shop action column should remain fixed on horizontal scroll.');
+assert.match(source, /<IconButton[\s\S]*?aria-label={`管理商品映射/, 'Shop operations should use accessible icon buttons.');
+assert.match(brandSource, /douyin-shop-icon\.png/, 'Douyin should render the transparent icon-only asset.');
+assert.match(brandSource, /aliases:\s*\['抖音小店'/, 'The legacy Douyin platform name should remain a recognized alias.');
+assert.match(brandSource, /alt=\{showName \? '' : preset\.name\}/, 'Brand images should not repeat visible platform text for screen readers.');

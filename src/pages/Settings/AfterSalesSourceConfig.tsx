@@ -8,6 +8,7 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
+  IconButton,
   Paper,
   Stack,
   Switch,
@@ -19,8 +20,11 @@ import {
   TableRow,
   TextField,
   Typography,
+  Tooltip,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import BlockOutlinedIcon from '@mui/icons-material/BlockOutlined';
+import CheckCircleOutlineRoundedIcon from '@mui/icons-material/CheckCircleOutlineRounded';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
@@ -32,6 +36,7 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import OperationFeedbackDialog, { type OperationFeedbackSeverity } from '../../shared/components/OperationFeedbackDialog';
 import BusinessPlatformBrand, {
   BUSINESS_PLATFORM_PRESETS,
+  businessPlatformDisplayName,
   findBusinessPlatformPreset,
   type BusinessPlatformPresetKey,
 } from '../../shared/components/BusinessPlatformBrand';
@@ -48,6 +53,28 @@ type EditorState = {
 };
 
 const emptyEditor: EditorState = { kind: 'platform', item: null, name: '', platformShopId: '', aliasesText: '', isActive: true };
+
+const shopActionHeaderSx = {
+  position: 'sticky',
+  right: 0,
+  zIndex: 4,
+  width: 132,
+  minWidth: 132,
+  whiteSpace: 'nowrap',
+  bgcolor: '#f8fafc',
+  boxShadow: '-1px 0 0 #e5e7eb',
+};
+
+const shopActionCellSx = {
+  position: 'sticky',
+  right: 0,
+  zIndex: 3,
+  width: 132,
+  minWidth: 132,
+  whiteSpace: 'nowrap',
+  bgcolor: '#fff',
+  boxShadow: '-1px 0 0 #e5e7eb',
+};
 
 function splitLines(value: string) {
   return [...new Set(value.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean))];
@@ -93,7 +120,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
       kind,
       item: item || null,
       parentId: parentId || item?.parentId,
-      name: item?.name || '',
+      name: preset?.name || item?.name || '',
       platformShopId: item?.platformShopId || '',
       aliasesText: item?.aliases?.join('\n') || '',
       isActive: item?.isActive ?? true,
@@ -155,7 +182,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
 
   const manageMappings = async (shopId: string, platformName: string) => {
     if (findBusinessPlatformPreset(platformName)?.code !== 'DOUYIN') {
-      setFeedback({ severity: 'warning', message: `${platformName}的浏览器员工尚未接入，当前只能维护店铺资料` });
+      setFeedback({ severity: 'warning', message: `${businessPlatformDisplayName(platformName)}的浏览器员工尚未接入，当前只能维护店铺资料` });
       return;
     }
     const synced = await browserAgentConfigApi.syncBusinessShop(shopId);
@@ -169,7 +196,8 @@ const AfterSalesSourceConfigPage: React.FC = () => {
   const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN');
   const visiblePlatforms = platforms.filter((platform) => {
     const shops = items.filter((item) => item.parentId === platform.id);
-    return !normalizedQuery || platform.name.toLocaleLowerCase('zh-CN').includes(normalizedQuery)
+    return !normalizedQuery || businessPlatformDisplayName(platform.name).toLocaleLowerCase('zh-CN').includes(normalizedQuery)
+      || platform.name.toLocaleLowerCase('zh-CN').includes(normalizedQuery)
       || shops.some((shop) => shop.name.toLocaleLowerCase('zh-CN').includes(normalizedQuery));
   });
   const existingPresetKeys = new Set(platforms.map((platform) => findBusinessPlatformPreset(platform.name)?.key).filter(Boolean));
@@ -201,11 +229,11 @@ const AfterSalesSourceConfigPage: React.FC = () => {
               <BusinessPlatformBrand platform={platform.name} compact />
               <Box>
                 <Stack direction="row" alignItems="center" spacing={1}>
-                  <Typography variant="subtitle1" fontWeight={800}>{platform.name}</Typography>
+                  <Typography variant="subtitle1" fontWeight={800}>{businessPlatformDisplayName(platform.name)}</Typography>
                   <Chip size="small" label={`${shops.length} 家店铺`} sx={{ bgcolor: '#e2e8f0', fontWeight: 700 }} />
                   <Chip size="small" color={platform.isActive ? 'success' : 'default'} label={platform.isActive ? '启用' : '停用'} />
                 </Stack>
-                <Typography variant="caption" color="text.secondary">店铺资料在这里统一维护；当前仅抖音小店支持浏览器员工。</Typography>
+                <Typography variant="caption" color="text.secondary">店铺资料在这里统一维护；当前仅抖店支持浏览器员工。</Typography>
               </Box>
             </Stack>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
@@ -217,8 +245,8 @@ const AfterSalesSourceConfigPage: React.FC = () => {
 
           {shops.length ? <>
             <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
-              <Table size="small">
-                <TableHead><TableRow><TableCell>店铺名称</TableCell><TableCell>平台店铺ID</TableCell><TableCell>浏览器员工</TableCell><TableCell>状态</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
+              <Table size="small" sx={{ minWidth: 900 }}>
+                <TableHead><TableRow><TableCell>店铺名称</TableCell><TableCell>平台店铺ID</TableCell><TableCell>浏览器员工</TableCell><TableCell>状态</TableCell><TableCell align="center" sx={shopActionHeaderSx}>操作</TableCell></TableRow></TableHead>
                 <TableBody>{shops.map((shop) => <TableRow key={shop.id} hover>
                   <TableCell><Stack direction="row" alignItems="center" spacing={1}><BusinessPlatformBrand platform={platform.name} compact /><Box><Typography fontWeight={700}>{shop.name}</Typography>{shop.aliases?.length ? <Typography variant="caption" color="text.secondary">别名：{shop.aliases.join('、')}</Typography> : null}</Box></Stack></TableCell>
                   <TableCell>{shop.platformShopId || <Typography variant="body2" color="warning.main">待补充</Typography>}</TableCell>
@@ -226,10 +254,12 @@ const AfterSalesSourceConfigPage: React.FC = () => {
                     ? <Chip size="small" color={linkedBusinessShopIds.has(shop.id) ? 'success' : 'warning'} variant="outlined" label={linkedBusinessShopIds.has(shop.id) ? '飞鸽已接入' : '保存后自动接入'} />
                     : <Chip size="small" variant="outlined" label="暂未支持" />}</TableCell>
                   <TableCell><Chip size="small" color={shop.isActive ? 'success' : 'default'} variant={shop.isActive ? 'filled' : 'outlined'} label={shop.isActive ? '启用' : '停用'} /></TableCell>
-                  <TableCell align="right">
-                    <Button size="small" startIcon={<LinkOutlinedIcon />} disabled={findBusinessPlatformPreset(platform.name)?.code !== 'DOUYIN'} onClick={() => void manageMappings(shop.id, platform.name)}>管理商品映射</Button>
-                    <Button size="small" onClick={() => openEditor('shop', shop)}>编辑</Button>
-                    <Button size="small" color={shop.isActive ? 'warning' : 'success'} onClick={() => void toggle(shop)}>{shop.isActive ? '停用' : '启用'}</Button>
+                  <TableCell align="center" sx={shopActionCellSx}>
+                    <Tooltip title={findBusinessPlatformPreset(platform.name)?.code === 'DOUYIN' ? '管理商品映射' : '当前平台暂未支持商品映射'} arrow>
+                      <span><IconButton size="small" color="primary" disabled={findBusinessPlatformPreset(platform.name)?.code !== 'DOUYIN'} aria-label={`管理商品映射 ${shop.name}`} onClick={() => void manageMappings(shop.id, platform.name)}><LinkOutlinedIcon fontSize="small" /></IconButton></span>
+                    </Tooltip>
+                    <Tooltip title="编辑店铺" arrow><IconButton size="small" color="primary" aria-label={`编辑店铺 ${shop.name}`} onClick={() => openEditor('shop', shop)}><EditOutlinedIcon fontSize="small" /></IconButton></Tooltip>
+                    <Tooltip title={shop.isActive ? '停用店铺' : '启用店铺'} arrow><IconButton size="small" color={shop.isActive ? 'warning' : 'success'} aria-label={`${shop.isActive ? '停用' : '启用'}店铺 ${shop.name}`} onClick={() => void toggle(shop)}>{shop.isActive ? <BlockOutlinedIcon fontSize="small" /> : <CheckCircleOutlineRoundedIcon fontSize="small" />}</IconButton></Tooltip>
                   </TableCell>
                 </TableRow>)}</TableBody>
               </Table>
@@ -241,10 +271,10 @@ const AfterSalesSourceConfigPage: React.FC = () => {
                   <Box><Stack direction="row" alignItems="center" spacing={0.75}><BusinessPlatformBrand platform={platform.name} compact /><Typography fontWeight={800}>{shop.name}</Typography></Stack><Typography variant="caption" color="text.secondary">店铺ID：{shop.platformShopId || '待补充'}</Typography></Box>
                   <Chip size="small" color={shop.isActive ? 'success' : 'default'} label={shop.isActive ? '启用' : '停用'} />
                 </Stack>
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-                  <Button size="small" disabled={findBusinessPlatformPreset(platform.name)?.code !== 'DOUYIN'} onClick={() => void manageMappings(shop.id, platform.name)}>管理商品映射</Button>
-                  <Button size="small" onClick={() => openEditor('shop', shop)}>编辑</Button>
-                  <Button size="small" color={shop.isActive ? 'warning' : 'success'} onClick={() => void toggle(shop)}>{shop.isActive ? '停用' : '启用'}</Button>
+                <Stack direction="row" justifyContent="flex-end" spacing={0.5} sx={{ mt: 1 }}>
+                  <Tooltip title={findBusinessPlatformPreset(platform.name)?.code === 'DOUYIN' ? '管理商品映射' : '当前平台暂未支持商品映射'} arrow><span><IconButton size="small" color="primary" disabled={findBusinessPlatformPreset(platform.name)?.code !== 'DOUYIN'} aria-label={`管理商品映射 ${shop.name}`} onClick={() => void manageMappings(shop.id, platform.name)}><LinkOutlinedIcon fontSize="small" /></IconButton></span></Tooltip>
+                  <Tooltip title="编辑店铺" arrow><IconButton size="small" color="primary" aria-label={`编辑店铺 ${shop.name}`} onClick={() => openEditor('shop', shop)}><EditOutlinedIcon fontSize="small" /></IconButton></Tooltip>
+                  <Tooltip title={shop.isActive ? '停用店铺' : '启用店铺'} arrow><IconButton size="small" color={shop.isActive ? 'warning' : 'success'} aria-label={`${shop.isActive ? '停用' : '启用'}店铺 ${shop.name}`} onClick={() => void toggle(shop)}>{shop.isActive ? <BlockOutlinedIcon fontSize="small" /> : <CheckCircleOutlineRoundedIcon fontSize="small" />}</IconButton></Tooltip>
                 </Stack>
               </Paper>)}
             </Stack>
@@ -288,7 +318,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
                   '&.Mui-disabled': { opacity: 0.58 },
                 }}
               >
-                <BusinessPlatformBrand platform={preset.name} />
+                <BusinessPlatformBrand platform={preset.name} showName />
                 {added ? <Chip size="small" label="已添加" /> : selected ? <CheckCircleRoundedIcon color="primary" /> : null}
               </ButtonBase>;
             })}
@@ -312,7 +342,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
             helperText="请填写对外使用的正式平台名称"
           /> : null}
         </Stack> : editor.kind === 'platform' ? <Stack spacing={1.5}>
-          {findBusinessPlatformPreset(editor.name) ? <BusinessPlatformBrand platform={editor.name} /> : null}
+          {findBusinessPlatformPreset(editor.name) ? <BusinessPlatformBrand platform={editor.name} showName /> : null}
           <TextField
             autoFocus fullWidth label="平台名称" value={editor.name}
             disabled={Boolean(findBusinessPlatformPreset(editor.name))}

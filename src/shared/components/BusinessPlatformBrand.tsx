@@ -13,10 +13,10 @@ export type BusinessPlatformPreset = {
 };
 
 export const BUSINESS_PLATFORM_PRESETS: BusinessPlatformPreset[] = [
-  { key: 'douyin', name: '抖音小店', code: 'DOUYIN', logoSrc: '/platforms/douyin-shop.png', aliases: ['抖店', '抖音电商', 'douyin'] },
-  { key: 'wechat', name: '微信小店', code: 'WECHAT', logoSrc: '/platforms/wechat-shop.png', aliases: ['微信电商', '视频号小店', 'wechat', 'weixin'] },
-  { key: 'kuaishou', name: '快手小店', code: 'KUAISHOU', logoSrc: '/platforms/kuaishou-shop.png', aliases: ['快手电商', 'kuaishou'] },
-  { key: 'xiaohongshu', name: '小红书电商', code: 'XIAOHONGSHU', logoSrc: '/platforms/xiaohongshu-shop.png', aliases: ['小红书小店', '小红书', 'rednote', 'xiaohongshu'] },
+  { key: 'douyin', name: '抖店', code: 'DOUYIN', logoSrc: '/platforms/douyin-shop-icon.png', aliases: ['抖音小店', '抖音电商', 'douyin'] },
+  { key: 'wechat', name: '微信小店', code: 'WECHAT', logoSrc: '/platforms/wechat-shop-icon.png', aliases: ['微信电商', '视频号小店', 'wechat', 'weixin'] },
+  { key: 'kuaishou', name: '快手小店', code: 'KUAISHOU', logoSrc: '/platforms/kuaishou-shop-icon.png', aliases: ['快手电商', 'kuaishou'] },
+  { key: 'xiaohongshu', name: '小红书电商', code: 'XIAOHONGSHU', logoSrc: '/platforms/xiaohongshu-shop-icon.png', aliases: ['小红书小店', '小红书', 'rednote', 'xiaohongshu'] },
 ];
 
 function normalizedPlatform(value: string) {
@@ -29,6 +29,10 @@ export function findBusinessPlatformPreset(value: string | null | undefined) {
     [preset.name, preset.code, preset.key, ...preset.aliases]
       .some((candidate) => normalizedPlatform(candidate) === normalized)
   ));
+}
+
+export function businessPlatformDisplayName(value: string | null | undefined) {
+  return findBusinessPlatformPreset(value)?.name || String(value || '');
 }
 
 type Props = {
@@ -50,10 +54,10 @@ const BusinessPlatformBrand: React.FC<Props> = ({ platform, compact = false, sho
     <Box
       component="img"
       src={preset.logoSrc}
-      alt={preset.name}
+      alt={showName ? '' : preset.name}
       sx={{
-        display: 'block', objectFit: 'contain', objectPosition: 'left center', flexShrink: 0,
-        width: compact ? 66 : 118, height: compact ? 26 : 42,
+        display: 'block', objectFit: 'contain', objectPosition: 'center', flexShrink: 0,
+        width: compact ? 28 : 38, height: compact ? 28 : 38,
       }}
     />
     {showName ? <Typography variant={compact ? 'caption' : 'body2'} fontWeight={700} noWrap>{preset.name}</Typography> : null}

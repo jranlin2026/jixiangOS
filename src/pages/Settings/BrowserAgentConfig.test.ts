@@ -86,7 +86,7 @@ test('店铺选择区只展示业务店铺上下文和映射数量', () => {
   }`);
 
   assert.match(html, /极享官方旗舰店/);
-  assert.match(html, /抖音小店/);
+  assert.match(html, /抖店/);
   assert.match(html, /已启用/);
   assert.match(html, /0 个映射/);
   assert.doesNotMatch(html, /稳定店铺标识|公司资源 \/ 抖音电商 \/ 飞鸽客服/);

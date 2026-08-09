@@ -33,7 +33,7 @@ type LegacySourceConfig = {
 
 export function businessPlatformCode(name: string) {
   const normalized = name.trim().toLocaleLowerCase('zh-CN');
-  if (/(抖音|douyin)/i.test(normalized)) return 'DOUYIN';
+  if (/(抖音|抖店|douyin)/i.test(normalized)) return 'DOUYIN';
   if (/(微信|wechat|weixin)/i.test(normalized)) return 'WECHAT';
   if (/(快手|kuaishou)/i.test(normalized)) return 'KUAISHOU';
   if (/(小红书|xiaohongshu|rednote)/i.test(normalized)) return 'XIAOHONGSHU';
