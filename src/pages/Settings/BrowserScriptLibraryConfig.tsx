@@ -218,23 +218,13 @@ const BrowserScriptLibraryConfigPage: React.FC = () => {
             {orderedScripts.map((script, index) => {
               const isRecommended = script.id === recommendedScriptId;
               return <Paper key={script.id} variant="outlined" sx={{ p: 1.75, borderRadius: 2, borderColor: isRecommended ? 'primary.light' : moduleTokens.softLine, bgcolor: isRecommended ? '#f8faff' : 'background.paper' }}>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} alignItems={{ sm: 'flex-start' }}>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', rowGap: .75 }}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
                       <Typography variant="subtitle2" fontWeight={800}>话术 {index + 1}</Typography>
                       {isRecommended && <Chip size="small" color="primary" icon={<StarRoundedIcon />} label="推荐" />}
                       {!script.enabled && <Chip size="small" label="已停用" />}
-                    </Stack>
-                    <TextField
-                      fullWidth
-                      multiline
-                      minRows={3}
-                      label="话术内容"
-                      value={script.content}
-                      onChange={(event) => updateScript(script.id, { content: event.target.value })}
-                    />
-                  </Box>
-                  <Stack direction={{ xs: 'row', sm: 'column' }} spacing={.25} alignItems="center">
+                  </Stack>
+                  <Stack data-testid="script-action-toolbar" direction="row" spacing={.25} alignItems="center" sx={{ ml: { sm: 'auto' }, flexWrap: 'nowrap' }}>
                     <Tooltip title={!script.enabled ? '启用后可设为推荐' : isRecommended ? '当前推荐话术' : '设为推荐'}><span><IconButton aria-label={isRecommended ? '当前推荐话术' : '设为推荐'} disabled={!script.enabled} color={isRecommended ? 'primary' : 'default'} onClick={() => markRecommended(script.id)}>{isRecommended ? <StarRoundedIcon /> : <StarBorderRoundedIcon />}</IconButton></span></Tooltip>
                     <Tooltip title="上移话术"><span><IconButton aria-label="上移话术" disabled={index === 0} onClick={() => updateGroup({ scripts: moveScriptItem(selectedGroup.scripts, script.id, -1) })}><ArrowUpwardRoundedIcon /></IconButton></span></Tooltip>
                     <Tooltip title="下移话术"><span><IconButton aria-label="下移话术" disabled={index === orderedScripts.length - 1} onClick={() => updateGroup({ scripts: moveScriptItem(selectedGroup.scripts, script.id, 1) })}><ArrowDownwardRoundedIcon /></IconButton></span></Tooltip>
@@ -242,6 +232,14 @@ const BrowserScriptLibraryConfigPage: React.FC = () => {
                     <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { fontSize: 12 } }} control={<Switch size="small" checked={script.enabled} onChange={(event) => updateScript(script.id, { enabled: event.target.checked, priority: event.target.checked ? script.priority : 0 })} />} label="启用" />
                   </Stack>
                 </Stack>
+                <TextField
+                  fullWidth
+                  multiline
+                  minRows={3}
+                  label="话术内容"
+                  value={script.content}
+                  onChange={(event) => updateScript(script.id, { content: event.target.value })}
+                />
               </Paper>;
             })}
             {!selectedGroup.scripts.length && <Paper variant="outlined" sx={{ p: 4, textAlign: 'center', borderStyle: 'dashed' }}><Typography color="text.secondary">当前分组暂无话术</Typography></Paper>}

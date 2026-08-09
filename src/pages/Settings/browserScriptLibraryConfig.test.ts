@@ -17,6 +17,8 @@ assert.match(page, /浏览器客服话术/);
 assert.match(page, /设为推荐/);
 assert.match(page, /上移/);
 assert.match(page, /下移/);
+assert.match(page, /data-testid="script-action-toolbar" direction="row"/, '话术操作区必须保持横向排列');
+assert.doesNotMatch(page, /direction=\{\{ xs: 'row', sm: 'column' \}\}/, '话术操作区不得在桌面端变成竖列');
 assert.doesNotMatch(page, /话术标题/);
 assert.doesNotMatch(page, /优先级/);
 assert.doesNotMatch(page, /推荐条件/);
