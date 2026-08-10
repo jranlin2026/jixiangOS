@@ -132,6 +132,46 @@ const paidAmountWithDiscount = readOrderFactsFixture(`
 assert.equal(paidAmountWithDiscount.paymentAmount, 999, '实付金额同行展示优惠金额时，应读取紧邻实付标签的金额');
 assert.equal(paidAmountWithDiscount.paymentAt, '2026-08-09T12:22:46+08:00');
 
+const liveSplitPaidAmountWithDiscount = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已发货</span><span data-jx-order-no>ORDER-LIVE-SPLIT-PAID-WITH-DISCOUNT</span>
+    <span data-btm="d5834">极享口播智能体 读书卡</span>
+    <div class="payment-row">
+      <div>实付金额</div>
+      <div class="payment-value">
+        <div class="split-amount"><div>¥</div><div>999.</div><div>00</div></div>
+        <div><span>优惠 ¥ 300.00</span></div>
+      </div>
+    </div>
+    <div><span>付款时间</span><strong>2026/08/09 11:31:49 (抖音支付)</strong></div>
+  </section>
+`);
+assert.equal(
+  liveSplitPaidAmountWithDiscount.paymentAmount,
+  999,
+  '飞鸽将实付金额拆成多个节点且同行展示优惠时，仍应读取实付金额而不是优惠金额',
+);
+
+const liveSplitClosedAmountWithDiscount = readOrderFactsFixture(`
+  <section data-testid="order-card">
+    <span data-jx-order-status>已关闭（售后完成）</span><span data-jx-order-no>ORDER-LIVE-SPLIT-CLOSED-WITH-DISCOUNT</span>
+    <span data-btm="d5834">极享口播智能体 读书卡</span>
+    <div class="payment-row">
+      <div>订单金额</div>
+      <div class="payment-value">
+        <div class="split-amount"><div>¥</div><div>999.</div><div>00</div></div>
+        <div><span>优惠 ¥ 300.00</span></div>
+      </div>
+    </div>
+    <div><span>付款时间</span><strong>2026/08/09 10:32:55 (微信)</strong></div>
+  </section>
+`);
+assert.equal(
+  liveSplitClosedAmountWithDiscount.paymentAmount,
+  999,
+  '已关闭订单将订单金额拆成多个节点且同行展示优惠时，应将订单金额识别为平台实付金额',
+);
+
 const ambiguousPaymentRows = readOrderFactsFixture(`
   <section data-testid="order-card">
     <span data-jx-order-status>已付款</span><span data-jx-order-no>ORDER-AMBIGUOUS-PAYMENT-ROWS</span>
@@ -833,6 +873,23 @@ assert.equal(saveContextSwitchResult.ok, false);
 assert.equal(saveContextSwitchResult.ok ? '' : saveContextSwitchResult.code, 'CONTEXT_CHANGED');
 assert.equal(saveContextSwitchFixture.getSaveClicks(), 1, '上下文是在保存事件中切换');
 
+const saveRerenderedCardFixture = createGuardBoundaryFixture({
+  onSaveClick(document) {
+    const card = document.querySelector('[data-testid="order-card"]') as HTMLElement;
+    card.replaceWith(card.cloneNode(true));
+  },
+});
+const saveRerenderedCardResult = await saveRerenderedCardFixture.adapter.completeOsOrder({
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: backendRemarkLines,
+});
+assert.equal(saveRerenderedCardResult.ok, true, '保存后飞鸽重绘同一订单卡时应重新获取卡片并验证成功');
+if (saveRerenderedCardResult.ok) {
+  assert.equal(saveRerenderedCardResult.remarkStatus, 'SUCCEEDED');
+  assert.equal(saveRerenderedCardResult.greenFlagStatus, 'SUCCEEDED');
+}
+
 const finalBoundarySwitchFixture = createGuardBoundaryFixture({
   onSaveClick(document) {
     document.defaultView?.queueMicrotask(() => {
@@ -1043,7 +1100,10 @@ assert.equal(
   '应优先从当前展开订单卡的商品节点识别商品名称',
 );
 
-function createLiveGreenFlagCompletionFixture() {
+function createLiveGreenFlagCompletionFixture(options: {
+  truncateCardSummaryAfterSave?: boolean;
+  obscureCardFlagAfterSave?: boolean;
+} = {}) {
   const fixture = new JSDOM(`<!doctype html><html><body>
     <main id="workspace-chat">
       <div id="topbar-left-info"><span>悠然一刻</span><span>添加备注</span></div>
@@ -1081,15 +1141,24 @@ function createLiveGreenFlagCompletionFixture() {
   const summaryLines = fixtureDocument.querySelector('[data-real-remark-lines]') as HTMLElement;
   const currentFlag = fixtureDocument.querySelector('[data-real-current-flag]') as HTMLElement;
   const signature = fixtureDocument.querySelector('[data-real-signature]') as HTMLInputElement;
+  let persistedRemark = summaryLines.textContent || '';
   fixtureDocument.querySelector('button[render_type="feature_button"]')?.addEventListener('click', () => {
     drawer.hidden = false;
-    input.value = summaryLines.textContent || '';
+    input.value = persistedRemark;
   });
   [...drawer.querySelectorAll('button')]
     .find((button) => button.textContent?.trim() === '确定')
     ?.addEventListener('click', () => {
-      summaryLines.textContent = signature.checked ? `${input.value}【林恩光 08-09 13:26】` : input.value;
-      currentFlag.style.color = 'rgb(255, 59, 82)';
+      persistedRemark = signature.checked ? `${input.value}【林恩光 08-09 13:26】` : input.value;
+      summaryLines.textContent = options.truncateCardSummaryAfterSave
+        ? `${persistedRemark.slice(0, 18)}...`
+        : persistedRemark;
+      currentFlag.style.color = options.obscureCardFlagAfterSave ? '' : 'rgb(255, 59, 82)';
+      drawer.hidden = true;
+    });
+  [...drawer.querySelectorAll('button')]
+    .find((button) => button.textContent?.trim() === '取消')
+    ?.addEventListener('click', () => {
       drawer.hidden = true;
     });
   return createDouyinFeigeAdapter(fixtureDocument, fixture.window.location.href);
@@ -1106,6 +1175,21 @@ assert.deepEqual(liveGreenFlagCompletionResult, {
   remarkStatus: 'SUCCEEDED',
   greenFlagStatus: 'SUCCEEDED',
 }, '应识别飞鸽真实红色旗帜并取消平台自动追加备注人和时间');
+
+const truncatedLiveCompletionResult = await createLiveGreenFlagCompletionFixture({
+  truncateCardSummaryAfterSave: true,
+  obscureCardFlagAfterSave: true,
+}).completeOsOrder({
+  expectedOrderNo: '6955059225013785777',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: backendRemarkLines,
+});
+assert.deepEqual(truncatedLiveCompletionResult, {
+  ok: true,
+  remarkText: `#销售：小王\n${backendRemarkLines.join('\n')}`,
+  remarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'SUCCEEDED',
+}, '订单卡只显示省略备注和旗帜计数时，应重新打开备注抽屉校验完整持久化结果');
 
 function createCalibratedPaidOrderFixture(options: { includeConfirm?: boolean } = {}) {
   const fixture = new JSDOM(`<!doctype html><html><body>

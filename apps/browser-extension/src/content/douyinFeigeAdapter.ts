@@ -294,8 +294,7 @@ function hasNewPlatformRemarkSignature(existing: string, saved: string) {
   return platformRemarkSignatures(saved).length > platformRemarkSignatures(existing).length;
 }
 
-function hasSavedRemark(orderCard: HTMLElement, remarkText: string, existing: string) {
-  const summary = savedRemarkSummary(orderCard);
+function hasSavedRemarkValue(summary: string, remarkText: string, existing: string) {
   const requiredLines = remarkText
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -303,6 +302,20 @@ function hasSavedRemark(orderCard: HTMLElement, remarkText: string, existing: st
   return requiredLines.length > 0
     && requiredLines.every((line) => summary.includes(line))
     && !hasNewPlatformRemarkSignature(existing, summary);
+}
+
+function hasSavedRemark(orderCard: HTMLElement, remarkText: string, existing: string) {
+  return hasSavedRemarkValue(savedRemarkSummary(orderCard), remarkText, existing);
+}
+
+function isSelectedFlagControl(element: HTMLElement | null) {
+  if (!element) return false;
+  if (element.tagName === 'INPUT') {
+    return (element as HTMLInputElement).checked;
+  }
+  return element.getAttribute('aria-checked') === 'true'
+    || element.dataset.state === 'checked'
+    || element.dataset.selected === 'true';
 }
 
 function direction(element: HTMLElement): BrowserChatMessage['direction'] {
@@ -396,13 +409,27 @@ function textWithNodeBoundaries(node: Node): string {
   return [...node.childNodes].map(textWithNodeBoundaries).join(' ');
 }
 
+type FactContentNormalizer = (content: string) => string;
+
+function paymentAmountContent(content: string) {
+  const discountBoundary = content.indexOf('优惠');
+  const primaryAmountContent = discountBoundary >= 0
+    ? content.slice(0, discountBoundary)
+    : content;
+  return primaryAmountContent.replace(
+    /([¥￥])\s*((?:\d{1,3}(?:\s*,\s*\d{3})+|\d+)(?:\s*\.\s*\d{2})?)/g,
+    (_match, currency: string, amount: string) => `${currency}${amount.replace(/\s+/g, '')}`,
+  );
+}
+
 function factMatchInAdjacentValue(
   labelElement: HTMLElement,
   pattern: RegExp,
+  normalizeContent: FactContentNormalizer = (content) => content,
 ): ParsedPlatformFact<RegExpMatchArray> | null {
   let sibling: ChildNode | null = labelElement.nextSibling;
   while (sibling) {
-    const content = textWithNodeBoundaries(sibling);
+    const content = normalizeContent(textWithNodeBoundaries(sibling));
     const matches = [...content.matchAll(pattern)];
     if (matches.length > 1) return { status: 'AMBIGUOUS' };
     if (matches.length === 1) return { status: 'FOUND', value: matches[0] };
@@ -416,21 +443,22 @@ function factMatchNearUniqueLabel(
   orderCard: HTMLElement,
   label: string,
   pattern: RegExp,
+  normalizeContent: FactContentNormalizer = (content) => content,
 ): ParsedPlatformFact<RegExpMatchArray> {
   const orderContainer = activeOrderContainer(orderCard);
   const labels = semanticLabelElements(orderContainer, label);
   if (!labels.length) return { status: 'ABSENT' };
   if (labels.length > 1) return { status: 'AMBIGUOUS' };
 
-  const labelContentMatches = [...textWithNodeBoundaries(labels[0]).matchAll(pattern)];
+  const labelContentMatches = [...normalizeContent(textWithNodeBoundaries(labels[0])).matchAll(pattern)];
   if (!labelContentMatches.length) {
-    const adjacentValue = factMatchInAdjacentValue(labels[0], pattern);
+    const adjacentValue = factMatchInAdjacentValue(labels[0], pattern, normalizeContent);
     if (adjacentValue) return adjacentValue;
   }
 
   let current: HTMLElement | null = labels[0];
   while (current) {
-    const content = textWithNodeBoundaries(current);
+    const content = normalizeContent(textWithNodeBoundaries(current));
     const matches = [...content.matchAll(pattern)];
     const contentWithoutLabel = content.replace(label, '').replace(/[\s:：-]/g, '');
     const reachedBoundary = current === orderContainer;
@@ -451,9 +479,10 @@ function paymentAmountFromOrderCard(orderCard: HTMLElement): ParsedPlatformFact<
     orderCard,
     '实付金额',
     amountPattern,
+    paymentAmountContent,
   );
   const match = paidAmount.status === 'ABSENT' && orderStatusFromElement(orderCard).startsWith('已关闭')
-    ? factMatchNearUniqueLabel(orderCard, '订单金额', amountPattern)
+    ? factMatchNearUniqueLabel(orderCard, '订单金额', amountPattern, paymentAmountContent)
     : paidAmount;
   if (match.status !== 'FOUND') return match;
   const value = Number(match.value[1].replaceAll(',', ''));
@@ -678,15 +707,20 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           stage: 'CONTEXT',
         };
       }
-      const hasSameBoundContext = () => {
+      const currentBoundOrderCard = () => {
         const currentActiveCard = firstActiveOrderCard(document);
-        return currentActiveCard === orderCard
-          && orderCard.isConnected
-          && isVisible(orderCard)
-          && orderNoFromElement(orderCard) === expectedOrderNo
+        return currentActiveCard
+          && currentActiveCard.isConnected
+          && isVisible(currentActiveCard)
+          && orderNoFromElement(currentActiveCard) === expectedOrderNo
           && currentCustomer() === expectedCustomer
-          && isIntakeEligibleOrderStatus(orderStatusFromElement(orderCard));
+          && isIntakeEligibleOrderStatus(orderStatusFromElement(currentActiveCard))
+          ? currentActiveCard
+          : null;
       };
+      // 保存前必须仍是最初绑定的 DOM 卡片，避免飞鸽切换订单时误操作。
+      // 保存后飞鸽会重绘整张订单卡，验证阶段则按客户和订单号重新获取最新卡片。
+      const hasSameBoundContext = () => currentBoundOrderCard() === orderCard;
 
       const edit = first(orderCard, selectors.orderRemarkEdit)
         || findButtonByText(orderCard, ['添加备注', '修改']);
@@ -854,29 +888,85 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       }
       saveAfterGreen.click();
 
-      if (!hasSameBoundContext()) {
-        return {
-          ok: false,
-          code: 'CONTEXT_CHANGED',
-          message: '保存后当前飞鸽客户或订单已切换，未报告成功',
-          stage: 'CONTEXT',
-          remarkText,
-        };
-      }
-
       const verified = await waitForElement(document, () => {
-        if (!hasSameBoundContext()) return null;
+        const latestOrderCard = currentBoundOrderCard();
+        if (!latestOrderCard) return null;
         const closed = !dialog.isConnected || !isVisible(dialog);
-        return closed && hasSavedRemark(orderCard, remarkText, existing)
-          && isGreenActive(orderCard)
-          ? orderCard
+        return closed && hasSavedRemark(latestOrderCard, remarkText, existing)
+          && isGreenActive(latestOrderCard)
+          ? latestOrderCard
           : null;
       });
       if (!verified) {
-        const savedSummary = savedRemarkSummary(orderCard);
+        const latestOrderCard = currentBoundOrderCard();
+        if (!latestOrderCard) {
+          return {
+            ok: false,
+            code: 'CONTEXT_CHANGED',
+            message: '保存后当前飞鸽客户或订单已切换，未报告成功',
+            stage: 'CONTEXT',
+            remarkText,
+          };
+        }
+        let savedSummary = savedRemarkSummary(latestOrderCard);
+        let remarkSaved = hasSavedRemarkValue(savedSummary, remarkText, existing);
+        let redFlagSaved = isGreenActive(latestOrderCard);
+
+        // 飞鸽订单卡可能只展示被省略的备注摘要和“旗帜 + 数量”，
+        // 无法从卡片本身确认完整持久化结果。此时重新打开同一订单的
+        // 备注抽屉，只读取完整备注和已选红旗，然后取消关闭，不再次写入。
+        const originalDialogClosed = !dialog.isConnected || !isVisible(dialog);
+        let verificationDialogClosed = true;
+        if (originalDialogClosed && (!remarkSaved || !redFlagSaved)) {
+          const verificationEdit = first(latestOrderCard, selectors.orderRemarkEdit)
+            || findButtonByText(latestOrderCard, ['添加备注', '修改']);
+          if (verificationEdit && currentBoundOrderCard() === latestOrderCard) {
+            verificationEdit.click();
+            const verificationDialog = await waitForElement(document, () => findUniqueRemarkDialog(document));
+            if (verificationDialog && currentBoundOrderCard() === latestOrderCard) {
+              verificationDialogClosed = false;
+              const persistedEditor = first(verificationDialog, selectors.orderRemark);
+              const persistedRedFlag = findUniqueGreenFlag(verificationDialog);
+              const persistedRemark = persistedEditor ? editableValue(persistedEditor) : '';
+              if (persistedRemark) {
+                savedSummary = persistedRemark;
+                remarkSaved = hasSavedRemarkValue(persistedRemark, remarkText, existing);
+              }
+              redFlagSaved = redFlagSaved || isSelectedFlagControl(persistedRedFlag);
+
+              const cancel = findButtonByText(verificationDialog, ['取消']);
+              if (cancel && isVisible(cancel) && isEnabled(cancel)) {
+                cancel.click();
+                verificationDialogClosed = Boolean(await waitForElement(document, () => (
+                  !verificationDialog.isConnected || !isVisible(verificationDialog)
+                    ? latestOrderCard
+                    : null
+                ), 500));
+              }
+            }
+          }
+        }
+
+        if (!currentBoundOrderCard()) {
+          return {
+            ok: false,
+            code: 'CONTEXT_CHANGED',
+            message: '保存后复核时当前飞鸽客户或订单已切换，未报告成功',
+            stage: 'CONTEXT',
+            remarkText,
+          };
+        }
+
         const signatureAppended = hasNewPlatformRemarkSignature(existing, savedSummary);
-        const remarkSaved = hasSavedRemark(orderCard, remarkText, existing);
-        const redFlagSaved = isGreenActive(orderCard);
+        if (originalDialogClosed && verificationDialogClosed
+          && remarkSaved && redFlagSaved && !signatureAppended) {
+          return {
+            ok: true,
+            remarkText,
+            remarkStatus: 'SUCCEEDED',
+            greenFlagStatus: 'SUCCEEDED',
+          };
+        }
         return {
           ok: false,
           code: 'ORDER_COMPLETION_NOT_VERIFIED',
@@ -889,7 +979,10 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           greenFlagStatus: redFlagSaved ? 'SUCCEEDED' : 'FAILED',
         };
       }
-      if (!hasSameBoundContext()) {
+      const finalOrderCard = currentBoundOrderCard();
+      if (!finalOrderCard
+        || !hasSavedRemark(finalOrderCard, remarkText, existing)
+        || !isGreenActive(finalOrderCard)) {
         return {
           ok: false,
           code: 'CONTEXT_CHANGED',

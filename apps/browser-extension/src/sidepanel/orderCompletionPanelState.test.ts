@@ -299,6 +299,21 @@ assert.deepEqual(detectedReset.form, {
   source: 'CHAT',
 }, '新会话只能采用新识别到的联系方式');
 assert.equal(detectedReset.sync, null);
+const manuallyCorrectedContact = completionPanelReducer(detectedReset, {
+  type: 'SET_FORM_FIELD', field: 'phone', value: '13700000000',
+});
+assert.equal(manuallyCorrectedContact.form.source, 'OFF_PLATFORM', '客服手工修改联系方式后应自动记录为站外补录');
+const manuallyCorrectedAfterRefresh = completionPanelReducer(manuallyCorrectedContact, {
+  type: 'RECOGNIZE_CONTEXT',
+  context: { ...detectedReset.context!, paymentAmount: 299 },
+  detectedContact: { phone: '13600000000', wechat: 'chat_override_wechat' },
+});
+assert.deepEqual(manuallyCorrectedAfterRefresh.form, {
+  name: '新客户',
+  phone: '13700000000',
+  wechat: 'new_wechat',
+  source: 'OFF_PLATFORM',
+}, '同一会话再次识别时不得覆盖客服手工补录的联系方式和来源');
 
 let raceState = createCompletionPanelState();
 raceState = completionPanelReducer(raceState, {

@@ -74,6 +74,25 @@ export type CompletionPanelAction =
 
 const emptyForm: ContactForm = { name: '', phone: '', wechat: '', source: 'CHAT' };
 
+function mergeRecognizedContact(
+  form: ContactForm,
+  customerDisplayName: string,
+  detectedContact: RecognizedContact,
+): ContactForm {
+  const hasManualContact = form.source === 'OFF_PLATFORM'
+    && Boolean(form.phone.trim() || form.wechat.trim());
+  if (hasManualContact) {
+    return { ...form, name: customerDisplayName, source: 'OFF_PLATFORM' };
+  }
+  return {
+    ...form,
+    name: customerDisplayName,
+    phone: detectedContact?.phone || form.phone,
+    wechat: detectedContact?.wechat || form.wechat,
+    source: detectedContact ? 'CHAT' : form.source,
+  };
+}
+
 export function createCompletionPanelState(): CompletionPanelState {
   return {
     runtimeConfig: null,
@@ -246,13 +265,7 @@ export function completionPanelReducer(
       productPreviewMessage: '',
       activeProductPreview: null,
       context: action.context,
-      form: {
-        ...state.form,
-        name: action.context.customerDisplayName,
-        phone: action.detectedContact?.phone || state.form.phone,
-        wechat: action.detectedContact?.wechat || state.form.wechat,
-        source: action.detectedContact ? 'CHAT' : state.form.source,
-      },
+      form: mergeRecognizedContact(state.form, action.context.customerDisplayName, action.detectedContact),
       contactConfirmed: false,
       sync: null,
       completion: null,
@@ -290,26 +303,14 @@ export function completionPanelReducer(
       return clearOrderResult({
         ...state,
         context: action.context,
-        form: {
-          ...state.form,
-          name: action.context.customerDisplayName,
-          phone: action.detectedContact?.phone || state.form.phone,
-          wechat: action.detectedContact?.wechat || state.form.wechat,
-          source: action.detectedContact ? 'CHAT' : state.form.source,
-        },
+        form: mergeRecognizedContact(state.form, action.context.customerDisplayName, action.detectedContact),
         contactConfirmed: false,
       });
     }
     return {
       ...state,
       context: action.context,
-      form: {
-        ...state.form,
-        name: action.context.customerDisplayName,
-        phone: action.detectedContact?.phone || state.form.phone,
-        wechat: action.detectedContact?.wechat || state.form.wechat,
-        source: action.detectedContact ? 'CHAT' : state.form.source,
-      },
+      form: mergeRecognizedContact(state.form, action.context.customerDisplayName, action.detectedContact),
     };
   }
   if (action.type === 'START_ATTEMPT') {
@@ -342,7 +343,7 @@ export function completionPanelReducer(
   }
   return {
     ...state,
-    form: { ...state.form, [action.field]: action.value },
+    form: { ...state.form, [action.field]: action.value, source: 'OFF_PLATFORM' },
     contactConfirmed: false,
   };
 }

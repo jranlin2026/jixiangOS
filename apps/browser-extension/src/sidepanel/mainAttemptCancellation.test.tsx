@@ -217,7 +217,6 @@ async function loginAndPrepare(orderNo: string) {
   const loginCard = await waitFor('.login-card');
   loginCard.querySelector<HTMLButtonElement>('.primary')?.click();
   await waitFor('.context-card', (node) => (node.textContent || '').includes(orderNo));
-  document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
   await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
 }
 
@@ -238,15 +237,9 @@ document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.c
 await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', () => previewCalls === optionalFactsPreviewBaseline + 1);
 assert.equal(document.body.textContent?.includes('平台商品名称、实付金额或付款时间未完整唯一识别'), false);
 assert.equal(
-  document.querySelector<HTMLInputElement>('.confirm-row input')?.checked,
-  false,
-  '订单快照变化后仍必须由客服重新确认',
-);
-document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
-assert.equal(
   document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.disabled,
   false,
-  '昵称、订单号、联系方式和绑定店铺齐全即应允许入OS',
+  '昵称、订单号、联系方式和绑定店铺齐全即应允许客服通过主按钮确认并入OS',
 );
 const changedConversationCallBaseline = [previewCalls, intakeCalls, completePageCalls, reportCalls];
 pageContext = {

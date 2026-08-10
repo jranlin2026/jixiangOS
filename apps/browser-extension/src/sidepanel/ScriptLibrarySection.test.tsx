@@ -21,7 +21,7 @@ const view = {
     groups: [{
       id: 'paid', name: '付款用户', enabled: true, sortOrder: 1,
       scripts: [{
-        id: 'paid-script', title: '付款确认', content: '已收到您的付款。', enabled: true, sortOrder: 1, priority: 1,
+        id: 'paid-script', title: '确认收货', content: '需要激活的📞码是哪个', enabled: true, sortOrder: 1, priority: 1,
         match: { orderStatuses: ['已付款'], productKeywords: [], contactState: 'ANY' as const },
       }],
     }, {
@@ -33,25 +33,38 @@ const view = {
     }],
     updatedAt: '', updatedBy: { id: 'u1', name: '管理员' },
   },
-  canManage: false,
+  canManage: true,
 };
 
 const root = createRoot(document.getElementById('root')!);
+let refreshCalls = 0;
 await act(async () => {
-  root.render(<ScriptLibrarySection view={view} onFill={() => undefined} onManage={() => undefined} onRetry={() => undefined} />);
+  root.render(<ScriptLibrarySection view={view} onFill={() => undefined} onManage={() => undefined} onRefresh={() => { refreshCalls += 1; }} onRetry={() => undefined} />);
 });
 
+const scriptActionLabels = [...document.querySelectorAll<HTMLButtonElement>('.script-actions button')].map((button) => button.textContent);
+assert.deepEqual(scriptActionLabels, ['刷新话术', '话术设置'], '刷新话术应位于话术设置左侧');
+await act(async () => { document.querySelector<HTMLButtonElement>('.script-refresh')?.click(); });
+assert.equal(refreshCalls, 1, '点击刷新话术应触发重新加载');
 assert.equal(document.body.textContent?.includes('常用'), false);
 assert.equal(document.body.textContent?.includes('查看全部话术'), false);
 assert.equal(document.querySelector('.script-all') !== null, true);
-assert.match(document.querySelector('.primary-recommendation')?.textContent || '', /付款确认/);
+const paidRecommendation = document.querySelector('.primary-recommendation')?.textContent || '';
+assert.match(paidRecommendation, /付款用户 · 推荐话术/);
+assert.equal(paidRecommendation.match(/需要激活的📞码是哪个/g)?.length, 1, '推荐话术正文只显示一次');
+assert.doesNotMatch(paidRecommendation, /确认收货/);
+assert.doesNotMatch(document.querySelector('.script-grid')?.textContent || '', /需要激活的📞码是哪个/, '已推荐的话术不在下方重复展示');
 
 const afterSaleTab = [...document.querySelectorAll<HTMLButtonElement>('.script-tabs button')]
   .find((button) => button.textContent === '售后服务');
 assert.ok(afterSaleTab);
 await act(async () => { afterSaleTab.click(); });
-assert.match(document.querySelector('.primary-recommendation')?.textContent || '', /售后登记/);
-assert.doesNotMatch(document.querySelector('.primary-recommendation')?.textContent || '', /付款确认/);
+const afterSaleRecommendation = document.querySelector('.primary-recommendation')?.textContent || '';
+assert.match(afterSaleRecommendation, /售后服务 · 推荐话术/);
+assert.equal(afterSaleRecommendation.match(/已经为您登记售后需求。/g)?.length, 1, '切换分组后正文仍只显示一次');
+assert.doesNotMatch(afterSaleRecommendation, /售后登记/);
+assert.doesNotMatch(afterSaleRecommendation, /需要激活的📞码是哪个/);
+assert.doesNotMatch(document.querySelector('.script-grid')?.textContent || '', /已经为您登记售后需求/, '切换分组后也不重复展示推荐话术');
 
 await act(async () => { root.unmount(); });
 console.log('browser script library simplified interaction: ok');

@@ -115,7 +115,6 @@ function App() {
     sync,
     completion,
     remarkText,
-    contactConfirmed,
     runtimeConfig,
     shopBindingId,
     productPreview: authoritativePreview,
@@ -123,6 +122,7 @@ function App() {
   } = panel;
   const [scriptView, setScriptView] = useState<ScriptLibraryView | null>(null);
   const [scriptLibraryError, setScriptLibraryError] = useState('');
+  const [scriptLibraryRefreshing, setScriptLibraryRefreshing] = useState(false);
   const attemptSequence = useRef(0);
   const activeAttempt = useRef<{
     id: number;
@@ -157,6 +157,7 @@ function App() {
     setNotice('');
     setScriptView(null);
     setScriptLibraryError('');
+    setScriptLibraryRefreshing(false);
     if (sessionExpiredMessage) setError(sessionExpiredMessage);
   };
 
@@ -185,7 +186,7 @@ function App() {
     /客户昵称|平台订单号|多张可见活动订单卡/.test(item)
   )) || [];
   const canRunAuthoritativePreflight = Boolean(context?.supported && context.platformOrderNo && form.name.trim()
-    && (form.phone.trim() || form.wechat.trim()) && selectedShop && contactConfirmed
+    && (form.phone.trim() || form.wechat.trim()) && selectedShop
     && hasRequiredIntakeContext(context) && isIntakeEligibleOrderStatus(context.orderStatus) && !loggingOut);
   const canIntake = canRunAuthoritativePreflight && productPreviewStatus === 'READY';
   const intakeBlockedReason = sync ? ''
@@ -196,15 +197,14 @@ function App() {
             : !hasRequiredIntakeContext(context) ? '订单必要信息尚未识别完整，请展开订单后刷新'
               : !selectedShop ? '请先选择当前店铺'
                 : !(form.phone.trim() || form.wechat.trim()) ? '请至少填写手机号或微信号'
-                    : !contactConfirmed ? '请先核对并确认客户资料'
-                      : !isIntakeEligibleOrderStatus(context.orderStatus) ? '当前订单状态暂不支持入OS'
-                        : productPreviewStatus === 'LOADING' ? '正在校验订单与商品信息'
-                          : productPreviewStatus === 'FAILED' ? '订单或商品校验失败，请按上方提示处理'
-                            : '请根据上方提示完善信息';
+                  : !isIntakeEligibleOrderStatus(context.orderStatus) ? '当前订单状态暂不支持入OS'
+                    : productPreviewStatus === 'LOADING' ? '正在校验订单与商品信息'
+                      : productPreviewStatus === 'FAILED' ? '订单或商品校验失败，请按上方提示处理'
+                        : '请根据上方提示完善信息';
   const workflowLabel = useMemo(() => {
     if (completion?.stage === 'COMPLETED') return '订单闭环已完成';
     if (sync) return '线索已入库，待完成订单';
-    if (form.phone || form.wechat) return '联系方式待确认';
+    if (form.phone || form.wechat) return '联系方式已获取';
     return '等待联系方式';
   }, [completion?.stage, form.phone, form.wechat, sync]);
 
@@ -321,6 +321,19 @@ function App() {
       const message = caught instanceof Error ? caught.message : '话术加载失败';
       setScriptLibraryError(message);
       throw caught;
+    }
+  };
+
+  const refreshScriptLibrary = async () => {
+    if (scriptLibraryRefreshing) return;
+    setScriptLibraryRefreshing(true);
+    setError('');
+    try {
+      await loadScriptLibrary();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '话术加载失败');
+    } finally {
+      if (mounted.current) setScriptLibraryRefreshing(false);
     }
   };
 
@@ -584,7 +597,7 @@ function App() {
       }
       if (result.stage === 'COMPLETED') {
         const completedIntake = result.intakeResult;
-        setNotice(`线索编号：${completedIntake?.lead.id || '未知'}；分配销售：${completedIntake?.lead.assignedTo || '暂未分配'}；订单备注、红色旗帜均已验证`);
+        setNotice(`分配销售：${completedIntake?.lead.assignedTo || '暂未分配'}；订单备注、红色旗帜均已验证`);
       } else if (result.message) setError(result.message);
       if (activeAttempt.current === attemptToken) activeAttempt.current = null;
     } catch (caught) {
@@ -638,6 +651,9 @@ function App() {
       </div> : null}
       {context ? <div className="facts">
         <div><span>客户</span><strong>{context.customerDisplayName || '未识别'}</strong></div>
+        <div className="contact-input-row" data-field="contact-phone"><span>手机号</span><input aria-label="手机号" disabled={completionFormLocked} value={form.phone} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'phone', value: event.target.value })} placeholder="未获取，点击补录" /></div>
+        <div className="contact-input-row" data-field="contact-wechat"><span>微信号</span><input aria-label="微信号" disabled={completionFormLocked} value={form.wechat} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'wechat', value: event.target.value })} placeholder="可选" /></div>
+        <div data-field="contact-source"><span>获取方式</span><strong>{form.phone || form.wechat ? (form.source === 'CHAT' ? '聊天中识别' : '客服站外补录') : '待获取'}</strong></div>
         <div><span>订单</span><strong>{context.platformOrderNo || '未识别'}</strong></div>
         <div><span>订单状态</span><strong>{context.orderStatus || '未识别'}</strong></div>
         <div><span>平台商品</span><strong>{context.productName || '未识别'}</strong></div>
@@ -661,27 +677,19 @@ function App() {
     <ScriptLibrarySection
       view={scriptView}
       loadError={scriptLibraryError}
+      refreshing={scriptLibraryRefreshing}
       onFill={(text) => void fillScript(text)}
       onManage={() => window.open(scriptLibrarySettingsUrl(apiBaseUrl), '_blank', 'noopener,noreferrer')}
+      onRefresh={() => void refreshScriptLibrary()}
       onRetry={() => {
         setError('');
         void loadScriptLibrary().catch((caught) => setError(caught instanceof Error ? caught.message : '话术加载失败'));
       }}
     />
 
-    <section className="card">
-      <div className="section-title"><h2>联系方式</h2><span className={`status ${form.phone || form.wechat ? 'ready' : ''}`}>{form.phone || form.wechat ? '已获取' : '待获取'}</span></div>
-      <div className="source-switch" role="radiogroup" aria-label="联系方式来源"><button role="radio" aria-checked={form.source === 'CHAT'} disabled={completionFormLocked} className={form.source === 'CHAT' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'CHAT' })}>聊天中提供</button><button role="radio" aria-checked={form.source === 'OFF_PLATFORM'} disabled={completionFormLocked} className={form.source === 'OFF_PLATFORM' ? 'active' : ''} onClick={() => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'source', value: 'OFF_PLATFORM' })}>客服站外补录</button></div>
-      <p className="source-description">{form.source === 'CHAT' ? '客户在当前飞鸽会话中发送了手机号或微信号。' : '客服通过电话、微信等站外方式取得联系方式后手工补录。'}</p>
-      <div className="customer-summary"><span>客户昵称</span><strong>{form.name || '请先刷新识别当前客户'}</strong></div>
-      <label>手机号<input disabled={completionFormLocked} value={form.phone} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'phone', value: event.target.value })} placeholder="手机号和微信至少填一项" /></label>
-      <label>微信号<input disabled={completionFormLocked} value={form.wechat} onChange={(event) => dispatchPanel({ type: 'SET_FORM_FIELD', field: 'wechat', value: event.target.value })} placeholder="可选" /></label>
-      <label className="confirm-row contact-confirm"><input disabled={completionFormLocked} type="checkbox" checked={contactConfirmed} onChange={(event) => dispatchPanel({ type: 'SET_CONTACT_CONFIRMED', value: event.target.checked })} /> 已核对：昵称、联系方式与当前订单属于同一客户</label>
-    </section>
-
     {(completion || sync) && <section className="card result-card">
       <h2>处理结果</h2>
-      {sync && <div className="facts"><div><span>线索编号</span><strong>{sync.lead.id}</strong></div><div><span>分配销售</span><strong>{sync.lead.assignedTo || '暂未分配'}</strong></div></div>}
+      {sync && <div className="facts"><div><span>分配销售</span><strong>{sync.lead.assignedTo || '暂未分配'}</strong></div></div>}
       <div className="completion-steps">
         {([
           ['极享OS入库', completion?.osStatus || (sync ? 'SUCCEEDED' : 'NOT_ATTEMPTED')],
@@ -699,8 +707,8 @@ function App() {
       </div>}
     </section>}
     <div className="sticky-primary-action">
-      {!sync && !canIntake && <p className="action-reason">{intakeBlockedReason}</p>}
-      <button data-action="complete-order" className="primary" disabled={busy || loggingOut || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '入OS并写入订单备注'}</button>
+      {!sync && <p className={canIntake ? 'action-confirmation' : 'action-reason'}>{canIntake ? '点击即确认以上联系方式属于当前客户，并写入订单备注和红色旗帜' : intakeBlockedReason}</p>}
+      <button data-action="complete-order" className="primary" disabled={busy || loggingOut || !canIntake || Boolean(sync)} onClick={() => void completeOrder()}>{busy ? '正在处理…' : sync ? '极享OS已入库' : '确认资料并入OS'}</button>
     </div>
   </main>;
 }

@@ -65,6 +65,7 @@ const productWorkerCallOrder: string[] = [];
 let completeInput: unknown;
 let completePageCalls = 0;
 let reportCalls = 0;
+let scriptLibraryCalls = 0;
 const savedConfigs: unknown[] = [];
 const scriptView = {
   library: {
@@ -192,7 +193,10 @@ const chromeMock = {
           message: 'success',
         };
       }
-      if (message.type === 'GET_SCRIPT_LIBRARY') return { code: 0, data: scriptView, message: 'success' };
+      if (message.type === 'GET_SCRIPT_LIBRARY') {
+        scriptLibraryCalls += 1;
+        return { code: 0, data: scriptView, message: 'success' };
+      }
       if (message.type === 'CREATE_LEAD_INTAKE') {
         productWorkerCallOrder.push('CREATE_LEAD_INTAKE');
         intakeInputs.push(message.input);
@@ -276,11 +280,19 @@ assert.equal(shopSelect.value, '', '多店铺不得自动猜测');
 const completeButton = await waitFor<HTMLButtonElement>('button[data-action="complete-order"]');
 assert.equal(completeButton.disabled, true, '多店铺未选择时必须阻止入库');
 assert.ok(completeButton.closest('.sticky-primary-action'), '入OS主操作必须固定在插件底部操作区');
-assert.equal(completeButton.textContent, '入OS并写入订单备注');
-assert.match(document.body.textContent || '', /聊天中提供/);
-assert.match(document.body.textContent || '', /客服站外补录/);
-assert.match(document.body.textContent || '', /已核对：昵称、联系方式与当前订单属于同一客户/);
-await waitFor('.primary-recommendation', (node) => (node.textContent || '').includes('付款确认'));
+assert.equal(completeButton.textContent, '确认资料并入OS');
+assert.equal(document.querySelector<HTMLInputElement>('.context-card input[aria-label="手机号"]')?.value, '13800138000', '手机号必须在当前会话内完整显示');
+assert.equal(document.querySelector<HTMLInputElement>('.context-card input[aria-label="微信号"]')?.value, '', '微信号补录入口应合并到当前会话');
+assert.match(document.querySelector('[data-field="contact-source"]')?.textContent || '', /聊天中识别/);
+assert.equal([...document.querySelectorAll('.card h2')].some((node) => node.textContent === '联系方式'), false, '不得再渲染独立联系方式卡片');
+assert.equal(document.querySelector('.source-switch'), null, '联系方式来源应由自动识别或手工补录决定');
+assert.equal(document.querySelector('.contact-confirm'), null, '主按钮点击本身即代表资料确认，不再额外勾选');
+await waitFor('.primary-recommendation', (node) => (node.textContent || '').includes('已收到您的付款'));
+assert.equal(document.querySelector('.primary-recommendation')?.textContent?.includes('付款确认'), false, '插件不得显示 OS 中已隐藏的历史话术标题');
+assert.equal(scriptLibraryCalls, 1, '登录连接后应自动加载一次话术');
+document.querySelector<HTMLButtonElement>('.script-refresh')?.click();
+await waitFor<HTMLButtonElement>('.script-refresh', (node) => scriptLibraryCalls === 2 && !node.disabled);
+assert.equal(scriptLibraryCalls, 2, '点击刷新话术应在不退出登录的情况下重新请求 OS');
 assert.equal(document.body.textContent?.includes('常用'), false, '插件不再暴露没有明确含义的“常用”概念');
 assert.equal(document.body.textContent?.includes('查看全部话术'), false, '全部话术应默认展开，无需额外点击');
 assert.equal(document.body.textContent?.includes('售后服务'), true, '全部话术分组应默认可见');
@@ -349,7 +361,6 @@ pageContext = {
 document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
 await waitFor('.context-card', (node) => (node.textContent || '').includes('订单ORDER-CACHED-MISMATCH'));
 await waitFor('.context-card', (node) => (node.textContent || '').includes('OS产品淘金AI'));
-document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
 await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
 intakeSucceeds = true;
 completeButton.click();
@@ -387,7 +398,6 @@ document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.c
 await waitFor('.context-card', (node) => (node.textContent || '').includes('商品未匹配OS标准产品，本次仍可入库'));
 assert.equal(intakeInputs.length, 1, '未匹配警告必须在客服点击入库前出现');
 
-document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
 await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
 completeButton.click();
 const errorDialog = await waitFor<HTMLElement>('[role="dialog"]');
@@ -400,9 +410,10 @@ await new Promise((resolve) => setTimeout(resolve, 10));
 intakeSucceeds = true;
 completeButton.click();
 const successDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (node.textContent || '').includes('操作成功'));
-assert.match(successDialog.textContent || '', /线索编号：lead-render-1/);
+assert.doesNotMatch(successDialog.textContent || '', /线索编号|lead-render-1/);
 assert.match(successDialog.textContent || '', /分配销售：销售小王/);
 assert.match(successDialog.textContent || '', /订单备注、红色旗帜均已验证/);
+assert.doesNotMatch(document.querySelector('.result-card')?.textContent || '', /线索编号|lead-render-1/);
 assert.match(document.body.textContent || '', /OS产品未匹配（不影响入OS）/);
 assert.match(document.body.textContent || '', /商品未匹配OS标准产品，本次仍可入库/);
 assert.equal(intakeInputs.length, 3);
@@ -440,7 +451,6 @@ pageContext = {
 document.querySelector<HTMLButtonElement>('.context-card .secondary.compact')?.click();
 await waitFor('.context-card', (node) => (node.textContent || '').includes('平台商品初始商品'));
 await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled || previewInputs.length > 0);
-document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
 await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
 const latestFactsBaselines = {
   preview: previewInputs.length,
@@ -467,9 +477,7 @@ assert.deepEqual(
   '商品、实付或付款时间变化后的首次点击不得入库、改页面或上报',
 );
 assert.match(document.body.textContent || '', /平台商品点击时最新商品/);
-assert.equal(document.querySelector<HTMLInputElement>('.confirm-row input')?.checked, false, '事实变化后必须重新确认');
 latestFactsChangedDialog.querySelector<HTMLButtonElement>('.feedback-confirm')?.click();
-document.querySelector<HTMLInputElement>('.confirm-row input')?.click();
 await waitFor<HTMLButtonElement>('button[data-action="complete-order"]', (node) => !node.disabled);
 document.querySelector<HTMLButtonElement>('button[data-action="complete-order"]')?.click();
 const latestFactsSuccessDialog = await waitFor<HTMLElement>('[role="dialog"]', (node) => (
