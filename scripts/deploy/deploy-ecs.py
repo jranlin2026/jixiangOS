@@ -71,6 +71,7 @@ EXCLUDE_SUFFIXES = (
 )
 
 BROWSER_EMPLOYEE_ARCHIVE = "server/assets/browser-agent/jixiang-ai-browser-employee.zip"
+FRONTEND_ENTRY = "dist/index.html"
 
 
 def run_local(command: list[str], *, cwd: Path = PROJECT_ROOT, env: dict[str, str] | None = None) -> None:
@@ -103,6 +104,11 @@ def should_include(path: Path) -> bool:
 
 
 def create_release_zip() -> Path:
+    frontend_entry = PROJECT_ROOT / FRONTEND_ENTRY
+    if not frontend_entry.is_file() or frontend_entry.stat().st_size == 0:
+        raise RuntimeError(
+            f"发布包缺少 {FRONTEND_ENTRY}。请先运行生产构建，或移除 --skip-build 后重试。"
+        )
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     release_path = Path(tempfile.gettempdir()) / f"jixiang-os-release-{timestamp}.zip"
     if release_path.exists():
