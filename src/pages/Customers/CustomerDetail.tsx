@@ -30,7 +30,7 @@ import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
 import useAuthStore from '../../store/useAuthStore';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
-import ContactPhoneFields from '../../shared/components/ContactPhoneFields';
+import ContactPhoneDetailRows from '../../shared/components/ContactPhoneDetailRows';
 import {
   CRM_DETAIL_CONTENT_SX,
   CRM_DETAIL_DIALOG_PAPER_SX,
@@ -42,7 +42,7 @@ import { canCompleteContactField, canCompletePhoneField } from '../../shared/uti
 import {
   alternateContactPhone,
   contactPhonesFromValues,
-  formatContactPhoneLines,
+  formatContactPhoneHistoryValue,
   getContactPhoneError,
 } from '../../shared/utils/contactPhones';
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
@@ -87,6 +87,11 @@ type SourceOption = {
 
 const emptyText = (value?: string | number) => (value || value === 0 ? value : '未填写');
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '未填写';
+const formatActivityChangeValue = (field: string, value: unknown) => (
+  field === 'phones'
+    ? formatContactPhoneHistoryValue(value)
+    : value === null || value === undefined || value === '' ? '空' : String(value)
+);
 const contractKey = (customerId: string) => `aaos_customer_contracts_${customerId}`;
 const MAX_ACTIVITY_ATTACHMENTS = 6;
 const MAX_ACTIVITY_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -525,8 +530,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     const showCurrentUserOption = isUserField && currentValue && !userFieldOptions.some((user) => user.name === currentValue);
     const displayValue = field === 'createdAt' && currentCustomer.createdAt
       ? formatDate(currentCustomer.createdAt, 'yyyy-MM-dd HH:mm:ss')
-      : field === 'phone'
-        ? formatContactPhoneLines(currentCustomer.phone, currentCustomer.phones)
       : emptyText(currentCustomer[field] as string | number);
 
     return (
@@ -606,14 +609,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                   </MenuItem>
                 ))}
               </TextField>
-            ) : field === 'phone' ? (
-              <ContactPhoneFields
-                primaryPhone={currentValue}
-                alternatePhone={alternateContactPhone(currentValue, draft.phones)}
-                onPrimaryChange={handlePhoneChange}
-                onAlternateChange={handleAlternatePhoneChange}
-                size="small"
-              />
             ) : (
               <TextField
                 value={currentValue}
@@ -799,7 +794,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 <Box sx={{ bgcolor: '#f8fafc', borderRadius: 1, px: 1.5, py: 1 }}>
                   {record.changes.map((change) => (
                     <Typography key={`${record.id}-${change.field}`} variant="body2" sx={{ color: '#374151' }}>
-                      {change.label}: {change.oldValue ?? '空'} → {change.newValue ?? '空'}
+                      {change.label}: {formatActivityChangeValue(change.field, change.oldValue)} → {formatActivityChangeValue(change.field, change.newValue)}
                     </Typography>
                   ))}
                 </Box>
@@ -1056,7 +1051,16 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
             <Box sx={{ minHeight: 0, overflowY: { lg: 'auto' } }}>
               {renderInfoRow('客户全名', 'name', detailActions.actions.editProfile)}
               {renderInfoRow('公司', 'company', detailActions.actions.editProfile)}
-              {renderInfoRow('手机', 'phone', detailActions.actions.editProfile && (canEditLockedContact || canCompletePhoneField(currentCustomer.phone)))}
+              <ContactPhoneDetailRows
+                primaryPhone={editing ? String(draft.phone || '') : String(currentCustomer.phone || '')}
+                alternatePhone={editing
+                  ? alternateContactPhone(draft.phone, draft.phones)
+                  : alternateContactPhone(currentCustomer.phone, currentCustomer.phones)}
+                editing={editing}
+                editable={detailActions.actions.editProfile && (canEditLockedContact || canCompletePhoneField(currentCustomer.phone))}
+                onPrimaryChange={handlePhoneChange}
+                onAlternateChange={handleAlternatePhoneChange}
+              />
               {renderInfoRow('微信', 'wechat', detailActions.actions.editProfile && (canEditLockedContact || canCompleteContactField(currentCustomer.wechat)))}
               {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
               {renderSourceRow()}

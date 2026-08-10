@@ -746,10 +746,32 @@ function editableCustomerPatch(input: Partial<Customer>): Partial<Customer> {
 }
 
 function activityValue(value: unknown): string | number | boolean | null {
-  if (Array.isArray(value)) return value.filter(Boolean).join('、') || null;
+  if (Array.isArray(value)) {
+    const values = value
+      .map((item) => (
+        item && typeof item === 'object' && 'number' in item
+          ? String((item as { number?: unknown }).number || '').trim()
+          : String(item || '').trim()
+      ))
+      .filter(Boolean);
+    return values.join('、') || null;
+  }
   if (value === undefined || value === '') return null;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
   return String(value);
+}
+
+function customerEditActivityValue(field: keyof Customer | keyof Lead, value: unknown) {
+  if (field !== 'phones' || !Array.isArray(value)) return activityValue(value);
+  const alternateNumbers = value
+    .filter((item) => !(item && typeof item === 'object' && 'isPrimary' in item && item.isPrimary))
+    .map((item) => (
+      item && typeof item === 'object' && 'number' in item
+        ? String((item as { number?: unknown }).number || '').trim()
+        : String(item || '').trim()
+    ))
+    .filter(Boolean);
+  return alternateNumbers.join('、') || null;
 }
 
 function buildCustomerEditChanges(customer: Customer, patch: Partial<Customer>) {
@@ -758,8 +780,8 @@ function buildCustomerEditChanges(customer: Customer, patch: Partial<Customer>) 
     .map(({ field, label }) => ({
       field: String(field),
       label,
-      oldValue: activityValue(customer[field]),
-      newValue: activityValue(patch[field]),
+      oldValue: customerEditActivityValue(field, customer[field]),
+      newValue: customerEditActivityValue(field, patch[field]),
     }))
     .filter((change) => change.oldValue !== change.newValue);
 }
@@ -880,8 +902,8 @@ function buildLeadEditChanges(lead: Lead, patch: Partial<Lead>) {
     .map(({ field, label }) => ({
       field: String(field),
       label,
-      oldValue: activityValue(lead[field]),
-      newValue: activityValue(patch[field]),
+      oldValue: customerEditActivityValue(field, lead[field]),
+      newValue: customerEditActivityValue(field, patch[field]),
     }))
     .filter((change) => change.oldValue !== change.newValue);
 }

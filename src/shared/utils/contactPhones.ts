@@ -106,3 +106,10 @@ export function formatContactPhoneLines(primaryPhone?: string | null, phones?: C
     .map((item) => `${item.label}：${formatPhoneForDisplay(item.number)}`)
     .join('\n');
 }
+
+/** Keeps malformed legacy audit entries readable without inventing a phone number. */
+export function formatContactPhoneHistoryValue(value: unknown): string {
+  const text = String(value ?? '').trim();
+  if (!text) return '空';
+  return text.includes('[object Object]') ? '旧版记录未保存具体号码' : text;
+}

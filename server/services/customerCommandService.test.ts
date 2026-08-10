@@ -1478,6 +1478,27 @@ const serviceOptions = {
   assert.equal(deniedFake.transactionCalls, 0);
 }
 
+// 备用手机号写入操作记录时必须显示真实号码，不能把手机号对象隐式转成 [object Object]。
+{
+  const value = customer('cust-update-alternate-phone-audit');
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  const result = await service.updateCustomer(value.id, {
+    phone: value.phone,
+    phones: [
+      { number: value.phone, isPrimary: true, label: '主手机号' },
+      { number: '13122222222', isPrimary: false, label: '备用手机号' },
+    ],
+  }, superAdmin);
+
+  assert.equal(result.code, 0);
+  const phoneChange = result.data?.activityRecords?.[0]?.changes?.find((change) => change.field === 'phones');
+  assert.equal(phoneChange?.label, '备用手机号');
+  assert.equal(phoneChange?.oldValue, null);
+  assert.equal(phoneChange?.newValue, '+8613122222222');
+  assert.equal(String(phoneChange?.newValue).includes('[object Object]'), false);
+}
+
 // 通用客户编辑不得绕过客户分配命令修改 owner。
 {
   const value = customer('cust-update-owner');

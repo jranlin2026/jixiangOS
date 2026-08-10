@@ -27,15 +27,20 @@ import { canEditLeadProfile } from './leadDetailRules';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { canCompleteContactField } from '../../shared/utils/contactEditLock';
-import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
+import ContactPhoneDetailRows from '../../shared/components/ContactPhoneDetailRows';
 import {
   CRM_DETAIL_CONTENT_SX,
   CRM_DETAIL_DIALOG_PAPER_SX,
   CRM_DETAIL_FIELD_COLUMNS,
   CRM_DETAIL_GRID_COLUMNS,
 } from '../../shared/components/crmDetailLayout';
-import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
-import { formatContactPhoneLines } from '../../shared/utils/contactPhones';
+import { normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import {
+  alternateContactPhone,
+  contactPhonesFromValues,
+  formatContactPhoneHistoryValue,
+  getContactPhoneValuesError,
+} from '../../shared/utils/contactPhones';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 interface LeadDetailProps {
@@ -49,6 +54,7 @@ type LeadDraft = {
   name: string;
   company: string;
   phone: string;
+  alternatePhone: string;
   wechat: string;
   source: string;
   sourceName: string;
@@ -81,7 +87,8 @@ const emptyText = (value?: string | number) => (value || value === 0 ? value : '
 
 const formatSource = (lead: Lead) => [lead.source, lead.sourceName].filter(Boolean).join('-') || '未填写';
 
-const formatHistoryValue = (value: unknown) => {
+const formatHistoryValue = (value: unknown, field?: string) => {
+  if (field === 'phones') return formatContactPhoneHistoryValue(value).replace(/^空$/, '未填写');
   if (value === null || value === undefined || value === '') return '未填写';
   return String(value);
 };
@@ -90,6 +97,7 @@ const toDraft = (lead: Lead): LeadDraft => ({
   name: lead.name || '',
   company: lead.company || '',
   phone: lead.phone || '',
+  alternatePhone: alternateContactPhone(lead.phone, lead.phones),
   wechat: lead.wechat || '',
   source: lead.source || '',
   sourceName: lead.sourceName || '',
@@ -247,7 +255,11 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
     const nextPhone = canEditLockedContact || canCompleteContactField(currentLead.phone)
       ? normalizePhoneForStorage(draft.phone)
       : currentLead.phone;
-    const phoneError = getPhoneNumberError(nextPhone);
+    const canEditPhone = canEditLockedContact || canCompleteContactField(currentLead.phone);
+    const nextAlternatePhone = canEditPhone
+      ? normalizePhoneForStorage(draft.alternatePhone)
+      : alternateContactPhone(currentLead.phone, currentLead.phones);
+    const phoneError = getContactPhoneValuesError(nextPhone, nextAlternatePhone);
     if (phoneError) {
       alert(phoneError);
       return;
@@ -256,6 +268,9 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       name: draft.name,
       company: draft.company,
       phone: nextPhone,
+      phones: canEditPhone
+        ? contactPhonesFromValues(nextPhone, nextAlternatePhone)
+        : currentLead.phones,
       wechat: canEditLockedContact || canCompleteContactField(currentLead.wechat) ? draft.wechat.trim() : currentLead.wechat,
       source: draft.source,
       sourceName: draft.sourceName,
@@ -322,7 +337,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       operator: item.operator,
       time: item.changedAt,
       content: item.changes?.length
-        ? item.changes.map((change) => `${change.label}：${formatHistoryValue(change.oldValue)} → ${formatHistoryValue(change.newValue)}`).join('\n')
+        ? item.changes.map((change) => `${change.label}：${formatHistoryValue(change.oldValue, change.field)} → ${formatHistoryValue(change.newValue, change.field)}`).join('\n')
         : item.summary,
     }));
     const entries: HistoryEntry[] = [
@@ -385,8 +400,6 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       ? normalizeResourceOwnership(currentLead.sourceType)
       : field === 'assignedTo'
           ? followerName
-          : field === 'phone'
-            ? formatContactPhoneLines(currentLead.phone, currentLead.phones)
           : (currentLead[field as keyof Lead] as string | undefined);
 
     return (
@@ -424,13 +437,6 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                   </MenuItem>
                 ))}
               </TextField>
-            ) : field === 'phone' ? (
-              <PhoneNumberInput
-                value={currentValue}
-                onChange={(value) => setDraft((prev) => ({ ...prev, [field]: value }))}
-                size="small"
-                fullWidth
-              />
             ) : (
               <TextField value={currentValue} onChange={handleDraftChange(field)} size="small" fullWidth />
             )
@@ -541,7 +547,16 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
             <Box sx={{ minHeight: 0, overflowY: { lg: 'auto' } }}>
               {renderInfoRow('姓名', 'name')}
               {renderInfoRow('公司', 'company')}
-              {renderInfoRow('手机号', 'phone', canEditLockedContact || canCompleteContactField(currentLead.phone))}
+              <ContactPhoneDetailRows
+                primaryPhone={editing ? draft.phone : currentLead.phone}
+                alternatePhone={editing
+                  ? draft.alternatePhone
+                  : alternateContactPhone(currentLead.phone, currentLead.phones)}
+                editing={editing}
+                editable={canEditLockedContact || canCompleteContactField(currentLead.phone)}
+                onPrimaryChange={(value) => setDraft((prev) => ({ ...prev, phone: value }))}
+                onAlternateChange={(value) => setDraft((prev) => ({ ...prev, alternatePhone: value }))}
+              />
               {renderInfoRow('微信', 'wechat', canEditLockedContact || canCompleteContactField(currentLead.wechat))}
               {renderInfoRow('资源归属', 'sourceType')}
               {renderSourceRow()}

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   canonicalizeContactPhones,
   contactPhoneNumbers,
+  formatContactPhoneHistoryValue,
   getContactPhoneError,
   getContactPhoneValuesError,
 } from './contactPhones';
@@ -44,5 +45,11 @@ assert.match(
   getContactPhoneValuesError('+8613800138000', '13800138000'),
   /不能重复/,
 );
+
+assert.equal(
+  formatContactPhoneHistoryValue('[object Object]、[object Object]'),
+  '旧版记录未保存具体号码',
+);
+assert.equal(formatContactPhoneHistoryValue('+8613900139000'), '+8613900139000');
 
 console.log('contact phone policy tests passed');
