@@ -176,6 +176,16 @@ assertBefore('PERSISTENT_DATA_DIR', 'echo "Switching release...', '持久目录�
 
 assert.match(remote, /npm install[^\n]*--include=dev[^\n]*--prefer-offline/);
 assert.match(remote, /NPM_CONFIG_JOBS=1[^\n]*NODE_OPTIONS="--max-old-space-size=640"[^\n]*nice -n 15[^\n]*npm install/);
+assert.match(
+  remote,
+  /npm --prefix apps\/browser-extension ci --include=dev --prefer-offline --no-audit --no-fund/,
+  '服务器必须按浏览器员工自己的锁文件安装依赖，确保下载包与现场构建一致',
+);
+assertBefore(
+  'npm --prefix apps/browser-extension ci',
+  'NODE_ENV="production" AI_PROXY_HOST="127.0.0.1" AI_PROXY_PORT="3001" npm run prod:check',
+  '浏览器员工依赖必须在生产配置与发布测试前安装',
+);
 assert.match(remote, /business-records:repair -- --apply --confirm-production/);
 assertBefore('pm2 stop jixiang-os-api', 'business-records:repair', 'legacy repair must run after writes are stopped');
 assertBefore('business-records:repair', 'echo "Switching release...', 'legacy repair must finish before release switch');

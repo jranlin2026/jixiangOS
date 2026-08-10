@@ -325,6 +325,8 @@ if [ "$REUSE_NODE_MODULES" = "1" ] && [ -d "$APP_DIR/node_modules" ]; then
 fi
 echo "Installing dependencies with constrained resources to keep the active release responsive..."
 NPM_CONFIG_JOBS=1 NODE_OPTIONS="--max-old-space-size=640" nice -n 15 npm install --include=dev --prefer-offline --no-audit --no-fund
+echo "Installing browser employee dependencies from its dedicated lockfile..."
+NPM_CONFIG_JOBS=1 NODE_OPTIONS="--max-old-space-size=640" nice -n 15 npm --prefix apps/browser-extension ci --include=dev --prefer-offline --no-audit --no-fund
 NODE_ENV="production" AI_PROXY_HOST="127.0.0.1" AI_PROXY_PORT="3001" npm run prod:check
 
 echo "Creating database backup before migration..."
