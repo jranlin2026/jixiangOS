@@ -273,6 +273,8 @@ export function createPrismaCustomerBatchWorkerStore(
           if (!items.length) return { kind: 'empty' as const };
           const executionContext = await loadExecutionContext(tx, job.actorId);
           let processedCount = 0;
+          let succeededCount = 0;
+          let skippedCount = 0;
           for (const item of items) {
             attemptedItemId = String(item.id);
             const claimedItem = await tx.customerBatchJobItem.updateMany({
@@ -294,8 +296,10 @@ export function createPrismaCustomerBatchWorkerStore(
               const saved = await tx.customerBatchJobItem.updateMany({
                 where: { id: item.id, jobId: job.id, status: 'running' },
                 data: {
-                  status: 'succeeded',
+                  status: result.skipped ? 'skipped' : 'succeeded',
                   retryable: false,
+                  errorCode: null,
+                  errorMessage: result.skipped ? result.skipReason || '无需修改' : null,
                   beforeHash: result.beforeHash || null,
                   afterHash: result.afterHash || null,
                   beforeSnapshot: result.beforeSnapshot ? json(result.beforeSnapshot) : Prisma.JsonNull,
@@ -305,6 +309,8 @@ export function createPrismaCustomerBatchWorkerStore(
               });
               if (saved.count !== 1) throw new Error('批量任务明细状态已变化');
               processedCount += 1;
+              if (result.skipped) skippedCount += 1;
+              else succeededCount += 1;
             } catch (error) {
               const failure = classifyCustomerBatchItemFailure(error);
               if (failure.retryable) throw new RetryableBatchItemTransactionError(item.id, failure, error);
@@ -316,7 +322,11 @@ export function createPrismaCustomerBatchWorkerStore(
           }
           const progressed = await tx.customerBatchJob.updateMany({
             where: { id: job.id, leaseOwner: lease.workerId, leaseEpoch: lease.leaseEpoch, status: 'running' },
-            data: { successCount: { increment: processedCount }, cursor: { increment: processedCount } },
+            data: {
+              successCount: { increment: succeededCount },
+              skippedCount: { increment: skippedCount },
+              cursor: { increment: processedCount },
+            },
           });
           if (progressed.count !== 1) throw new Error('批量任务租约已失效');
           return { kind: 'processed' as const, itemId: String(items[items.length - 1].id) };

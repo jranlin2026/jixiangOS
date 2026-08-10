@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Accordion, AccordionDetails, AccordionSummary,
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box,
   Typography, Chip,
   TextField, Paper, Tabs, Tab, Table, TableBody, TableCell, TableContainer,
@@ -18,6 +19,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import useCustomerStore from '../../store/useCustomerStore';
 import type { Customer, CustomerActivityAttachment, CustomerActivityAttachmentCategory, CustomerActivityRecord, CustomerManageableUser } from '../../types/customer';
 import type { AIBusinessCard } from '../../types/aiCard';
@@ -56,6 +58,14 @@ import {
   buildCustomerDetailPatch,
   buildManageableOwnerIds,
 } from './customerDetailPolicy';
+import { buildLeadSourceOptions } from '../../shared/utils/leadSourceOptions';
+import {
+  CUSTOMER_DETAIL_SECTION_DEFAULTS,
+  CUSTOMER_DETAIL_SECTION_STORAGE_KEY,
+  editableCustomerDetailSections,
+  normalizeCustomerDetailSectionState,
+  type CustomerDetailSectionKey,
+} from './customerDetailSections';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -76,14 +86,6 @@ interface ContractFile {
   dataUrl: string;
   uploadedAt: string;
 }
-
-type SourceOption = {
-  key: string;
-  label: string;
-  parentName: string;
-  childName: string;
-  parentId: string;
-};
 
 const emptyText = (value?: string | number) => (value || value === 0 ? value : '未填写');
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '未填写';
@@ -139,6 +141,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   initialTab = 'activity',
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
+  const sectionStorageKey = `${CUSTOMER_DETAIL_SECTION_STORAGE_KEY}:${currentUser?.id || 'anonymous'}`;
   const { alert, dialog: feedbackDialog } = useAppFeedback();
   const [currentCustomer, setCurrentCustomer] = useState<Customer>(customer);
   const [aiCard, setAiCard] = useState<AIBusinessCard | null>(null);
@@ -158,6 +161,13 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
   const [releaseReason, setReleaseReason] = useState('');
+  const [sectionState, setSectionState] = useState(() => {
+    try {
+      return normalizeCustomerDetailSectionState(JSON.parse(localStorage.getItem(sectionStorageKey) || 'null'));
+    } catch {
+      return { ...CUSTOMER_DETAIL_SECTION_DEFAULTS };
+    }
+  });
   const { addFollowUp } = useCustomerStore();
   const lifecycleCode = normalizeLifecycleStatusCode(currentCustomer.lifecycleStatusCode);
   const lifecycleConfig = getLifecycleConfigByCode(lifecycleCode);
@@ -207,6 +217,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   }, [readOnly]);
 
   useEffect(() => {
+    localStorage.setItem(sectionStorageKey, JSON.stringify(sectionState));
+  }, [sectionState, sectionStorageKey]);
+
+  useEffect(() => {
     if (!open) return;
     customerApi.fetchManageableUsers().then((res) => {
       setManageableUsers(res.code === 0 ? res.data : []);
@@ -240,50 +254,28 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     setDraft(response.data);
   };
 
-  const parentSources = useMemo(
-    () => sourceConfigs.filter((item) => !item.parentId).sort((a, b) => a.sortOrder - b.sortOrder),
-    [sourceConfigs],
-  );
-  const childSources = useMemo(
-    () => sourceConfigs.filter((item) => item.parentId).sort((a, b) => a.sortOrder - b.sortOrder),
-    [sourceConfigs],
-  );
-  const sourceOptions = useMemo<SourceOption[]>(() => {
+  const sourceOptions = useMemo(() => {
     const draftLeadSource = String(draft.leadSource || '');
     const draftSourceName = String(draft.sourceName || '');
-    const options = parentSources.flatMap((parent) => {
-      const children = childSources.filter((child) => child.parentId === parent.id);
-      if (!children.length) {
-        return [{
-          key: parent.id,
-          label: parent.name,
-          parentName: parent.name,
-          childName: '',
-          parentId: parent.id,
-        }];
-      }
-      return children.map((child) => ({
-        key: `${parent.id}:${child.id}`,
-        label: `${parent.name}-${child.name}`,
-        parentName: parent.name,
-        childName: child.name,
-        parentId: parent.id,
-      }));
-    });
-    if (draftLeadSource && !options.some((option) => option.parentName === draftLeadSource && option.childName === draftSourceName)) {
+    const options = buildLeadSourceOptions(sourceConfigs);
+    if (draftLeadSource && !options.some((option) => option.leadSource === draftLeadSource && option.sourceName === draftSourceName)) {
       options.unshift({
         key: `current:${draftLeadSource}:${draftSourceName}`,
         label: [draftLeadSource, draftSourceName].filter(Boolean).join('-'),
-        parentName: draftLeadSource,
-        childName: draftSourceName,
+        leadSource: draftLeadSource,
+        sourceName: draftSourceName,
         parentId: 'current',
       });
     }
     return options;
-  }, [childSources, draft.leadSource, draft.sourceName, parentSources]);
+  }, [draft.leadSource, draft.sourceName, sourceConfigs]);
+  const sourceParentGroups = useMemo(() => sourceConfigs
+    .filter((item) => item.isActive && !item.parentId)
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+    .map((parent) => ({ parent, options: sourceOptions.filter((option) => option.parentId === parent.id) })), [sourceConfigs, sourceOptions]);
 
   const selectedSourceKey = sourceOptions.find((option) => (
-    option.parentName === String(draft.leadSource || '') && option.childName === String(draft.sourceName || '')
+    option.leadSource === String(draft.leadSource || '') && option.sourceName === String(draft.sourceName || '')
   ))?.key || '';
   const customerLevelOptions = useMemo(() => {
     const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
@@ -298,7 +290,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const handleSourceSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const option = sourceOptions.find((item) => item.key === event.target.value);
     if (!option) return;
-    setDraft((prev) => ({ ...prev, leadSource: option.parentName, sourceName: option.childName }));
+    setDraft((prev) => ({ ...prev, leadSource: option.leadSource, sourceName: option.sourceName }));
   };
 
   const handlePhoneChange = (value: string) => {
@@ -418,6 +410,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       payload.phones ?? currentCustomer.phones,
     );
     if (phoneError) {
+      setSectionState((current) => ({ ...current, basic: true }));
       alert(phoneError);
       return;
     }
@@ -631,8 +624,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       <Box sx={{ px: 1.5, py: editing && detailActions.actions.editAttribution ? 0.5 : 1, fontSize: 13 }}>
         {editing && detailActions.actions.editAttribution ? (
           <TextField select value={selectedSourceKey} onChange={handleSourceSelect} size="small" fullWidth>
-            {parentSources.flatMap((parent) => {
-              const options = sourceOptions.filter((option) => option.parentId === parent.id);
+            {sourceParentGroups.flatMap(({ parent, options }) => {
+              if (options.length === 1 && options[0].key === parent.id) {
+                return [<MenuItem key={options[0].key} value={options[0].key}>{options[0].label}</MenuItem>];
+              }
               return [
                 <MenuItem key={`${parent.id}-group`} disabled sx={{ fontWeight: 700, color: 'text.primary' }}>
                   {parent.name}
@@ -679,6 +674,44 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
         )}
       </Box>
     </Box>
+  );
+
+  const toggleSection = (key: CustomerDetailSectionKey) => {
+    setSectionState((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  const renderInfoSection = (
+    key: CustomerDetailSectionKey,
+    title: string,
+    summary: string,
+    content: React.ReactNode,
+  ) => (
+    <Accordion
+      expanded={sectionState[key]}
+      onChange={() => toggleSection(key)}
+      disableGutters
+      elevation={0}
+      square
+      sx={{
+        '&:before': { display: 'none' },
+        borderBottom: '1px solid #e5e7eb',
+        '&:last-of-type': { borderBottom: 0 },
+      }}
+    >
+      <AccordionSummary
+        expandIcon={<ExpandMoreIcon fontSize="small" />}
+        sx={{
+          minHeight: 44,
+          px: 1.5,
+          bgcolor: '#fbfdff',
+          '& .MuiAccordionSummary-content': { my: 1, minWidth: 0, alignItems: 'center', gap: 1 },
+        }}
+      >
+        <Typography variant="body2" sx={{ fontWeight: 750, color: '#334155', flexShrink: 0 }}>{title}</Typography>
+        <Typography variant="caption" noWrap sx={{ color: '#94a3b8', minWidth: 0 }}>{summary}</Typography>
+      </AccordionSummary>
+      <AccordionDetails sx={{ p: 0 }}>{content}</AccordionDetails>
+    </Accordion>
   );
 
   const renderAttachmentButton = (
@@ -1039,7 +1072,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                       <Button
                         size="small"
                         variant="outlined"
-                        onClick={() => setEditing(true)}
+                        onClick={() => {
+                          setSectionState((current) => editableCustomerDetailSections(current));
+                          setEditing(true);
+                        }}
                       >
                         编辑资料
                       </Button>
@@ -1049,40 +1085,48 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               )}
             </Box>
             <Box sx={{ minHeight: 0, overflowY: { lg: 'auto' } }}>
-              {renderInfoRow('客户全名', 'name', detailActions.actions.editProfile)}
-              {renderInfoRow('公司', 'company', detailActions.actions.editProfile)}
-              <ContactPhoneDetailRows
-                primaryPhone={editing ? String(draft.phone || '') : String(currentCustomer.phone || '')}
-                alternatePhone={editing
-                  ? alternateContactPhone(draft.phone, draft.phones)
-                  : alternateContactPhone(currentCustomer.phone, currentCustomer.phones)}
-                editing={editing}
-                editable={detailActions.actions.editProfile && (canEditLockedContact || canCompletePhoneField(currentCustomer.phone))}
-                onPrimaryChange={handlePhoneChange}
-                onAlternateChange={handleAlternatePhoneChange}
-              />
-              {renderInfoRow('微信', 'wechat', detailActions.actions.editProfile && (canEditLockedContact || canCompleteContactField(currentCustomer.wechat)))}
-              {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
-              {renderSourceRow()}
-              {renderStatusRow('来源平台', currentCustomer.sourcePlatformName || '-')}
-              {renderStatusRow('来源店铺', currentCustomer.sourceShopName || '-')}
-              {renderStatusRow('平台订单号', currentCustomer.platformOrderNo || '-')}
-              {renderStatusRow('平台购买产品', currentCustomer.sourceProductName || '-')}
-              {renderStatusRow('平台付款金额', currentCustomer.sourcePaymentAmount == null ? '-' : formatCurrency(currentCustomer.sourcePaymentAmount))}
-              {renderStatusRow('平台付款时间', currentCustomer.sourcePaymentAt ? formatDate(currentCustomer.sourcePaymentAt, 'yyyy-MM-dd HH:mm') : '-')}
-              {renderInfoRow('资源归属', 'sourceType', detailActions.actions.editAttribution)}
-              {renderInfoRow('行业', 'industry', detailActions.actions.editProfile)}
-              {renderInfoRow('城市', 'city', detailActions.actions.editProfile)}
-              {renderInfoRow('销售负责人', 'owner', false)}
-              {renderInfoRow('线索录入人', 'leadInputBy', false)}
-              {renderInfoRow('线索贡献人', 'leadContributorName', detailActions.actions.editAttribution)}
-              {renderInfoRow('客户等级', 'customerLevel', detailActions.actions.editProfile)}
-              {renderInfoRow('首个销售负责人', 'originalSalesTransferBy', detailActions.actions.editAttribution)}
-              {renderInfoRow('上一个销售负责人', 'previousOwner', false)}
-              {renderInfoRow('累计消费', 'totalSpent', false)}
-              {renderInfoRow('订单数', 'orderCount', false)}
-              {renderInfoRow('创建时间', 'createdAt', false)}
-              {renderRemarkRow()}
+              {renderInfoSection('basic', '基本资料', [currentCustomer.company, currentCustomer.phone].filter(Boolean).join(' · ') || '待完善', <>
+                {renderInfoRow('客户全名', 'name', detailActions.actions.editProfile)}
+                {renderInfoRow('公司', 'company', detailActions.actions.editProfile)}
+                <ContactPhoneDetailRows
+                  primaryPhone={editing ? String(draft.phone || '') : String(currentCustomer.phone || '')}
+                  alternatePhone={editing
+                    ? alternateContactPhone(draft.phone, draft.phones)
+                    : alternateContactPhone(currentCustomer.phone, currentCustomer.phones)}
+                  editing={editing}
+                  editable={detailActions.actions.editProfile && (canEditLockedContact || canCompletePhoneField(currentCustomer.phone))}
+                  onPrimaryChange={handlePhoneChange}
+                  onAlternateChange={handleAlternatePhoneChange}
+                />
+                {renderInfoRow('微信', 'wechat', detailActions.actions.editProfile && (canEditLockedContact || canCompleteContactField(currentCustomer.wechat)))}
+                {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
+                {renderInfoRow('客户等级', 'customerLevel', detailActions.actions.editProfile)}
+                {renderInfoRow('行业', 'industry', detailActions.actions.editProfile)}
+                {renderInfoRow('城市', 'city', detailActions.actions.editProfile)}
+                {renderRemarkRow()}
+              </>)}
+              {renderInfoSection('attribution', '线索与归因', [formatCustomerSource(currentCustomer), normalizeResourceOwnership(currentCustomer.sourceType)].filter((value) => value && value !== '未填写').join(' · ') || '待完善', <>
+                {renderSourceRow()}
+                {renderInfoRow('资源归属', 'sourceType', detailActions.actions.editAttribution)}
+                {renderInfoRow('线索录入人', 'leadInputBy', false)}
+                {renderInfoRow('线索贡献人', 'leadContributorName', detailActions.actions.editAttribution)}
+              </>)}
+              {renderInfoSection('platform', '首次平台交易', [currentCustomer.sourcePlatformName, currentCustomer.sourceShopName, currentCustomer.sourcePaymentAmount == null ? '' : formatCurrency(currentCustomer.sourcePaymentAmount)].filter(Boolean).join(' · ') || '暂无平台交易信息', <>
+                {renderStatusRow('来源平台', currentCustomer.sourcePlatformName || '-')}
+                {renderStatusRow('来源店铺', currentCustomer.sourceShopName || '-')}
+                {renderStatusRow('平台订单号', currentCustomer.platformOrderNo || '-')}
+                {renderStatusRow('平台购买产品', currentCustomer.sourceProductName || '-')}
+                {renderStatusRow('平台付款金额', currentCustomer.sourcePaymentAmount == null ? '-' : formatCurrency(currentCustomer.sourcePaymentAmount))}
+                {renderStatusRow('平台付款时间', currentCustomer.sourcePaymentAt ? formatDate(currentCustomer.sourcePaymentAt, 'yyyy-MM-dd HH:mm') : '-')}
+              </>)}
+              {renderInfoSection('ownership', '负责人及系统信息', [currentCustomer.owner || '未分配', `${currentCustomer.orderCount || 0} 单`].join(' · '), <>
+                {renderInfoRow('销售负责人', 'owner', false)}
+                {renderInfoRow('首个销售负责人', 'originalSalesTransferBy', detailActions.actions.editAttribution)}
+                {renderInfoRow('上一个销售负责人', 'previousOwner', false)}
+                {renderInfoRow('累计消费', 'totalSpent', false)}
+                {renderInfoRow('订单数', 'orderCount', false)}
+                {renderInfoRow('创建时间', 'createdAt', false)}
+              </>)}
             </Box>
           </Paper>
 

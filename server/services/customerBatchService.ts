@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import {
   DEFAULT_LIFECYCLE_STATUS_CONFIGS,
+  DEFAULT_LEAD_SOURCE_CONFIGS,
   LIFECYCLE_STATUS_CODES,
   STORAGE_KEYS,
 } from '../../src/shared/utils/constants';
@@ -23,6 +24,7 @@ import type {
   CustomerBatchSelection,
 } from '../../src/types/customerBatch';
 import type { CustomerFilters } from '../../src/types/customer';
+import type { LeadSourceConfig } from '../../src/types/settings';
 import type { CustomerTagCatalog } from '../../src/types/tag';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import {
@@ -73,8 +75,10 @@ type LockedBatchCustomer = {
 type GuardRevisions = {
   lifecycleConfigRevision: string;
   tagCatalogRevision: string;
+  leadSourceConfigRevision: string;
   lifecycleConfig?: CustomerLifecycleConfig;
   tagCatalog?: CustomerTagCatalog;
+  leadSourceConfigs?: LeadSourceConfig[];
 };
 
 type StoredBatchJob = {
@@ -309,7 +313,7 @@ export function normalizeCustomerBatchSelection(value: unknown): CustomerBatchSe
 
 function normalizeOperation(value: unknown): CustomerBatchOperation {
   const operation = cleanText(value);
-  if (!['transfer', 'release_to_pool', 'set_progress', 'update_tags', 'add_todo', 'soft_delete'].includes(operation)) {
+  if (!['transfer', 'release_to_pool', 'set_progress', 'update_lead_source', 'update_tags', 'add_todo', 'soft_delete'].includes(operation)) {
     throw new BatchPrecheckValidationError('不支持的批量操作');
   }
   return operation as CustomerBatchOperation;
@@ -335,6 +339,15 @@ export function normalizeCustomerBatchOperationInput(
     const lifecycleStatusCode = cleanText(raw.lifecycleStatusCode);
     if (!lifecycleStatusCode || lifecycleStatusCode.length > 80) throw new BatchPrecheckValidationError('客户进展无效');
     return { lifecycleStatusCode };
+  }
+  if (operation === 'update_lead_source') {
+    assertOnlyKeys(raw, ['leadSource', 'sourceName'], '线索来源参数包含不允许的字段');
+    const leadSource = cleanText(raw.leadSource);
+    const sourceName = cleanText(raw.sourceName);
+    if (!leadSource || leadSource.length > 120 || sourceName.length > 120) {
+      throw new BatchPrecheckValidationError('线索来源无效');
+    }
+    return { leadSource, sourceName };
   }
   if (operation === 'update_tags') {
     assertOnlyKeys(raw, ['mode', 'tagIds'], '标签参数包含不允许的字段');
@@ -408,6 +421,7 @@ function readManifest(value: unknown): BatchPrecheckGuardManifest {
     || !Array.isArray(manifest.requiredPermissionKeys)
     || typeof manifest.lifecycleConfigRevision !== 'string'
     || typeof manifest.tagCatalogRevision !== 'string'
+    || typeof manifest.leadSourceConfigRevision !== 'string'
   ) {
     throw new BatchPrecheckConflictError('预检守卫清单已损坏');
   }
@@ -759,9 +773,12 @@ function tagCatalogFromGuardRows(rows: Array<{ domain: string; recordId: string;
 
 function guardRevisionsFromRows(
   lifecycleValue: unknown,
+  leadSourceValue: unknown,
   tagRows: Array<{ domain: string; recordId: string; data: unknown; updatedAt: Date | string }>,
 ): GuardRevisions {
   const lifecycleConfig = normalizeCustomerLifecycleConfig(decodeJson(lifecycleValue) ?? DEFAULT_LIFECYCLE_STATUS_CONFIGS);
+  const decodedLeadSources = decodeJson(leadSourceValue);
+  const leadSourceConfigs = (Array.isArray(decodedLeadSources) ? decodedLeadSources : DEFAULT_LEAD_SOURCE_CONFIGS) as LeadSourceConfig[];
   const catalogRows = tagRows
     .filter((row) => row.domain === STORAGE_KEYS.TAG_GROUPS || row.domain === STORAGE_KEYS.TAGS)
     .map((row) => ({ ...row, data: decodeJson(row.data) }));
@@ -775,19 +792,22 @@ function guardRevisionsFromRows(
     }))),
     lifecycleConfig,
     tagCatalog: tagCatalogFromGuardRows(catalogRows),
+    leadSourceConfigRevision: sha256Json(leadSourceConfigs),
+    leadSourceConfigs,
   };
 }
 
 async function readGuardRevisions(client: BatchTx): Promise<GuardRevisions> {
-  const [lifecycle, tagRows] = await Promise.all([
+  const [lifecycle, leadSources, tagRows] = await Promise.all([
     client.appStorage.findUnique({ where: { key: STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS } }),
+    client.appStorage.findUnique({ where: { key: STORAGE_KEYS.LEAD_SOURCE_CONFIGS } }),
     client.businessRecord.findMany({
       where: { domain: { in: [STORAGE_KEYS.TAG_GROUPS, STORAGE_KEYS.TAGS] } },
       select: { domain: true, recordId: true, data: true, updatedAt: true },
       orderBy: [{ domain: 'asc' }, { recordId: 'asc' }],
     }),
   ]);
-  return guardRevisionsFromRows(lifecycle?.value, tagRows as any[]);
+  return guardRevisionsFromRows(lifecycle?.value, leadSources?.value, tagRows as any[]);
 }
 
 async function lockGuardRevisions(tx: BatchTx): Promise<GuardRevisions> {
@@ -796,10 +816,16 @@ async function lockGuardRevisions(tx: BatchTx): Promise<GuardRevisions> {
     update: {},
     create: { key: STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, value: asJson(DEFAULT_LIFECYCLE_STATUS_CONFIGS) },
   });
+  await tx.appStorage.upsert({
+    where: { key: STORAGE_KEYS.LEAD_SOURCE_CONFIGS },
+    update: {},
+    create: { key: STORAGE_KEYS.LEAD_SOURCE_CONFIGS, value: asJson(DEFAULT_LEAD_SOURCE_CONFIGS) },
+  });
   const lifecycleRows = await rawRows<any>(tx, Prisma.sql`
     SELECT \`key\`, value, updatedAt
     FROM app_storage
-    WHERE \`key\` = ${STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS}
+    WHERE \`key\` IN (${STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS}, ${STORAGE_KEYS.LEAD_SOURCE_CONFIGS})
+    ORDER BY \`key\` ASC
     FOR UPDATE
   `);
   try {
@@ -824,7 +850,11 @@ async function lockGuardRevisions(tx: BatchTx): Promise<GuardRevisions> {
     ORDER BY domain ASC, recordId ASC
     FOR UPDATE
   `);
-  return guardRevisionsFromRows(lifecycleRows[0]?.value, tagRows as any[]);
+  return guardRevisionsFromRows(
+    lifecycleRows.find((row) => row.key === STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS)?.value,
+    lifecycleRows.find((row) => row.key === STORAGE_KEYS.LEAD_SOURCE_CONFIGS)?.value,
+    tagRows as any[],
+  );
 }
 
 async function lockCustomerRecords(tx: BatchTx, customerIds: string[]): Promise<LockedBatchCustomer[]> {
@@ -871,6 +901,7 @@ function manifestFromFrozen(
     customerGuards: frozen.customerGuards.map((guard) => ({ ...guard })).sort((left, right) => left.customerId.localeCompare(right.customerId)),
     lifecycleConfigRevision: revisions.lifecycleConfigRevision,
     tagCatalogRevision: revisions.tagCatalogRevision,
+    leadSourceConfigRevision: revisions.leadSourceConfigRevision,
     command: { selectionMode, input, reason },
   };
 }
@@ -895,6 +926,7 @@ function assertRevalidatedGuard(
   if (
     manifest.lifecycleConfigRevision !== revisions.lifecycleConfigRevision
     || manifest.tagCatalogRevision !== revisions.tagCatalogRevision
+    || manifest.leadSourceConfigRevision !== revisions.leadSourceConfigRevision
   ) {
     throw new BatchPrecheckConflictError('客户配置已变化，请重新预检');
   }
@@ -984,6 +1016,20 @@ async function assertCurrentOperationGuard(
       const validation = validateManualTagUpdateSelection(tagCatalog, 'customer', next, previous);
       if (!validation.ok) throw new BatchPrecheckConflictError(validation.message);
     }
+    return;
+  }
+
+  if (operation === 'update_lead_source') {
+    const leadSource = cleanText((input as { leadSource?: unknown }).leadSource);
+    const sourceName = cleanText((input as { sourceName?: unknown }).sourceName);
+    const configs = revisions.leadSourceConfigs || [];
+    const parent = configs.find((item) => item.isActive && !item.parentId && cleanText(item.name) === leadSource);
+    if (!parent) throw new BatchPrecheckConflictError('线索来源配置已变化，请重新预检');
+    const children = configs.filter((item) => item.isActive && item.parentId === parent.id);
+    const valid = children.length
+      ? children.some((item) => cleanText(item.name) === sourceName)
+      : !sourceName;
+    if (!valid) throw new BatchPrecheckConflictError('线索来源配置已变化，请重新预检');
   }
 }
 
@@ -1096,9 +1142,43 @@ export function createCustomerBatchService(
         throw new BatchPrecheckValidationError('没有可执行的客户，请调整选择范围后重试');
       }
       const revisions = await currentRevisions(prisma);
+      let effectiveFrozen = frozen;
+      if (request.operation === 'update_lead_source') {
+        const rows = await jobCustomers(prisma, frozen.customerIds);
+        const records = rows.map(({ customer }) => ({
+          customer,
+          businessRecordUpdatedAt: frozen.versionManifest[cleanText(customer.id)],
+        }));
+        await validateOperationGuard(prisma, request.operation, request.input, context, records, revisions);
+        const sourceInput = request.input as { leadSource?: unknown; sourceName?: unknown };
+        const targetLeadSource = cleanText(sourceInput.leadSource);
+        const targetSourceName = cleanText(sourceInput.sourceName);
+        const unchangedIds = new Set(records
+          .filter(({ customer }) => (
+            cleanText(customer.leadSource) === targetLeadSource
+            && cleanText(customer.sourceName) === targetSourceName
+          ))
+          .map(({ customer }) => cleanText(customer.id)));
+        if (unchangedIds.size) {
+          const customerIds = frozen.customerIds.filter((customerId) => !unchangedIds.has(customerId));
+          if (!customerIds.length) {
+            throw new BatchPrecheckValidationError('所选客户的线索来源均未变化，无需执行');
+          }
+          effectiveFrozen = {
+            ...frozen,
+            customerIds,
+            selectionHash: sha256Json(customerIds),
+            versionManifest: Object.fromEntries(customerIds.map((customerId) => [customerId, frozen.versionManifest[customerId]])),
+            customerGuards: frozen.customerGuards.filter((guard) => !unchangedIds.has(guard.customerId)),
+            itemResults: frozen.itemResults.map((item) => unchangedIds.has(item.customerId)
+              ? { ...item, status: 'blocked' as const, reason: '线索来源未变化，已跳过' }
+              : item),
+          };
+        }
+      }
       const guardManifest = manifestFromFrozen(
         request.operation,
-        frozen,
+        effectiveFrozen,
         revisions,
         request.input,
         request.reason,
@@ -1110,10 +1190,10 @@ export function createCustomerBatchService(
         actorId: context.actorId,
         handlerKey: request.handlerKey,
         operation: request.operation,
-        selectionHash: frozen.selectionHash,
+        selectionHash: effectiveFrozen.selectionHash,
         inputHash,
-        selectedCustomerIds: frozen.customerIds,
-        customerVersionManifest: frozen.versionManifest,
+        selectedCustomerIds: effectiveFrozen.customerIds,
+        customerVersionManifest: effectiveFrozen.versionManifest,
         guardManifest,
         canonicalInput: { input: request.input, reason: request.reason },
         filterSnapshot: request.selection.mode === 'filter_snapshot' ? request.selection.filters : null,
@@ -1124,11 +1204,11 @@ export function createCustomerBatchService(
       return {
         confirmationToken: issued.confirmationToken,
         expiresAt: issued.expiresAt,
-        totalCount: frozen.customerIds.length,
+        totalCount: effectiveFrozen.itemResults.length,
         executionMode: 'background',
-        selectionHash: frozen.selectionHash,
+        selectionHash: effectiveFrozen.selectionHash,
         inputHash,
-        itemResults: frozen.itemResults,
+        itemResults: effectiveFrozen.itemResults,
       };
     },
 

@@ -51,6 +51,8 @@ export type ProcessBatchItemInput = {
 };
 
 export type ProcessBatchItemResult = {
+  skipped?: boolean;
+  skipReason?: string;
   beforeHash?: string;
   afterHash?: string;
   beforeSnapshot?: Customer;
@@ -151,6 +153,12 @@ export function buildCustomerMutationCommand(
     if (!lifecycleStatusCode) throw new Error('批量任务参数已损坏');
     return { action: 'set_progress', customerId, lifecycleStatusCode, reason };
   }
+  if (job.operation === 'update_lead_source') {
+    const leadSource = text(input.leadSource);
+    const sourceName = text(input.sourceName);
+    if (!leadSource) throw new Error('批量任务参数已损坏');
+    return { action: 'update_lead_source', customerId, leadSource, sourceName, reason };
+  }
   if (job.operation === 'update_tags') {
     const mode = input.mode === 'add' || input.mode === 'remove' ? input.mode : null;
     const tagIds = Array.isArray(input.tagIds)
@@ -208,6 +216,9 @@ export function createCustomerMutationBatchJobHandler(options: {
           : undefined,
       });
       return {
+        ...(command.action === 'update_lead_source' && sha256Json(result.beforeSnapshot) === sha256Json(result.afterSnapshot)
+          ? { skipped: true, skipReason: '线索来源未变化' }
+          : {}),
         beforeSnapshot: result.beforeSnapshot,
         afterSnapshot: result.afterSnapshot,
         beforeHash: sha256Json(result.beforeSnapshot),

@@ -19,6 +19,7 @@ export type CustomerMutationAction =
   | 'transfer'
   | 'release_to_pool'
   | 'set_progress'
+  | 'update_lead_source'
   | 'update_tags'
   | 'add_todo'
   | 'soft_delete';
@@ -84,6 +85,7 @@ const ACTION_PERMISSION: Record<CustomerMutationAction, { key: string; label: st
   transfer: { key: PERMISSION_KEYS.CUSTOMER_TRANSFER, label: '转让客户' },
   release_to_pool: { key: PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, label: '释放客户至公海' },
   set_progress: { key: PERMISSION_KEYS.CUSTOMER_SET_PROGRESS, label: '设置客户进展' },
+  update_lead_source: { key: PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION, label: '编辑客户归属' },
   update_tags: { key: PERMISSION_KEYS.CUSTOMER_SET_TAGS, label: '设置客户标签' },
   add_todo: { key: PERMISSION_KEYS.CUSTOMER_SET_TODOS, label: '设置客户待办' },
   soft_delete: { key: PERMISSION_KEYS.CUSTOMER_DELETE, label: '删除客户' },

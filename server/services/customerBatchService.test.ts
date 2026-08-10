@@ -5,10 +5,20 @@ import {
   createPrismaJobStore,
   lockServerAccessContext,
   lockServerCustomerDirectory,
+  normalizeCustomerBatchOperationInput,
 } from './customerBatchService';
 import { sha256Json } from './customerBatchPrecheckService';
 
 const now = new Date('2026-07-18T00:00:00.000Z');
+
+assert.deepEqual(
+  normalizeCustomerBatchOperationInput('update_lead_source', { leadSource: '抖音电商', sourceName: '飞鸽客服' }),
+  { leadSource: '抖音电商', sourceName: '飞鸽客服' },
+);
+assert.throws(
+  () => normalizeCustomerBatchOperationInput('update_lead_source', { leadSource: '', sourceName: '飞鸽客服' }),
+  /线索来源无效/,
+);
 const customer = (id: string, updatedAt = '2026-07-18T00:00:00.000Z') => ({
   id,
   name: `客户 ${id}`,
@@ -143,7 +153,15 @@ const access = (permissions: Set<string> = new Set([
 function fixture(options: { useDefaultOperationGuard?: boolean; targetRow?: Record<string, unknown> } = {}) {
   let currentAccess = access();
   let updatedAt = '2026-07-18T00:00:00.000Z';
-  let revisions = { lifecycleConfigRevision: 'life-1', tagCatalogRevision: 'tags-1' };
+  let revisions = {
+    lifecycleConfigRevision: 'life-1',
+    tagCatalogRevision: 'tags-1',
+    leadSourceConfigRevision: 'sources-1',
+    leadSourceConfigs: [
+      { id: 'douyin', name: '抖音电商', isActive: true, sortOrder: 1, createdAt: '', updatedAt: '' },
+      { id: 'feige', name: '飞鸽客服', parentId: 'douyin', isActive: true, sortOrder: 1, createdAt: '', updatedAt: '' },
+    ],
+  };
   let frozenCustomerIds = ['c-1'];
   let currentCustomer = customer('c-1', updatedAt);
   let jobCustomerRows: Array<{ customer: ReturnType<typeof customer> }> | null = null;
@@ -178,7 +196,7 @@ function fixture(options: { useDefaultOperationGuard?: boolean; targetRow?: Reco
     tokenStore: store,
     loadCurrentAccess: async () => currentAccess,
     lockCurrentAccess: async () => { lockOrder.push('access'); return currentAccess; },
-    lockCustomerRecords: async () => frozenCustomerIds.map((customerId) => ({
+    lockCustomerRecords: async (_tx: unknown, customerIds: string[]) => customerIds.map((customerId) => ({
       customer: { ...currentCustomer, id: customerId, updatedAt }, businessRecordUpdatedAt: updatedAt,
     })),
     readGuardRevisions: async () => revisions,
@@ -236,6 +254,7 @@ function fixture(options: { useDefaultOperationGuard?: boolean; targetRow?: Reco
     prechecks,
     setVersion: (value: string) => { updatedAt = value; },
     setRevisions: (value: typeof revisions) => { revisions = value; },
+    getRevisions: () => revisions,
     setAccess: (value: typeof currentAccess) => { currentAccess = value; },
     setFrozenCustomerIds: (value: string[]) => { frozenCustomerIds = value; },
     setCurrentCustomer: (value: ReturnType<typeof customer>) => { currentCustomer = value; },
@@ -270,6 +289,66 @@ function fixture(options: { useDefaultOperationGuard?: boolean; targetRow?: Reco
 }
 
 {
+  const sourceAccess = access(new Set([
+    PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE,
+    PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION,
+  ]));
+  const test = fixture({ useDefaultOperationGuard: true });
+  test.setAccess(sourceAccess);
+  const precheck = await test.service.precheckCustomerBatch({
+    handlerKey: 'customer_mutation',
+    operation: 'update_lead_source',
+    selection: { mode: 'ids', customerIds: ['c-1'] },
+    input: { leadSource: '抖音电商', sourceName: '飞鸽客服' },
+    reason: '统一来源归因',
+  }, sourceAccess);
+  const created = await test.service.createCustomerBatchJob({ precheckToken: precheck.confirmationToken, idempotencyKey: 'source-valid' }, sourceAccess);
+  assert.equal(created.operation, 'update_lead_source');
+}
+
+{
+  const sourceAccess = access(new Set([
+    PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE,
+    PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION,
+  ]));
+  const test = fixture({ useDefaultOperationGuard: true });
+  test.setAccess(sourceAccess);
+  await assert.rejects(
+    () => test.service.precheckCustomerBatch({
+      handlerKey: 'customer_mutation',
+      operation: 'update_lead_source',
+      selection: { mode: 'ids', customerIds: ['c-1'] },
+      input: { leadSource: '抖音电商', sourceName: '已停用来源' },
+      reason: '统一来源归因',
+    }, sourceAccess),
+    /线索来源配置已变化/,
+  );
+}
+
+{
+  const sourceAccess = access(new Set([
+    PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE,
+    PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION,
+  ]));
+  const test = fixture({ useDefaultOperationGuard: true });
+  test.setAccess(sourceAccess);
+  test.setFrozenCustomerIds(['c-1', 'c-2']);
+  test.setJobCustomerRows([
+    { customer: { ...customer('c-1', '2026-07-18T00:00:00.000Z'), leadSource: '抖音电商', sourceName: '飞鸽客服' } as any },
+    { customer: { ...customer('c-2', '2026-07-18T00:00:00.000Z'), leadSource: '微信', sourceName: '私域' } as any },
+  ]);
+  const precheck = await test.service.precheckCustomerBatch({
+    handlerKey: 'customer_mutation', operation: 'update_lead_source',
+    selection: { mode: 'ids', customerIds: ['c-1', 'c-2'] },
+    input: { leadSource: '抖音电商', sourceName: '飞鸽客服' }, reason: '统一来源归因',
+  }, sourceAccess);
+  assert.equal(precheck.itemResults.find((item) => item.customerId === 'c-1')?.status, 'blocked');
+  assert.equal(precheck.itemResults.find((item) => item.customerId === 'c-1')?.reason, '线索来源未变化，已跳过');
+  const created = await test.service.createCustomerBatchJob({ precheckToken: precheck.confirmationToken, idempotencyKey: 'source-skip' }, sourceAccess);
+  assert.equal(created.totalCount, 1, '未变化客户不应进入后台任务');
+}
+
+{
   const test = fixture();
   const precheck = await test.service.precheckCustomerBatch({
     handlerKey: 'customer_mutation', operation: 'transfer', selection: { mode: 'ids', customerIds: ['c-1'] }, input: { targetOwnerId: 'owner-b' }, reason: '团队调整',
@@ -287,7 +366,7 @@ function fixture(options: { useDefaultOperationGuard?: boolean; targetRow?: Reco
   const precheck = await test.service.precheckCustomerBatch({
     handlerKey: 'customer_mutation', operation: 'transfer', selection: { mode: 'ids', customerIds: ['c-1'] }, input: { targetOwnerId: 'owner-b' }, reason: '团队调整',
   }, access());
-  test.setRevisions({ lifecycleConfigRevision: 'life-2', tagCatalogRevision: 'tags-1' });
+  test.setRevisions({ ...test.getRevisions(), lifecycleConfigRevision: 'life-2' });
   await assert.rejects(
     () => test.service.createCustomerBatchJob({ precheckToken: precheck.confirmationToken, idempotencyKey: 'config-changed' }, access()),
     /配置已变化/,

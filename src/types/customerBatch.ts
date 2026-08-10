@@ -37,6 +37,7 @@ export type CustomerBatchSelection =
 export type CustomerBatchOperationInput =
   | { targetOwnerId: string }
   | { lifecycleStatusCode: string }
+  | { leadSource: string; sourceName: string }
   | { mode: 'add' | 'remove'; tagIds: string[] }
   | { title: string; content?: string; dueAt: string; executionMethod: string }
   | { confirmed: true }
@@ -64,6 +65,7 @@ export type BatchPrecheckGuardManifest = {
   }>;
   lifecycleConfigRevision: string;
   tagCatalogRevision: string;
+  leadSourceConfigRevision: string;
   command: {
     selectionMode: CustomerBatchSelection['mode'];
     input: CustomerBatchOperationInput;

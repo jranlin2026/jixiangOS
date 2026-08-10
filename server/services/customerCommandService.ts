@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { failure, success, type ApiResponse } from '../api/response';
 import {
   DEFAULT_LEAD_FLOW_CONFIG,
+  DEFAULT_LEAD_SOURCE_CONFIGS,
   DEFAULT_LIFECYCLE_STATUS_CONFIGS,
   LIFECYCLE_STATUS_CODES,
   STORAGE_KEYS,
@@ -13,6 +14,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer, CustomerActivityRecord } from '../../src/types/customer';
 import type { FollowUpRecord, Lead, LeadChangeLog, LeadFlowConfig, LeadIntakeRecord } from '../../src/types/lead';
 import type { Role } from '../../src/types/role';
+import type { LeadSourceConfig } from '../../src/types/settings';
 import {
   buildDataVisibilityScopeForUser,
   type DataVisibilityScope,
@@ -93,6 +95,7 @@ export type CustomerAtomicCommand =
   | { action: 'transfer'; customerId: string; targetOwnerId: string; reason: string }
   | { action: 'release_to_pool'; customerId: string; reason: string }
   | { action: 'set_progress'; customerId: string; lifecycleStatusCode: string; reason: string }
+  | { action: 'update_lead_source'; customerId: string; leadSource: string; sourceName: string; reason: string }
   | { action: 'update_tags'; customerId: string; mode: 'add' | 'remove'; tagIds: string[]; reason: string }
   | { action: 'add_todo'; customerId: string; title: string; content: string; dueAt: string; executionMethod: string; reason: string }
   | { action: 'soft_delete'; customerId: string; reason: string; confirmed: true };
@@ -952,13 +955,14 @@ function atomicActivity(
     transfer: '转让了客户',
     release_to_pool: '释放客户至公海',
     set_progress: '更新了客户进展',
+    update_lead_source: '更新了线索来源',
     update_tags: '更新了客户标签',
     add_todo: '新建了客户待办',
     soft_delete: '删除了客户',
   };
   return {
     id: `activity-${randomUUID()}`,
-    type: command.action === 'add_todo' ? 'todo' : command.action === 'set_progress' || command.action === 'update_tags' ? 'update' : 'transfer',
+    type: command.action === 'add_todo' ? 'todo' : command.action === 'set_progress' || command.action === 'update_lead_source' || command.action === 'update_tags' ? 'update' : 'transfer',
     title: labels[command.action],
     content: command.reason,
     operator: actor.name,
@@ -1134,6 +1138,26 @@ export function createCustomerAtomicCommandService(options: {
           lifecycleStatusCode: targetLifecycleCode as Customer['lifecycleStatusCode'],
           lifecycleStatusUpdatedAt: atIso,
         };
+      } else if (command.action === 'update_lead_source') {
+        const leadSource = cleanText(command.leadSource);
+        const sourceName = cleanText(command.sourceName);
+        if (!leadSource || leadSource.length > 120 || sourceName.length > 120) throw new Error('线索来源无效');
+        const storedConfigs = await lockStorageValue<LeadSourceConfig[]>(
+          tx,
+          STORAGE_KEYS.LEAD_SOURCE_CONFIGS,
+          DEFAULT_LEAD_SOURCE_CONFIGS,
+        );
+        const configs = Array.isArray(storedConfigs) ? storedConfigs : DEFAULT_LEAD_SOURCE_CONFIGS;
+        const parent = configs.find((item) => item.isActive && !item.parentId && cleanText(item.name) === leadSource);
+        const children = parent ? configs.filter((item) => item.isActive && item.parentId === parent.id) : [];
+        const validSelection = Boolean(parent) && (children.length
+          ? children.some((item) => cleanText(item.name) === sourceName)
+          : !sourceName);
+        if (!validSelection) throw new Error('线索来源配置已变化，请重新预检');
+        if (cleanText(customer.leadSource) === leadSource && cleanText(customer.sourceName) === sourceName) {
+          return noOpResult();
+        }
+        next = { ...next, leadSource, sourceName };
       } else if (command.action === 'update_tags') {
         const catalog = await loadCustomerTagCatalog(tx, true);
         const targetIds = new Set(customer.manualTagIds || []);
@@ -1195,9 +1219,18 @@ export function createCustomerAtomicCommandService(options: {
         };
       }
 
+      const activity = atomicActivity(command, actor, at);
+      if (command.action === 'update_lead_source') {
+        activity.changes = [{
+          field: 'leadSource',
+          label: '线索来源',
+          oldValue: [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || null,
+          newValue: [next.leadSource, next.sourceName].filter(Boolean).join('-') || null,
+        }];
+      }
       next = {
         ...next,
-        activityRecords: [atomicActivity(command, actor, at), ...(next.activityRecords || [])],
+        activityRecords: [activity, ...(next.activityRecords || [])],
         updatedAt: atIso,
       };
       await repository.compareAndSave(snapshot, next, at);
@@ -1207,9 +1240,21 @@ export function createCustomerAtomicCommandService(options: {
           tx, customer.id, at, actor.name, reason, next.deletionCascadeId!,
         );
       }
-      if (command.action === 'transfer' || command.action === 'release_to_pool') {
+      if (command.action === 'transfer' || command.action === 'release_to_pool' || command.action === 'update_lead_source') {
         const relatedLeads = await lockedLeadRowsByStableCustomerId(tx, customer.id);
-        for (const row of relatedLeads) {
+        const activeRelatedLeads = relatedLeads.filter((row) => !readJson<Lead>(row.data).deletedAt);
+        const originLeadId = command.action === 'update_lead_source'
+          ? cleanText(customer.activityRecords?.find((record) => record.relatedType === 'lead' && record.relatedId)?.relatedId)
+          : '';
+        const leadsToUpdate = command.action === 'update_lead_source'
+          ? (originLeadId
+            ? activeRelatedLeads.filter((row) => {
+              const lead = readJson<Lead>(row.data);
+              return row.id === originLeadId || lead.id === originLeadId;
+            })
+            : activeRelatedLeads.length === 1 ? activeRelatedLeads : [])
+          : relatedLeads;
+        for (const row of leadsToUpdate) {
           const lead = readJson<Lead>(row.data);
           const nextLead: Lead = command.action === 'transfer'
             ? {
@@ -1221,7 +1266,7 @@ export function createCustomerAtomicCommandService(options: {
               assignedAt: atIso,
               updatedAt: atIso,
             }
-            : {
+            : command.action === 'release_to_pool' ? {
               ...lead,
               owner: '公海',
               ownerId: undefined,
@@ -1231,6 +1276,11 @@ export function createCustomerAtomicCommandService(options: {
               lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
               lifecycleStatus: '流失公海',
               lifecycleStatusUpdatedAt: atIso,
+              updatedAt: atIso,
+            } : {
+              ...lead,
+              source: command.leadSource,
+              sourceName: command.sourceName,
               updatedAt: atIso,
             };
           await persistLead(tx, row.id, nextLead, at);
@@ -1281,6 +1331,14 @@ function canonicalAtomicCommandInput(command: CustomerAtomicCommand): Record<str
           action: command.action,
           customerId: cleanText(command.customerId),
           lifecycleStatusCode: cleanText(command.lifecycleStatusCode),
+          reason: cleanText(command.reason),
+        };
+      case 'update_lead_source':
+        return {
+          action: command.action,
+          customerId: cleanText(command.customerId),
+          leadSource: cleanText(command.leadSource),
+          sourceName: cleanText(command.sourceName),
           reason: cleanText(command.reason),
         };
       case 'update_tags':

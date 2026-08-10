@@ -104,6 +104,7 @@ function createAtomicFixture(options: {
   linkedLead?: boolean;
   customerOverrides?: Record<string, unknown>;
   lifecycleConfigOverride?: unknown;
+  leadSourceConfigOverride?: unknown;
 } = {}) {
   let source = { ...structuredClone(customer), ...(options.customerOverrides || {}) };
   let savedCustomer: any = null;
@@ -112,7 +113,7 @@ function createAtomicFixture(options: {
   let auditEvent: any = null;
   let linkedLead: any = options.linkedLead ? {
     id: 'lead-linked-delete',
-    data: { id: 'lead-linked-delete', customerId: 'c-1', name: '客户甲', owner: '销售甲' },
+    data: { id: 'lead-linked-delete', customerId: 'c-1', name: '客户甲', owner: '销售甲', source: '微信', sourceName: '私域' },
   } : null;
   const lifecycleConfig = options.lifecycleConfigOverride || {
     statuses: [
@@ -122,12 +123,17 @@ function createAtomicFixture(options: {
     enabledStatusCodes: ['following', 'pending_followup'],
     transitions: { following: ['pending_followup'], pending_followup: ['following'] },
   };
+  const leadSourceConfig = options.leadSourceConfigOverride || [
+    { id: 'douyin', name: '抖音电商', isActive: true, sortOrder: 1, createdAt: '', updatedAt: '' },
+    { id: 'feige', name: '飞鸽客服', parentId: 'douyin', isActive: true, sortOrder: 1, createdAt: '', updatedAt: '' },
+  ];
   const tagGroup = { id: 'group-1', name: '客户级别', color: '#1677ff', selectionMode: 'single', scope: 'customer', isActive: true, sortOrder: 1 };
   const tag = { id: 'tag-1', groupId: 'group-1', name: '重点客户', color: '#1677ff', isActive: true, sortOrder: 1 };
   const conflictingTag = { id: 'tag-2', groupId: 'group-1', name: '普通客户', color: '#94a3b8', isActive: true, sortOrder: 2 };
   const tx = { marker: `atomic-${Math.random()}` } as any;
+  let lockedStorageKey = '';
   tx.appStorage = {
-    upsert: async () => undefined,
+    upsert: async ({ where }: any) => { lockedStorageKey = where.key; },
     findUnique: async () => null,
   };
   tx.$queryRaw = async (query: any) => {
@@ -137,7 +143,7 @@ function createAtomicFixture(options: {
       return [{ id: 'row-c-1', domain: 'aaos_customers', recordId: 'c-1', data: source, updatedAt: new Date('2026-07-17T00:00:00.000Z') }];
     }
     if (text.includes('app_storage') && text.includes('value')) {
-      return [{ key: 'lifecycle_status_configs', value: lifecycleConfig }];
+      return [{ key: lockedStorageKey, value: lockedStorageKey.endsWith('lead_source_configs') ? leadSourceConfig : lifecycleConfig }];
     }
     return [];
   };
@@ -193,6 +199,7 @@ function createAtomicFixture(options: {
           PERMISSION_KEYS.CUSTOMER_TRANSFER,
           PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL,
           PERMISSION_KEYS.CUSTOMER_SET_PROGRESS,
+          PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION,
           PERMISSION_KEYS.CUSTOMER_SET_TAGS,
           PERMISSION_KEYS.CUSTOMER_SET_TODOS,
           PERMISSION_KEYS.CUSTOMER_DELETE,
@@ -240,6 +247,37 @@ function createAtomicFixture(options: {
   assert.equal(fixture.get().savedCustomer, null);
   assert.equal(fixture.get().todoMutation, null);
   assert.equal(fixture.get().auditEvent, null);
+}
+{
+  const fixture = createAtomicFixture({
+    linkedLead: true,
+    customerOverrides: { leadSource: '微信', sourceName: '私域' },
+  });
+  const result = await fixture.service.execute({
+    action: 'update_lead_source', customerId: 'c-1', leadSource: '抖音电商', sourceName: '飞鸽客服', reason: '统一来源归因',
+  }, fixture.context);
+  assert.equal(result.customer.leadSource, '抖音电商');
+  assert.equal(result.customer.sourceName, '飞鸽客服');
+  assert.equal(fixture.get().linkedLead.data.source, '抖音电商');
+  assert.equal(fixture.get().linkedLead.data.sourceName, '飞鸽客服');
+  assert.deepEqual(result.customer.activityRecords![0].changes, [{
+    field: 'leadSource', label: '线索来源', oldValue: '微信-私域', newValue: '抖音电商-飞鸽客服',
+  }]);
+}
+{
+  const fixture = createAtomicFixture({
+    customerOverrides: { leadSource: '微信', sourceName: '私域' },
+    leadSourceConfigOverride: [
+      { id: 'douyin', name: '抖音电商', isActive: false, sortOrder: 1, createdAt: '', updatedAt: '' },
+    ],
+  });
+  await assert.rejects(
+    () => fixture.service.execute({
+      action: 'update_lead_source', customerId: 'c-1', leadSource: '抖音电商', sourceName: '', reason: '统一来源归因',
+    }, fixture.context),
+    /线索来源配置已变化/,
+  );
+  assert.equal(fixture.get().savedCustomer, null, '后台执行时来源失效不得写入客户');
 }
 {
   const fixture = createAtomicFixture();

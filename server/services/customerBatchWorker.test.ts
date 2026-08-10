@@ -12,7 +12,7 @@ import { CustomerBatchJobHandlerRegistry, type CustomerBatchJobHandler } from '.
 type FakeItem = {
   id: string;
   targetKey: string;
-  status: 'queued' | 'succeeded' | 'failed' | 'cancelled';
+  status: 'queued' | 'succeeded' | 'failed' | 'skipped' | 'cancelled';
   attemptCount: number;
   retryable: boolean;
 };
@@ -53,7 +53,7 @@ function fakeStoreFixture(start = new Date('2026-07-18T08:00:00.000Z')) {
   const counts = () => ({
     successCount: items.filter((item) => item.status === 'succeeded').length,
     failedCount: items.filter((item) => item.status === 'failed').length,
-    skippedCount: 0,
+    skippedCount: items.filter((item) => item.status === 'skipped').length,
     cancelledCount: items.filter((item) => item.status === 'cancelled').length,
   });
 
@@ -83,11 +83,11 @@ function fakeStoreFixture(start = new Date('2026-07-18T08:00:00.000Z')) {
       if (!item) return { kind: 'empty' };
       item.attemptCount += 1;
       try {
-        await processItem({
+        const result = await processItem({
           tx: {}, job, item: { ...item, jobId: job.id, idempotencyKey: `${job.id}:${item.targetKey}`, expectedUpdatedAt: now },
           executionContext: { access: { actorId: job.actorId } as any, actor: { id: job.actorId, name: job.actorName }, roles: [] },
         });
-        item.status = 'succeeded';
+        item.status = result.skipped ? 'skipped' : 'succeeded';
       } catch (error) {
         const code = (error as any)?.code;
         if (code === 'P2034') return { kind: 'retryable_failure', itemId: item.id, error };
@@ -146,6 +146,21 @@ function fakeStoreFixture(start = new Date('2026-07-18T08:00:00.000Z')) {
   assert.equal(fake.heartbeatCalls(), 0, 'item transactions already extend the lease; do not add one heartbeat write per row');
   assert.equal(await worker.runOnce(), 0);
   assert.equal(calls.length, 3, 'terminal items must never execute twice');
+}
+
+{
+  const fake = fakeStoreFixture();
+  const handler: CustomerBatchJobHandler = {
+    handlerKey: 'customer_mutation', executionKind: 'itemized',
+    processItem: async () => ({ skipped: true, skipReason: '线索来源未变化' }),
+  };
+  const worker = createCustomerBatchWorker({
+    store: fake.store, handlers: new CustomerBatchJobHandlerRegistry([handler]), workerId: 'worker-skip', now: fake.now,
+  });
+  assert.equal(await worker.runOnce(), 1);
+  assert.equal(fake.job.skippedCount, 3);
+  assert.equal(fake.job.successCount, 0);
+  assert.equal(fake.job.status, 'succeeded');
 }
 
 {

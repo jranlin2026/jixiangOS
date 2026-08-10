@@ -17,6 +17,7 @@ import {
 } from '@mui/material';
 import DialogCloseTitle from '../../../shared/components/DialogCloseTitle';
 import { customerBatchApi } from '../../../api/customerBatchApi';
+import { settingsApi } from '../../../api/settingsApi';
 import { fetchCustomerTagCatalog } from '../../../api/customerTagApi';
 import type { CustomerManageableUser } from '../../../types/customer';
 import type {
@@ -26,15 +27,17 @@ import type {
   CustomerBatchPrecheckResult,
   CustomerBatchSelection,
 } from '../../../types/customerBatch';
-import type { LifecycleStatusConfig } from '../../../types/settings';
+import type { LeadSourceConfig, LifecycleStatusConfig } from '../../../types/settings';
 import type { CustomerTag } from '../../../types/tag';
 import type { CustomerBatchSelectionState } from '../../../shared/utils/customerBatchSelection';
 import { formatEmployeeNameWithPosition } from '../../../shared/utils/formatters';
+import { buildLeadSourceOptions, resolveLeadSourceOption } from '../../../shared/utils/leadSourceOptions';
 
 export const CUSTOMER_BATCH_ACTION_LABELS: Record<CustomerBatchOperation, string> = {
   transfer: '转让客户',
   release_to_pool: '释放到公海',
   set_progress: '设置客户进展',
+  update_lead_source: '修改线索来源',
   update_tags: '设置客户标签',
   add_todo: '添加客户待办',
   soft_delete: '删除客户',
@@ -87,6 +90,7 @@ type Props = {
 type ActionForm = {
   targetOwnerId: string;
   lifecycleStatusCode: string;
+  leadSourceKey: string;
   tagMode: 'add' | 'remove';
   tagIds: string[];
   todoTitle: string;
@@ -105,6 +109,7 @@ const defaultDueAt = () => {
 const initialForm = (): ActionForm => ({
   targetOwnerId: '',
   lifecycleStatusCode: '',
+  leadSourceKey: '',
   tagMode: 'add',
   tagIds: [],
   todoTitle: '',
@@ -124,10 +129,17 @@ function toApiSelection(selection: CustomerBatchSelectionState): CustomerBatchSe
   return { mode: 'ids', customerIds: selection.selectedIds };
 }
 
-function actionInput(operation: CustomerBatchOperation, form: ActionForm): CustomerBatchOperationInput | null {
+function actionInput(
+  operation: CustomerBatchOperation,
+  form: ActionForm,
+  leadSourceOptions: ReturnType<typeof buildLeadSourceOptions>,
+): CustomerBatchOperationInput | null {
   if (operation === 'transfer') return form.targetOwnerId ? { targetOwnerId: form.targetOwnerId } : null;
   if (operation === 'release_to_pool') return {};
   if (operation === 'set_progress') return form.lifecycleStatusCode ? { lifecycleStatusCode: form.lifecycleStatusCode } : null;
+  if (operation === 'update_lead_source') {
+    return resolveLeadSourceOption(leadSourceOptions, form.leadSourceKey);
+  }
   if (operation === 'update_tags') return form.tagIds.length ? { mode: form.tagMode, tagIds: form.tagIds } : null;
   if (operation === 'add_todo') {
     if (!form.todoTitle.trim() || !form.todoDueAt || !form.todoExecutionMethod) return null;
@@ -159,6 +171,7 @@ const CustomerBatchActionDialog: React.FC<Props> = ({
   const [state, setState] = useState<CustomerBatchDialogState>(initialCustomerBatchDialogState());
   const [form, setForm] = useState<ActionForm>(initialForm());
   const [tags, setTags] = useState<CustomerTag[]>([]);
+  const [leadSourceConfigs, setLeadSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const revisionRef = useRef(0);
@@ -170,6 +183,16 @@ const CustomerBatchActionDialog: React.FC<Props> = ({
     setError('');
     revisionRef.current += 1;
   }, [open, operation]);
+
+  useEffect(() => {
+    if (!open || operation !== 'update_lead_source') return;
+    void settingsApi.fetchLeadSourceConfigs().then((response) => {
+      if (response.code === 0) setLeadSourceConfigs(response.data.filter((item) => item.isActive));
+      else setError(response.message || '线索来源读取失败');
+    });
+  }, [open, operation]);
+
+  const leadSourceOptions = useMemo(() => buildLeadSourceOptions(leadSourceConfigs), [leadSourceConfigs]);
 
   useEffect(() => {
     if (!open || operation !== 'update_tags') return;
@@ -198,7 +221,7 @@ const CustomerBatchActionDialog: React.FC<Props> = ({
       setError('请输入“删除客户”确认高风险操作');
       return;
     }
-    const input = actionInput(operation, form);
+    const input = actionInput(operation, form, leadSourceOptions);
     if (!input) {
       setError('请完整填写本次批量操作参数');
       return;
@@ -270,6 +293,33 @@ const CustomerBatchActionDialog: React.FC<Props> = ({
                 <MenuItem key={config.code} value={config.code}>{config.name}</MenuItem>
               ))}
             </TextField>
+          )}
+          {operation === 'update_lead_source' && (
+            <Stack spacing={1.25}>
+              <TextField
+                select
+                required
+                label="新的线索来源"
+                value={form.leadSourceKey}
+                onChange={(event) => updateForm({ leadSourceKey: event.target.value })}
+                disabled={!leadSourceOptions.length}
+                helperText={leadSourceOptions.length ? '请选择系统设置中已启用的线索来源' : '暂无可用线索来源，请先在系统设置中维护'}
+              >
+                {leadSourceConfigs.filter((item) => !item.parentId).sort((left, right) => left.sortOrder - right.sortOrder).flatMap((parent) => {
+                  const options = leadSourceOptions.filter((option) => option.parentId === parent.id);
+                  if (options.length === 1 && options[0].key === parent.id) {
+                    return [<MenuItem key={options[0].key} value={options[0].key}>{options[0].label}</MenuItem>];
+                  }
+                  return [
+                    <MenuItem key={`${parent.id}-group`} disabled sx={{ fontWeight: 700, color: 'text.primary' }}>{parent.name}</MenuItem>,
+                    ...options.map((option) => <MenuItem key={option.key} value={option.key} sx={{ pl: 4 }}>{option.label}</MenuItem>),
+                  ];
+                })}
+              </TextField>
+              <Alert severity="info" icon={false}>
+                只修改客户及其关联线索的“线索来源”，不会改动来源平台、店铺、平台订单和付款信息。
+              </Alert>
+            </Stack>
           )}
           {operation === 'update_tags' && (
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
@@ -350,7 +400,7 @@ const CustomerBatchActionDialog: React.FC<Props> = ({
         <Button onClick={onClose} disabled={loading}>取消</Button>
         <Button variant="outlined" onClick={() => void runPrecheck()} disabled={loading}>{loading ? '处理中…' : state.precheck ? '重新预检' : '开始预检'}</Button>
         <Button color={operation === 'soft_delete' ? 'error' : 'primary'} variant="contained" onClick={() => void createJob()} disabled={loading || !canSubmitBatchDialog(state)}>
-          确认创建任务
+          {state.precheck ? `确认处理 ${presentation.executableCount} 位客户` : '确认创建任务'}
         </Button>
       </DialogActions>
     </Dialog>

@@ -15,6 +15,11 @@ assert.equal(
   '释放到公海',
   '批量释放必须与单客户操作使用同一业务名称',
 );
+assert.equal(
+  CUSTOMER_BATCH_ACTION_LABELS.update_lead_source,
+  '修改线索来源',
+  '批量修改线索来源必须使用客户归因中的统一名称',
+);
 
 const precheck = {
   confirmationToken: 'opaque-token',
