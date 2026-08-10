@@ -45,8 +45,8 @@ export const resizeColumnWidths = (widths: ColumnWidthMap, columnId: string, del
 
 export const resetColumnWidths = (defaultWidths: ColumnWidthMap): ColumnWidthMap => ({ ...defaultWidths });
 
-export const createAutoTableStorageKey = (pathname: string, tableIndex: number) => (
-  `${AUTO_TABLE_WIDTH_STORAGE_PREFIX}:${pathname || '/'}:${tableIndex}`
+export const createAutoTableStorageKey = (pathname: string, tableIdentity: number | string) => (
+  `${AUTO_TABLE_WIDTH_STORAGE_PREFIX}:${pathname || '/'}:${tableIdentity}`
 );
 
 export const getAutoColumnId = (headerText: string, columnIndex: number) => {

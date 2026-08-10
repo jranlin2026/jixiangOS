@@ -47,7 +47,7 @@ const updateTableMinWidth = (table: HTMLTableElement) => {
   if (width > 0) table.style.minWidth = `${width}px`;
 };
 
-const enhanceTable = (table: HTMLTableElement, pathname: string, tableIndex: number) => {
+export const enhanceTable = (table: HTMLTableElement, pathname: string, tableIndex: number) => {
   if (table.closest('[data-disable-column-resize="true"]')) return;
   const headers = Array.from(table.querySelectorAll('thead th')) as HTMLTableCellElement[];
   if (!headers.length) return;
@@ -55,7 +55,10 @@ const enhanceTable = (table: HTMLTableElement, pathname: string, tableIndex: num
   const hasManualResizableHeader = separators.some((separator) => !separator.classList.contains(HANDLE_CLASS));
   if (hasManualResizableHeader) return;
 
-  const storageKey = createAutoTableStorageKey(pathname, tableIndex);
+  const stableTableId = table.dataset.systemTableId?.trim();
+  const storageKey = stableTableId
+    ? createAutoTableStorageKey(pathname, stableTableId)
+    : createAutoTableStorageKey(pathname, tableIndex);
   const widths = readWidths(storageKey);
 
   table.style.tableLayout = 'fixed';

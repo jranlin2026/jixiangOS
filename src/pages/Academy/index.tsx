@@ -13,7 +13,6 @@ import {
   Paper,
   Stack,
   Tab,
-  Table,
   TableBody,
   TableCell,
   TableContainer,
@@ -62,6 +61,7 @@ import useAppFeedback from "../../shared/hooks/useAppFeedback";
 import ProtectedFormDialog from "../../shared/components/ProtectedFormDialog";
 import DialogCloseTitle from "../../shared/components/DialogCloseTitle";
 import TablePagination from "../../shared/components/TablePagination";
+import SystemDataTable from "../../shared/components/SystemDataTable";
 import {
   ModuleHeader,
   ModulePage,
@@ -91,38 +91,30 @@ const panelSx = {
   bgcolor: "#fff",
 };
 
-const tableSx = {
-  "& .MuiTableCell-root": {
-    borderColor: "#E8EDF4",
-    py: 1.1,
-    px: 1.5,
-    fontSize: 13,
-    color: palette.ink,
-    whiteSpace: "nowrap",
-  },
-  "& .MuiTableHead-root .MuiTableCell-root": {
-    bgcolor: "#F8FAFD",
-    color: "#5C6A82",
-    fontWeight: 800,
-  },
-};
-
 type AcademyView =
-  "overview" | "plans" | "courses" | "sessions" | "engagements" | "reviews";
+  | "overview"
+  | "courses"
+  | "plans"
+  | "sessions"
+  | "engagements"
+  | "handoffs"
+  | "reviews";
 const viewPath: Record<AcademyView, string> = {
   overview: ROUTES.ACADEMY,
-  plans: `${ROUTES.ACADEMY}/plans`,
   courses: `${ROUTES.ACADEMY}/courses`,
+  plans: `${ROUTES.ACADEMY}/plans`,
   sessions: `${ROUTES.ACADEMY}/sessions`,
   engagements: `${ROUTES.ACADEMY}/engagements`,
+  handoffs: `${ROUTES.ACADEMY}/handoffs`,
   reviews: `${ROUTES.ACADEMY}/reviews`,
 };
 const navItems: Array<{ value: AcademyView; label: string }> = [
   { value: "overview", label: "运营工作台" },
-  { value: "plans", label: "课程计划" },
-  { value: "courses", label: "课程库" },
-  { value: "sessions", label: "场次运营" },
-  { value: "engagements", label: "学员与转化" },
+  { value: "courses", label: "课程资产" },
+  { value: "plans", label: "课程排期" },
+  { value: "sessions", label: "场次执行" },
+  { value: "engagements", label: "邀约与学员" },
+  { value: "handoffs", label: "转化与交接" },
   { value: "reviews", label: "经营复盘" },
 ];
 
@@ -294,6 +286,8 @@ const Academy: React.FC = () => {
         ? "sessions"
         : location.pathname.endsWith("/engagements")
           ? "engagements"
+          : location.pathname.endsWith("/handoffs")
+            ? "handoffs"
           : location.pathname.endsWith("/reviews")
             ? "reviews"
             : "overview";
@@ -332,7 +326,7 @@ const Academy: React.FC = () => {
       return hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE);
     if (item.value === "sessions")
       return hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE);
-    if (item.value === "engagements")
+    if (item.value === "engagements" || item.value === "handoffs")
       return hasPermission(
         currentUser,
         PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE,
@@ -393,14 +387,18 @@ const Academy: React.FC = () => {
 
   useEffect(() => {
     if (
-      (view === "engagements" || view === "reviews") &&
+      (view === "engagements" || view === "handoffs" || view === "reviews") &&
       selectedSessionId &&
       !details[selectedSessionId]
     )
       void loadDetail(selectedSessionId);
   }, [details, loadDetail, selectedSessionId, view]);
   useEffect(() => {
-    if (view !== "engagements" || !canEngagement || customers.length) return;
+    if (
+      (view !== "engagements" && view !== "handoffs") ||
+      !canEngagement ||
+      customers.length
+    ) return;
     void customerApi
       .fetchCustomers({ page: 1, pageSize: 100 })
       .then((response) => {
@@ -552,12 +550,10 @@ const Academy: React.FC = () => {
       (task) => task.status === "BLOCKED",
     );
     return (
-      <ModulePage
-        data-disable-column-resize="true"
-      >
+      <ModulePage>
         <ModuleHeader
           title="极享商学院"
-          description="统一管理课程、场次执行、学员转化与经营复盘。"
+          description="连接课程资产、课程排期、场次执行、学员邀约、转化交接与经营复盘。"
         />
         <ModuleTabs
           value={view}
@@ -716,7 +712,7 @@ const Academy: React.FC = () => {
                 helper="任务状态直接驱动场次准备度与开课门禁"
               />
               <TableContainer sx={{ mt: 1.2 }}>
-                <Table size="small" sx={tableSx}>
+                <SystemDataTable tableId="academy-session-execution-tasks">
                   <TableHead>
                     <TableRow>
                       <TableCell>任务</TableCell>
@@ -788,7 +784,7 @@ const Academy: React.FC = () => {
                       </TableRow>
                     ))}
                   </TableBody>
-                </Table>
+                </SystemDataTable>
               </TableContainer>
             </Paper>
             <Stack spacing={1.5}>
@@ -927,7 +923,7 @@ const Academy: React.FC = () => {
               }
             />
             <TableContainer sx={{ mt: 1 }}>
-              <Table size="small" sx={tableSx}>
+              <SystemDataTable tableId="academy-session-change-history">
                 <TableHead>
                   <TableRow>
                     <TableCell>变更内容</TableCell>
@@ -958,7 +954,7 @@ const Academy: React.FC = () => {
                     </TableRow>
                   )}
                 </TableBody>
-              </Table>
+              </SystemDataTable>
             </TableContainer>
           </Paper>
         </Stack>
@@ -968,12 +964,10 @@ const Academy: React.FC = () => {
   }
 
   return (
-    <ModulePage
-      data-disable-column-resize="true"
-    >
+    <ModulePage>
       <ModuleHeader
         title="极享商学院"
-        description="统一管理课程、场次执行、学员转化与经营复盘。"
+        description="连接课程资产、课程排期、场次执行、学员邀约、转化交接与经营复盘。"
       />
       <ModuleTabs
         value={view}
@@ -994,18 +988,24 @@ const Academy: React.FC = () => {
             sessions={weekSessions}
             details={details}
             onOpen={(id) => void loadDetail(id, true)}
+            onViewPlans={() => navigate(viewPath.plans)}
+            onViewSessions={() => navigate(viewPath.sessions)}
           />
         )}
         {view === "plans" && (
           <Plans
-            sessions={weekSessions}
+            sessions={sessions}
+            details={details}
             onCreate={() => setSessionOpen(true)}
             canCreate={canPlan}
+            onViewAll={() => navigate(viewPath.sessions)}
+            onNeedDetail={loadDetail}
           />
         )}
         {view === "courses" && (
           <CourseWorkspace
             items={pagedCourses}
+            sessions={sessions}
             total={filteredCourses.length}
             selectedId={selectedCourseId}
             onSelect={setSelectedCourseId}
@@ -1028,8 +1028,8 @@ const Academy: React.FC = () => {
         {view === "sessions" && (
           <>
             <SectionTitle
-              title="场次运营"
-              helper="每场课从筹备、执行、客户分层到复盘的完整闭环。"
+              title="场次执行"
+              helper="按场次推进课前准备、现场执行、课后跟进和复盘门禁。"
               action={
                 <TextField
                   size="small"
@@ -1072,6 +1072,19 @@ const Academy: React.FC = () => {
               });
               setEngagementOpen(true);
             }}
+          />
+        )}
+        {view === "handoffs" && (
+          <HandoffWorkspace
+            sessions={sessions}
+            selectedSessionId={selectedSessionId}
+            onSelectSession={(id) => {
+              setSelectedSessionId(id);
+              void loadDetail(id);
+            }}
+            detail={selectedDetail}
+            onGoCustomers={() => navigate(ROUTES.CUSTOMERS)}
+            onGoOrders={() => navigate(ROUTES.ORDERS)}
           />
         )}
         {view === "reviews" && (
@@ -1406,7 +1419,9 @@ const Overview: React.FC<{
   sessions: AcademySession[];
   details: Record<string, AcademySessionDetail>;
   onOpen: (id: string) => void;
-}> = ({ dashboard, sessions, details, onOpen }) => {
+  onViewPlans: () => void;
+  onViewSessions: () => void;
+}> = ({ dashboard, sessions, details, onOpen, onViewPlans, onViewSessions }) => {
   const engagementList = Object.values(details).flatMap(
     (item) => item.engagements,
   );
@@ -1494,7 +1509,7 @@ const Overview: React.FC<{
               <ChevronRightIcon fontSize="small" />
             </IconButton>
           </Stack>
-          <Button size="small" variant="outlined">
+          <Button size="small" variant="outlined" onClick={onViewSessions}>
             查看全部场次
           </Button>
         </Stack>
@@ -1611,10 +1626,9 @@ const Overview: React.FC<{
             helper={`${Math.max(dashboard.sessionsNeedingAttention, riskTasks.length)} 项需关注`}
           />
           <TableContainer sx={{ mt: 1 }}>
-            <Table
-              size="small"
+            <SystemDataTable
+              tableId="academy-overview-risk-alerts"
               sx={{
-                ...tableSx,
                 width: "100%",
                 minWidth: "0 !important",
                 tableLayout: "fixed",
@@ -1674,11 +1688,11 @@ const Overview: React.FC<{
                   </TableRow>
                 )}
               </TableBody>
-            </Table>
+            </SystemDataTable>
           </TableContainer>
-          <Button size="small" sx={{ mt: 0.7 }}>
-            查看全部风险 <ChevronRightIcon fontSize="small" />
-          </Button>
+        <Button size="small" sx={{ mt: 0.7 }} onClick={onViewPlans}>
+          查看全部风险 <ChevronRightIcon fontSize="small" />
+        </Button>
         </Paper>
         <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
           <SectionTitle
@@ -1747,7 +1761,7 @@ const Overview: React.FC<{
           helper={`${Math.max(dashboard.pendingFollowUps, todoTasks.length)} 项待推进`}
         />
         <TableContainer sx={{ mt: 1 }}>
-          <Table size="small" sx={tableSx}>
+          <SystemDataTable tableId="academy-overview-execution-tasks">
             <TableHead>
               <TableRow>
                 <TableCell>任务内容</TableCell>
@@ -1799,7 +1813,7 @@ const Overview: React.FC<{
                 </TableRow>
               )}
             </TableBody>
-          </Table>
+          </SystemDataTable>
         </TableContainer>
       </Paper>
     </>
@@ -1808,43 +1822,88 @@ const Overview: React.FC<{
 
 const Plans: React.FC<{
   sessions: AcademySession[];
+  details: Record<string, AcademySessionDetail>;
   onCreate: () => void;
   canCreate: boolean;
-}> = ({ sessions, onCreate, canCreate }) => {
+  onViewAll: () => void;
+  onNeedDetail: (id: string) => void;
+}> = ({ sessions, details, onCreate, canCreate, onViewAll, onNeedDetail }) => {
+  const [weekOffset, setWeekOffset] = useState(0);
   const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
   const monday = new Date();
   const todayWeekday = monday.getDay() || 7;
-  monday.setDate(monday.getDate() - todayWeekday + 1);
+  monday.setDate(monday.getDate() - todayWeekday + 1 + weekOffset * 7);
   monday.setHours(0, 0, 0, 0);
-  const selected = sessions[0];
+  const nextMonday = new Date(monday);
+  nextMonday.setDate(monday.getDate() + 7);
+  const weekSessions = sessions
+    .filter((item) => {
+      const startsAt = new Date(item.startsAt);
+      return startsAt >= monday && startsAt < nextMonday;
+    })
+    .sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const selected = weekSessions[0];
+  const selectedDetail = selected ? details[selected.id] : undefined;
   const selectedDate = selected ? new Date(selected.startsAt) : new Date();
+  const shortDate = (date: Date) =>
+    `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+  useEffect(() => {
+    if (selected && !selectedDetail) onNeedDetail(selected.id);
+  }, [onNeedDetail, selected, selectedDetail]);
   return (
     <>
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5, overflow: "hidden" }}>
-        <SectionTitle
-          title="本周课程计划"
-          helper="按周统一安排课程、负责人、目标和执行节点"
-          action={
-            <Stack direction="row" spacing={1}>
-              <IconButton size="small">
-                <ChevronLeftIcon />
-              </IconButton>
-              <Button size="small" variant="outlined">
-                本周
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          justifyContent="space-between"
+          alignItems={{ md: "center" }}
+          spacing={1}
+        >
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+            <Typography sx={{ fontWeight: 900, fontSize: 16, color: palette.ink }}>
+              本周课程计划
+            </Typography>
+            <Typography fontSize={13} color="text.secondary">
+              {shortDate(monday)} ～ {shortDate(sunday)}
+            </Typography>
+            <IconButton
+              size="small"
+              aria-label="上一周"
+              onClick={() => setWeekOffset((value) => value - 1)}
+              sx={{ border: `1px solid ${palette.line}`, borderRadius: 1 }}
+            >
+              <ChevronLeftIcon fontSize="small" />
+            </IconButton>
+            <Button size="small" variant="outlined" onClick={() => setWeekOffset(0)}>
+              本周
+            </Button>
+            <IconButton
+              size="small"
+              aria-label="下一周"
+              onClick={() => setWeekOffset((value) => value + 1)}
+              sx={{ border: `1px solid ${palette.line}`, borderRadius: 1 }}
+            >
+              <ChevronRightIcon fontSize="small" />
+            </IconButton>
+          </Stack>
+          <Stack direction="row" spacing={1}>
+            <Button size="small" variant="outlined" onClick={onViewAll}>
+              查看全部场次
+            </Button>
+            {canCreate && (
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={onCreate}
+              >
+                新建课程计划
               </Button>
-              {canCreate && (
-                <Button
-                  size="small"
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={onCreate}
-                >
-                  新建课程计划
-                </Button>
-              )}
-            </Stack>
-          }
-        />
+            )}
+          </Stack>
+        </Stack>
         <Box
           sx={{
             display: "grid",
@@ -1859,9 +1918,9 @@ const Plans: React.FC<{
           {days.map((day, index) => {
             const date = new Date(monday);
             date.setDate(monday.getDate() + index);
-            const items = sessions.filter((item) => {
-              const weekday = new Date(item.startsAt).getDay() || 7;
-              return weekday === index + 1;
+            const items = weekSessions.filter((item) => {
+              const startsAt = new Date(item.startsAt);
+              return startsAt.toDateString() === date.toDateString();
             });
             return (
               <Box
@@ -1935,7 +1994,7 @@ const Plans: React.FC<{
           sx={{ pt: 1.1 }}
         >
           <Typography fontSize={12.5} color="text.secondary">
-            本周已安排课程 {sessions.length}{" "}
+            本周已安排课程 {weekSessions.length}{" "}
             场，目标成交金额由各场次经营目标汇总
           </Typography>
           <Stack direction="row" spacing={1} alignItems="center">
@@ -2019,10 +2078,9 @@ const Plans: React.FC<{
         <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
           <SectionTitle title="执行任务" helper="开课前必须完成所有必做任务" />
           <TableContainer sx={{ mt: 1 }}>
-            <Table
-              size="small"
+            <SystemDataTable
+              tableId="academy-plan-execution-tasks"
               sx={{
-                ...tableSx,
                 width: "100%",
                 minWidth: "0 !important",
                 tableLayout: "fixed",
@@ -2047,45 +2105,59 @@ const Plans: React.FC<{
                 </TableRow>
               </TableHead>
               <TableBody>
-                {[
-                  "课程输出与讲师确认",
-                  "课程目标和资源准备",
-                  "邀约名单与分组",
-                  "客户问题收集",
-                  "场地设备检查",
-                  "签到与物料准备",
-                ].map((task, index) => (
-                  <TableRow key={task}>
+                {(selectedDetail?.tasks || []).map((task) => (
+                  <TableRow key={task.id}>
                     <TableCell>
-                      <Checkbox size="small" checked={index < 2} readOnly />
-                      {task}
+                      <Checkbox size="small" checked={task.status === "DONE"} readOnly />
+                      {task.title}
                     </TableCell>
                     <TableCell>
-                      {selected?.facilitatorUserName || "待分配"}
+                      {task.completedByName || selected?.facilitatorUserName || "待分配"}
                     </TableCell>
                     <TableCell>-</TableCell>
-                    <TableCell>-</TableCell>
+                    <TableCell>{task.completedAt ? formatDate(task.completedAt) : "待安排"}</TableCell>
                     <TableCell>
                       <Chip
                         size="small"
-                        label={index === 4 ? "中" : "低"}
+                        label={task.status === "BLOCKED" ? "高" : task.status === "PENDING" ? "中" : "低"}
                         sx={{
                           height: 21,
                           bgcolor:
-                            index === 4 ? palette.amberSoft : palette.greenSoft,
-                          color: index === 4 ? palette.amber : palette.green,
+                            task.status === "BLOCKED"
+                              ? palette.redSoft
+                              : task.status === "PENDING"
+                                ? palette.amberSoft
+                                : palette.greenSoft,
+                          color:
+                            task.status === "BLOCKED"
+                              ? palette.red
+                              : task.status === "PENDING"
+                                ? palette.amber
+                                : palette.green,
                         }}
                       />
                     </TableCell>
-                    <TableCell
-                      sx={{ color: index < 2 ? palette.green : palette.blue }}
-                    >
-                      {index < 2 ? "已完成" : "待开始"}
+                    <TableCell sx={{ color: task.status === "DONE" ? palette.green : palette.blue }}>
+                      {statusLabel[task.status] || task.status}
                     </TableCell>
                   </TableRow>
                 ))}
+                {selected && !selectedDetail && (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                      正在加载执行任务…
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!selected && (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                      当前周暂无课程场次
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
-            </Table>
+            </SystemDataTable>
           </TableContainer>
         </Paper>
       </Box>
@@ -2095,6 +2167,7 @@ const Plans: React.FC<{
 
 const CourseWorkspace: React.FC<{
   items: AcademyCourse[];
+  sessions: AcademySession[];
   total: number;
   selectedId: string;
   onSelect: (id: string) => void;
@@ -2112,6 +2185,7 @@ const CourseWorkspace: React.FC<{
   onPageSize: (value: number) => void;
 }> = ({
   items,
+  sessions,
   total,
   selectedId,
   onSelect,
@@ -2125,7 +2199,11 @@ const CourseWorkspace: React.FC<{
   onPage,
   onPageSize,
 }) => {
+  const [detailTab, setDetailTab] = useState(0);
   const selected = items.find((item) => item.id === selectedId) || items[0];
+  const selectedSessions = selected
+    ? sessions.filter((item) => item.courseId === selected.id)
+    : [];
   return (
     <Box
       sx={{
@@ -2197,10 +2275,9 @@ const CourseWorkspace: React.FC<{
           共 {total} 条
         </Typography>
         <TableContainer>
-          <Table
-            size="small"
+          <SystemDataTable
+            tableId="academy-course-library"
             sx={{
-              ...tableSx,
               width: "100% !important",
               maxWidth: "100% !important",
               minWidth: "0 !important",
@@ -2273,7 +2350,9 @@ const CourseWorkspace: React.FC<{
                   <TableCell>
                     {new Date(item.updatedAt).toLocaleDateString("zh-CN")}
                   </TableCell>
-                  <TableCell>0</TableCell>
+                  <TableCell>
+                    {sessions.filter((session) => session.courseId === item.id).length}
+                  </TableCell>
                   <TableCell
                     align="right"
                     onClick={(event) => event.stopPropagation()}
@@ -2308,7 +2387,7 @@ const CourseWorkspace: React.FC<{
                 </TableRow>
               )}
             </TableBody>
-          </Table>
+          </SystemDataTable>
         </TableContainer>
         <TablePagination
           count={total}
@@ -2419,7 +2498,8 @@ const CourseWorkspace: React.FC<{
             </Box>
             <Divider />
             <Tabs
-              value={0}
+              value={detailTab}
+              onChange={(_, value: number) => setDetailTab(value)}
               sx={{
                 px: 1.2,
                 minHeight: 44,
@@ -2432,41 +2512,99 @@ const CourseWorkspace: React.FC<{
               <Tab label="使用记录" />
             </Tabs>
             <Box sx={{ p: 1.7 }}>
-              <Stack spacing={1}>
-                {[
-                  "课件 PPT",
-                  "逐字稿",
-                  "课程案例",
-                  "宣传海报",
-                  "邀约话术",
-                  "直播回放",
-                ].map((asset, index) => (
-                  <Stack
-                    key={asset}
-                    direction="row"
-                    justifyContent="space-between"
-                    sx={{ p: 1.1, borderBottom: `1px solid ${palette.line}` }}
-                  >
-                    <Box>
-                      <Typography fontSize={13} fontWeight={800}>
-                        {asset}
-                      </Typography>
-                      <Typography fontSize={11.5} color="text.secondary">
-                        {selected.title}_{asset}_V1.0
-                      </Typography>
-                    </Box>
-                    <Chip
-                      size="small"
-                      label={index < 2 ? "已上传" : "待补充"}
-                      sx={{
-                        height: 21,
-                        bgcolor: index < 2 ? palette.greenSoft : palette.soft,
-                        color: index < 2 ? palette.green : palette.muted,
-                      }}
-                    />
-                  </Stack>
-                ))}
-              </Stack>
+              {detailTab === 0 && (
+                <Stack spacing={1}>
+                  {(selected.objectives.length
+                    ? selected.objectives
+                    : ["尚未维护课程目标与内容结构"]
+                  ).map((objective, index) => (
+                    <Stack
+                      key={`${objective}-${index}`}
+                      direction="row"
+                      spacing={1.2}
+                      sx={{ p: 1.1, borderBottom: `1px solid ${palette.line}` }}
+                    >
+                      <Chip size="small" label={index + 1} color="primary" />
+                      <Box>
+                        <Typography fontSize={13} fontWeight={800}>
+                          {objective}
+                        </Typography>
+                        <Typography fontSize={11.5} color="text.secondary">
+                          课程内容节点
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
+              {detailTab === 1 && (
+                <Stack spacing={1}>
+                  {[
+                    "课件 PPT",
+                    "逐字稿",
+                    "课程案例",
+                    "宣传海报",
+                    "邀约话术",
+                    "直播回放",
+                  ].map((asset) => (
+                    <Stack
+                      key={asset}
+                      direction="row"
+                      justifyContent="space-between"
+                      alignItems="center"
+                      sx={{ p: 1.1, borderBottom: `1px solid ${palette.line}` }}
+                    >
+                      <Box>
+                        <Typography fontSize={13} fontWeight={800}>{asset}</Typography>
+                        <Typography fontSize={11.5} color="text.secondary">
+                          当前课程尚未保存该类资产文件
+                        </Typography>
+                      </Box>
+                      <Chip
+                        size="small"
+                        label="待上传"
+                        sx={{ height: 21, bgcolor: palette.soft, color: palette.muted }}
+                      />
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
+              {detailTab === 2 && (
+                <Stack spacing={1.1}>
+                  <Typography fontSize={13} fontWeight={800}>V1.0 当前版本</Typography>
+                  <Typography fontSize={12.5} color="text.secondary">
+                    创建于 {formatDate(selected.createdAt)}，最近更新 {formatDate(selected.updatedAt)}。
+                  </Typography>
+                  <Typography fontSize={12.5} color="text.secondary">
+                    后续版本发布必须保留旧版本，不覆盖历史场次引用。
+                  </Typography>
+                </Stack>
+              )}
+              {detailTab === 3 && (
+                <Stack spacing={1}>
+                  {selectedSessions.map((session) => (
+                    <Stack
+                      key={session.id}
+                      direction="row"
+                      justifyContent="space-between"
+                      sx={{ p: 1.1, borderBottom: `1px solid ${palette.line}` }}
+                    >
+                      <Box>
+                        <Typography fontSize={13} fontWeight={800}>{session.title}</Typography>
+                        <Typography fontSize={11.5} color="text.secondary">
+                          {formatDate(session.startsAt)} · {session.venue || "场地待定"}
+                        </Typography>
+                      </Box>
+                      <Chip size="small" label={statusLabel[session.status] || session.status} />
+                    </Stack>
+                  ))}
+                  {!selectedSessions.length && (
+                    <Typography color="text.secondary" textAlign="center" sx={{ py: 5 }}>
+                      当前课程尚未创建场次
+                    </Typography>
+                  )}
+                </Stack>
+              )}
             </Box>
           </>
         ) : (
@@ -2483,7 +2621,7 @@ const SessionTable: React.FC<{
   onOpen: (id: string) => void;
 }> = ({ items, onOpen }) => (
   <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
-    <Table size="small">
+    <SystemDataTable tableId="academy-session-list">
       <TableHead>
         <TableRow>
           <TableCell>场次</TableCell>
@@ -2527,7 +2665,7 @@ const SessionTable: React.FC<{
           </TableRow>
         )}
       </TableBody>
-    </Table>
+    </SystemDataTable>
   </TableContainer>
 );
 const EngagementWorkspace: React.FC<{
@@ -2669,7 +2807,7 @@ const EngagementWorkspace: React.FC<{
       >
         <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
           <TableContainer>
-            <Table size="small" sx={tableSx}>
+            <SystemDataTable tableId="academy-engagement-list">
               <TableHead>
                 <TableRow>
                   <TableCell padding="checkbox">
@@ -2761,7 +2899,7 @@ const EngagementWorkspace: React.FC<{
                   </TableRow>
                 )}
               </TableBody>
-            </Table>
+            </SystemDataTable>
           </TableContainer>
         </Paper>
         <Paper
@@ -2855,6 +2993,182 @@ const EngagementWorkspace: React.FC<{
     </>
   );
 };
+
+const HandoffWorkspace: React.FC<{
+  sessions: AcademySession[];
+  selectedSessionId: string;
+  onSelectSession: (id: string) => void;
+  detail?: AcademySessionDetail;
+  onGoCustomers: () => void;
+  onGoOrders: () => void;
+}> = ({
+  sessions,
+  selectedSessionId,
+  onSelectSession,
+  detail,
+  onGoCustomers,
+  onGoOrders,
+}) => {
+  const items = detail?.engagements || [];
+  const qualified = items.filter((item) =>
+    ["A", "B"].includes(item.courseAssessment || ""),
+  );
+  const hot = items.filter((item) => item.courseAssessment === "A");
+  const following = items.filter((item) => item.followUpStatus !== "DONE");
+  const done = items.filter((item) => item.followUpStatus === "DONE");
+
+  return (
+    <>
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.4 }}>
+        <Stack
+          direction={{ xs: "column", lg: "row" }}
+          spacing={1}
+          alignItems={{ lg: "center" }}
+        >
+          <Box>
+            <Typography fontWeight={900} fontSize={16}>
+              转化与交接
+            </Typography>
+            <Typography fontSize={12.5} color="text.secondary">
+              商学院只负责形成转化线索和交接入口，客户主档、订单和交付继续使用极享OS现有模块。
+            </Typography>
+          </Box>
+          <Box flex={1} />
+          <TextField
+            select
+            size="small"
+            label="课程场次"
+            value={selectedSessionId}
+            onChange={(event) => onSelectSession(event.target.value)}
+            sx={{ minWidth: 320 }}
+          >
+            {sessions.map((item) => (
+              <MenuItem key={item.id} value={item.id}>
+                {item.title} · {new Date(item.startsAt).toLocaleDateString("zh-CN")}
+              </MenuItem>
+            ))}
+          </TextField>
+          <Button variant="outlined" onClick={onGoCustomers}>
+            打开客户管理
+          </Button>
+          <Button variant="contained" onClick={onGoOrders}>
+            打开订单管理
+          </Button>
+        </Stack>
+      </Paper>
+
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
+          gap: 1.2,
+        }}
+      >
+        {[
+          { label: "待转化学员", value: qualified.length, color: palette.blue },
+          { label: "A类重点跟进", value: hot.length, color: palette.red },
+          { label: "跟进中", value: following.length, color: palette.amber },
+          { label: "已完成跟进", value: done.length, color: palette.green },
+        ].map((item) => (
+          <Paper key={item.label} variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+            <Typography fontSize={12.5} color="text.secondary">
+              {item.label}
+            </Typography>
+            <Typography fontSize={26} fontWeight={950} color={item.color} sx={{ mt: 0.5 }}>
+              {item.value}
+            </Typography>
+          </Paper>
+        ))}
+      </Box>
+
+      <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
+        <Box sx={{ px: 1.5, py: 1.3, borderBottom: `1px solid ${palette.line}` }}>
+          <SectionTitle
+            title="课程转化清单"
+            helper="按课程分层推进销售跟进；正式成交结果以订单管理为准。"
+          />
+        </Box>
+        <TableContainer>
+          <SystemDataTable tableId="academy-conversion-handoff-list">
+            <TableHead>
+              <TableRow>
+                <TableCell>学员</TableCell>
+                <TableCell>课程场次</TableCell>
+                <TableCell>CRM关联</TableCell>
+                <TableCell>课程分层</TableCell>
+                <TableCell>销售负责人</TableCell>
+                <TableCell>跟进状态</TableCell>
+                <TableCell>建议动作</TableCell>
+                <TableCell>业务去向</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow key={item.id} hover>
+                  <TableCell sx={{ fontWeight: 800 }}>{item.participantName}</TableCell>
+                  <TableCell>{detail?.title || "-"}</TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      label={item.customerId ? "已关联客户" : "待关联客户"}
+                      sx={{
+                        bgcolor: item.customerId ? palette.greenSoft : palette.amberSoft,
+                        color: item.customerId ? palette.green : palette.amber,
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      label={item.courseAssessment || "待分层"}
+                      sx={{
+                        bgcolor:
+                          item.courseAssessment === "A"
+                            ? palette.redSoft
+                            : item.courseAssessment === "B"
+                              ? palette.amberSoft
+                              : palette.blueSoft,
+                        color:
+                          item.courseAssessment === "A"
+                            ? palette.red
+                            : item.courseAssessment === "B"
+                              ? palette.amber
+                              : palette.blue,
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>{item.ownerUserName || "待分配"}</TableCell>
+                  <TableCell>{statusLabel[item.followUpStatus] || item.followUpStatus}</TableCell>
+                  <TableCell>
+                    {item.courseAssessment === "A"
+                      ? "24小时内重点跟进"
+                      : item.courseAssessment === "B"
+                        ? "建立销售跟进计划"
+                        : "进入长期培育"}
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5}>
+                      <Button size="small" onClick={onGoCustomers}>客户</Button>
+                      <Button size="small" onClick={onGoOrders}>订单</Button>
+                    </Stack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!items.length && (
+                <TableRow>
+                  <TableCell colSpan={8} align="center" sx={{ py: 7 }}>
+                    当前场次暂无学员转化数据
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </SystemDataTable>
+        </TableContainer>
+      </Paper>
+    </>
+  );
+};
+
 const Reviews: React.FC<{
   sessions: AcademySession[];
   details: Record<string, AcademySessionDetail>;
@@ -3041,7 +3355,7 @@ const Reviews: React.FC<{
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
         <SectionTitle title="核心场次达成对比" />
         <TableContainer sx={{ mt: 1 }}>
-          <Table size="small" sx={tableSx}>
+          <SystemDataTable tableId="academy-review-session-performance">
             <TableHead>
               <TableRow>
                 <TableCell>场次日期</TableCell>
@@ -3106,7 +3420,7 @@ const Reviews: React.FC<{
                 </TableRow>
               )}
             </TableBody>
-          </Table>
+          </SystemDataTable>
         </TableContainer>
       </Paper>
       <Box
@@ -3164,10 +3478,9 @@ const Reviews: React.FC<{
             }
           />
           <TableContainer sx={{ mt: 1 }}>
-            <Table
-              size="small"
+            <SystemDataTable
+              tableId="academy-review-action-plan"
               sx={{
-                ...tableSx,
                 width: "100%",
                 minWidth: "0 !important",
                 tableLayout: "fixed",
@@ -3218,7 +3531,7 @@ const Reviews: React.FC<{
                   </TableRow>
                 )}
               </TableBody>
-            </Table>
+            </SystemDataTable>
           </TableContainer>
         </Paper>
       </Box>
