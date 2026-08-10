@@ -27,6 +27,27 @@ async function clearSessionAuth() {
   await chrome.storage.local.remove([TOKEN_KEY, OPERATOR_KEY]);
 }
 
+async function readApiEnvelope<T>(response: Response): Promise<ApiEnvelope<T>> {
+  const body = await response.text();
+  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+  if (!contentType.includes('application/json')) {
+    return {
+      code: response.status || 502,
+      data: null,
+      message: `极享OS接口返回了非JSON响应（HTTP ${response.status || 0}），请检查API地址或服务器配置`,
+    };
+  }
+  try {
+    return JSON.parse(body) as ApiEnvelope<T>;
+  } catch {
+    return {
+      code: response.status || 502,
+      data: null,
+      message: `极享OS接口返回的数据格式异常（HTTP ${response.status || 0}），请联系管理员`,
+    };
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T>> {
   const config = await stored<ExtensionConfig>(chrome.storage.local, CONFIG_KEY);
   if (!config?.apiBaseUrl) return { code: 400, data: null, message: '请先配置极享OS地址' };
@@ -36,7 +57,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnve
   if (token) headers.set('authorization', `Bearer ${token}`);
   try {
     const response = await fetch(`${normalizedApiBaseUrl(config.apiBaseUrl)}${path}`, { ...init, headers });
-    const payload = await response.json().catch(() => null) as ApiEnvelope<T> | null;
+    const payload = await readApiEnvelope<T>(response);
     if (response.status === 401) {
       await clearSessionAuth();
       return {
@@ -46,7 +67,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnve
         authOutcome: 'SESSION_EXPIRED_LOCAL_LOGOUT',
       };
     }
-    return payload || { code: response.status, data: null, message: `极享OS返回了HTTP ${response.status}` };
+    return payload;
   } catch (error) {
     return { code: 503, data: null, message: error instanceof Error ? error.message : '无法连接极享OS' };
   }
@@ -67,7 +88,7 @@ async function exchangeBrowserAgentCode(config: ExtensionConfig, input: Record<s
     const response = await fetch(`${normalizedApiBaseUrl(config.apiBaseUrl)}/browser-agent/auth/exchange`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
     });
-    return await response.json() as ApiEnvelope<{ token: string; user: AuthenticatedOperator }>;
+    return await readApiEnvelope<{ token: string; user: AuthenticatedOperator }>(response);
   } catch (error) {
     return { code: 503, data: null, message: error instanceof Error ? error.message : '无法连接极享OS' };
   }

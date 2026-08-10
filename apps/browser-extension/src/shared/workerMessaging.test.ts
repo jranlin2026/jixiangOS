@@ -63,6 +63,7 @@ let sessionValues: Record<string, unknown> = {};
 const originalFetch = globalThis.fetch;
 let previewRequestBody: unknown;
 let logoutResponse: ApiEnvelope<boolean> = { code: 0, data: true, message: 'success' };
+let exchangeReturnsHtml = false;
 let runtimeConfig = {
   shops: [
     {
@@ -83,6 +84,11 @@ globalThis.fetch = async (input, init) => {
     });
   }
   if (url.endsWith('/browser-agent/auth/exchange')) {
+    if (exchangeReturnsHtml) {
+      return new Response('<!DOCTYPE html><title>Server error</title>', {
+        status: 500, headers: { 'content-type': 'text/html' },
+      });
+    }
     return new Response(JSON.stringify({
       code: 0, data: { token: 'browser-token-new', user: { id: 'u1', name: '客服甲', role: 'SERVICE' } }, message: 'success',
     }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -206,6 +212,19 @@ try {
     apiBaseUrl: 'https://os.example.com',
     shopBindingId: 'shop-gold',
   });
+
+  exchangeReturnsHtml = true;
+  const nonJsonExchange = await new Promise<any>((resolve) => {
+    assert.equal(workerListener?.({
+      type: 'CONNECT_OS',
+      config: { apiBaseUrl: 'https://os.example.com' },
+      interactive: true,
+    }, {}, resolve), true);
+  });
+  assert.equal(nonJsonExchange.code, 500);
+  assert.match(nonJsonExchange.message, /接口返回了非JSON响应/);
+  assert.doesNotMatch(nonJsonExchange.message, /Unexpected token/);
+  exchangeReturnsHtml = false;
 
   const previewInput = {
     platform: 'DOUYIN', shopBindingId: 'shop-gold', pageShopDisplayName: 'Gold 商城',

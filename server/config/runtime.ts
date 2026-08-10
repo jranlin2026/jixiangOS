@@ -33,13 +33,19 @@ export function parseCorsOrigins(env: NodeJS.ProcessEnv = process.env): string[]
 
 export function getAllowedCorsOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
   const configured = parseCorsOrigins(env);
-  if (configured.length || isProductionRuntime(env)) return configured;
-  return [
+  const webOrigins = configured.length || isProductionRuntime(env) ? configured : [
     'http://127.0.0.1:3000',
     'http://localhost:3000',
     'http://127.0.0.1:3002',
     'http://localhost:3002',
   ];
+  const browserAgentOrigins = getBrowserAgentRedirectUris(env).flatMap((redirectUri) => {
+    const hostname = new URL(redirectUri).hostname;
+    const suffix = '.chromiumapp.org';
+    const extensionId = hostname.endsWith(suffix) ? hostname.slice(0, -suffix.length) : '';
+    return /^[a-z]{32}$/.test(extensionId) ? [`chrome-extension://${extensionId}`] : [];
+  });
+  return [...new Set([...webOrigins, ...browserAgentOrigins])];
 }
 
 export function isCorsOriginAllowed(

@@ -31,6 +31,11 @@ assert.throws(() => validateBrowserAgentAuthConfig({
 }), /invalid Chrome extension redirect URI/);
 const localExtensionOrigin = `chrome-extension://${'a'.repeat(32)}`;
 const publishedExtensionOrigin = `chrome-extension://${'b'.repeat(32)}`;
+assert.ok(getAllowedCorsOrigins({
+  NODE_ENV: 'production',
+  CORS_ORIGINS: 'https://crm.jixiang-ai.com',
+  JIXIANG_BROWSER_AGENT_REDIRECT_URIS: `https://${'b'.repeat(32)}.chromiumapp.org/browser-agent`,
+}).includes(publishedExtensionOrigin), '生产环境必须从受信任的浏览器员工回调地址推导精确扩展来源');
 assert.equal(isCorsOriginAllowed(localExtensionOrigin, [], { NODE_ENV: 'development' }), true);
 assert.equal(isCorsOriginAllowed(localExtensionOrigin, [], { NODE_ENV: 'production' }), false);
 assert.equal(isCorsOriginAllowed(publishedExtensionOrigin, [publishedExtensionOrigin], { NODE_ENV: 'production' }), true);
