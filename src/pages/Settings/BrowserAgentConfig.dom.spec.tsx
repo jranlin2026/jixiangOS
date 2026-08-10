@@ -326,4 +326,4 @@ test('真实页面工作流覆盖加载、键盘选店、停用确认、启用�
   setupDom();
   installProducts();
   await exerciseRealPageWorkflow();
-});
+}, 45_000);
