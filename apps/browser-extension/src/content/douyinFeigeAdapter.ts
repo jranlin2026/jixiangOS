@@ -65,6 +65,32 @@ function findButtonByText(root: ParentNode, labels: string[]): HTMLElement | nul
     .find((element) => labels.includes(element.textContent?.trim() || '')) || null;
 }
 
+function hasOrderRemarkEntrySemantic(element: HTMLElement) {
+  const textValue = element.textContent?.trim() || '';
+  if (textValue === '备' || textValue === '添加备注' || textValue === '修改') return true;
+  const attributes = [
+    element.getAttribute('aria-label'),
+    element.getAttribute('title'),
+    element.getAttribute('data-testid'),
+  ].map((value) => value?.trim() || '').filter(Boolean);
+  return attributes.some((value) => (
+    value === '订单备注'
+    || /^(?:添加|新增|编辑|修改)订单?备注$/.test(value)
+    || value === 'edit-order-remark'
+  ));
+}
+
+function findOrderRemarkEntry(orderCard: HTMLElement) {
+  const orderContainer = activeOrderContainer(orderCard);
+  const trusted = uniqueMatches(orderContainer, selectors.orderRemarkEdit);
+  const interactive = [...orderContainer.querySelectorAll<HTMLElement>(
+    'button,[role="button"],a[href],[tabindex]',
+  )].filter(hasOrderRemarkEntrySemantic);
+  const candidates = [...new Set([...trusted, ...interactive])]
+    .filter((element) => isVisible(element) && isEnabled(element));
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 function orderNoFromElement(root: ParentNode) {
   const explicit = text(root, selectors.orderNo);
   if (explicit) return explicit;
@@ -722,8 +748,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       // 保存后飞鸽会重绘整张订单卡，验证阶段则按客户和订单号重新获取最新卡片。
       const hasSameBoundContext = () => currentBoundOrderCard() === orderCard;
 
-      const edit = first(orderCard, selectors.orderRemarkEdit)
-        || findButtonByText(orderCard, ['添加备注', '修改']);
+      const edit = findOrderRemarkEntry(orderCard);
       if (!edit) {
         return {
           ok: false,
@@ -918,8 +943,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         const originalDialogClosed = !dialog.isConnected || !isVisible(dialog);
         let verificationDialogClosed = true;
         if (originalDialogClosed && (!remarkSaved || !redFlagSaved)) {
-          const verificationEdit = first(latestOrderCard, selectors.orderRemarkEdit)
-            || findButtonByText(latestOrderCard, ['添加备注', '修改']);
+          const verificationEdit = findOrderRemarkEntry(latestOrderCard);
           if (verificationEdit && currentBoundOrderCard() === latestOrderCard) {
             verificationEdit.click();
             const verificationDialog = await waitForElement(document, () => findUniqueRemarkDialog(document));
