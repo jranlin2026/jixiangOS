@@ -3,6 +3,7 @@ export type BrowserOrderRemarkInput = {
   phone?: string | null;
   wechat?: string | null;
   assignedTo?: string | null;
+  operatorName: string;
   completedAt: Date;
 };
 
@@ -37,7 +38,9 @@ export function buildBrowserOrderRemark(input: BrowserOrderRemarkInput): [string
   const phone = canonicalSingleLine(input.phone, '手机号');
   const wechat = canonicalSingleLine(input.wechat, '微信号');
   const assignedTo = canonicalSingleLine(input.assignedTo, '对接销售') || '暂未分配';
+  const operatorName = canonicalSingleLine(input.operatorName, '入库员工');
   if (!nickname) throw new Error('客户昵称不能为空，请先核对飞鸽客户昵称');
+  if (!operatorName) throw new Error('入库员工不能为空，请先核对极享OS登录员工');
   if (!phone && !wechat) {
     throw new Error('手机号或微信号至少填写一项，请先在极享OS核对客户资料');
   }
@@ -47,6 +50,6 @@ export function buildBrowserOrderRemark(input: BrowserOrderRemarkInput): [string
   ].join('');
   return [
     `#${nickname}${contactFragments}（对接：${assignedTo}）`,
-    `#入OS（${formatShanghaiMinute(input.completedAt)}）`,
+    `#入OS（${operatorName}：${formatShanghaiMinute(input.completedAt)}）`,
   ];
 }

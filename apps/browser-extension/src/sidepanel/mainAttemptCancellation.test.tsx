@@ -65,7 +65,7 @@ const intakeResult = {
   lead: { id: 'lead-cancel', name: '取消测试客户', assignedTo: '销售小王' },
   storedContact: { nickname: '取消测试客户', phone: '13800138000' },
   completedAt: '2026-08-09T02:00:00.000Z',
-  remarkLines: ['#取消测试客户/手机号：13800138000（对接：销售小王）', '#入OS（2026-08-09 10:00）'] as [string, string],
+  remarkLines: ['#取消测试客户/手机号：13800138000（对接：销售小王）', '#入OS（客服小李：2026-08-09 10:00）'] as [string, string],
   productResolution: { status: 'UNMATCHED' as const, rawProductName: '取消测试商品' },
   shop: { id: shop.id, shopKey: shop.shopKey, displayName: shop.displayName },
   orderRemarkStatus: 'NOT_ATTEMPTED' as const,

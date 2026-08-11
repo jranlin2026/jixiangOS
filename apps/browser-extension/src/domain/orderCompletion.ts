@@ -6,13 +6,21 @@ function assertValidRemarkLines(lines: unknown): asserts lines is [string, strin
   }
 }
 
+function newOsIntakeTimestamp(line: string) {
+  return line.match(/^#入OS（[^：\r\n（）]+：(\d{4}-\d{2}-\d{2} \d{2}:\d{2})）$/)?.[1] || '';
+}
+
 export function mergeOsOrderRemark(
   existing: string,
   lines: readonly [string, string],
 ): string {
   assertValidRemarkLines(lines);
   const currentLines = existing.split(/\r\n|\n|\r/);
-  const missing = lines.filter((line) => !currentLines.includes(line));
+  const missing = lines.filter((line) => {
+    if (currentLines.includes(line)) return false;
+    const timestamp = newOsIntakeTimestamp(line);
+    return !timestamp || !currentLines.includes(`#入OS（${timestamp}）`);
+  });
   if (!missing.length) return existing;
   const newline = existing.match(/\r\n|\n|\r/)?.[0] || '\n';
   const separator = existing && !/(?:\r\n|\n|\r)$/.test(existing) ? newline : '';

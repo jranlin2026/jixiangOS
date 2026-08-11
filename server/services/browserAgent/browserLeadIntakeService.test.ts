@@ -14,6 +14,7 @@ const actor = {
   createdAt: '2026-08-08T00:00:00.000Z',
   updatedAt: '2026-08-08T00:00:00.000Z',
 } as any;
+const laterRetryActor = { ...actor, id: 'user-customer-service-2', name: '客服小周' };
 
 const shops = [
   {
@@ -252,7 +253,7 @@ assert.equal(first.data?.lead.intakeStatus, '入库成功');
 assert.equal(first.data?.completedAt, '2026-08-08T13:00:00.000Z');
 assert.deepEqual(first.data?.remarkLines, [
   '#张先生/手机号：13800138000/微信号：wx_original_88（对接：销售小王）',
-  '#入OS（2026-08-08 21:00）',
+  '#入OS（客服小李：2026-08-08 21:00）',
 ]);
 assert.deepEqual(first.data?.shop, {
   id: 'binding-a',
@@ -458,7 +459,7 @@ const duplicate = await service.intake({
   contactName: ' 张先生 ',
   contactPhone: ' 13800138000 ',
   contactWechat: ' WX_ORIGINAL_88 ',
-}, actor);
+}, laterRetryActor);
 assert.equal(duplicate.code, 0);
 assert.equal(duplicate.data?.outcome, 'ALREADY_CREATED');
 assert.equal(duplicate.errorCode, undefined);
@@ -472,6 +473,7 @@ assert.deepEqual(duplicate.data?.storedContact, {
 assert.deepEqual(duplicate.data?.productResolution, first.data?.productResolution);
 assert.equal(duplicate.data?.completedAt, first.data?.completedAt);
 assert.deepEqual(duplicate.data?.remarkLines, first.data?.remarkLines);
+assert.equal(duplicate.data?.remarkLines[1], '#入OS（客服小李：2026-08-08 21:00）', '重复入库必须沿用首次操作员工，不能改成重试员工或对接销售');
 assert.deepEqual(duplicate.data?.shop, first.data?.shop);
 assert.equal(createLeadCalls.length, 3, '重复点击不能再创建线索');
 assert.equal(records.size, 3, '业务幂等键必须先规范化再持久化');

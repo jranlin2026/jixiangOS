@@ -35,7 +35,7 @@ const sync = {
   completedAt: '2026-08-08T13:00:00.000Z',
   remarkLines: [
     '#旧客户/手机号：13826459812（对接：暂未分配）',
-    '#入OS（2026-08-08 21:00）',
+    '#入OS（客服小李：2026-08-08 21:00）',
   ] as [string, string],
   productResolution: { status: 'UNMATCHED' as const, rawProductName: '旧商品' },
   shop: { id: 'shop-old', shopKey: 'shop-old', displayName: '旧店铺' },

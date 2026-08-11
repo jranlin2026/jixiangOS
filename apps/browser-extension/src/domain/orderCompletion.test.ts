@@ -3,7 +3,7 @@ import { isIntakeEligibleOrderStatus, isPaidOrderStatus, mergeOsOrderRemark } fr
 
 const remarkLines: [string, string] = [
   '#悠然一刻/手机号：13826459812/微信号：wx_user88（对接：销售小王）',
-  '#入OS（2026-08-08 21:00）',
+  '#入OS（客服小李：2026-08-08 21:00）',
 ];
 
 assert.equal(mergeOsOrderRemark('', remarkLines), remarkLines.join('\n'));
@@ -15,6 +15,16 @@ assert.equal(
   mergeOsOrderRemark(remarkLines.join('\n'), remarkLines),
   remarkLines.join('\n'),
   '同一备注重复执行必须幂等',
+);
+assert.equal(
+  mergeOsOrderRemark(`${remarkLines[0]}\n#入OS（2026-08-08 21:00）`, remarkLines),
+  `${remarkLines[0]}\n#入OS（2026-08-08 21:00）`,
+  '旧格式相同首次入库时间应视为同一入库标记，不能重复追加新格式',
+);
+assert.equal(
+  mergeOsOrderRemark(`${remarkLines[0]}\n#入OS（客服小周：2026-08-08 21:00）`, remarkLines),
+  `${remarkLines[0]}\n#入OS（客服小周：2026-08-08 21:00）\n${remarkLines[1]}`,
+  '其他员工的同时间新格式不能吞掉权威首次入库员工',
 );
 assert.equal(
   mergeOsOrderRemark(`原备注\n${remarkLines[0]}`, remarkLines),

@@ -43,7 +43,7 @@ const shops = [
 ];
 const backendRemarkLines: [string, string] = [
   '#海盗船长/手机号：13800138000（对接：销售小王）',
-  '#入OS（2026-08-08 21:00）',
+  '#入OS（客服小李：2026-08-08 21:00）',
 ];
 const intakeResult = {
   syncId: 'sync-render-1',

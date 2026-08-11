@@ -243,6 +243,7 @@ function resultFromRecord(record: BrowserLeadSyncRecord, outcome: BrowserLeadInt
     remarkLines = buildBrowserOrderRemark({
       ...record.storedContact,
       assignedTo: record.assignedTo,
+      operatorName: record.operatorName,
       completedAt: record.completedAt,
     });
   } catch (error) {

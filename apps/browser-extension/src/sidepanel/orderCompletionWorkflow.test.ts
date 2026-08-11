@@ -81,7 +81,7 @@ function runCompletion(
 
 const backendRemarkLines: [string, string] = [
   '#悠然一刻/手机号：13826459812/微信号：wx_original_88（对接：销售小陈）',
-  '#入OS（2026-08-08 21:00）',
+  '#入OS（客服小李：2026-08-08 21:00）',
 ];
 const backendRemarkText = backendRemarkLines.join('\n');
 
