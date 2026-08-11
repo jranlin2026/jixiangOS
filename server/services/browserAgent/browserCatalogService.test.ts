@@ -289,12 +289,25 @@ for (const [lockedState, expectedCode, expectedError] of [
 
 const savedMapping = await service.saveMapping({
   shopBindingId: 'shop-1', platformProductId: 'DY-100',
-  platformProductName: '  淘金ＡＩ   多模态  ', aliases: ['读书卡', ' 读书卡 '],
+  platformProductName: '  淘金ＡＩ   多模态  ', aliases: ['淘金ai 多模态', '读书卡', ' 读书卡 '],
   osProductId: 'prod-taojin', active: true,
 }, actor);
 assert.equal(savedMapping.code, 0);
 assert.equal(savedMapping.data?.osProductName, '淘金AI');
-assert.deepEqual(savedMapping.data?.aliases, ['淘金ai 多模态', '读书卡']);
+assert.deepEqual(savedMapping.data?.aliases, ['读书卡'], '曾用名只保存额外名称，不应重复保存当前平台商品名称');
+
+mappings.push({
+  id: 'map-legacy-current-name-alias', shopBindingId: 'shop-1', platformIdentityKey: 'product:LEGACY-ALIAS',
+  platformProductId: 'LEGACY-ALIAS', platformSkuId: null, platformProductName: '历史当前名称',
+  aliases: ['历史当前名称', '历史曾用名'], osProductId: 'prod-taojin', osProductName: '淘金AI', active: false,
+  confirmedById: 'admin-1', confirmedByName: '管理员', confirmedAt: new Date(),
+});
+const catalogWithLegacyAlias = await service.listCatalog();
+assert.deepEqual(
+  catalogWithLegacyAlias.data?.mappings.find((mapping) => mapping.id === 'map-legacy-current-name-alias')?.aliases,
+  ['历史曾用名'],
+  '旧数据中重复保存的当前名称不应继续回显在曾用名输入框',
+);
 
 products.push({ id: 'prod-other', name: '其他产品', price: 399, isActive: true });
 mappings.push({

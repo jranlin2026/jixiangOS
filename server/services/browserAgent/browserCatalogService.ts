@@ -174,17 +174,32 @@ function uniqueTexts(values: unknown) {
 }
 
 function normalizedAliases(platformProductName: string, aliases: string[]) {
-  return [...new Set([platformProductName, ...aliases]
+  const normalizedCurrentName = normalizePlatformProductName(platformProductName);
+  return [...new Set(aliases
     .map((alias) => normalizePlatformProductName(alias))
-    .filter(Boolean))];
+    .filter((alias) => alias && alias !== normalizedCurrentName))];
 }
 
-function platformIdentityKey(input: BrowserProductMappingInput, aliases: string[]) {
+function platformIdentityKey(input: BrowserProductMappingInput) {
   const productId = cleanText(input.platformProductId);
   if (productId) return `product:${productId}`;
   const skuId = cleanText(input.platformSkuId);
   if (skuId) return `sku:${skuId}`;
-  return `name:${aliases[0] || normalizePlatformProductName(input.platformProductName)}`;
+  return `name:${normalizePlatformProductName(input.platformProductName)}`;
+}
+
+function mappingRecognitionNames(mapping: Pick<BrowserStoreProductMapping, 'platformProductName' | 'aliases'>) {
+  return new Set([
+    normalizePlatformProductName(cleanText(mapping.platformProductName)),
+    ...mapping.aliases.map((alias) => normalizePlatformProductName(alias)),
+  ].filter(Boolean));
+}
+
+function catalogMapping(mapping: BrowserStoredProductMapping): BrowserStoredProductMapping {
+  return {
+    ...mapping,
+    aliases: normalizedAliases(cleanText(mapping.platformProductName), mapping.aliases),
+  };
 }
 
 function runtimeShop(shop: BrowserShopBinding) {
@@ -282,7 +297,7 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
     const now = new Date();
     const values = {
       shopBindingId,
-      platformIdentityKey: platformIdentityKey(input, aliases),
+      platformIdentityKey: platformIdentityKey(input),
       platformProductId: cleanText(input.platformProductId) || null,
       platformSkuId: cleanText(input.platformSkuId) || null,
       platformProductName,
@@ -307,12 +322,12 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
         return catalogFailure('商品映射创建后不能修改所属店铺', 409, 'PRODUCT_MAPPING_CONFLICT');
       }
       if (input.active) {
-        const aliasSet = new Set(aliases);
+        const recognitionNames = mappingRecognitionNames({ platformProductName, aliases });
         const conflict = (await mappingRepository.listMappings(shopBindingId)).find((mapping) => (
           mapping.id !== mappingId
           && mapping.active
           && mapping.osProductId !== product.id
-          && mapping.aliases.some((alias) => aliasSet.has(normalizePlatformProductName(alias)))
+          && [...mappingRecognitionNames(mapping)].some((name) => recognitionNames.has(name))
         ));
         if (conflict) {
           return catalogFailure(
@@ -327,7 +342,7 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
           ? await mappingRepository.updateMapping(mappingId, values)
           : await mappingRepository.createMapping({ id: randomUUID(), ...values });
         return saved
-          ? success(saved)
+          ? success(catalogMapping(saved))
           : catalogFailure('商品映射不存在', 404, 'PRODUCT_MAPPING_NOT_FOUND');
       } catch (error) {
         if (uniqueConflict(error)) {
@@ -453,7 +468,7 @@ export function createBrowserCatalogService(deps: { repository: BrowserCatalogRe
       const [shops, mappings, products, businessShops] = await Promise.all([
         repository.listShops(), repository.listMappings(), repository.listProducts(), repository.listBusinessShops(),
       ]);
-      return success({ shops, mappings, products, businessShops });
+      return success({ shops, mappings: mappings.map(catalogMapping), products, businessShops });
     },
 
     async createShop(input: BrowserShopInput, actor: AuthenticatedUser): Promise<BrowserCatalogResponse<BrowserShopBinding>> {

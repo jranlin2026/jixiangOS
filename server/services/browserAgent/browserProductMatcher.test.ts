@@ -60,6 +60,16 @@ assert.deepEqual(resolveBrowserProduct({
 }, '同店铺别名规范化后必须命中映射');
 
 assert.deepEqual(resolveBrowserProduct({
+  shopBindingId: 'shop-1',
+  facts: { platformProductName: '  淘金AI　多模态创作智能体 读书卡 ' },
+  products,
+  mappings: [taojinMapping],
+}), {
+  status: 'MATCHED', method: 'SHOP_ALIAS',
+  osProductId: 'prod-taojin', osProductName: '淘金AI', osReferencePrice: 299,
+}, '当前平台商品名称不写入曾用名时仍必须命中映射');
+
+assert.deepEqual(resolveBrowserProduct({
   shopBindingId: 'shop-2',
   facts: { platformProductName: '淘金AI 学习卡' },
   products,

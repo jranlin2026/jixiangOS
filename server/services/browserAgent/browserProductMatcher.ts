@@ -108,7 +108,8 @@ export function resolveBrowserProduct(input: ResolveBrowserProductInput): Browse
     currentShopMappings,
     productsById,
     'SHOP_ALIAS',
-    (mapping) => mapping.aliases.some((alias) => normalizePlatformProductName(alias) === normalizedProductName),
+    (mapping) => normalizePlatformProductName(mapping.platformProductName || '') === normalizedProductName
+      || mapping.aliases.some((alias) => normalizePlatformProductName(alias) === normalizedProductName),
   );
   if (aliasResolution) return aliasResolution;
 
@@ -116,7 +117,8 @@ export function resolveBrowserProduct(input: ResolveBrowserProductInput): Browse
     input.mappings,
     productsById,
     'COMPANY_ALIAS',
-    (mapping) => mapping.aliases.some((alias) => normalizePlatformProductName(alias) === normalizedProductName),
+    (mapping) => normalizePlatformProductName(mapping.platformProductName || '') === normalizedProductName
+      || mapping.aliases.some((alias) => normalizePlatformProductName(alias) === normalizedProductName),
   );
   if (companyAliasResolution) return companyAliasResolution;
 

@@ -741,13 +741,14 @@ function createGuardBoundaryFixture(options: {
   existingRemark?: string;
   keepDialogVisibleAfterSave?: boolean;
   removeEditorAfterSave?: boolean;
+  remarkEntryMarkup?: string;
 } = {}) {
   const fixture = new JSDOM(`<!doctype html><html><body>
     <main data-jx-feige-conversation><span data-jx-customer-name>悠然一刻</span></main>
     <section data-testid="order-card">
       <span data-testid="order-no">6925095897028853458</span>
       <span data-testid="order-status">已付款</span>
-      <button data-testid="edit-order-remark">修改</button>
+      ${options.remarkEntryMarkup ?? '<button data-testid="edit-order-remark">修改</button>'}
       <div data-testid="order-remark-summary">${options.existingRemark ?? '#入EC\n#销售：小王'}</div>
       <span data-testid="current-order-flag" data-current-flag="red"></span>
     </section>
@@ -767,7 +768,7 @@ function createGuardBoundaryFixture(options: {
   const currentFlag = fixtureDocument.querySelector('[data-testid="current-order-flag"]') as HTMLElement;
   let greenClicks = 0;
   let saveClicks = 0;
-  fixtureDocument.querySelector('[data-testid="edit-order-remark"]')?.addEventListener('click', () => {
+  fixtureDocument.querySelector('[data-testid="edit-order-remark"],[data-test-blank-order-remark-entry]')?.addEventListener('click', () => {
     dialog.hidden = false;
     input.value = summary.textContent || '';
   });
@@ -1040,6 +1041,22 @@ assert.deepEqual(blankRemarkResult, {
   greenFlagStatus: 'SUCCEEDED',
 }, '空备注只能新增 OS 两行');
 assert.equal(blankRemarkResult.ok && blankRemarkResult.remarkText.includes('#入EC'), false, '空备注不得自动新增 #入EC');
+
+const blankRemarkIconEntryFixture = createGuardBoundaryFixture({
+  existingRemark: '',
+  remarkEntryMarkup: '<button data-test-blank-order-remark-entry aria-label="订单备注">备</button>',
+});
+const blankRemarkIconEntryResult = await blankRemarkIconEntryFixture.adapter.completeOsOrder({
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: backendRemarkLines,
+});
+assert.deepEqual(blankRemarkIconEntryResult, {
+  ok: true,
+  remarkText: backendRemarkLines.join('\n'),
+  remarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'SUCCEEDED',
+}, '无历史备注的订单应从卡片顶部“备”按钮首次新增备注');
 
 const malformedLinesFixture = createGuardBoundaryFixture();
 const malformedLinesResult = await malformedLinesFixture.adapter.completeOsOrder({
