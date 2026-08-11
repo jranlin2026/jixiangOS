@@ -135,6 +135,7 @@ function customerPurgeFixture(options: {
   };
   const deletedLead = {
     id: 'lead-linked', name: '测试客户', customerId: deletedCustomer.id, owner: '销售甲',
+    externalIntakeKey: 'browser-sync-linked',
     deletionCascadeId: deletedCustomer.deletionCascadeId,
     ...(options.activeLinkedLead
       ? {}
@@ -151,7 +152,16 @@ function customerPurgeFixture(options: {
       customerId: deletedCustomer.id, data: { id: 'order-linked', customerId: deletedCustomer.id },
     });
   }
-  const leadRows: any[] = [{ id: deletedLead.id, data: deletedLead }];
+  const leadRows: any[] = [{
+    id: deletedLead.id,
+    externalIntakeKey: deletedLead.externalIntakeKey,
+    data: deletedLead,
+  }];
+  const browserLeadSyncs: any[] = [
+    { id: deletedLead.externalIntakeKey, leadId: null, platformOrderNo: 'ORDER-LINKED' },
+    { id: deletedLead.id, leadId: 'lead-other-cross-value', platformOrderNo: 'ORDER-CROSS-VALUE' },
+    { id: 'browser-sync-unrelated', leadId: 'lead-other', platformOrderNo: 'ORDER-OTHER' },
+  ];
   const audits: any[] = [];
   const customerAuditEvents: any[] = [{
     id: 'customer-audit-with-pii',
@@ -182,7 +192,7 @@ function customerPurgeFixture(options: {
       if (sql.includes('FROM business_records') && sql.includes('LIMIT 1')) {
         return businessRows.length ? [{ data: businessRows[0].data }] : [];
       }
-      if (sql.includes('SELECT id, data') && sql.includes('FROM lead_records')) {
+      if (sql.includes('FROM lead_records') && sql.includes("'$.customerId'")) {
         return leadRows;
       }
       if (sql.includes('FROM contact_identities')) {
@@ -229,6 +239,18 @@ function customerPurgeFixture(options: {
         const kept = leadRows.filter((row) => !ids.has(row.id));
         const count = leadRows.length - kept.length;
         leadRows.splice(0, leadRows.length, ...kept);
+        return { count };
+      },
+    },
+    browserLeadSync: {
+      deleteMany: async ({ where }: any) => {
+        const conditions = where.OR || [];
+        const retained = browserLeadSyncs.filter((row) => !conditions.some((condition: any) => (
+          (condition.id?.in || []).includes(row.id)
+          || (condition.leadId?.in || []).includes(row.leadId)
+        )));
+        const count = browserLeadSyncs.length - retained.length;
+        browserLeadSyncs.splice(0, browserLeadSyncs.length, ...retained);
         return { count };
       },
     },
@@ -292,6 +314,7 @@ function customerPurgeFixture(options: {
   return {
     businessRows,
     leadRows,
+    browserLeadSyncs,
     audits,
     customerAuditEvents,
     identityLinks,
@@ -308,6 +331,11 @@ const customerFixture = customerPurgeFixture();
 await customerFixture.repository.purge('customer', 'customer-deleted', '确认清理测试客户', '管理员');
 assert.equal(customerFixture.businessRows.length, 0, '永久删除客户后不得保留客户根记录');
 assert.equal(customerFixture.leadRows.length, 0, '永久删除客户必须在同一事务中清理已联合删除的关联线索');
+assert.deepEqual(
+  customerFixture.browserLeadSyncs.map((row) => row.id),
+  ['lead-linked', 'browser-sync-unrelated'],
+  '永久删除客户后必须释放关联订单的浏览器入库占用，且不得误删其他订单',
+);
 assert.equal(customerFixture.identityLinks.length, 0, '永久删除客户及关联线索必须清理对应身份链接');
 assert.equal(customerFixture.identities.length, 0, '没有其他业务链接的身份索引必须同步清理');
 assert.equal(customerFixture.duplicateGroups.length, 0, '仅引用孤儿身份索引的重复客户候选必须同步清理');
@@ -317,6 +345,7 @@ assert.equal(customerFixture.audits.some((row) => (
   && row.data.targetType === 'customer'
   && row.data.removedLinkedLeadCount === 1
   && row.data.removedCustomerAuditEventCount === 1
+  && row.data.removedBrowserLeadSyncCount === 1
   && row.data.reason === '确认清理测试客户'
 )), true, '永久删除客户必须保留不含联系方式的最小审计');
 
@@ -358,11 +387,20 @@ assert.equal(
 function standaloneLeadPurgeFixture(customerExists = false) {
   const deletedLead = {
     id: 'lead-standalone', name: '独立测试线索',
+    externalIntakeKey: 'browser-sync-standalone',
     ...(customerExists ? { customerId: 'customer-deleted' } : {}),
     deletedAt: '2026-07-28T01:00:00.000Z', deletedBy: '管理员', deleteReason: '测试数据',
     createdAt: '2026-07-25T01:00:00.000Z', updatedAt: '2026-07-28T01:00:00.000Z',
   };
-  const leadRows: any[] = [{ id: deletedLead.id, data: deletedLead }];
+  const leadRows: any[] = [{
+    id: deletedLead.id,
+    externalIntakeKey: deletedLead.externalIntakeKey,
+    data: deletedLead,
+  }];
+  const browserLeadSyncs: any[] = [
+    { id: deletedLead.externalIntakeKey, leadId: null, platformOrderNo: 'ORDER-STANDALONE' },
+    { id: 'browser-sync-unrelated', leadId: 'lead-other', platformOrderNo: 'ORDER-OTHER' },
+  ];
   const audits: any[] = [];
   const identityLinks: any[] = [{
     id: 'identity-link-lead', identityId: 'identity-lead', entityType: 'lead', entityId: deletedLead.id,
@@ -394,6 +432,18 @@ function standaloneLeadPurgeFixture(customerExists = false) {
         return {};
       },
     },
+    browserLeadSync: {
+      deleteMany: async ({ where }: any) => {
+        const conditions = where.OR || [];
+        const retained = browserLeadSyncs.filter((row) => !conditions.some((condition: any) => (
+          (condition.id?.in || []).includes(row.id)
+          || (condition.leadId?.in || []).includes(row.leadId)
+        )));
+        const count = browserLeadSyncs.length - retained.length;
+        browserLeadSyncs.splice(0, browserLeadSyncs.length, ...retained);
+        return { count };
+      },
+    },
     customerTodo: { findMany: async () => [] },
     contactIdentityLink: {
       findMany: async () => identityLinks,
@@ -417,6 +467,7 @@ function standaloneLeadPurgeFixture(customerExists = false) {
   };
   return {
     leadRows,
+    browserLeadSyncs,
     audits,
     identityLinks,
     identities,
@@ -430,11 +481,17 @@ function standaloneLeadPurgeFixture(customerExists = false) {
 const standaloneLeadFixture = standaloneLeadPurgeFixture();
 await standaloneLeadFixture.repository.purge('lead', 'lead-standalone', '确认清理独立线索', '管理员');
 assert.equal(standaloneLeadFixture.leadRows.length, 0, '未关联客户的回收站线索应允许永久删除');
+assert.deepEqual(
+  standaloneLeadFixture.browserLeadSyncs.map((row) => row.id),
+  ['browser-sync-unrelated'],
+  '永久删除独立线索后必须释放关联订单的浏览器入库占用',
+);
 assert.equal(standaloneLeadFixture.identityLinks.length, 0);
 assert.equal(standaloneLeadFixture.identities.length, 0);
 assert.equal(standaloneLeadFixture.audits.some((row) => (
   row.domain === STORAGE_KEYS.BUSINESS_RECYCLE_BIN_AUDITS
   && row.data.targetType === 'lead'
+  && row.data.removedBrowserLeadSyncCount === 1
   && row.data.reason === '确认清理独立线索'
 )), true, '永久删除独立线索必须保留最小审计');
 

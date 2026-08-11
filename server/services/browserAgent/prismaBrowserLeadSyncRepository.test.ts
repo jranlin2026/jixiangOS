@@ -321,22 +321,38 @@ assert.equal(recycledFailedRetry.existingLeadState, 'RECYCLED');
 assert.equal(recycledFailedRetry.record.matchedProductId, 'product-taojin');
 row = { ...row, status: 'SUCCEEDED', lastError: null };
 
+const historicalOrderRemarkedAt = new Date('2026-08-08T13:05:00.000Z');
+const historicalGreenFlaggedAt = new Date('2026-08-08T13:06:00.000Z');
+row = {
+  ...row,
+  orderRemarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'SUCCEEDED',
+  orderRemarkedAt: historicalOrderRemarkedAt,
+  greenFlaggedAt: historicalGreenFlaggedAt,
+};
 leadRow = null;
 const missingSuccessfulLead = await repository.reserve({
   ...reservationInput,
   sourcePaymentAmount: '777.77',
 });
-assert.equal(missingSuccessfulLead.acquired, false);
+assert.equal(missingSuccessfulLead.acquired, true, '原线索已永久删除时必须自动释放并重新获取订单入库租约');
 assert.equal(missingSuccessfulLead.existingLeadState, 'MISSING');
-assert.equal(missingSuccessfulLead.record.status, 'SUCCEEDED');
-assert.equal(missingSuccessfulLead.record.sourcePaymentAmount, '123456789012.34');
+assert.equal(missingSuccessfulLead.record.status, 'PENDING');
+assert.equal(missingSuccessfulLead.record.completedAt, null);
+assert.equal(missingSuccessfulLead.record.leadId, null);
+assert.equal(missingSuccessfulLead.record.sourcePaymentAmount, '777.77');
+assert.deepEqual(missingSuccessfulLead.record.storedContact, succeededOnce.storedContact);
+assert.equal(missingSuccessfulLead.record.orderRemarkStatus, 'SUCCEEDED');
+assert.equal(missingSuccessfulLead.record.greenFlagStatus, 'SUCCEEDED');
+assert.equal(missingSuccessfulLead.record.orderRemarkedAt?.getTime(), historicalOrderRemarkedAt.getTime());
+assert.equal(missingSuccessfulLead.record.greenFlaggedAt?.getTime(), historicalGreenFlaggedAt.getTime());
 
 const protectedSuccess = await repository.markFailed(
   first.record.id,
   first.record.attemptToken!,
   '极享OS暂时不可用',
 );
-assert.equal(protectedSuccess.status, 'SUCCEEDED', '迟到失败不得把成功记录降级');
+assert.equal(protectedSuccess.status, 'PENDING', '旧租约的迟到失败不得覆盖孤立记录的新入库尝试');
 row = { ...row, status: 'FAILED', lastError: '极享OS暂时不可用' };
 const correctedReservationInput = {
   ...reservationInput,
@@ -357,7 +373,7 @@ const correctedReservationInput = {
 const retry = await repository.reserve(correctedReservationInput);
 assert.equal(retry.acquired, true, '失败记录可以被后续重试重新获取');
 assert.equal(retry.record.status, 'PENDING');
-assert.equal(retry.record.attemptCount, 2);
+assert.equal(retry.record.attemptCount, 3);
 assert.deepEqual({
   shopBindingId: retry.record.shopBindingId,
   shopDisplayName: retry.record.shopDisplayName,
@@ -698,7 +714,7 @@ row = {
 };
 const staleRetry = await repository.reserve(reservationInput);
 assert.equal(staleRetry.acquired, true, '没有生成线索的超时任务必须释放重试');
-assert.equal(staleRetry.record.attemptCount, 3);
+assert.equal(staleRetry.record.attemptCount, 4);
 
 row = {
   ...row,

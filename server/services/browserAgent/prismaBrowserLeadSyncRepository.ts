@@ -258,9 +258,12 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
       if (reconciliation.result) return reconciliation.result;
       const { existingLeadState } = reconciliation;
 
+      const orphanedSuccess = existingLeadState === 'MISSING'
+        && existing.status === 'SUCCEEDED'
+        && Boolean(storedContactFromSyncRow(existing));
       const stalePending = existing.status === 'PENDING'
         && existing.updatedAt.getTime() <= Date.now() - PENDING_LEASE_MS;
-      if (existing.status !== 'FAILED' && !stalePending) {
+      if (!orphanedSuccess && existing.status !== 'FAILED' && !stalePending) {
         return { acquired: false as const, record: record(existing), existingLeadState };
       }
 
@@ -292,6 +295,14 @@ export function createPrismaBrowserLeadSyncRepository(prisma: BrowserLeadSyncPri
           contactSource: input.contactSource,
           attemptCount: { increment: 1 },
           attemptToken,
+          ...(orphanedSuccess ? {
+            leadId: null,
+            leadName: null,
+            assignedTo: null,
+            assignedToId: null,
+            intakeStatus: null,
+            completedAt: null,
+          } : {}),
         },
       });
       const refreshed = await prisma.browserLeadSync.findUnique({ where: { id: existing.id } });

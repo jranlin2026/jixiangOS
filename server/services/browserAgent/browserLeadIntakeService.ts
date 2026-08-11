@@ -49,6 +49,10 @@ export type BrowserLeadSyncRecord = {
   status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
   orderRemarkStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
   greenFlagStatus: 'NOT_ATTEMPTED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED';
+  orderRemarkError?: string | null;
+  greenFlagError?: string | null;
+  orderRemarkedAt?: Date | null;
+  greenFlaggedAt?: Date | null;
   attemptCount: number;
   attemptToken: string | null;
   completedAt?: Date | null;
@@ -195,6 +199,21 @@ function contactConflictLabels(
     const storedWechat = stored?.wechat?.trim().toLocaleLowerCase('zh-CN') || '';
     if (!submittedWechat || !storedWechat || submittedWechat !== storedWechat) labels.push('微信号不一致');
   }
+  return labels;
+}
+
+function strictContactConflictLabels(
+  submitted: { contactName: string; contactPhone?: string; contactWechat?: string },
+  stored?: StoredLeadContactSnapshot,
+) {
+  const labels: string[] = [];
+  if (!stored || stored.nickname.trim() !== submitted.contactName.trim()) labels.push('昵称不一致');
+  if (normalizePhoneForComparison(stored?.phone) !== normalizePhoneForComparison(submitted.contactPhone)) {
+    labels.push('手机号不一致');
+  }
+  const submittedWechat = submitted.contactWechat?.trim().toLocaleLowerCase('zh-CN') || '';
+  const storedWechat = stored?.wechat?.trim().toLocaleLowerCase('zh-CN') || '';
+  if (storedWechat !== submittedWechat) labels.push('微信号不一致');
   return labels;
 }
 
@@ -379,7 +398,7 @@ export function createBrowserLeadIntakeService(deps: {
         }
         if (reservation.existingLeadState === 'MISSING' && reservation.record.status === 'SUCCEEDED') {
           return intakeFailure(
-            '该订单的同步记录显示已录入，但原线索已不存在。请由管理员彻底清理该订单的同步记录后再重试；本次不会修改飞鸽订单。',
+            '该订单的历史同步状态正在重新校验，请稍后重试；本次不会修改飞鸽订单。',
             'LEAD_SYNC_RECORD_ORPHANED',
           );
         }
@@ -405,6 +424,17 @@ export function createBrowserLeadIntakeService(deps: {
       const attemptToken = reserved.attemptToken;
       if (!attemptToken) {
         return failure<BrowserLeadIntakeResult>('入库任务租约缺失，请稍后重试', 500);
+      }
+      if (reservation.existingLeadState === 'MISSING') {
+        const differences = strictContactConflictLabels(normalized, reserved.storedContact);
+        if (differences.length) {
+          const message = `该订单的原线索已不存在，但本次提交资料存在冲突（${differences.join('、')}）。请先核对当前飞鸽会话和订单后重试；本次不会修改飞鸽订单。`;
+          const failedRecord = await deps.repository.markFailed(reserved.id, attemptToken, message);
+          if (failedRecord.status !== 'FAILED' || failedRecord.attemptToken !== attemptToken) {
+            return resultAfterLeaseLoss(failedRecord);
+          }
+          return intakeFailure(message, 'ORDER_CONTACT_CONFLICT');
+        }
       }
       const reservedProduct = productResolutionFromRecord(reserved);
       const reservedPaymentAmount = paymentAmountFromRecord(reserved);

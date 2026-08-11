@@ -90,9 +90,9 @@ async function lockDeletedCustomer(transaction: Prisma.TransactionClient, id: st
 async function lockDeletedLead(
   transaction: Prisma.TransactionClient,
   id: string,
-): Promise<{ rowId: string; lead: Lead }> {
-  const rows = await transaction.$queryRaw<Array<{ id: string; data: unknown }>>(Prisma.sql`
-    SELECT id, data
+): Promise<{ rowId: string; externalIntakeKey: string | null; lead: Lead }> {
+  const rows = await transaction.$queryRaw<Array<{ id: string; externalIntakeKey: string | null; data: unknown }>>(Prisma.sql`
+    SELECT id, externalIntakeKey, data
     FROM lead_records
     WHERE id = ${id}
     LIMIT 1
@@ -102,20 +102,40 @@ async function lockDeletedLead(
   const lead = parseObject<Lead>(rows[0].data, '线索');
   if (lead.id !== id) throw new BusinessRecycleBinCommandError(409, '线索标识与数据库记录不一致');
   if (!lead.deletedAt) throw new BusinessRecycleBinCommandError(409, '线索不在业务回收站中');
-  return { rowId: rows[0].id, lead };
+  return { rowId: rows[0].id, externalIntakeKey: rows[0].externalIntakeKey, lead };
 }
 
 async function lockedLinkedLeadRows(
   transaction: Prisma.TransactionClient,
   customerId: string,
-): Promise<Array<{ id: string; data: unknown }>> {
-  return transaction.$queryRaw<Array<{ id: string; data: unknown }>>(Prisma.sql`
-    SELECT id, data
+): Promise<Array<{ id: string; externalIntakeKey: string | null; data: unknown }>> {
+  return transaction.$queryRaw<Array<{ id: string; externalIntakeKey: string | null; data: unknown }>>(Prisma.sql`
+    SELECT id, externalIntakeKey, data
     FROM lead_records
     WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.customerId')) = ${customerId}
     ORDER BY id
     FOR UPDATE
   `);
+}
+
+async function purgeBrowserLeadSyncs(
+  transaction: Prisma.TransactionClient,
+  leads: Array<{ rowId: string; externalIntakeKey?: string | null }>,
+): Promise<number> {
+  const leadIds = leads.map((lead) => lead.rowId);
+  const syncIds = leads
+    .map((lead) => lead.externalIntakeKey)
+    .filter((syncId): syncId is string => Boolean(syncId));
+  if (!leadIds.length && !syncIds.length) return 0;
+  const removed = await transaction.browserLeadSync.deleteMany({
+    where: {
+      OR: [
+        ...(leadIds.length ? [{ leadId: { in: leadIds } }] : []),
+        ...(syncIds.length ? [{ id: { in: syncIds } }] : []),
+      ],
+    },
+  });
+  return removed.count;
 }
 
 async function purgeContactIdentityArtifacts(
@@ -195,6 +215,10 @@ async function purgeDeletedCustomer(
   const removedCustomerAudits = await transaction.customerAuditEvent.deleteMany({
     where: { customerId: id },
   });
+  const removedBrowserLeadSyncCount = await purgeBrowserLeadSyncs(
+    transaction,
+    linkedRows.map((row) => ({ rowId: row.id, externalIntakeKey: row.externalIntakeKey })),
+  );
   const purgedAt = new Date().toISOString();
   const auditId = `recycle-purge-${randomUUID()}`;
   await transaction.businessRecord.create({
@@ -214,6 +238,7 @@ async function purgeDeletedCustomer(
         operator: actorName,
         removedLinkedLeadCount: linkedLeads.length,
         removedCustomerAuditEventCount: removedCustomerAudits.count,
+        removedBrowserLeadSyncCount,
         removedContactIdentityLinkCount: identityCleanup.removedLinkCount,
         removedOrphanIdentityCount: identityCleanup.removedOrphanIdentityCount,
         purgedAt,
@@ -237,7 +262,7 @@ async function purgeDeletedLead(
   actorName: string,
 ): Promise<void> {
   await lockContactIdentityMutationGate(transaction);
-  const { rowId, lead } = await lockDeletedLead(transaction, id);
+  const { rowId, externalIntakeKey, lead } = await lockDeletedLead(transaction, id);
   const customerId = String(lead.customerId || '').trim();
   if (customerId) {
     await lockCustomerAssociationScope(transaction, [customerId], { allowMerged: true });
@@ -254,6 +279,10 @@ async function purgeDeletedLead(
   }
 
   const identityCleanup = await purgeContactIdentityArtifacts(transaction, [], [rowId]);
+  const removedBrowserLeadSyncCount = await purgeBrowserLeadSyncs(
+    transaction,
+    [{ rowId, externalIntakeKey }],
+  );
   const purgedAt = new Date().toISOString();
   const auditId = `recycle-purge-${randomUUID()}`;
   await transaction.businessRecord.create({
@@ -273,6 +302,7 @@ async function purgeDeletedLead(
         operator: actorName,
         removedContactIdentityLinkCount: identityCleanup.removedLinkCount,
         removedOrphanIdentityCount: identityCleanup.removedOrphanIdentityCount,
+        removedBrowserLeadSyncCount,
         purgedAt,
       }),
     },

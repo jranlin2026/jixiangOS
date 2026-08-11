@@ -104,6 +104,22 @@ const repository = {
     const existing = records.get(key);
     if (existing) {
       if (existing.status !== 'FAILED') {
+        if (existing.status === 'SUCCEEDED' && existing.existingLeadState === 'MISSING') {
+          Object.assign(existing, prismaAuditSnapshot(input), {
+            status: 'PENDING',
+            leadId: null,
+            leadName: null,
+            assignedTo: null,
+            assignedToId: null,
+            intakeStatus: null,
+            completedAt: null,
+            lastError: null,
+            attemptCount: existing.attemptCount + 1,
+            attemptToken: `attempt-${existing.attemptCount + 1}`,
+            updatedAt: new Date(),
+          });
+          return { acquired: true as const, record: existing, existingLeadState: 'MISSING' as const };
+        }
         return {
           acquired: false as const,
           record: existing,
@@ -117,7 +133,11 @@ const repository = {
         attemptToken: `attempt-${existing.attemptCount + 1}`,
         updatedAt: new Date(),
       });
-      return { acquired: true as const, record: existing };
+      return {
+        acquired: true as const,
+        record: existing,
+        ...(existing.existingLeadState ? { existingLeadState: existing.existingLeadState } : {}),
+      };
     }
     const record = {
       id: `browser-sync-${records.size + 1}`,
@@ -496,14 +516,27 @@ assert.equal(normalizedPhoneDuplicate.code, 0, '手机号比较必须复用极�
 firstSyncRecord.storedContact.phone = '13800138000';
 
 firstSyncRecord.existingLeadState = 'MISSING';
+const conflictingMissingLead = await service.intake({
+  ...shopAInput,
+  contactName: '另一个昵称',
+}, actor);
+assert.equal(conflictingMissingLead.code, 409);
+assert.equal(conflictingMissingLead.errorCode, 'ORDER_CONTACT_CONFLICT');
+assert.match(conflictingMissingLead.message, /昵称不一致/);
+assert.equal(createLeadCalls.length, 3, '历史孤立记录的联系快照不一致时不得自动重建线索');
+const incompleteMissingLead = await service.intake({
+  ...shopAInput,
+  contactWechat: undefined,
+}, actor);
+assert.equal(incompleteMissingLead.code, 409);
+assert.equal(incompleteMissingLead.errorCode, 'ORDER_CONTACT_CONFLICT');
+assert.match(incompleteMissingLead.message, /微信号不一致/);
+assert.equal(createLeadCalls.length, 3, '孤立记录重建必须与首次成功快照的全部联系字段一致');
 const missingSuccessfulLead = await service.intake(shopAInput, actor);
-assert.deepEqual(missingSuccessfulLead, {
-  code: 409,
-  data: null,
-  errorCode: 'LEAD_SYNC_RECORD_ORPHANED',
-  message: '该订单的同步记录显示已录入，但原线索已不存在。请由管理员彻底清理该订单的同步记录后再重试；本次不会修改飞鸽订单。',
-});
-assert.equal(createLeadCalls.length, 3, '成功同步关联线索消失时不得静默创建第二条线索');
+assert.equal(missingSuccessfulLead.code, 0);
+assert.equal(missingSuccessfulLead.data?.outcome, 'CREATED');
+assert.equal(missingSuccessfulLead.data?.syncId, firstSyncRecord.id, '历史孤立同步记录应复用原审计标识重新入库');
+assert.equal(createLeadCalls.length, 4, '原线索已永久删除时应允许同一订单重新录入');
 firstSyncRecord.existingLeadState = 'ACTIVE';
 
 const originalStoredContact = firstSyncRecord.storedContact;
@@ -525,7 +558,7 @@ const invalid = await service.intake({
 }, actor);
 assert.equal(invalid.code, 400);
 assert.equal(invalid.message, '手机号或微信至少填写一项');
-assert.equal(createLeadCalls.length, 3, '无效联系方式不能进入线索创建');
+assert.equal(createLeadCalls.length, 4, '无效联系方式不能进入线索创建');
 
 const retryCreateLeadCalls: any[] = [];
 const retryService = createBrowserLeadIntakeService({
