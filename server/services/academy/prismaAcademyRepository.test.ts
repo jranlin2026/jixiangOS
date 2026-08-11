@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createPrismaAcademyRepository } from "./prismaAcademyRepository";
 
 const calls: Array<{ model: string; method: string; args: any }> = [];
+const now = new Date("2026-08-08T09:00:00.000Z");
 const client: any = {
   academyCourse: {
     findMany: async (args: any) => (
@@ -20,7 +21,20 @@ const client: any = {
       { count: 1 }
     ),
   },
-  academyCourseVersion: { create: async ({ data }: any) => data },
+  academyCourseVersion: {
+    create: async ({ data }: any) => data,
+    findFirst: async () => ({ id: "version-1" }),
+  },
+  businessRecord: {
+    findMany: async (args: any) => (
+      calls.push({ model: "businessRecord", method: "findMany", args }),
+      []
+    ),
+    upsert: async (args: any) => (
+      calls.push({ model: "businessRecord", method: "upsert", args }),
+      { data: args.create.data, createdAt: now, updatedAt: now }
+    ),
+  },
   academySession: {
     findMany: async (args: any) => (
       calls.push({ model: "session", method: "findMany", args }),
@@ -38,11 +52,16 @@ const client: any = {
   },
   academySessionTask: {
     findMany: async () => [],
+    findUnique: async ({ where }: any) => ({ id: where.id, status: "PENDING" }),
     update: async ({ data }: any) => data,
   },
   academyEngagement: {
     upsert: async ({ create }: any) => create,
+    findUnique: async ({ where }: any) => ({ id: where.id }),
     count: async () => 0,
+  },
+  order: {
+    findUnique: async ({ where }: any) => ({ id: where.id, orderNo: "ORD-1", customerId: "customer-1" }),
   },
   academySessionReview: { upsert: async ({ create }: any) => create },
   $transaction: async (arg: any) => {
@@ -90,7 +109,6 @@ assert.deepEqual(
   "商学院课程列表必须按角色数据范围过滤",
 );
 
-const now = new Date("2026-08-08T09:00:00.000Z");
 const created = await repository.createSession(
   {
     id: "session-1",
@@ -131,5 +149,34 @@ assert.deepEqual(
   { id: "session-1", status: "PLANNED" },
   "场次状态更新必须带旧状态条件，避免并发覆盖",
 );
+
+await repository.listCourseAssets("course-1");
+const assetListCall = calls.find(
+  (call) => call.model === "businessRecord" && call.method === "findMany",
+);
+assert.deepEqual(assetListCall?.args.where, {
+  domain: "academy_course_assets",
+  recordId: { startsWith: "course-1:" },
+});
+
+await repository.upsertCourseAsset({
+  id: "asset-course-1-PPT",
+  courseId: "course-1",
+  courseVersionId: "version-1",
+  assetType: "PPT",
+  title: "课件",
+  attachments: [],
+  ownerUserId: "u1",
+  ownerUserName: "管理员",
+  createdAt: now,
+  updatedAt: now,
+});
+const assetSaveCall = calls.find(
+  (call) => call.model === "businessRecord" && call.method === "upsert",
+);
+assert.deepEqual(assetSaveCall?.args.where.domain_recordId, {
+  domain: "academy_course_assets",
+  recordId: "course-1:PPT",
+});
 
 console.log("prisma academy repository tests passed");

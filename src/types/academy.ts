@@ -1,7 +1,23 @@
+import type { BusinessAttachment } from './businessAttachment';
+
 export type AcademyCourseStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 export type AcademySessionStatus =
   "PLANNED" | "READY" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
-export type AcademyTaskStatus = "PENDING" | "DONE" | "BLOCKED" | "SKIPPED";
+export type AcademyTaskStatus =
+  | "PENDING"
+  | "IN_PROGRESS"
+  | "SUBMITTED"
+  | "DONE"
+  | "REJECTED"
+  | "BLOCKED"
+  | "SKIPPED";
+export type AcademyAssetType =
+  | "PPT"
+  | "SCRIPT"
+  | "CASE"
+  | "POSTER"
+  | "INVITATION"
+  | "REPLAY";
 
 export interface AcademyDashboard {
   activeCourses: number;
@@ -19,6 +35,19 @@ export interface AcademyCourse {
   defaultDurationMinutes: number;
   objectives: string[];
   status: AcademyCourseStatus;
+  ownerUserName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AcademyCourseAsset {
+  id: string;
+  courseId: string;
+  courseVersionId: string;
+  assetType: AcademyAssetType;
+  title: string;
+  attachments: BusinessAttachment[];
+  ownerUserId: string;
   ownerUserName: string;
   createdAt: string;
   updatedAt: string;
@@ -48,6 +77,17 @@ export interface AcademySessionTask {
   isRequired: boolean;
   status: AcademyTaskStatus;
   note?: string;
+  assigneeUserId?: string;
+  assigneeUserName?: string;
+  collaboratorNames?: string[];
+  dueAt?: string;
+  acceptanceCriteria?: string;
+  submissionNote?: string;
+  submittedAt?: string;
+  submittedByName?: string;
+  reviewNote?: string;
+  reviewedAt?: string;
+  reviewedByName?: string;
   completedByName?: string;
   completedAt?: string;
 }
@@ -64,6 +104,12 @@ export interface AcademyEngagement {
   interactionLevel?: string;
   courseAssessment?: string;
   followUpStatus: string;
+  nextFollowUpAt?: string;
+  orderId?: string;
+  orderNo?: string;
+  handoffStatus: string;
+  handedOffAt?: string;
+  handedOffByName?: string;
   notes?: string;
   ownerUserName?: string;
 }
@@ -108,8 +154,19 @@ export type CreateAcademySessionInput = Pick<
 >;
 export type SaveAcademyEngagementInput = Omit<
   AcademyEngagement,
-  "id" | "ownerUserName"
+  | "id"
+  | "ownerUserName"
+  | "orderId"
+  | "orderNo"
+  | "handoffStatus"
+  | "handedOffAt"
+  | "handedOffByName"
 >;
+export interface SaveAcademyCourseAssetInput {
+  assetType: AcademyAssetType;
+  title: string;
+  attachments: BusinessAttachment[];
+}
 export type SaveAcademyReviewInput = Pick<
   AcademySessionReview,
   | "sessionId"

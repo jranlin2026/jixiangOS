@@ -40,9 +40,11 @@ import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useLocation, useNavigate } from "react-router-dom";
-import { academyApi, customerApi } from "../../api";
+import { academyApi, customerApi, orderApi } from "../../api";
 import type {
+  AcademyAssetType,
   AcademyCourse,
+  AcademyCourseAsset,
   AcademyDashboard,
   AcademyEngagement,
   AcademySession,
@@ -53,7 +55,9 @@ import type {
   SaveAcademyEngagementInput,
   SaveAcademyReviewInput,
 } from "../../types/academy";
+import type { BusinessAttachment } from "../../types/businessAttachment";
 import type { Customer } from "../../types/customer";
+import type { Order } from "../../types/order";
 import { ROUTES } from "../../shared/utils/constants";
 import { hasPermission, PERMISSION_KEYS } from "../../shared/utils/permissions";
 import useAuthStore from "../../store/useAuthStore";
@@ -62,6 +66,7 @@ import ProtectedFormDialog from "../../shared/components/ProtectedFormDialog";
 import DialogCloseTitle from "../../shared/components/DialogCloseTitle";
 import TablePagination from "../../shared/components/TablePagination";
 import SystemDataTable from "../../shared/components/SystemDataTable";
+import BusinessAttachmentPicker from "../../shared/components/BusinessAttachmentPicker";
 import {
   ModuleHeader,
   ModulePage,
@@ -150,6 +155,14 @@ const emptyReview: SaveAcademyReviewInput = {
   metrics: {},
   actionItems: [],
 };
+const assetTypes: Array<{ value: AcademyAssetType; label: string }> = [
+  { value: "PPT", label: "课件 PPT" },
+  { value: "SCRIPT", label: "逐字稿" },
+  { value: "CASE", label: "课程案例" },
+  { value: "POSTER", label: "宣传海报" },
+  { value: "INVITATION", label: "邀约话术" },
+  { value: "REPLAY", label: "直播回放" },
+];
 
 const formatDate = (value?: string) =>
   value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "-";
@@ -163,7 +176,9 @@ const statusLabel: Record<string, string> = {
   COMPLETED: "已完成",
   CANCELLED: "已取消",
   PENDING: "待处理",
+  SUBMITTED: "待验收",
   DONE: "已完成",
+  REJECTED: "验收驳回",
   BLOCKED: "受阻",
   SKIPPED: "已跳过",
   CONFIRMED: "已确认",
@@ -273,6 +288,23 @@ const Academy: React.FC = () => {
   const [engagementForm, setEngagementForm] = useState(emptyEngagement);
   const [reviewForm, setReviewForm] = useState(emptyReview);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [courseAssets, setCourseAssets] = useState<Record<string, AcademyCourseAsset[]>>({});
+  const [assetOpen, setAssetOpen] = useState(false);
+  const [assetCourseId, setAssetCourseId] = useState("");
+  const [assetType, setAssetType] = useState<AcademyAssetType>("PPT");
+  const [assetTitle, setAssetTitle] = useState("");
+  const [existingAssetAttachments, setExistingAssetAttachments] = useState<BusinessAttachment[]>([]);
+  const [assetAttachments, setAssetAttachments] = useState<BusinessAttachment[]>([]);
+  const [taskAction, setTaskAction] = useState<{
+    task: AcademySessionTask;
+    status: AcademySessionTask["status"];
+  } | null>(null);
+  const [taskActionNote, setTaskActionNote] = useState("");
+  const [orderLink, setOrderLink] = useState<{
+    engagement: AcademyEngagement;
+    orders: Order[];
+  } | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState("");
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -385,6 +417,17 @@ const Academy: React.FC = () => {
     [alert],
   );
 
+  const loadCourseAssets = useCallback(
+    async (courseId: string) => {
+      if (!courseId) return;
+      const response = await academyApi.listCourseAssets(courseId);
+      if (response.code !== 0)
+        return alert(response.message, "课程资产加载失败");
+      setCourseAssets((current) => ({ ...current, [courseId]: response.data }));
+    },
+    [alert],
+  );
+
   useEffect(() => {
     if (
       (view === "engagements" || view === "handoffs" || view === "reviews") &&
@@ -393,6 +436,10 @@ const Academy: React.FC = () => {
     )
       void loadDetail(selectedSessionId);
   }, [details, loadDetail, selectedSessionId, view]);
+  useEffect(() => {
+    if (view === "courses" && selectedCourseId && !courseAssets[selectedCourseId])
+      void loadCourseAssets(selectedCourseId);
+  }, [courseAssets, loadCourseAssets, selectedCourseId, view]);
   useEffect(() => {
     if (
       (view !== "engagements" && view !== "handoffs") ||
@@ -498,12 +545,71 @@ const Academy: React.FC = () => {
     if (response.code !== 0) return alert(response.message, "课程状态更新失败");
     await loadBase();
   };
-  const updateTask = async (task: AcademySessionTask) => {
+  const updateTask = async (
+    task: AcademySessionTask,
+    status: AcademySessionTask["status"],
+    note = "",
+  ) => {
     const response = await academyApi.updateTask(task.id, {
-      status: task.status === "DONE" ? "PENDING" : "DONE",
+      status,
+      ...(status === "SUBMITTED" ? { submissionNote: note } : {}),
+      ...(status === "DONE" || status === "REJECTED" ? { reviewNote: note } : {}),
     });
     if (response.code !== 0) return alert(response.message, "任务状态更新失败");
+    setTaskAction(null);
+    setTaskActionNote("");
     if (detail) await loadDetail(detail.id, true);
+    else if (selectedSessionId) await loadDetail(selectedSessionId);
+  };
+  const openTaskAction = (task: AcademySessionTask, status: AcademySessionTask["status"]) => {
+    if (status === "IN_PROGRESS") {
+      void updateTask(task, status);
+      return;
+    }
+    setTaskAction({ task, status });
+    setTaskActionNote("");
+  };
+  const openAssetUpload = (course: AcademyCourse, nextType: AcademyAssetType) => {
+    const existing = courseAssets[course.id]?.find((item) => item.assetType === nextType);
+    setAssetCourseId(course.id);
+    setAssetType(nextType);
+    setAssetTitle(existing?.title || `${course.title} · ${assetTypes.find((item) => item.value === nextType)?.label || "课程资产"}`);
+    setExistingAssetAttachments(existing?.attachments || []);
+    setAssetAttachments([]);
+    setAssetOpen(true);
+  };
+  const saveCourseAsset = async () => {
+    setSaving(true);
+    const response = await academyApi.saveCourseAsset(assetCourseId, {
+      assetType,
+      title: assetTitle,
+      attachments: [...existingAssetAttachments, ...assetAttachments],
+    });
+    setSaving(false);
+    if (response.code !== 0) return alert(response.message, "课程资产保存失败");
+    setAssetOpen(false);
+    await loadCourseAssets(assetCourseId);
+  };
+  const openOrderLink = async (engagement: AcademyEngagement) => {
+    if (!engagement.customerId)
+      return alert("请先将该学员关联到CRM客户，再关联正式订单。", "暂不能关联订单");
+    const response = await orderApi.fetchOrders({ customerId: engagement.customerId, page: 1, pageSize: 100 });
+    if (response.code !== 0) return alert(response.message, "正式订单加载失败");
+    setOrderLink({ engagement, orders: response.data.items });
+    setSelectedOrderId(engagement.orderId || "");
+  };
+  const saveOrderLink = async () => {
+    if (!orderLink) return;
+    const order = orderLink.orders.find((item) => item.id === selectedOrderId);
+    if (!order) return;
+    setSaving(true);
+    const response = await academyApi.linkEngagementOrder(orderLink.engagement.id, {
+      orderId: order.id,
+    });
+    setSaving(false);
+    if (response.code !== 0) return alert(response.message, "订单关联失败");
+    setOrderLink(null);
+    await loadDetail(selectedSessionId);
   };
   const saveEngagement = async () => {
     setSaving(true);
@@ -732,14 +838,14 @@ const Academy: React.FC = () => {
                           {task.isRequired ? " *" : ""}
                         </TableCell>
                         <TableCell>
-                          {task.completedByName ||
-                            detail.facilitatorUserName ||
-                            "待分配"}
+                          {task.assigneeUserName || "待分配"}
                         </TableCell>
-                        <TableCell>-</TableCell>
-                        <TableCell>-</TableCell>
                         <TableCell>
-                          {task.note || "完成后由负责人确认"}
+                          {task.collaboratorNames?.join("、") || "-"}
+                        </TableCell>
+                        <TableCell>{formatDate(task.dueAt)}</TableCell>
+                        <TableCell>
+                          {task.acceptanceCriteria || "完成后由负责人确认"}
                         </TableCell>
                         <TableCell>
                           <Chip
@@ -759,27 +865,42 @@ const Academy: React.FC = () => {
                           />
                         </TableCell>
                         <TableCell>
-                          <Chip
-                            size="small"
-                            clickable={canSession}
-                            onClick={() => canSession && void updateTask(task)}
-                            label={statusLabel[task.status] || task.status}
-                            sx={{
-                              height: 22,
-                              bgcolor:
-                                task.status === "DONE"
-                                  ? palette.greenSoft
-                                  : task.status === "BLOCKED"
-                                    ? palette.redSoft
-                                    : palette.blueSoft,
-                              color:
-                                task.status === "DONE"
-                                  ? palette.green
-                                  : task.status === "BLOCKED"
-                                    ? palette.red
-                                    : palette.blue,
-                            }}
-                          />
+                          <Stack direction="row" spacing={0.5} alignItems="center">
+                            <Chip
+                              size="small"
+                              label={statusLabel[task.status] || task.status}
+                              sx={{
+                                height: 22,
+                                bgcolor:
+                                  task.status === "DONE"
+                                    ? palette.greenSoft
+                                    : task.status === "BLOCKED" || task.status === "REJECTED"
+                                      ? palette.redSoft
+                                      : palette.blueSoft,
+                                color:
+                                  task.status === "DONE"
+                                    ? palette.green
+                                    : task.status === "BLOCKED" || task.status === "REJECTED"
+                                      ? palette.red
+                                      : palette.blue,
+                              }}
+                            />
+                            {canSession && task.status === "PENDING" && (
+                              <Button size="small" onClick={() => openTaskAction(task, "IN_PROGRESS")}>开始</Button>
+                            )}
+                            {canSession && task.status === "IN_PROGRESS" && (
+                              <Button size="small" onClick={() => openTaskAction(task, "SUBMITTED")}>提交验收</Button>
+                            )}
+                            {canSession && task.status === "SUBMITTED" && (
+                              <>
+                                <Button size="small" color="success" onClick={() => openTaskAction(task, "DONE")}>通过</Button>
+                                <Button size="small" color="error" onClick={() => openTaskAction(task, "REJECTED")}>驳回</Button>
+                              </>
+                            )}
+                            {canSession && (task.status === "REJECTED" || task.status === "BLOCKED") && (
+                              <Button size="small" onClick={() => openTaskAction(task, "IN_PROGRESS")}>重新处理</Button>
+                            )}
+                          </Stack>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -958,6 +1079,57 @@ const Academy: React.FC = () => {
             </TableContainer>
           </Paper>
         </Stack>
+        <ProtectedFormDialog
+          open={Boolean(taskAction)}
+          onClose={() => setTaskAction(null)}
+          submitting={saving}
+          fullWidth
+          maxWidth="sm"
+          resetKey={`${taskAction?.task.id || ""}:${taskAction?.status || ""}`}
+        >
+          {({ markDirty, requestClose }) => (
+            <>
+              <DialogCloseTitle onClose={() => void requestClose()}>
+                {taskAction?.status === "SUBMITTED"
+                  ? "提交任务验收"
+                  : taskAction?.status === "REJECTED"
+                    ? "驳回任务验收"
+                    : "确认任务验收"}
+              </DialogCloseTitle>
+              <DialogContent dividers>
+                <Typography fontWeight={800} sx={{ mb: 1.5 }}>
+                  {taskAction?.task.title}
+                </Typography>
+                <TextField
+                  fullWidth
+                  multiline
+                  minRows={3}
+                  required={taskAction?.status === "SUBMITTED" || taskAction?.status === "REJECTED"}
+                  label={taskAction?.status === "REJECTED" ? "驳回原因" : "完成说明 / 验收意见"}
+                  value={taskActionNote}
+                  onChange={(event) => {
+                    markDirty();
+                    setTaskActionNote(event.target.value);
+                  }}
+                />
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => void requestClose()}>取消</Button>
+                <Button
+                  variant="contained"
+                  color={taskAction?.status === "REJECTED" ? "error" : "primary"}
+                  disabled={
+                    !taskAction ||
+                    ((taskAction.status === "SUBMITTED" || taskAction.status === "REJECTED") && !taskActionNote.trim())
+                  }
+                  onClick={() => taskAction && void updateTask(taskAction.task, taskAction.status, taskActionNote)}
+                >
+                  确认
+                </Button>
+              </DialogActions>
+            </>
+          )}
+        </ProtectedFormDialog>
         {feedbackDialog}
       </ModulePage>
     );
@@ -1009,10 +1181,12 @@ const Academy: React.FC = () => {
             total={filteredCourses.length}
             selectedId={selectedCourseId}
             onSelect={setSelectedCourseId}
+            assets={courseAssets}
             search={search}
             onSearch={setSearch}
             canManage={canCourse}
             onCreate={() => setCourseOpen(true)}
+            onUploadAsset={openAssetUpload}
             onStatusChange={(course, status) =>
               void changeCourseStatus(course, status)
             }
@@ -1083,6 +1257,8 @@ const Academy: React.FC = () => {
               void loadDetail(id);
             }}
             detail={selectedDetail}
+            canManage={canEngagement}
+            onLinkOrder={(engagement) => void openOrderLink(engagement)}
             onGoCustomers={() => navigate(ROUTES.CUSTOMERS)}
             onGoOrders={() => navigate(ROUTES.ORDERS)}
           />
@@ -1404,6 +1580,141 @@ const Academy: React.FC = () => {
                 onClick={() => void saveEngagement()}
               >
                 加入场次
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </ProtectedFormDialog>
+      <ProtectedFormDialog
+        open={assetOpen}
+        onClose={() => setAssetOpen(false)}
+        submitting={saving}
+        fullWidth
+        maxWidth="md"
+        resetKey={`${assetCourseId}:${assetType}:${assetOpen}`}
+      >
+        {({ markDirty, requestClose }) => (
+          <>
+            <DialogCloseTitle onClose={() => void requestClose()}>
+              上传课程资产
+            </DialogCloseTitle>
+            <DialogContent dividers>
+              <Stack spacing={2}>
+                <TextField
+                  select
+                  label="资产类型 *"
+                  value={assetType}
+                  onChange={(event) => {
+                    markDirty();
+                    setAssetType(event.target.value as AcademyAssetType);
+                  }}
+                >
+                  {assetTypes.map((item) => (
+                    <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
+                  ))}
+                </TextField>
+                <TextField
+                  label="资产名称 *"
+                  value={assetTitle}
+                  onChange={(event) => {
+                    markDirty();
+                    setAssetTitle(event.target.value);
+                  }}
+                />
+                {existingAssetAttachments.length > 0 && (
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      已关联文件
+                    </Typography>
+                    <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                      {existingAssetAttachments.map((attachment) => (
+                        <Chip
+                          key={attachment.id}
+                          label={attachment.name}
+                          variant="outlined"
+                          size="small"
+                        />
+                      ))}
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary">
+                      已保存文件保持只读；本次可继续追加新文件，避免取消编辑时误删原文件。
+                    </Typography>
+                  </Box>
+                )}
+                <BusinessAttachmentPicker
+                  title="课程资产文件"
+                  description="支持课件、文档、图片和 MP4 回放；文件保存在业务附件私有目录。"
+                  value={assetAttachments}
+                  onChange={(attachments) => {
+                    markDirty();
+                    setAssetAttachments(attachments);
+                  }}
+                  category="academy-course-asset"
+                  draftKey={`academy-course-${assetCourseId}-${assetType}`}
+                  imagesOnly={false}
+                  maxCount={20}
+                />
+              </Stack>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => void requestClose()}>取消</Button>
+              <Button
+                variant="contained"
+                disabled={
+                  saving ||
+                  !assetTitle.trim() ||
+                  existingAssetAttachments.length + assetAttachments.length === 0
+                }
+                onClick={() => void saveCourseAsset()}
+              >
+                保存并关联当前版本
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </ProtectedFormDialog>
+      <ProtectedFormDialog
+        open={Boolean(orderLink)}
+        onClose={() => setOrderLink(null)}
+        submitting={saving}
+        fullWidth
+        maxWidth="sm"
+        resetKey={orderLink?.engagement.id || ""}
+      >
+        {({ markDirty, requestClose }) => (
+          <>
+            <DialogCloseTitle onClose={() => void requestClose()}>
+              关联正式订单
+            </DialogCloseTitle>
+            <DialogContent dividers>
+              <Stack spacing={2}>
+                <Typography color="text.secondary">
+                  学员：{orderLink?.engagement.participantName}。成交金额和后续交付以所选正式订单为准。
+                </Typography>
+                <TextField
+                  select
+                  label="正式订单 *"
+                  value={selectedOrderId}
+                  onChange={(event) => {
+                    markDirty();
+                    setSelectedOrderId(event.target.value);
+                  }}
+                >
+                  {orderLink?.orders.map((order) => (
+                    <MenuItem key={order.id} value={order.id}>
+                      {order.orderNo} · {order.productName || order.productLevel} · ¥{Number(order.actualAmount || 0).toLocaleString("zh-CN")}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                {!orderLink?.orders.length && (
+                  <Typography color="text.secondary">该客户暂无可关联的正式订单。</Typography>
+                )}
+              </Stack>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => void requestClose()}>取消</Button>
+              <Button variant="contained" disabled={saving || !selectedOrderId} onClick={() => void saveOrderLink()}>
+                确认关联
               </Button>
             </DialogActions>
           </>
@@ -2171,10 +2482,12 @@ const CourseWorkspace: React.FC<{
   total: number;
   selectedId: string;
   onSelect: (id: string) => void;
+  assets: Record<string, AcademyCourseAsset[]>;
   search: string;
   onSearch: (value: string) => void;
   canManage: boolean;
   onCreate: () => void;
+  onUploadAsset: (course: AcademyCourse, assetType: AcademyAssetType) => void;
   onStatusChange: (
     course: AcademyCourse,
     status: AcademyCourse["status"],
@@ -2189,10 +2502,12 @@ const CourseWorkspace: React.FC<{
   total,
   selectedId,
   onSelect,
+  assets,
   search,
   onSearch,
   canManage,
   onCreate,
+  onUploadAsset,
   onStatusChange,
   page,
   pageSize,
@@ -2204,6 +2519,7 @@ const CourseWorkspace: React.FC<{
   const selectedSessions = selected
     ? sessions.filter((item) => item.courseId === selected.id)
     : [];
+  const selectedAssets = selected ? assets[selected.id] || [] : [];
   return (
     <Box
       sx={{
@@ -2539,34 +2855,38 @@ const CourseWorkspace: React.FC<{
               )}
               {detailTab === 1 && (
                 <Stack spacing={1}>
-                  {[
-                    "课件 PPT",
-                    "逐字稿",
-                    "课程案例",
-                    "宣传海报",
-                    "邀约话术",
-                    "直播回放",
-                  ].map((asset) => (
+                  {assetTypes.map((assetType) => {
+                    const asset = selectedAssets.find((item) => item.assetType === assetType.value);
+                    return (
                     <Stack
-                      key={asset}
+                      key={assetType.value}
                       direction="row"
                       justifyContent="space-between"
                       alignItems="center"
                       sx={{ p: 1.1, borderBottom: `1px solid ${palette.line}` }}
                     >
                       <Box>
-                        <Typography fontSize={13} fontWeight={800}>{asset}</Typography>
+                        <Typography fontSize={13} fontWeight={800}>{assetType.label}</Typography>
                         <Typography fontSize={11.5} color="text.secondary">
-                          当前课程尚未保存该类资产文件
+                          {asset
+                            ? `${asset.attachments.length} 个文件 · ${asset.ownerUserName} · ${formatDate(asset.updatedAt)}`
+                            : "当前课程尚未保存该类资产文件"}
                         </Typography>
                       </Box>
-                      <Chip
-                        size="small"
-                        label="待上传"
-                        sx={{ height: 21, bgcolor: palette.soft, color: palette.muted }}
-                      />
+                      {canManage ? (
+                        <Button size="small" onClick={() => onUploadAsset(selected, assetType.value)}>
+                          {asset ? "更新" : "上传"}
+                        </Button>
+                      ) : (
+                        <Chip
+                          size="small"
+                          label={asset ? "已保存" : "待上传"}
+                          sx={{ height: 21, bgcolor: asset ? palette.greenSoft : palette.soft, color: asset ? palette.green : palette.muted }}
+                        />
+                      )}
                     </Stack>
-                  ))}
+                    );
+                  })}
                 </Stack>
               )}
               {detailTab === 2 && (
@@ -2999,6 +3319,8 @@ const HandoffWorkspace: React.FC<{
   selectedSessionId: string;
   onSelectSession: (id: string) => void;
   detail?: AcademySessionDetail;
+  canManage: boolean;
+  onLinkOrder: (engagement: AcademyEngagement) => void;
   onGoCustomers: () => void;
   onGoOrders: () => void;
 }> = ({
@@ -3006,6 +3328,8 @@ const HandoffWorkspace: React.FC<{
   selectedSessionId,
   onSelectSession,
   detail,
+  canManage,
+  onLinkOrder,
   onGoCustomers,
   onGoOrders,
 }) => {
@@ -3099,6 +3423,7 @@ const HandoffWorkspace: React.FC<{
                 <TableCell>销售负责人</TableCell>
                 <TableCell>跟进状态</TableCell>
                 <TableCell>建议动作</TableCell>
+                <TableCell>正式订单</TableCell>
                 <TableCell>业务去向</TableCell>
               </TableRow>
             </TableHead>
@@ -3116,6 +3441,21 @@ const HandoffWorkspace: React.FC<{
                         color: item.customerId ? palette.green : palette.amber,
                       }}
                     />
+                  </TableCell>
+                  <TableCell>
+                    {item.orderNo ? (
+                      <Chip size="small" color="success" label={item.orderNo} />
+                    ) : canManage ? (
+                      <Button
+                        size="small"
+                        disabled={!item.customerId}
+                        onClick={() => onLinkOrder(item)}
+                      >
+                        关联订单
+                      </Button>
+                    ) : (
+                      "待关联"
+                    )}
                   </TableCell>
                   <TableCell>
                     <Chip
@@ -3156,7 +3496,7 @@ const HandoffWorkspace: React.FC<{
               ))}
               {!items.length && (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 7 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 7 }}>
                     当前场次暂无学员转化数据
                   </TableCell>
                 </TableRow>

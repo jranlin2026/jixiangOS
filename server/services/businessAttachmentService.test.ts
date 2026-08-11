@@ -37,6 +37,12 @@ const orderCorrector: AuthenticatedUser = {
   id: 'order-corrector',
   permissions: [{ module: PERMISSION_KEYS.ORDER_CORRECT, actions: ['read', 'write'] }],
 };
+const academyManager: AuthenticatedUser = {
+  ...uploader,
+  id: 'academy-manager',
+  name: '学院管理员',
+  permissions: [{ module: PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, actions: ['read', 'write'] }],
+};
 
 class MemoryRepository {
   records = new Map<string, BusinessAttachmentRecord>();
@@ -122,6 +128,26 @@ try {
     file: { originalName: '更正付款.png', mimeType: 'image/png', size: pngBytes.length, buffer: pngBytes },
   }, orderCorrector);
   assert.equal(correctionProof.code, 0, '独立订单更正权限应允许补充订单凭证');
+
+  const academyService = createBusinessAttachmentService({
+    repository,
+    rootDir,
+    now: () => new Date(NOW),
+    id: () => 'attachment-academy',
+  });
+  const academyAsset = await academyService.upload({
+    draftKey: 'academy-course-course-1-SCRIPT',
+    category: 'academy-course-asset',
+    file: {
+      originalName: '课程逐字稿.txt',
+      mimeType: 'text/plain',
+      size: 12,
+      buffer: Buffer.from('academy text'),
+    },
+  }, academyManager);
+  assert.equal(academyAsset.code, 0, '学院课程管理员应可上传课程资产');
+  assert.equal((await academyService.open('attachment-academy', academyManager)).code, 0);
+  assert.equal((await academyService.open('attachment-academy', outsider)).code, 403);
 } finally {
   await rm(rootDir, { recursive: true, force: true });
 }

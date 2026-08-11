@@ -1,5 +1,6 @@
 import type {
   AcademyCourseRecord,
+  AcademyCourseAssetRecord,
   AcademyAccessScope,
   AcademyEngagementRecord,
   AcademyRepository,
@@ -8,6 +9,8 @@ import type {
   AcademySessionStatus,
   AcademySessionTaskRecord,
 } from "./academyService";
+
+const ACADEMY_COURSE_ASSET_DOMAIN = "academy_course_assets";
 
 const mapCourse = (record: any): AcademyCourseRecord => ({
   ...record,
@@ -69,8 +72,10 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
       const record = await prisma.academyCourse.findFirst({ where: { code } });
       return record ? mapCourse(record) : null;
     },
-    async findCourseById(id) {
-      const record = await prisma.academyCourse.findUnique({ where: { id } });
+    async findCourseById(id, scope) {
+      const record = scope
+        ? await prisma.academyCourse.findFirst({ where: { id, ...courseScopeWhere(scope) } })
+        : await prisma.academyCourse.findUnique({ where: { id } });
       return record ? mapCourse(record) : null;
     },
     async findLatestCourseVersionId(courseId) {
@@ -86,6 +91,62 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
     },
     async createCourseVersion(version) {
       return prisma.academyCourseVersion.create({ data: version });
+    },
+    async listCourseAssets(courseId) {
+      const rows = await prisma.businessRecord.findMany({
+        where: {
+          domain: ACADEMY_COURSE_ASSET_DOMAIN,
+          recordId: { startsWith: `${courseId}:` },
+        },
+        orderBy: { updatedAt: "desc" },
+      });
+      return rows.map((row: any) => {
+        const data = row.data as any;
+        return {
+          ...data,
+          createdAt: new Date(data.createdAt || row.createdAt),
+          updatedAt: new Date(data.updatedAt || row.updatedAt),
+          attachments: Array.isArray(data.attachments) ? data.attachments : [],
+        } as AcademyCourseAssetRecord;
+      });
+    },
+    async upsertCourseAsset(asset) {
+      const recordId = `${asset.courseId}:${asset.assetType}`;
+      const data = {
+        ...asset,
+        createdAt: asset.createdAt.toISOString(),
+        updatedAt: asset.updatedAt.toISOString(),
+      };
+      const row = await prisma.businessRecord.upsert({
+        where: {
+          domain_recordId: {
+            domain: ACADEMY_COURSE_ASSET_DOMAIN,
+            recordId,
+          },
+        },
+        create: {
+          id: `${ACADEMY_COURSE_ASSET_DOMAIN}:${recordId}`,
+          domain: ACADEMY_COURSE_ASSET_DOMAIN,
+          recordId,
+          title: asset.title,
+          owner: asset.ownerUserName,
+          eventAt: asset.updatedAt,
+          data,
+        },
+        update: {
+          title: asset.title,
+          owner: asset.ownerUserName,
+          eventAt: asset.updatedAt,
+          data,
+        },
+      });
+      const saved = row.data as any;
+      return {
+        ...saved,
+        createdAt: new Date(saved.createdAt || row.createdAt),
+        updatedAt: new Date(saved.updatedAt || row.updatedAt),
+        attachments: Array.isArray(saved.attachments) ? saved.attachments : [],
+      } as AcademyCourseAssetRecord;
     },
     async updateCourseStatus(id, expectedStatus, status) {
       const result = await prisma.academyCourse.updateMany({
@@ -173,6 +234,9 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         orderBy: { createdAt: "asc" },
       });
     },
+    async findTaskById(id) {
+      return prisma.academySessionTask.findUnique({ where: { id } });
+    },
     async updateTaskStatus(id, update) {
       try {
         return await prisma.academySessionTask.update({
@@ -201,6 +265,20 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         },
         create: engagement,
         update,
+      });
+    },
+    async findEngagementById(id) {
+      return prisma.academyEngagement.findUnique({ where: { id } });
+    },
+    async findEngagementByKey(sessionId, participantKey) {
+      return prisma.academyEngagement.findUnique({
+        where: { sessionId_participantKey: { sessionId, participantKey } },
+      });
+    },
+    async findOrderById(id) {
+      return prisma.order.findUnique({
+        where: { id },
+        select: { id: true, orderNo: true, customerId: true },
       });
     },
     async saveReview(review: AcademyReviewRecord) {

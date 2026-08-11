@@ -34,6 +34,7 @@ export interface BusinessAttachmentPickerProps {
 
 const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
+const ACADEMY_MAX_BYTES = 200 * 1024 * 1024;
 const DOCUMENT_MIME_TYPES = [
   'image/',
   'application/pdf',
@@ -41,6 +42,10 @@ const DOCUMENT_MIME_TYPES = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain',
+  'video/mp4',
 ];
 
 function downloadBlob(blob: Blob, name: string) {
@@ -77,7 +82,7 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
   previewUrlsRef.current = previewUrls;
 
   const accept = useMemo(() => (imagesOnly ? ['image/'] : DOCUMENT_MIME_TYPES), [imagesOnly]);
-  const inputAccept = imagesOnly ? 'image/*' : 'image/*,.pdf,.doc,.docx,.xls,.xlsx';
+  const inputAccept = imagesOnly ? 'image/*' : 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.mp4';
 
   useEffect(() => {
     let cancelled = false;
@@ -111,7 +116,11 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
     const remaining = Math.max(0, maxCount - valueRef.current.length);
     const selection = selectAttachments([], uniqueIncoming, {
       maxCount: remaining,
-      maxBytes: imagesOnly ? IMAGE_MAX_BYTES : DOCUMENT_MAX_BYTES,
+      maxBytes: imagesOnly
+        ? IMAGE_MAX_BYTES
+        : category === 'academy-course-asset'
+          ? ACADEMY_MAX_BYTES
+          : DOCUMENT_MAX_BYTES,
       accept,
       rejectWholeBatchOnOverflow,
     });

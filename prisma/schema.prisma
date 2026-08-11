@@ -1111,50 +1111,73 @@ model AcademySession {
 }
 
 model AcademySessionTask {
-  id              String    @id @db.VarChar(64)
-  sessionId       String    @db.VarChar(64)
-  templateKey     String    @db.VarChar(40)
-  title           String    @db.VarChar(200)
-  category        String    @db.VarChar(24)
-  isRequired      Boolean   @default(true)
-  status          String    @default("PENDING") @db.VarChar(24)
-  note            String?   @db.Text
-  completedAt     DateTime?
-  completedById   String?   @db.VarChar(64)
-  completedByName String?   @db.VarChar(100)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                 String    @id @db.VarChar(64)
+  sessionId          String    @db.VarChar(64)
+  templateKey        String    @db.VarChar(40)
+  title              String    @db.VarChar(200)
+  category           String    @db.VarChar(24)
+  isRequired         Boolean   @default(true)
+  status             String    @default("PENDING") @db.VarChar(24)
+  note               String?   @db.Text
+  assigneeUserId     String?   @db.VarChar(64)
+  assigneeUserName   String?   @db.VarChar(100)
+  collaboratorNames  Json?
+  dueAt              DateTime?
+  acceptanceCriteria String?   @db.Text
+  submissionNote     String?   @db.Text
+  submittedAt        DateTime?
+  submittedById      String?   @db.VarChar(64)
+  submittedByName    String?   @db.VarChar(100)
+  reviewNote         String?   @db.Text
+  reviewedAt         DateTime?
+  reviewedById       String?   @db.VarChar(64)
+  reviewedByName     String?   @db.VarChar(100)
+  completedAt        DateTime?
+  completedById      String?   @db.VarChar(64)
+  completedByName    String?   @db.VarChar(100)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   session AcademySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, templateKey])
   @@index([sessionId, category, status])
+  @@index([assigneeUserId, status, dueAt])
   @@map("academy_session_tasks")
 }
 
 model AcademyEngagement {
-  id               String   @id @db.VarChar(64)
-  sessionId        String   @db.VarChar(64)
-  participantKey   String   @db.VarChar(160)
-  customerId       String?  @db.VarChar(80)
-  leadId           String?  @db.VarChar(80)
-  participantName  String   @db.VarChar(200)
-  invitationStatus String   @default("PENDING") @db.VarChar(24)
-  attendanceStatus String   @default("UNKNOWN") @db.VarChar(24)
-  interactionLevel String?  @db.VarChar(24)
-  courseAssessment String?  @db.VarChar(12)
-  followUpStatus   String   @default("PENDING") @db.VarChar(24)
-  notes            String?  @db.Text
-  ownerUserId      String?  @db.VarChar(64)
-  ownerUserName    String?  @db.VarChar(100)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id               String    @id @db.VarChar(64)
+  sessionId        String    @db.VarChar(64)
+  participantKey   String    @db.VarChar(160)
+  customerId       String?   @db.VarChar(80)
+  leadId           String?   @db.VarChar(80)
+  participantName  String    @db.VarChar(200)
+  invitationStatus String    @default("PENDING") @db.VarChar(24)
+  attendanceStatus String    @default("UNKNOWN") @db.VarChar(24)
+  interactionLevel String?   @db.VarChar(24)
+  courseAssessment String?   @db.VarChar(12)
+  followUpStatus   String    @default("PENDING") @db.VarChar(24)
+  nextFollowUpAt   DateTime?
+  orderId          String?   @db.VarChar(64)
+  orderNo          String?   @db.VarChar(100)
+  handoffStatus    String    @default("PENDING") @db.VarChar(24)
+  handedOffAt      DateTime?
+  handedOffById    String?   @db.VarChar(64)
+  handedOffByName  String?   @db.VarChar(100)
+  notes            String?   @db.Text
+  ownerUserId      String?   @db.VarChar(64)
+  ownerUserName    String?   @db.VarChar(100)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   session AcademySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, participantKey])
   @@index([sessionId, attendanceStatus])
   @@index([ownerUserId, followUpStatus])
+  @@index([orderId])
+  @@index([handoffStatus, updatedAt])
   @@index([customerId])
   @@index([leadId])
   @@map("academy_engagements")

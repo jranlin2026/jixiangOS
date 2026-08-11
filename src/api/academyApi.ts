@@ -2,6 +2,7 @@ import { backendRequest } from './backendClient';
 import type { ApiResponse } from './types';
 import type {
   AcademyCourse,
+  AcademyCourseAsset,
   AcademyCourseStatus,
   AcademyDashboard,
   AcademyEngagement,
@@ -14,6 +15,7 @@ import type {
   CreateAcademyCourseInput,
   CreateAcademySessionInput,
   SaveAcademyEngagementInput,
+  SaveAcademyCourseAssetInput,
   SaveAcademyReviewInput,
 } from '../types/academy';
 
@@ -38,6 +40,15 @@ export const academyApi = {
   changeCourseStatus(id: string, status: AcademyCourseStatus): Promise<ApiResponse<AcademyCourse>> {
     return backendRequest(`/academy/courses/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status }) });
   },
+  listCourseAssets(courseId: string): Promise<ApiResponse<AcademyCourseAsset[]>> {
+    return backendRequest(`/academy/courses/${encodeURIComponent(courseId)}/assets`);
+  },
+  saveCourseAsset(courseId: string, input: SaveAcademyCourseAssetInput): Promise<ApiResponse<AcademyCourseAsset>> {
+    return backendRequest(`/academy/courses/${encodeURIComponent(courseId)}/assets`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
   listSessions(input: { page: number; pageSize: number; search?: string; status?: string }): Promise<ApiResponse<AcademyPage<AcademySession>>> {
     return backendRequest(`/academy/sessions?${query(input)}`);
   },
@@ -50,11 +61,17 @@ export const academyApi = {
   changeSessionStatus(id: string, status: AcademySessionStatus): Promise<ApiResponse<AcademySession>> {
     return backendRequest(`/academy/sessions/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status }) });
   },
-  updateTask(id: string, input: { status: AcademyTaskStatus; note?: string }): Promise<ApiResponse<AcademySessionTask>> {
+  updateTask(id: string, input: { status: AcademyTaskStatus; note?: string; submissionNote?: string; reviewNote?: string }): Promise<ApiResponse<AcademySessionTask>> {
     return backendRequest(`/academy/tasks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) });
   },
   saveEngagement(input: SaveAcademyEngagementInput): Promise<ApiResponse<AcademyEngagement>> {
     return backendRequest('/academy/engagements', { method: 'PUT', body: JSON.stringify(input) });
+  },
+  linkEngagementOrder(id: string, input: { orderId: string }): Promise<ApiResponse<AcademyEngagement>> {
+    return backendRequest(`/academy/engagements/${encodeURIComponent(id)}/order`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
   },
   saveReview(input: SaveAcademyReviewInput): Promise<ApiResponse<unknown>> {
     return backendRequest('/academy/reviews', { method: 'PUT', body: JSON.stringify(input) });

@@ -14,6 +14,7 @@ const actor = {
 
 function createRepository(): AcademyRepository {
   const courses: any[] = [];
+  const assets: any[] = [];
   const sessions: any[] = [];
   const tasks: any[] = [];
   const engagements: any[] = [];
@@ -33,6 +34,16 @@ function createRepository(): AcademyRepository {
         : null,
     createCourse: async (course) => (courses.push(course), course),
     createCourseVersion: async (version) => version,
+    listCourseAssets: async (courseId) =>
+      assets.filter((asset) => asset.courseId === courseId),
+    upsertCourseAsset: async (asset) => {
+      const index = assets.findIndex(
+        (item) => item.courseId === asset.courseId && item.assetType === asset.assetType,
+      );
+      if (index >= 0) assets[index] = { ...assets[index], ...asset };
+      else assets.push(asset);
+      return index >= 0 ? assets[index] : asset;
+    },
     updateCourseStatus: async (id, expectedStatus, status) => {
       const course = courses.find(
         (item) => item.id === id && item.status === expectedStatus,
@@ -73,6 +84,7 @@ function createRepository(): AcademyRepository {
     },
     listSessionTasks: async (sessionId) =>
       tasks.filter((task) => task.sessionId === sessionId),
+    findTaskById: async (id) => tasks.find((task) => task.id === id) || null,
     updateTaskStatus: async (id, update) => {
       const task = tasks.find((item) => item.id === id);
       if (!task) return null;
@@ -90,6 +102,17 @@ function createRepository(): AcademyRepository {
       else engagements.push(engagement);
       return index >= 0 ? engagements[index] : engagement;
     },
+    findEngagementById: async (id) =>
+      engagements.find((engagement) => engagement.id === id) || null,
+    findEngagementByKey: async (sessionId, participantKey) =>
+      engagements.find(
+        (engagement) =>
+          engagement.sessionId === sessionId && engagement.participantKey === participantKey,
+      ) || null,
+    findOrderById: async (id) =>
+      id === "order-100"
+        ? { id, orderNo: "ORD-20260808-001", customerId: "cust-100" }
+        : null,
     saveReview: async (review) => {
       const index = reviews.findIndex(
         (item) => item.sessionId === review.sessionId,
@@ -191,6 +214,9 @@ const sessionResult = await service.createSession(
   actor,
 );
 assert.equal(sessionResult.code, 0);
+assert.equal(sessionResult.data?.tasks[0]?.assigneeUserName, actor.name);
+assert.ok(sessionResult.data?.tasks[0]?.dueAt instanceof Date);
+assert.match(sessionResult.data?.tasks[0]?.acceptanceCriteria || "", /课程目标/);
 assert.deepEqual(
   sessionResult.data?.tasks.map((task: any) => task.templateKey),
   [
@@ -214,12 +240,31 @@ const prematureReady = await service.changeSessionStatus(
 );
 assert.equal(prematureReady.code, 409, "必做准备项未完成时不能进入已就绪");
 
+const invalidTaskTransition = await service.updateTask(
+  sessionResult.data!.tasks[0].id,
+  { status: "DONE" },
+  actor,
+);
+assert.equal(invalidTaskTransition.code, 409, "待处理任务不能绕过执行与验收直接完成");
+
 for (const task of sessionResult.data!.tasks.filter(
   (item: any) => item.category === "BEFORE",
 )) {
+  const started = await service.updateTask(
+    task.id,
+    { status: "IN_PROGRESS" },
+    actor,
+  );
+  assert.equal(started.code, 0);
+  const submitted = await service.updateTask(
+    task.id,
+    { status: "SUBMITTED", submissionNote: "已按验收标准完成" },
+    actor,
+  );
+  assert.equal(submitted.code, 0);
   const completed = await service.updateTask(
     task.id,
-    { status: "DONE", note: "已完成" },
+    { status: "DONE", reviewNote: "验收通过" },
     actor,
   );
   assert.equal(completed.code, 0);
@@ -249,6 +294,59 @@ const engagement = await service.saveEngagement(
 assert.equal(engagement.code, 0);
 assert.equal(engagement.data?.courseAssessment, "A");
 
+const linkedOrder = await service.linkEngagementOrder(
+  engagement.data!.id,
+  { orderId: "order-100", orderNo: "ORD-20260808-001" },
+  actor,
+);
+assert.equal(linkedOrder.code, 0);
+assert.equal(linkedOrder.data?.orderNo, "ORD-20260808-001");
+assert.equal(linkedOrder.data?.handoffStatus, "ORDER_LINKED");
+assert.equal(linkedOrder.data?.followUpStatus, "DONE");
+
+const editedAfterHandoff = await service.saveEngagement(
+  {
+    sessionId: sessionResult.data!.id,
+    participantKey: "customer:cust-100",
+    customerId: "cust-100",
+    participantName: "测试客户",
+    invitationStatus: "CONFIRMED",
+    attendanceStatus: "ATTENDED",
+    interactionLevel: "HIGH",
+    courseAssessment: "A",
+    followUpStatus: "DONE",
+    notes: "完成二次回访",
+  },
+  actor,
+);
+assert.equal(editedAfterHandoff.data?.orderId, "order-100");
+assert.equal(editedAfterHandoff.data?.handoffStatus, "ORDER_LINKED");
+
+const savedAsset = await service.saveCourseAsset(
+  courseResult.data!.id,
+  {
+    assetType: "PPT",
+    title: "AI企业升级公开课课件",
+    attachments: [
+      {
+        id: "attachment-1",
+        category: "academy-course-asset",
+        name: "课程课件.pptx",
+        mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        size: 1024,
+        uploadedById: actor.id,
+        uploadedByName: actor.name,
+        uploadedAt: "2026-08-08T09:00:00.000Z",
+      },
+    ],
+  },
+  actor,
+);
+assert.equal(savedAsset.code, 0);
+assert.equal(savedAsset.data?.courseVersionId, `version-${courseResult.data!.id}`);
+const listedAssets = await service.listCourseAssets(courseResult.data!.id, actor);
+assert.equal(listedAssets.data?.length, 1);
+
 const detail = await service.getSessionDetail(sessionResult.data!.id, actor);
 assert.equal(detail.code, 0);
 assert.equal(detail.data?.tasks.length, 9);
@@ -257,6 +355,6 @@ assert.equal(detail.data?.engagements.length, 1);
 const dashboard = await service.getDashboard(actor);
 assert.equal(dashboard.code, 0);
 assert.equal(dashboard.data?.sessionsNeedingAttention, 1);
-assert.equal(dashboard.data?.pendingFollowUps, 1);
+assert.equal(dashboard.data?.pendingFollowUps, 0, "订单交接完成后不应继续计入待跟进");
 
 console.log("academy service tests passed");

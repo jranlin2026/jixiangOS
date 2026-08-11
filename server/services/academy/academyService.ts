@@ -1,11 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type { AuthenticatedUser } from "../../../src/types/auth";
+import type { BusinessAttachment } from "../../../src/types/businessAttachment";
 import { failure, success } from "../../api/response";
 
 export type AcademyCourseStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 export type AcademySessionStatus =
   "PLANNED" | "READY" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
-export type AcademyTaskStatus = "PENDING" | "DONE" | "BLOCKED" | "SKIPPED";
+export type AcademyTaskStatus =
+  | "PENDING"
+  | "IN_PROGRESS"
+  | "SUBMITTED"
+  | "DONE"
+  | "REJECTED"
+  | "BLOCKED"
+  | "SKIPPED";
+export type AcademyAssetType = "PPT" | "SCRIPT" | "CASE" | "POSTER" | "INVITATION" | "REPLAY";
 
 export type AcademyCourseRecord = {
   id: string;
@@ -16,6 +25,19 @@ export type AcademyCourseRecord = {
   defaultDurationMinutes: number;
   objectives: string[];
   status: AcademyCourseStatus;
+  ownerUserId: string;
+  ownerUserName: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type AcademyCourseAssetRecord = {
+  id: string;
+  courseId: string;
+  courseVersionId: string;
+  assetType: AcademyAssetType;
+  title: string;
+  attachments: BusinessAttachment[];
   ownerUserId: string;
   ownerUserName: string;
   createdAt: Date;
@@ -49,6 +71,19 @@ export type AcademySessionTaskRecord = {
   isRequired: boolean;
   status: AcademyTaskStatus;
   note?: string | null;
+  assigneeUserId?: string | null;
+  assigneeUserName?: string | null;
+  collaboratorNames?: string[] | null;
+  dueAt?: Date | null;
+  acceptanceCriteria?: string | null;
+  submissionNote?: string | null;
+  submittedAt?: Date | null;
+  submittedById?: string | null;
+  submittedByName?: string | null;
+  reviewNote?: string | null;
+  reviewedAt?: Date | null;
+  reviewedById?: string | null;
+  reviewedByName?: string | null;
   completedAt?: Date | null;
   completedById?: string | null;
   completedByName?: string | null;
@@ -68,6 +103,13 @@ export type AcademyEngagementRecord = {
   interactionLevel?: string | null;
   courseAssessment?: string | null;
   followUpStatus: string;
+  nextFollowUpAt?: Date | null;
+  orderId?: string | null;
+  orderNo?: string | null;
+  handoffStatus: string;
+  handedOffAt?: Date | null;
+  handedOffById?: string | null;
+  handedOffByName?: string | null;
   notes?: string | null;
   ownerUserId?: string | null;
   ownerUserName?: string | null;
@@ -100,10 +142,12 @@ export interface AcademyRepository {
     scope: AcademyAccessScope,
   ): Promise<{ items: AcademyCourseRecord[]; total: number }>;
   findCourseByCode(code: string): Promise<AcademyCourseRecord | null>;
-  findCourseById(id: string): Promise<AcademyCourseRecord | null>;
+  findCourseById(id: string, scope?: AcademyAccessScope): Promise<AcademyCourseRecord | null>;
   findLatestCourseVersionId(courseId: string): Promise<string | null>;
   createCourse(course: AcademyCourseRecord): Promise<AcademyCourseRecord>;
   createCourseVersion(version: Record<string, unknown>): Promise<unknown>;
+  listCourseAssets(courseId: string): Promise<AcademyCourseAssetRecord[]>;
+  upsertCourseAsset(asset: AcademyCourseAssetRecord): Promise<AcademyCourseAssetRecord>;
   updateCourseStatus(
     id: string,
     expectedStatus: AcademyCourseStatus,
@@ -135,6 +179,7 @@ export interface AcademyRepository {
     status: AcademySessionStatus,
   ): Promise<AcademySessionRecord | null>;
   listSessionTasks(sessionId: string): Promise<AcademySessionTaskRecord[]>;
+  findTaskById(id: string): Promise<AcademySessionTaskRecord | null>;
   updateTaskStatus(
     id: string,
     update: Partial<AcademySessionTaskRecord>,
@@ -142,6 +187,12 @@ export interface AcademyRepository {
   upsertEngagement(
     engagement: AcademyEngagementRecord,
   ): Promise<AcademyEngagementRecord>;
+  findEngagementById(id: string): Promise<AcademyEngagementRecord | null>;
+  findEngagementByKey(
+    sessionId: string,
+    participantKey: string,
+  ): Promise<AcademyEngagementRecord | null>;
+  findOrderById(id: string): Promise<{ id: string; orderNo: string; customerId: string } | null>;
   saveReview(review: AcademyReviewRecord): Promise<AcademyReviewRecord>;
   getDashboard(
     scope: AcademyAccessScope,
@@ -159,54 +210,72 @@ const CHECKLIST = [
     title: "课程目标、客户问题与经营指标确认",
     category: "BEFORE",
     isRequired: true,
+    dueOffsetMinutes: -7 * 24 * 60,
+    acceptanceCriteria: "课程目标、目标客户问题和本场经营指标均已确认。",
   },
   {
     templateKey: "CONTENT",
     title: "大纲、核心观点、案例与转化环节锁版",
     category: "BEFORE",
     isRequired: true,
+    dueOffsetMinutes: -5 * 24 * 60,
+    acceptanceCriteria: "大纲、核心观点、案例和转化环节已锁定版本。",
   },
   {
     templateKey: "ASSETS",
     title: "课件、海报、邀约话术与宣传素材确认",
     category: "BEFORE",
     isRequired: true,
+    dueOffsetMinutes: -3 * 24 * 60,
+    acceptanceCriteria: "课件、海报、邀约话术及宣传素材齐全且可使用。",
   },
   {
     templateKey: "INVITATION",
     title: "邀约名单与到课确认",
     category: "BEFORE",
     isRequired: true,
+    dueOffsetMinutes: -24 * 60,
+    acceptanceCriteria: "邀约名单已建立，并完成到课确认和负责人分配。",
   },
   {
     templateKey: "PRECHECK",
     title: "场地、直播、设备、网络与备用方案检查",
     category: "BEFORE",
     isRequired: true,
+    dueOffsetMinutes: -2 * 60,
+    acceptanceCriteria: "场地、直播、设备、网络和备用方案检查通过。",
   },
   {
     templateKey: "DELIVERY",
     title: "授课与现场问题记录",
     category: "DURING",
     isRequired: true,
+    dueOffsetMinutes: 0,
+    acceptanceCriteria: "完成授课并记录现场问题、互动和关键客户反馈。",
   },
   {
     templateKey: "SEGMENTATION",
     title: "课后30分钟内完成A/B/C客户分层",
     category: "AFTER",
     isRequired: true,
+    dueOffsetMinutes: 30,
+    acceptanceCriteria: "课后30分钟内完成全部到课客户A/B/C分层。",
   },
   {
     templateKey: "FOLLOW_UP",
     title: "课后分层与销售跟进",
     category: "AFTER",
     isRequired: true,
+    dueOffsetMinutes: 24 * 60,
+    acceptanceCriteria: "重点客户已分配销售并形成下一步跟进计划。",
   },
   {
     templateKey: "REVIEW",
     title: "课程数据复盘与改进",
     category: "AFTER",
     isRequired: true,
+    dueOffsetMinutes: 2 * 24 * 60,
+    acceptanceCriteria: "完成课程数据、问题、改进项和责任人复盘。",
   },
 ] as const;
 
@@ -227,6 +296,25 @@ const COURSE_STATUS_TRANSITIONS: Record<
   ACTIVE: ["ARCHIVED"],
   ARCHIVED: ["ACTIVE"],
 };
+
+const TASK_STATUS_TRANSITIONS: Record<AcademyTaskStatus, AcademyTaskStatus[]> = {
+  PENDING: ["IN_PROGRESS", "BLOCKED", "SKIPPED"],
+  IN_PROGRESS: ["SUBMITTED", "BLOCKED"],
+  SUBMITTED: ["DONE", "REJECTED"],
+  REJECTED: ["IN_PROGRESS"],
+  BLOCKED: ["IN_PROGRESS"],
+  DONE: [],
+  SKIPPED: [],
+};
+
+const ASSET_TYPES = new Set<AcademyAssetType>([
+  "PPT",
+  "SCRIPT",
+  "CASE",
+  "POSTER",
+  "INVITATION",
+  "REPLAY",
+]);
 
 const invalid = (message: string, code = 400) => failure<never>(message, code);
 const normalizedCode = (value: string) => value.trim().toUpperCase();
@@ -268,6 +356,51 @@ export function createAcademyService(
         page,
         pageSize,
       });
+    },
+    async listCourseAssets(courseId: string, actor: AuthenticatedUser) {
+      const course = await repository.findCourseById(courseId, await resolveScope(actor));
+      if (!course) return invalid("课程不存在", 404);
+      return success(await repository.listCourseAssets(courseId));
+    },
+    async saveCourseAsset(
+      courseId: string,
+      raw: Record<string, unknown>,
+      actor: AuthenticatedUser,
+    ) {
+      const course = await repository.findCourseById(courseId, await resolveScope(actor));
+      if (!course) return invalid("课程不存在", 404);
+      const assetType = String(raw.assetType || "") as AcademyAssetType;
+      if (!ASSET_TYPES.has(assetType)) return invalid("课程资产类型无效");
+      const attachments = Array.isArray(raw.attachments)
+        ? raw.attachments.filter(
+            (item): item is BusinessAttachment =>
+              Boolean(item) &&
+              typeof item === "object" &&
+              String((item as BusinessAttachment).id || "").trim() !== "" &&
+              (item as BusinessAttachment).category === "academy-course-asset",
+          )
+        : [];
+      if (!attachments.length) return invalid("请至少上传一个课程资产文件");
+      const courseVersionId = await repository.findLatestCourseVersionId(courseId);
+      if (!courseVersionId) return invalid("课程尚无可用版本", 409);
+      const timestamp = now();
+      const existing = (await repository.listCourseAssets(courseId)).find(
+        (item) => item.assetType === assetType,
+      );
+      return success(
+        await repository.upsertCourseAsset({
+          id: `academy-asset-${courseId}-${assetType}`,
+          courseId,
+          courseVersionId,
+          assetType,
+          title: String(raw.title || "").trim() || course.title,
+          attachments,
+          ownerUserId: actor.id,
+          ownerUserName: actor.name,
+          createdAt: existing?.createdAt || timestamp,
+          updatedAt: timestamp,
+        }),
+      );
     },
     async createCourse(raw: Record<string, unknown>, actor: AuthenticatedUser) {
       const code = normalizedCode(String(raw.code || ""));
@@ -415,6 +548,13 @@ export function createAcademyService(
         id: `academy-task-${randomUUID()}`,
         sessionId: session.id,
         status: "PENDING",
+        assigneeUserId: session.facilitatorUserId || actor.id,
+        assigneeUserName: session.facilitatorUserName || actor.name,
+        collaboratorNames: [],
+        dueAt: new Date(
+          (item.category === "BEFORE" ? startsAt : endsAt).getTime() +
+            item.dueOffsetMinutes * 60_000,
+        ),
         createdAt: timestamp,
         updatedAt: timestamp,
       }));
@@ -451,15 +591,51 @@ export function createAcademyService(
     },
     async updateTask(
       id: string,
-      raw: { status: AcademyTaskStatus; note?: string },
+      raw: {
+        status: AcademyTaskStatus;
+        note?: string;
+        submissionNote?: string;
+        reviewNote?: string;
+      },
       actor: AuthenticatedUser,
     ) {
-      if (!["PENDING", "DONE", "BLOCKED", "SKIPPED"].includes(raw.status))
+      if (!Object.prototype.hasOwnProperty.call(TASK_STATUS_TRANSITIONS, raw.status))
         return invalid("无效的执行项状态");
+      const current = await repository.findTaskById(id);
+      if (!current) return invalid("执行项不存在", 404);
+      if (!TASK_STATUS_TRANSITIONS[current.status].includes(raw.status))
+        return invalid("当前执行项状态不允许执行该操作", 409);
+      if (raw.status === "SUBMITTED" && !String(raw.submissionNote || raw.note || "").trim())
+        return invalid("提交验收时必须填写完成说明");
+      if (raw.status === "REJECTED" && !String(raw.reviewNote || raw.note || "").trim())
+        return invalid("驳回验收时必须填写原因");
       const timestamp = now();
       const updated = await repository.updateTaskStatus(id, {
         status: raw.status,
         note: raw.note?.trim() || null,
+        submissionNote:
+          raw.status === "SUBMITTED"
+            ? String(raw.submissionNote || raw.note || "").trim()
+            : current.submissionNote,
+        submittedAt: raw.status === "SUBMITTED" ? timestamp : current.submittedAt,
+        submittedById: raw.status === "SUBMITTED" ? actor.id : current.submittedById,
+        submittedByName: raw.status === "SUBMITTED" ? actor.name : current.submittedByName,
+        reviewNote:
+          raw.status === "DONE" || raw.status === "REJECTED"
+            ? String(raw.reviewNote || raw.note || "").trim() || null
+            : current.reviewNote,
+        reviewedAt:
+          raw.status === "DONE" || raw.status === "REJECTED"
+            ? timestamp
+            : current.reviewedAt,
+        reviewedById:
+          raw.status === "DONE" || raw.status === "REJECTED"
+            ? actor.id
+            : current.reviewedById,
+        reviewedByName:
+          raw.status === "DONE" || raw.status === "REJECTED"
+            ? actor.name
+            : current.reviewedByName,
         completedAt: raw.status === "DONE" ? timestamp : null,
         completedById: raw.status === "DONE" ? actor.id : null,
         completedByName: raw.status === "DONE" ? actor.name : null,
@@ -476,7 +652,13 @@ export function createAcademyService(
       const participantName = String(raw.participantName || "").trim();
       if (!sessionId || !participantKey || !participantName)
         return invalid("场次和参与客户不能为空");
+      const nextFollowUpAt = raw.nextFollowUpAt
+        ? new Date(String(raw.nextFollowUpAt))
+        : null;
+      if (nextFollowUpAt && Number.isNaN(nextFollowUpAt.getTime()))
+        return invalid("下次跟进时间格式无效");
       const timestamp = now();
+      const existing = await repository.findEngagementByKey(sessionId, participantKey);
       return success(
         await repository.upsertEngagement({
           id: `academy-engagement-${randomUUID()}`,
@@ -494,10 +676,45 @@ export function createAcademyService(
             ? String(raw.courseAssessment)
             : null,
           followUpStatus: String(raw.followUpStatus || "PENDING"),
+          nextFollowUpAt,
+          orderId: existing?.orderId || null,
+          orderNo: existing?.orderNo || null,
+          handoffStatus: existing?.handoffStatus || "PENDING",
+          handedOffAt: existing?.handedOffAt || null,
+          handedOffById: existing?.handedOffById || null,
+          handedOffByName: existing?.handedOffByName || null,
           notes: raw.notes ? String(raw.notes) : null,
           ownerUserId: actor.id,
           ownerUserName: actor.name,
-          createdAt: timestamp,
+          createdAt: existing?.createdAt || timestamp,
+          updatedAt: timestamp,
+        }),
+      );
+    },
+    async linkEngagementOrder(
+      id: string,
+      raw: Record<string, unknown>,
+      actor: AuthenticatedUser,
+    ) {
+      const current = await repository.findEngagementById(id);
+      if (!current) return invalid("学员转化记录不存在", 404);
+      const orderId = String(raw.orderId || "").trim();
+      if (!orderId) return invalid("请选择需要关联的正式订单");
+      const order = await repository.findOrderById(orderId);
+      if (!order) return invalid("所选正式订单不存在", 404);
+      if (!current.customerId || order.customerId !== current.customerId)
+        return invalid("所选订单不属于当前学员关联客户", 409);
+      const timestamp = now();
+      return success(
+        await repository.upsertEngagement({
+          ...current,
+          orderId,
+          orderNo: order.orderNo,
+          followUpStatus: "DONE",
+          handoffStatus: "ORDER_LINKED",
+          handedOffAt: timestamp,
+          handedOffById: actor.id,
+          handedOffByName: actor.name,
           updatedAt: timestamp,
         }),
       );

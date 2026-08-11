@@ -13,11 +13,14 @@ const service: any = {
   listSessions: async (query: any) => (calls.push(['sessions', query]), ok({ items: [], total: 0, page: query.page, pageSize: query.pageSize })),
   createCourse: async (body: any) => (calls.push(['create-course', body]), ok({ id: 'course-1' })),
   changeCourseStatus: async (id: string, status: string) => (calls.push(['course-status', id, status]), ok({ id, status })),
+  listCourseAssets: async (id: string) => (calls.push(['course-assets', id]), ok([])),
+  saveCourseAsset: async (id: string, body: any) => (calls.push(['save-course-asset', id, body]), ok({ id: 'asset-1', courseId: id, ...body })),
   createSession: async (body: any) => (calls.push(['create-session', body]), ok({ id: 'session-1' })),
   getSessionDetail: async (id: string) => (calls.push(['session-detail', id]), ok({ id, tasks: [], engagements: [], review: null })),
   changeSessionStatus: async (id: string, status: string) => (calls.push(['status', id, status]), ok({ id, status })),
   updateTask: async (id: string, body: any) => (calls.push(['task', id, body]), ok({ id, ...body })),
   saveEngagement: async (body: any) => (calls.push(['engagement', body]), ok(body)),
+  linkEngagementOrder: async (id: string, body: any) => (calls.push(['engagement-order', id, body]), ok({ id, ...body })),
   saveReview: async (body: any) => (calls.push(['review', body]), ok(body)),
 };
 const allow: express.RequestHandler = (req: any, _res, next) => { req.currentUser = actor; next(); };
@@ -45,6 +48,14 @@ try {
   assert.equal(activated.status, 200);
   assert.deepEqual(calls.find((call) => call[0] === 'course-status'), ['course-status', 'course-1', 'ACTIVE']);
 
+  const assets = await fetch(`${base}/courses/course-1/assets`);
+  assert.equal(assets.status, 200);
+  assert.deepEqual(calls.find((call) => call[0] === 'course-assets'), ['course-assets', 'course-1']);
+
+  const savedAsset = await fetch(`${base}/courses/course-1/assets`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ assetType: 'PPT', attachments: [{ id: 'a1' }] }) });
+  assert.equal(savedAsset.status, 200);
+  assert.deepEqual(calls.find((call) => call[0] === 'save-course-asset')?.slice(0, 3), ['save-course-asset', 'course-1', { assetType: 'PPT', attachments: [{ id: 'a1' }] }]);
+
   const detail = await fetch(`${base}/sessions/session-1`);
   assert.equal(detail.status, 200);
   assert.deepEqual(calls.find((call) => call[0] === 'session-detail'), ['session-detail', 'session-1']);
@@ -52,6 +63,10 @@ try {
   const status = await fetch(`${base}/sessions/session-1/status`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'READY' }) });
   assert.equal(status.status, 200);
   assert.deepEqual(calls.find((call) => call[0] === 'status'), ['status', 'session-1', 'READY']);
+
+  const linked = await fetch(`${base}/engagements/engagement-1/order`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orderId: 'order-1', orderNo: 'ORD-1' }) });
+  assert.equal(linked.status, 200);
+  assert.deepEqual(calls.find((call) => call[0] === 'engagement-order'), ['engagement-order', 'engagement-1', { orderId: 'order-1', orderNo: 'ORD-1' }]);
 } finally {
   await new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));
 }

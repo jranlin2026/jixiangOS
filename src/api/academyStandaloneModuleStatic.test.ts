@@ -20,6 +20,10 @@ assert.doesNotMatch(academy, /<ProtectedFormDialog[^>]*detailOpen/, '场次执�
 assert.match(academy, /customerApi\s*\.\s*fetchCustomers/, '学员与转化必须从CRM客户主档选择客户');
 assert.match(academy, /academyApi\.saveEngagement/, '学员与转化必须可保存邀约记录');
 assert.match(academy, /academyApi\.saveReview/, '经营复盘必须可编辑并保存');
+assert.match(academy, /academyApi\.saveCourseAsset/, '课程资产必须保存到后端并关联课程版本');
+assert.match(academy, /BusinessAttachmentPicker/, '课程资产必须复用私有业务附件组件');
+assert.match(academy, /academyApi\.linkEngagementOrder/, '课程转化必须能关联现有正式订单');
+assert.match(academy, /提交验收/, '场次任务必须包含提交验收流程');
 assert.doesNotMatch(academy, /<Table(?:\s|>)/, '商学院不得绕过系统统一表格组件');
 assert.doesNotMatch(academy, /data-disable-column-resize/, '商学院不得禁用系统统一列宽调整');
 const academyTableIds = [...academy.matchAll(/<SystemDataTable\s+tableId="([^"]+)"/g)].map((match) => match[1]);

@@ -39,6 +39,14 @@ export function createAcademyRouter(deps: {
     const result = await deps.service.changeCourseStatus(String(req.params.courseId), String(req.body?.status || '') as any, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
+  router.get('/courses/:courseId/assets', deps.requireRead, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.listCourseAssets(String(req.params.courseId), req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+  router.put('/courses/:courseId/assets', deps.requireCourseWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.saveCourseAsset(String(req.params.courseId), req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
   router.get('/sessions', deps.requireRead, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.listSessions(pageQuery(req.query as any), req.currentUser!);
     res.status(statusFor(result.code)).json(result);
@@ -61,6 +69,10 @@ export function createAcademyRouter(deps: {
   });
   router.put('/engagements', deps.requireEngagementWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.saveEngagement(req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+  router.put('/engagements/:engagementId/order', deps.requireEngagementWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.linkEngagementOrder(String(req.params.engagementId), req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
   router.put('/reviews', deps.requireReviewWrite, async (req: AuthenticatedRequest, res) => {

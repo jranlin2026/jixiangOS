@@ -16,8 +16,16 @@ const DELIVERY_MIME_TYPES = new Set([
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ]);
+const ACADEMY_MIME_TYPES = new Set([
+  ...DELIVERY_MIME_TYPES,
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain',
+  'video/mp4',
+]);
 const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const DELIVERY_MAX_BYTES = 20 * 1024 * 1024;
+const ACADEMY_MAX_BYTES = 200 * 1024 * 1024;
 export const BUSINESS_ATTACHMENT_DOMAIN = 'jixiang_os_business_attachments';
 const CATEGORIES = new Set<BusinessAttachmentCategory>([
   'order-payment-proof',
@@ -25,6 +33,7 @@ const CATEGORIES = new Set<BusinessAttachmentCategory>([
   'recovery-payment-proof',
   'recovery-chat-evidence',
   'delivery-task-file',
+  'academy-course-asset',
 ]);
 
 export interface BusinessAttachmentRecord extends BusinessAttachment {
@@ -66,6 +75,12 @@ function safeDisplayName(value: string): string {
 }
 
 function permissionsFor(category: BusinessAttachmentCategory): { read: string[]; write: string[] } {
+  if (category === 'academy-course-asset') {
+    return {
+      read: [PERMISSION_KEYS.ACADEMY_VIEW, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE],
+      write: [PERMISSION_KEYS.ACADEMY_COURSE_MANAGE],
+    };
+  }
   if (category.startsWith('order-')) {
     return {
       read: [PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_REVIEW_LIST, PERMISSION_KEYS.ORDER_CREATE],
@@ -111,13 +126,14 @@ function validateUpload(upload: BusinessAttachmentUpload): string | null {
   if (!CATEGORIES.has(upload.category)) return '附件分类无效';
   if (!upload.file.buffer.length || upload.file.size <= 0) return '附件内容不能为空';
   const delivery = upload.category === 'delivery-task-file';
-  const types = delivery ? DELIVERY_MIME_TYPES : IMAGE_MIME_TYPES;
-  if (!types.has(upload.file.mimeType)) return delivery ? '文件类型不支持' : '凭证只支持图片';
+  const academy = upload.category === 'academy-course-asset';
+  const types = academy ? ACADEMY_MIME_TYPES : delivery ? DELIVERY_MIME_TYPES : IMAGE_MIME_TYPES;
+  if (!types.has(upload.file.mimeType)) return delivery || academy ? '文件类型不支持' : '凭证只支持图片';
   if (IMAGE_MIME_TYPES.has(upload.file.mimeType) && !imageContentMatchesMime(upload.file.mimeType, upload.file.buffer)) {
     return '图片内容与文件类型不匹配';
   }
-  const maxBytes = delivery ? DELIVERY_MAX_BYTES : IMAGE_MAX_BYTES;
-  if (upload.file.size > maxBytes) return `文件不能超过 ${delivery ? 20 : 10} MB`;
+  const maxBytes = academy ? ACADEMY_MAX_BYTES : delivery ? DELIVERY_MAX_BYTES : IMAGE_MAX_BYTES;
+  if (upload.file.size > maxBytes) return `文件不能超过 ${academy ? 200 : delivery ? 20 : 10} MB`;
   return null;
 }
 
