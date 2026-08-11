@@ -83,10 +83,14 @@ function hasOrderRemarkEntrySemantic(element: HTMLElement) {
 function findOrderRemarkEntry(orderCard: HTMLElement) {
   const orderContainer = activeOrderContainer(orderCard);
   const trusted = uniqueMatches(orderContainer, selectors.orderRemarkEdit);
-  const interactive = [...orderContainer.querySelectorAll<HTMLElement>(
-    'button,[role="button"],a[href],[tabindex]',
-  )].filter(hasOrderRemarkEntrySemantic);
-  const candidates = [...new Set([...trusted, ...interactive])]
+  const semantic = [...orderContainer.querySelectorAll<HTMLElement>('*')]
+    .filter(hasOrderRemarkEntrySemantic);
+  // 飞鸽的“备”入口有时是 button，有时只是带点击事件的 div/span。
+  // 取最深层语义节点可兼容两种结构；点击子节点会冒泡到实际绑定事件的父节点。
+  const semanticLeaves = semantic.filter((candidate) => !semantic.some((other) => (
+    other !== candidate && candidate.contains(other)
+  )));
+  const candidates = [...new Set([...trusted, ...semanticLeaves])]
     .filter((element) => isVisible(element) && isEnabled(element));
   return candidates.length === 1 ? candidates[0] : null;
 }
