@@ -651,9 +651,10 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       if (!expected?.expectedCustomerDisplayName.trim()) {
         return { ok: false, code: 'CONTEXT_NOT_VERIFIED', message: '未识别客户昵称，未追加话术' };
       }
-      const currentOrderNo = text(document, selectors.orderNo);
+      const activeOrderCard = firstActiveOrderCard(document);
+      const currentOrderNo = activeOrderCard ? orderNoFromElement(activeOrderCard) : '';
       const currentCustomer = text(first(document, selectors.root) || document, selectors.customer);
-      if ((expected.expectedOrderNo && currentOrderNo !== expected.expectedOrderNo)
+      if ((expected.expectedOrderNo && currentOrderNo && currentOrderNo !== expected.expectedOrderNo)
         || currentCustomer !== expected.expectedCustomerDisplayName) {
         return { ok: false, code: 'CONTEXT_CHANGED', message: '当前飞鸽会话已切换，未填入话术' };
       }
@@ -669,9 +670,10 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       expectedOrderNo?: string;
       expectedCustomerDisplayName?: string;
     }): SafeReplyFillResult {
-      const currentOrderNo = text(document, selectors.orderNo);
+      const activeOrderCard = firstActiveOrderCard(document);
+      const currentOrderNo = activeOrderCard ? orderNoFromElement(activeOrderCard) : '';
       const currentCustomer = text(first(document, selectors.root) || document, selectors.customer);
-      if ((expected?.expectedOrderNo && currentOrderNo !== expected.expectedOrderNo)
+      if ((expected?.expectedOrderNo && currentOrderNo && currentOrderNo !== expected.expectedOrderNo)
         || (expected?.expectedCustomerDisplayName && currentCustomer !== expected.expectedCustomerDisplayName)) {
         return { ok: false, code: 'CONTEXT_CHANGED', message: '当前飞鸽会话已切换，未填入话术' };
       }

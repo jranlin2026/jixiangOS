@@ -432,7 +432,10 @@ assert.deepEqual(realAdapter.appendReply('新话术', {
 assert.equal(reply.value, '已有内容\n新话术');
 
 const staleDocumentContextDom = new JSDOM(`<!doctype html><html><body>
-  <main data-jx-feige-conversation><span data-jx-customer-name>悠然一刻</span></main>
+  <main data-jx-feige-conversation>
+    <span data-jx-customer-name>悠然一刻</span>
+    <textarea data-jx-reply-input></textarea>
+  </main>
   <aside>
     <span data-jx-order-no>STALE-ORDER</span>
     <span data-jx-order-status>已付款</span>
@@ -446,12 +449,29 @@ const staleDocumentContextDom = new JSDOM(`<!doctype html><html><body>
     <span data-testid="order-status">待付款</span>
   </section>
 </body></html>`, { url: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' });
-const staleDocumentContext = createDouyinFeigeAdapter(
+const staleDocumentContextAdapter = createDouyinFeigeAdapter(
   staleDocumentContextDom.window.document,
   staleDocumentContextDom.window.location.href,
-).readContext();
+);
+const staleDocumentContext = staleDocumentContextAdapter.readContext();
 assert.equal(staleDocumentContext.platformOrderNo, 'ACTIVE-ORDER', '订单号必须来自唯一可见活动订单卡');
 assert.equal(staleDocumentContext.orderStatus, '待付款', '订单状态必须与订单号来自同一张卡');
+assert.deepEqual(staleDocumentContextAdapter.appendReply('当前会话话术', {
+  expectedOrderNo: staleDocumentContext.platformOrderNo,
+  expectedCustomerDisplayName: staleDocumentContext.customerDisplayName,
+}), { ok: true }, '点击话术时必须使用与页面识别相同的活动订单卡校验会话');
+assert.equal(
+  (staleDocumentContextDom.window.document.querySelector('[data-jx-reply-input]') as HTMLTextAreaElement).value,
+  '当前会话话术',
+);
+const staleDocumentReply = staleDocumentContextDom.window.document.querySelector('[data-jx-reply-input]') as HTMLTextAreaElement;
+staleDocumentReply.value = '';
+(staleDocumentContextDom.window.document.querySelector('[data-testid="order-card"]:not([hidden])') as HTMLElement).hidden = true;
+assert.deepEqual(staleDocumentContextAdapter.appendReply('订单卡收起后的话术', {
+  expectedOrderNo: staleDocumentContext.platformOrderNo,
+  expectedCustomerDisplayName: staleDocumentContext.customerDisplayName,
+}), { ok: true }, '当前客户未切换时，收起订单卡不应被误判为会话切换');
+assert.equal(staleDocumentReply.value, '订单卡收起后的话术');
 
 const ambiguousContextDom = new JSDOM(`<!doctype html><html><body>
   <main data-jx-feige-conversation><span data-jx-customer-name>悠然一刻</span></main>
