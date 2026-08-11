@@ -112,6 +112,9 @@ export interface Lead {
   remark?: string;
   score?: number;
   wechat?: string;
+  wechatNickname?: string;
+  douyinId?: string;
+  douyinNickname?: string;
   industry?: string;
   city?: string;
   estimatedProductId?: ID;

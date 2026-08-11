@@ -101,6 +101,9 @@ export interface Customer {
   releasedBy?: string;
   releaseReason?: string;
   wechat?: string;
+  wechatNickname?: string;
+  douyinId?: string;
+  douyinNickname?: string;
   industry?: string;
   city?: string;
   /** 归属销售 */
