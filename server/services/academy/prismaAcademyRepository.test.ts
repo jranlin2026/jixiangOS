@@ -123,11 +123,16 @@ const query = calls.find(
 assert.equal(query.skip, 20, "课程列表必须使用服务端分页偏移");
 assert.equal(query.take, 10, "课程列表必须使用服务端每页条数");
 assert.deepEqual(query.where, {
-  status: "ACTIVE",
-  OR: [
-    { title: { contains: "AI" } },
-    { code: { contains: "AI" } },
-    { category: { contains: "AI" } },
+  AND: [
+    {},
+    { status: "ACTIVE" },
+    {
+      OR: [
+        { title: { contains: "AI" } },
+        { code: { contains: "AI" } },
+        { category: { contains: "AI" } },
+      ],
+    },
   ],
 });
 
@@ -141,7 +146,18 @@ const scopedCourseCalls = calls.filter(
 const scopedCourseQuery = scopedCourseCalls[scopedCourseCalls.length - 1]?.args;
 assert.deepEqual(
   scopedCourseQuery.where,
-  { ownerUserId: { in: ["user-owner", "user-team"] } },
+  {
+    AND: [
+      {
+        OR: [
+          { ownerUserId: { in: ["user-owner", "user-team"] } },
+          { lecturerUserId: { in: ["user-owner", "user-team"] } },
+        ],
+      },
+      {},
+      {},
+    ],
+  },
   "商学院课程列表必须按角色数据范围过滤",
 );
 
@@ -155,6 +171,8 @@ const created = await repository.createSession(
     venue: "线上",
     capacity: 10,
     status: "PLANNED",
+    audience: "RESPONSIBLE_ONLY",
+    isInvitable: false,
     createdById: "u1",
     createdByName: "管理员",
     createdAt: now,

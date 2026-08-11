@@ -23,13 +23,14 @@ const service: any = {
   changeSessionStatus: async (id: string, status: string) => (calls.push(['status', id, status]), ok({ id, status })),
   updateTask: async (id: string, body: any) => (calls.push(['task', id, body]), ok({ id, ...body })),
   saveEngagement: async (body: any) => (calls.push(['engagement', body]), ok(body)),
+  updateEngagementExecution: async (id: string, body: any) => (calls.push(['engagement-execution', id, body]), ok({ id, ...body })),
   linkEngagementOrder: async (id: string, body: any) => (calls.push(['engagement-order', id, body]), ok({ id, ...body })),
   saveReview: async (body: any) => (calls.push(['review', body]), ok(body)),
 };
 const allow: express.RequestHandler = (req: any, _res, next) => { req.currentUser = actor; next(); };
 const app = express();
 app.use(express.json());
-app.use('/api/academy', createAcademyRouter({ service, requireRead: allow, requireCourseWrite: allow, requireSessionWrite: allow, requireEngagementWrite: allow, requireReviewWrite: allow }));
+app.use('/api/academy', createAcademyRouter({ service, requireRead: allow, requireCourseWrite: allow, requireArrangementWrite: allow, requireSessionWrite: allow, requireTaskWrite: allow, requireEngagementWrite: allow, requireReviewWrite: allow }));
 const listener = app.listen(0, '127.0.0.1');
 await once(listener, 'listening');
 const address = listener.address() as AddressInfo;
@@ -82,6 +83,10 @@ try {
   const linked = await fetch(`${base}/engagements/engagement-1/order`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orderId: 'order-1', orderNo: 'ORD-1' }) });
   assert.equal(linked.status, 200);
   assert.deepEqual(calls.find((call) => call[0] === 'engagement-order'), ['engagement-order', 'engagement-1', { orderId: 'order-1', orderNo: 'ORD-1' }]);
+
+  const execution = await fetch(`${base}/engagements/engagement-1/execution`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ attendanceStatus: 'ATTENDED', courseAssessment: 'A' }) });
+  assert.equal(execution.status, 200);
+  assert.deepEqual(calls.find((call) => call[0] === 'engagement-execution'), ['engagement-execution', 'engagement-1', { attendanceStatus: 'ATTENDED', courseAssessment: 'A' }]);
 } finally {
   await new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));
 }

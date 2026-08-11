@@ -13,6 +13,8 @@ import { STORAGE_KEYS } from "../../../src/shared/utils/constants";
 
 const ACADEMY_COURSE_ASSET_DOMAIN = "academy_course_assets";
 const ACADEMY_COURSE_CATEGORY_DOMAIN = "academy_course_categories";
+const ACADEMY_ALL_EMPLOYEES_MARKER = "__academy_all_employees__";
+const ACADEMY_INVITABLE_MARKER = "__academy_invitable__";
 
 const mapCourse = (record: any): AcademyCourseRecord => ({
   ...record,
@@ -20,13 +22,33 @@ const mapCourse = (record: any): AcademyCourseRecord => ({
   defaultDurationMinutes: Number(record.defaultDurationMinutes),
 });
 
-const mapSession = (record: any): AcademySessionRecord => ({
+const mapSession = (record: any): AcademySessionRecord => {
+  const storedCollaboratorIds = Array.isArray(record.collaboratorUserIds) ? record.collaboratorUserIds : [];
+  return ({
   ...record,
   capacity: Number(record.capacity),
+  inviteTarget: Number(record.inviteTarget || 0),
+  registrationTarget: Number(record.registrationTarget || 0),
+  attendanceTarget: Number(record.attendanceTarget || 0),
+  consultationTarget: Number(record.consultationTarget || 0),
+  dealTarget: Number(record.dealTarget || 0),
+  targetRevenue: Number(record.targetRevenue || 0),
+  collaboratorUserIds: storedCollaboratorIds.filter((id: string) => !id.startsWith("__academy_")),
+  collaboratorNames: Array.isArray(record.collaboratorNames) ? record.collaboratorNames : [],
+  audience: storedCollaboratorIds.includes(ACADEMY_ALL_EMPLOYEES_MARKER) ? "ALL_EMPLOYEES" : "RESPONSIBLE_ONLY",
+  isInvitable: storedCollaboratorIds.includes(ACADEMY_INVITABLE_MARKER),
 });
+};
 
 const courseScopeWhere = (scope: AcademyAccessScope) =>
-  scope.unrestricted ? {} : { ownerUserId: { in: scope.visibleUserIds } };
+  scope.unrestricted
+    ? {}
+    : {
+        OR: [
+          { ownerUserId: { in: scope.visibleUserIds } },
+          { lecturerUserId: { in: scope.visibleUserIds } },
+        ],
+      };
 
 const sessionScopeWhere = (scope: AcademyAccessScope) =>
   scope.unrestricted
@@ -35,6 +57,12 @@ const sessionScopeWhere = (scope: AcademyAccessScope) =>
         OR: [
           { createdById: { in: scope.visibleUserIds } },
           { facilitatorUserId: { in: scope.visibleUserIds } },
+          { lecturerUserId: { in: scope.visibleUserIds } },
+          { course: { ownerUserId: { in: scope.visibleUserIds } } },
+          { tasks: { some: { assigneeUserId: { in: scope.visibleUserIds } } } },
+          ...scope.visibleUserIds.map((userId) => ({
+            collaboratorUserIds: { array_contains: [userId] },
+          })),
           {
             engagements: {
               some: { ownerUserId: { in: scope.visibleUserIds } },
@@ -94,9 +122,10 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
     },
     async listCourses({ page, pageSize, search, status }, scope) {
       const where = {
-        ...courseScopeWhere(scope),
-        ...(status ? { status } : {}),
-        ...(search
+        AND: [
+          courseScopeWhere(scope),
+          status ? { status } : {},
+          search
           ? {
               OR: [
                 { title: { contains: search } },
@@ -104,7 +133,8 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
                 { category: { contains: search } },
               ],
             }
-          : {}),
+          : {},
+        ],
       };
       const [items, total] = await prisma.$transaction([
         prisma.academyCourse.findMany({
@@ -236,11 +266,15 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
       const record = await prisma.academyCourse.findUnique({ where: { id } });
       return record ? mapCourse(record) : null;
     },
-    async listSessions({ page, pageSize, search, status }, scope) {
+    async listSessions({ page, pageSize, search, status, includeAudience }, scope) {
+      const visibilityWhere = includeAudience === "ALL_EMPLOYEES"
+        ? { OR: [sessionScopeWhere(scope), { collaboratorUserIds: { array_contains: [ACADEMY_ALL_EMPLOYEES_MARKER] } }] }
+        : sessionScopeWhere(scope);
       const where = {
-        ...sessionScopeWhere(scope),
-        ...(status ? { status } : {}),
-        ...(search
+        AND: [
+          visibilityWhere,
+          status ? { status } : {},
+          search
           ? {
               OR: [
                 { title: { contains: search } },
@@ -248,13 +282,19 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
                 { course: { title: { contains: search } } },
               ],
             }
-          : {}),
+          : {},
+        ],
       };
       const [items, total] = await prisma.$transaction([
         prisma.academySession.findMany({
           where,
           include: {
-            course: { select: { code: true, title: true, category: true } },
+            course: { select: { code: true, title: true, category: true, ownerUserId: true } },
+            tasks: {
+              where: { assigneeUserId: { in: scope.visibleUserIds } },
+              select: { id: true },
+              take: 1,
+            },
             _count: { select: { engagements: true, tasks: true } },
           },
           orderBy: { startsAt: "desc" },
@@ -265,8 +305,10 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
       ]);
       return { items: items.map(mapSession), total };
     },
-    async findSessionById(id) {
-      const record = await prisma.academySession.findUnique({ where: { id } });
+    async findSessionById(id, scope) {
+      const record = scope
+        ? await prisma.academySession.findFirst({ where: { id, ...sessionScopeWhere(scope) } })
+        : await prisma.academySession.findUnique({ where: { id } });
       return record ? mapSession(record) : null;
     },
     async getSessionDetail(id, scope) {
@@ -288,8 +330,14 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
       };
     },
     async createSession(session, checklist) {
+      const { audience, isInvitable, ...sessionData } = session;
+      const collaboratorUserIds = [
+        ...(session.collaboratorUserIds || []),
+        ...(audience === "ALL_EMPLOYEES" ? [ACADEMY_ALL_EMPLOYEES_MARKER] : []),
+        ...(audience === "ALL_EMPLOYEES" && isInvitable ? [ACADEMY_INVITABLE_MARKER] : []),
+      ];
       await prisma.$transaction(async (tx: any) => {
-        await tx.academySession.create({ data: session });
+        await tx.academySession.create({ data: { ...sessionData, collaboratorUserIds } });
         await tx.academySessionTask.createMany({ data: checklist });
       });
       return { ...session, tasks: checklist };
@@ -313,8 +361,12 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         orderBy: { createdAt: "asc" },
       });
     },
-    async findTaskById(id) {
-      return prisma.academySessionTask.findUnique({ where: { id } });
+    async findTaskById(id, scope) {
+      return scope
+        ? prisma.academySessionTask.findFirst({
+            where: { id, session: sessionScopeWhere(scope) },
+          })
+        : prisma.academySessionTask.findUnique({ where: { id } });
     },
     async updateTaskStatus(id, update) {
       try {
@@ -331,8 +383,6 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
       const {
         id,
         createdAt,
-        ownerUserId: _ownerUserId,
-        ownerUserName: _ownerUserName,
         ...update
       } = engagement;
       return prisma.academyEngagement.upsert({
@@ -346,18 +396,16 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         update,
       });
     },
-    async findEngagementById(id) {
-      return prisma.academyEngagement.findUnique({ where: { id } });
+    async findEngagementById(id, scope) {
+      return scope
+        ? prisma.academyEngagement.findFirst({
+            where: { id, session: sessionScopeWhere(scope) },
+          })
+        : prisma.academyEngagement.findUnique({ where: { id } });
     },
     async findEngagementByKey(sessionId, participantKey) {
       return prisma.academyEngagement.findUnique({
         where: { sessionId_participantKey: { sessionId, participantKey } },
-      });
-    },
-    async findOrderById(id) {
-      return prisma.order.findUnique({
-        where: { id },
-        select: { id: true, orderNo: true, customerId: true },
       });
     },
     async saveReview(review: AcademyReviewRecord) {

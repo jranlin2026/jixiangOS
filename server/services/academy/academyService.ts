@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { AuthenticatedUser } from "../../../src/types/auth";
 import type { BusinessAttachment } from "../../../src/types/businessAttachment";
+import { hasPermission, PERMISSION_KEYS } from "../../../src/shared/utils/permissions";
 import { failure, success } from "../../api/response";
 
 export type AcademyCourseStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 export type AcademySessionStatus =
   "PLANNED" | "READY" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+export type AcademyDeliveryMode = "OFFLINE" | "LIVE" | "ONLINE";
 export type AcademyTaskStatus =
   | "PENDING"
   | "IN_PROGRESS"
@@ -68,11 +70,25 @@ export type AcademySessionRecord = {
   title: string;
   startsAt: Date;
   endsAt: Date;
+  deliveryMode?: AcademyDeliveryMode;
   venue: string;
+  meetingUrl?: string | null;
   capacity: number;
+  inviteTarget?: number;
+  registrationTarget?: number;
+  attendanceTarget?: number;
+  consultationTarget?: number;
+  dealTarget?: number;
+  targetRevenue?: number;
   status: AcademySessionStatus;
+  audience: "ALL_EMPLOYEES" | "RESPONSIBLE_ONLY";
+  isInvitable: boolean;
   facilitatorUserId?: string | null;
   facilitatorUserName?: string | null;
+  lecturerUserId?: string | null;
+  lecturerUserName?: string | null;
+  collaboratorUserIds?: string[] | null;
+  collaboratorNames?: string[] | null;
   createdById: string;
   createdByName: string;
   createdAt: Date;
@@ -153,6 +169,20 @@ export type AcademyAccessScope = {
   visibleUserIds: string[];
 };
 
+export type AcademyParticipantReference = {
+  id: string;
+  name: string;
+  ownerUserId?: string | null;
+  ownerUserName?: string | null;
+  isPublicPool?: boolean;
+};
+
+export type AcademyOrderReference = {
+  id: string;
+  orderNo: string;
+  customerId: string;
+};
+
 export interface AcademyRepository {
   listCourseCategories(): Promise<AcademyCourseCategoryRecord[]>;
   upsertCourseCategory(category: AcademyCourseCategoryRecord): Promise<AcademyCourseCategoryRecord>;
@@ -177,10 +207,10 @@ export interface AcademyRepository {
     status: AcademyCourseStatus,
   ): Promise<AcademyCourseRecord | null>;
   listSessions(
-    input: { page: number; pageSize: number; search?: string; status?: string },
+    input: { page: number; pageSize: number; search?: string; status?: string; includeAudience?: string },
     scope: AcademyAccessScope,
   ): Promise<{ items: AcademySessionRecord[]; total: number }>;
-  findSessionById(id: string): Promise<AcademySessionRecord | null>;
+  findSessionById(id: string, scope?: AcademyAccessScope): Promise<AcademySessionRecord | null>;
   getSessionDetail(
     id: string,
     scope: AcademyAccessScope,
@@ -202,7 +232,7 @@ export interface AcademyRepository {
     status: AcademySessionStatus,
   ): Promise<AcademySessionRecord | null>;
   listSessionTasks(sessionId: string): Promise<AcademySessionTaskRecord[]>;
-  findTaskById(id: string): Promise<AcademySessionTaskRecord | null>;
+  findTaskById(id: string, scope?: AcademyAccessScope): Promise<AcademySessionTaskRecord | null>;
   updateTaskStatus(
     id: string,
     update: Partial<AcademySessionTaskRecord>,
@@ -210,12 +240,11 @@ export interface AcademyRepository {
   upsertEngagement(
     engagement: AcademyEngagementRecord,
   ): Promise<AcademyEngagementRecord>;
-  findEngagementById(id: string): Promise<AcademyEngagementRecord | null>;
+  findEngagementById(id: string, scope?: AcademyAccessScope): Promise<AcademyEngagementRecord | null>;
   findEngagementByKey(
     sessionId: string,
     participantKey: string,
   ): Promise<AcademyEngagementRecord | null>;
-  findOrderById(id: string): Promise<{ id: string; orderNo: string; customerId: string } | null>;
   saveReview(review: AcademyReviewRecord): Promise<AcademyReviewRecord>;
   getDashboard(
     scope: AcademyAccessScope,
@@ -338,6 +367,11 @@ const ASSET_TYPES = new Set<AcademyAssetType>([
   "INVITATION",
   "REPLAY",
 ]);
+const DELIVERY_MODES = new Set<AcademyDeliveryMode>(["OFFLINE", "LIVE", "ONLINE"]);
+const asNonNegativeInteger = (value: unknown) => {
+  const number = Number(value || 0);
+  return Number.isInteger(number) && number >= 0 ? number : null;
+};
 
 const invalid = (message: string, code = 400) => failure<never>(message, code);
 const DEFAULT_COURSE_CATEGORIES = [
@@ -365,6 +399,9 @@ export function createAcademyService(
   deps: {
     now?: () => Date;
     resolveScope?: (actor: AuthenticatedUser) => Promise<AcademyAccessScope>;
+    resolveCustomer?: (id: string, actor: AuthenticatedUser) => Promise<AcademyParticipantReference | null>;
+    resolveLead?: (id: string, actor: AuthenticatedUser) => Promise<AcademyParticipantReference | null>;
+    resolveOrder?: (id: string, actor: AuthenticatedUser) => Promise<AcademyOrderReference | null>;
   } = {},
 ) {
   const now = deps.now || (() => new Date());
@@ -414,7 +451,13 @@ export function createAcademyService(
       }));
     },
     async getDashboard(actor: AuthenticatedUser) {
-      return success(await repository.getDashboard(await resolveScope(actor)));
+      const dashboard = await repository.getDashboard(await resolveScope(actor));
+      return success({
+        ...dashboard,
+        pendingFollowUps: hasPermission(actor, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE)
+          ? dashboard.pendingFollowUps
+          : 0,
+      });
     },
     async listCourses(
       raw: {
@@ -626,9 +669,9 @@ export function createAcademyService(
     async changeCourseStatus(
       id: string,
       nextStatus: AcademyCourseStatus,
-      _actor: AuthenticatedUser,
+      actor: AuthenticatedUser,
     ) {
-      const course = await repository.findCourseById(id);
+      const course = await repository.findCourseById(id, await resolveScope(actor));
       if (!course) return invalid("课程不存在", 404);
       if (!COURSE_STATUS_TRANSITIONS[course.status].includes(nextStatus))
         return invalid("当前课程状态不允许执行该操作", 409);
@@ -652,11 +695,52 @@ export function createAcademyService(
     ) {
       const page = Math.max(1, Number(raw.page) || 1);
       const pageSize = Math.min(100, Math.max(1, Number(raw.pageSize) || 10));
+      const canManage =
+        hasPermission(actor, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE) ||
+        hasPermission(actor, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE) ||
+        hasPermission(actor, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE);
+      const actorScope = await resolveScope(actor);
+      const result = await repository.listSessions(
+        {
+          page,
+          pageSize,
+          search: raw.search?.trim(),
+          status: raw.status,
+          includeAudience: "ALL_EMPLOYEES",
+        },
+        actorScope,
+      );
+      const items = result.items.map((item: any) => {
+            const { tasks: assignedTasks = [], ...session } = item;
+            const canOpenDetail = actorScope.unrestricted ||
+              actorScope.visibleUserIds.includes(item.createdById) ||
+              actorScope.visibleUserIds.includes(item.facilitatorUserId) ||
+              actorScope.visibleUserIds.includes(item.lecturerUserId) ||
+              (item.collaboratorUserIds || []).some((id: string) => actorScope.visibleUserIds.includes(id)) ||
+              actorScope.visibleUserIds.includes(item.course?.ownerUserId) ||
+              assignedTasks.length > 0;
+            if (canOpenDetail) return { ...session, canOpenDetail: true };
+            return ({
+            ...session,
+            canOpenDetail,
+            meetingUrl: null,
+            facilitatorUserId: null,
+            facilitatorUserName: null,
+            collaboratorUserIds: [],
+            collaboratorNames: [],
+            inviteTarget: 0,
+            registrationTarget: 0,
+            attendanceTarget: 0,
+            consultationTarget: 0,
+            dealTarget: 0,
+            targetRevenue: 0,
+            course: item.course ? { code: item.course.code, title: item.course.title, category: item.course.category } : undefined,
+            _count: { engagements: 0, tasks: 0 },
+          });
+        });
       return success({
-        ...(await repository.listSessions(
-          { page, pageSize, search: raw.search?.trim(), status: raw.status },
-          await resolveScope(actor),
-        )),
+        ...result,
+        items,
         page,
         pageSize,
       });
@@ -666,7 +750,51 @@ export function createAcademyService(
         id,
         await resolveScope(actor),
       );
-      return detail ? success(detail) : invalid("课程场次不存在", 404);
+      if (!detail) return invalid("课程安排不存在", 404);
+      const canViewSalesData = hasPermission(actor, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE);
+      const canOperateSession =
+        hasPermission(actor, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE) ||
+        hasPermission(actor, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE);
+      const engagements = canViewSalesData
+        ? (await Promise.all(detail.engagements.map(async (item) => {
+            const participant = item.customerId
+              ? await deps.resolveCustomer?.(item.customerId, actor)
+              : item.leadId
+                ? await deps.resolveLead?.(item.leadId, actor)
+                : null;
+            return participant
+              ? {
+                  ...item,
+                  participantName: participant.name,
+                  ownerUserId: participant.ownerUserId || item.ownerUserId,
+                  ownerUserName: participant.ownerUserName || item.ownerUserName,
+                }
+              : null;
+          }))).filter(Boolean) as AcademyEngagementRecord[]
+        : canOperateSession
+          ? detail.engagements.map((item) => ({
+              ...item,
+              participantKey: `academy:${item.id}`,
+              customerId: null,
+              leadId: null,
+              followUpStatus: "",
+              nextFollowUpAt: null,
+              orderId: null,
+              orderNo: null,
+              handoffStatus: "",
+              handedOffAt: null,
+              handedOffById: null,
+              handedOffByName: null,
+              notes: null,
+              ownerUserId: null,
+              ownerUserName: null,
+            }))
+          : [];
+      return success({
+        ...detail,
+        engagements,
+        review: hasPermission(actor, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE) ? detail.review : null,
+      });
     },
     async createSession(
       raw: Record<string, unknown>,
@@ -677,17 +805,18 @@ export function createAcademyService(
       const startsAt = new Date(String(raw.startsAt || ""));
       const endsAt = new Date(String(raw.endsAt || ""));
       const capacity = Number(raw.capacity);
+      const deliveryMode = String(raw.deliveryMode || "LIVE") as AcademyDeliveryMode;
       if (
         !courseId ||
-        !title ||
         Number.isNaN(startsAt.getTime()) ||
         Number.isNaN(endsAt.getTime())
       )
-        return invalid("课程、场次名称和时间不能为空");
+        return invalid("课程和时间不能为空");
       if (endsAt <= startsAt) return invalid("结束时间必须晚于开始时间");
       if (!Number.isInteger(capacity) || capacity <= 0)
         return invalid("场次容量必须是正整数");
-      const course = await repository.findCourseById(courseId);
+      if (!DELIVERY_MODES.has(deliveryMode)) return invalid("请选择有效的授课方式");
+      const course = await repository.findCourseById(courseId, await resolveScope(actor));
       if (!course) return invalid("所选课程不存在", 404);
       if (course.status !== "ACTIVE")
         return invalid("只有已启用课程可以创建场次", 409);
@@ -695,51 +824,99 @@ export function createAcademyService(
         await repository.findLatestCourseVersionId(courseId);
       if (!courseVersionId)
         return invalid("课程尚无可用版本，不能创建场次", 409);
+      const facilitatorUserId = String(raw.facilitatorUserId || "").trim();
+      const facilitator = facilitatorUserId
+        ? await repository.findActiveUserById(facilitatorUserId)
+        : null;
+      if (!facilitator) return invalid("请选择有效的课程运营负责人");
+      const lecturerUserId = String(raw.lecturerUserId || course.lecturerUserId || "").trim();
+      const lecturer = lecturerUserId
+        ? await repository.findActiveUserById(lecturerUserId)
+        : null;
+      if (lecturerUserId && !lecturer) return invalid("所选主讲人不存在或已停用");
+      const collaboratorUserIds = Array.isArray(raw.collaboratorUserIds)
+        ? [...new Set(raw.collaboratorUserIds.map(String).map((item) => item.trim()).filter(Boolean))]
+        : [];
+      const collaborators = await Promise.all(
+        collaboratorUserIds.map((userId) => repository.findActiveUserById(userId)),
+      );
+      if (collaborators.some((user) => !user)) return invalid("协作人员中包含已停用或不存在的员工");
+      const venue = String(raw.venue || "").trim();
+      const meetingUrl = String(raw.meetingUrl || "").trim();
+      if ((deliveryMode === "OFFLINE" || deliveryMode === "LIVE") && !venue)
+        return invalid(deliveryMode === "OFFLINE" ? "请填写授课场地" : "请填写直播间");
+      if (deliveryMode === "ONLINE" && !meetingUrl) return invalid("请填写会议链接");
+      const targets = {
+        inviteTarget: asNonNegativeInteger(raw.inviteTarget),
+        registrationTarget: asNonNegativeInteger(raw.registrationTarget),
+        attendanceTarget: asNonNegativeInteger(raw.attendanceTarget),
+        consultationTarget: asNonNegativeInteger(raw.consultationTarget),
+        dealTarget: asNonNegativeInteger(raw.dealTarget),
+      };
+      if (Object.values(targets).some((value) => value === null))
+        return invalid("经营目标人数必须是大于等于0的整数");
+      const targetRevenue = Number(raw.targetRevenue || 0);
+      if (!Number.isFinite(targetRevenue) || targetRevenue < 0)
+        return invalid("目标成交金额必须大于等于0");
       const timestamp = now();
+      const audience = raw.audience === "ALL_EMPLOYEES" ? "ALL_EMPLOYEES" : "RESPONSIBLE_ONLY";
       const session: AcademySessionRecord = {
         id: `academy-session-${randomUUID()}`,
         courseId,
         courseVersionId,
-        title,
+        title: title || `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}`,
         startsAt,
         endsAt,
-        venue: String(raw.venue || "").trim(),
+        deliveryMode,
+        venue,
+        meetingUrl: meetingUrl || null,
         capacity,
+        inviteTarget: targets.inviteTarget!,
+        registrationTarget: targets.registrationTarget!,
+        attendanceTarget: targets.attendanceTarget!,
+        consultationTarget: targets.consultationTarget!,
+        dealTarget: targets.dealTarget!,
+        targetRevenue,
         status: "PLANNED",
-        facilitatorUserId: raw.facilitatorUserId
-          ? String(raw.facilitatorUserId)
-          : null,
-        facilitatorUserName: raw.facilitatorUserName
-          ? String(raw.facilitatorUserName)
-          : null,
+        audience,
+        isInvitable: audience === "ALL_EMPLOYEES" && raw.isInvitable === true,
+        facilitatorUserId: facilitator.id,
+        facilitatorUserName: facilitator.name,
+        lecturerUserId: lecturer?.id || null,
+        lecturerUserName: lecturer?.name || null,
+        collaboratorUserIds,
+        collaboratorNames: collaborators.filter(Boolean).map((user) => user!.name),
         createdById: actor.id,
         createdByName: actor.name,
         createdAt: timestamp,
         updatedAt: timestamp,
       };
-      const checklist: AcademySessionTaskRecord[] = CHECKLIST.map((item) => ({
-        ...item,
-        id: `academy-task-${randomUUID()}`,
-        sessionId: session.id,
-        status: "PENDING",
-        assigneeUserId: session.facilitatorUserId || actor.id,
-        assigneeUserName: session.facilitatorUserName || actor.name,
-        collaboratorNames: [],
-        dueAt: new Date(
-          (item.category === "BEFORE" ? startsAt : endsAt).getTime() +
-            item.dueOffsetMinutes * 60_000,
-        ),
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      }));
+      const checklist: AcademySessionTaskRecord[] = CHECKLIST.map((item) => {
+        const { dueOffsetMinutes, ...taskTemplate } = item;
+        return {
+          ...taskTemplate,
+          id: `academy-task-${randomUUID()}`,
+          sessionId: session.id,
+          status: "PENDING",
+          assigneeUserId: session.facilitatorUserId || actor.id,
+          assigneeUserName: session.facilitatorUserName || actor.name,
+          collaboratorNames: [],
+          dueAt: new Date(
+            (item.category === "BEFORE" ? startsAt : endsAt).getTime() +
+              dueOffsetMinutes * 60_000,
+          ),
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+      });
       return success(await repository.createSession(session, checklist));
     },
     async changeSessionStatus(
       id: string,
       nextStatus: AcademySessionStatus,
-      _actor: AuthenticatedUser,
+      actor: AuthenticatedUser,
     ) {
-      const session = await repository.findSessionById(id);
+      const session = await repository.findSessionById(id, await resolveScope(actor));
       if (!session) return invalid("课程场次不存在", 404);
       if (!STATUS_TRANSITIONS[session.status].includes(nextStatus))
         return invalid("当前状态不允许执行该操作", 409);
@@ -775,8 +952,13 @@ export function createAcademyService(
     ) {
       if (!Object.prototype.hasOwnProperty.call(TASK_STATUS_TRANSITIONS, raw.status))
         return invalid("无效的执行项状态");
-      const current = await repository.findTaskById(id);
+      const current = await repository.findTaskById(id, await resolveScope(actor));
       if (!current) return invalid("执行项不存在", 404);
+      const canManageAllTasks = hasPermission(actor, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, "write");
+      if (!canManageAllTasks && current.assigneeUserId !== actor.id)
+        return invalid("执行项不存在", 404);
+      if (!canManageAllTasks && !["IN_PROGRESS", "SUBMITTED"].includes(raw.status))
+        return invalid("你只能推进并提交分配给自己的任务", 403);
       if (!TASK_STATUS_TRANSITIONS[current.status].includes(raw.status))
         return invalid("当前执行项状态不允许执行该操作", 409);
       if (raw.status === "SUBMITTED" && !String(raw.submissionNote || raw.note || "").trim())
@@ -822,10 +1004,20 @@ export function createAcademyService(
       actor: AuthenticatedUser,
     ) {
       const sessionId = String(raw.sessionId || "").trim();
-      const participantKey = String(raw.participantKey || "").trim();
-      const participantName = String(raw.participantName || "").trim();
-      if (!sessionId || !participantKey || !participantName)
+      if (!sessionId)
         return invalid("场次和参与客户不能为空");
+      const session = await repository.findSessionById(sessionId, { unrestricted: true, visibleUserIds: [] });
+      if (!session) return invalid("课程安排不存在", 404);
+      const customerId = String(raw.customerId || "").trim();
+      const leadId = String(raw.leadId || "").trim();
+      if ((customerId && leadId) || (!customerId && !leadId))
+        return invalid("请选择一个可见的客户或线索");
+      const participant = customerId
+        ? await deps.resolveCustomer?.(customerId, actor)
+        : await deps.resolveLead?.(leadId, actor);
+      if (!participant) return invalid(customerId ? "客户不存在或无权访问" : "线索不存在或无权访问", 404);
+      if (participant.isPublicPool) return invalid("公海客户需先领取后才能邀约", 409);
+      const participantKey = customerId ? `customer:${customerId}` : `lead:${leadId}`;
       const nextFollowUpAt = raw.nextFollowUpAt
         ? new Date(String(raw.nextFollowUpAt))
         : null;
@@ -833,22 +1025,20 @@ export function createAcademyService(
         return invalid("下次跟进时间格式无效");
       const timestamp = now();
       const existing = await repository.findEngagementByKey(sessionId, participantKey);
+      if (!existing && (!["PLANNED", "READY"].includes(session.status) || session.audience !== "ALL_EMPLOYEES" || !session.isInvitable))
+        return invalid("当前课程安排不接受新增邀约", 409);
       return success(
         await repository.upsertEngagement({
           id: `academy-engagement-${randomUUID()}`,
           sessionId,
           participantKey,
-          customerId: raw.customerId ? String(raw.customerId) : null,
-          leadId: raw.leadId ? String(raw.leadId) : null,
-          participantName,
+          customerId: customerId || null,
+          leadId: leadId || null,
+          participantName: participant.name,
           invitationStatus: String(raw.invitationStatus || "PENDING"),
-          attendanceStatus: String(raw.attendanceStatus || "UNKNOWN"),
-          interactionLevel: raw.interactionLevel
-            ? String(raw.interactionLevel)
-            : null,
-          courseAssessment: raw.courseAssessment
-            ? String(raw.courseAssessment)
-            : null,
+          attendanceStatus: existing?.attendanceStatus || "UNKNOWN",
+          interactionLevel: existing?.interactionLevel || null,
+          courseAssessment: existing?.courseAssessment || null,
           followUpStatus: String(raw.followUpStatus || "PENDING"),
           nextFollowUpAt,
           orderId: existing?.orderId || null,
@@ -858,23 +1048,52 @@ export function createAcademyService(
           handedOffById: existing?.handedOffById || null,
           handedOffByName: existing?.handedOffByName || null,
           notes: raw.notes ? String(raw.notes) : null,
-          ownerUserId: actor.id,
-          ownerUserName: actor.name,
+          ownerUserId: participant.ownerUserId || actor.id,
+          ownerUserName: participant.ownerUserName || actor.name,
           createdAt: existing?.createdAt || timestamp,
           updatedAt: timestamp,
         }),
       );
+    },
+    async updateEngagementExecution(
+      id: string,
+      raw: Record<string, unknown>,
+      actor: AuthenticatedUser,
+    ) {
+      const current = await repository.findEngagementById(id, await resolveScope(actor));
+      if (!current) return invalid("学员执行记录不存在", 404);
+      const attendanceStatus = String(raw.attendanceStatus || "UNKNOWN").trim();
+      if (!new Set(["UNKNOWN", "CONFIRMED", "ATTENDED", "ABSENT"]).has(attendanceStatus))
+        return invalid("请选择有效的到课状态");
+      const interactionLevel = String(raw.interactionLevel || "").trim() || null;
+      const courseAssessment = String(raw.courseAssessment || "").trim() || null;
+      if (interactionLevel && !new Set(["HIGH", "MEDIUM", "LOW"]).has(interactionLevel))
+        return invalid("请选择有效的课堂互动等级");
+      if (courseAssessment && !new Set(["A", "B", "C"]).has(courseAssessment))
+        return invalid("请选择有效的课程评估");
+      return success(await repository.upsertEngagement({
+        ...current,
+        attendanceStatus,
+        interactionLevel,
+        courseAssessment,
+        updatedAt: now(),
+      }));
     },
     async linkEngagementOrder(
       id: string,
       raw: Record<string, unknown>,
       actor: AuthenticatedUser,
     ) {
-      const current = await repository.findEngagementById(id);
+      const current = await repository.findEngagementById(id, await resolveScope(actor));
       if (!current) return invalid("学员转化记录不存在", 404);
+      const currentCustomer = current.customerId
+        ? await deps.resolveCustomer?.(current.customerId, actor)
+        : null;
+      if (!currentCustomer) return invalid("关联客户不存在或已不在你的数据范围内", 404);
+      if (currentCustomer.isPublicPool) return invalid("公海客户不能关联课程成交订单", 409);
       const orderId = String(raw.orderId || "").trim();
       if (!orderId) return invalid("请选择需要关联的正式订单");
-      const order = await repository.findOrderById(orderId);
+      const order = await deps.resolveOrder?.(orderId, actor);
       if (!order) return invalid("所选正式订单不存在", 404);
       if (!current.customerId || order.customerId !== current.customerId)
         return invalid("所选订单不属于当前学员关联客户", 409);
@@ -896,6 +1115,8 @@ export function createAcademyService(
     async saveReview(raw: Record<string, unknown>, actor: AuthenticatedUser) {
       const sessionId = String(raw.sessionId || "").trim();
       if (!sessionId) return invalid("场次不能为空");
+      const session = await repository.findSessionById(sessionId, await resolveScope(actor));
+      if (!session) return invalid("课程安排不存在", 404);
       const timestamp = now();
       return success(
         await repository.saveReview({

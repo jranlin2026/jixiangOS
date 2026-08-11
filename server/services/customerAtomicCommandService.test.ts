@@ -111,6 +111,7 @@ function createAtomicFixture(options: {
   let todoMutation: any = null;
   let createdTodo: any = null;
   let auditEvent: any = null;
+  let academyEngagementMutation: any = null;
   let linkedLead: any = options.linkedLead ? {
     id: 'lead-linked-delete',
     data: { id: 'lead-linked-delete', customerId: 'c-1', name: '客户甲', owner: '销售甲', source: '微信', sourceName: '私域' },
@@ -169,6 +170,9 @@ function createAtomicFixture(options: {
     updateMany: async ({ data }: any) => { todoMutation = data; return { count: 1 }; },
     create: async ({ data }: any) => (createdTodo = { ...data, id: 'todo-created' }),
   };
+  tx.academyEngagement = {
+    updateMany: async (args: any) => { academyEngagementMutation = args; return { count: 1 }; },
+  };
   tx.user = {
     findUnique: async ({ where }: any) => where.id === 'u-target'
       ? { id: 'u-target', name: '销售乙', role: '销售顾问', roleId: 'role-sales', isActive: true, employmentStatus: 'active' }
@@ -187,7 +191,7 @@ function createAtomicFixture(options: {
     },
   });
   return {
-    service, tx, get: () => ({ savedCustomer, todoMutation, createdTodo, auditEvent, linkedLead }),
+    service, tx, get: () => ({ savedCustomer, todoMutation, createdTodo, auditEvent, linkedLead, academyEngagementMutation }),
     context: {
       tx,
       canCascadeDeleteLeads: true,
@@ -220,6 +224,10 @@ function createAtomicFixture(options: {
   assert.equal(result.reassignedTodoCount, 1);
   assert.equal(fixture.get().savedCustomer.ownerId, 'u-target');
   assert.equal(fixture.get().todoMutation.assigneeId, 'u-target');
+  assert.deepEqual(fixture.get().academyEngagementMutation, {
+    where: { customerId: 'c-1', followUpStatus: { not: 'DONE' } },
+    data: { ownerUserId: 'u-target', ownerUserName: '销售乙', updatedAt: new Date('2026-07-17T02:00:00.000Z') },
+  });
   assert.equal(fixture.get().auditEvent.actor.id, 'u-1');
 }
 // A same-owner assignment was historically an idempotent no-op. It emits an

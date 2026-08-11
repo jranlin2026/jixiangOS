@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const source = readFileSync(new URL('../pages/Academy/index.tsx', import.meta.url), 'utf8');
+const source = [
+  readFileSync(new URL('../pages/Academy/index.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../pages/Academy/AcademyPlans.tsx', import.meta.url), 'utf8'),
+].join('\n');
 
 assert.doesNotMatch(source, /label="课程编码 \*"/, '新建课程不应要求用户手填课程编码');
 assert.match(source, /label="课程负责人 \*"/, '新建课程应明确课程负责人');
@@ -21,5 +24,21 @@ assert.match(source, /添加课程目标/, '课程目标应支持多条结构化
 assert.match(source, /tableId="academy-course-library"/, '课程列表应复用系统统一表格');
 assert.match(source, /<TablePagination[\s\S]*count=\{filtered\.length\}/, '课程列表应使用统一分页语义');
 assert.doesNotMatch(source, /<Tab label="版本记录"/, '版本历史尚未开放时不应展示假入口');
+assert.match(source, /新建课程安排/, '课程排期统一使用“课程安排”命名');
+assert.doesNotMatch(source, /新建课程计划/, '页面不应继续混用“课程计划”');
+assert.doesNotMatch(source, /新建课程场次/, '创建入口不应继续混用“课程场次”');
+assert.match(source, /label="授课方式 \*"/, '课程安排应明确授课方式');
+assert.match(source, /label="课程运营负责人 \*"/, '课程安排应明确运营负责人');
+assert.match(source, /计划邀约人数/, '课程安排应支持经营目标');
+assert.match(source, /tableId="academy-course-arrangements"/, '课程安排列表应复用系统统一表格');
+assert.match(source, /anchor="right"/, '课程安排详情应使用右侧抽屉，不跳转页面');
+assert.match(source, /requestedSessionId/, '外部工作台进入课程安排时应能直接打开目标抽屉');
+assert.match(source, /onEditLearner/, '课程安排抽屉应支持更新已有学员进度');
+assert.match(source, /detailErrors[\s\S]*课程安排详情加载失败[\s\S]*重新加载/, '课程安排详情失败时应显示抽屉内错误和重试入口');
+['安排概览', '课程任务', '学员执行', '课程结果'].forEach((label) => {
+  assert.ok(source.includes(label), `课程安排抽屉缺少${label}页签`);
+});
+assert.match(source, /完善课前任务|确认开课|进入现场执行|填写课程结果|查看课程结果/, '课程安排应根据状态展示明确的下一步操作');
+assert.doesNotMatch(source, /进入场次执行/, '课程安排不应继续使用含义重复的“进入场次执行”');
 
 console.log('academy course form static tests passed');

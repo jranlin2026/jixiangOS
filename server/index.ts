@@ -346,6 +346,36 @@ const academyService = createAcademyService(createPrismaAcademyRepository(prisma
     );
     return { unrestricted: scope.unrestricted, visibleUserIds: scope.visibleUserIds };
   },
+  resolveCustomer: async (customerId, actor) => {
+    const result = await customerListService.getById(customerId, actor);
+    const customer = result.code === 0 ? result.data : null;
+    if (!customer) return null;
+    return {
+      id: customer.id,
+      name: customer.name || customer.company || customer.id,
+      ownerUserId: customer.ownerId || null,
+      ownerUserName: customer.owner || null,
+      isPublicPool: customer.ownerIdentityStatus === 'public_pool',
+    };
+  },
+  resolveLead: async (leadId, actor) => {
+    if (!hasPermission(actor, PERMISSION_KEYS.LEADS_LIST)) return null;
+    const result = await leadListService.getById(leadId, actor);
+    const lead = result.code === 0 ? result.data : null;
+    if (!lead) return null;
+    return {
+      id: lead.id,
+      name: lead.name || lead.company || lead.id,
+      ownerUserId: lead.ownerId || lead.assignedToId || null,
+      ownerUserName: lead.owner || lead.assignedTo || null,
+    };
+  },
+  resolveOrder: async (orderId, actor) => {
+    if (!hasPermission(actor, PERMISSION_KEYS.ORDER_MANAGE)) return null;
+    const result = await orderQueryService.getOrder(orderId, actor);
+    const order = result.code === 0 ? result.data : null;
+    return order ? { id: order.id, orderNo: order.orderNo, customerId: order.customerId } : null;
+  },
 });
 const positionStandardService = createPositionStandardService({
   repository: createPrismaPositionStandardRepository(prisma as any),
@@ -473,7 +503,9 @@ const requireEnablementReview = createRequireAuth(authService, PERMISSION_KEYS.E
 const requireEnablementPublish = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_PUBLISH, 'write');
 const requireAcademyRead = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_VIEW);
 const requireAcademyCourseWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, 'write');
+const requireAcademyArrangementWrite = createRequireAnyPermission(authService, [PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE], 'write');
 const requireAcademySessionWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, 'write');
+const requireAcademyTaskWrite = requireAcademyRead;
 const requireAcademyEngagementWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE, 'write');
 const requireAcademyReviewWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE, 'write');
 const assignableUsersPermissions = [
@@ -496,6 +528,8 @@ const assignableUsersPermissions = [
   { permissionKey: PERMISSION_KEYS.ASSETS_DEVICES, action: 'write' },
   { permissionKey: PERMISSION_KEYS.ASSETS_PHONES, action: 'write' },
   { permissionKey: PERMISSION_KEYS.ASSETS_ACCOUNTS, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, action: 'write' },
 ];
 const runtimeStorageKeys = [
   STORAGE_KEYS.DELIVERY_ASSIGNMENT_CONFIG,
@@ -564,7 +598,9 @@ app.use('/api/academy', createAcademyRouter({
   service: academyService,
   requireRead: requireAcademyRead,
   requireCourseWrite: requireAcademyCourseWrite,
+  requireArrangementWrite: requireAcademyArrangementWrite,
   requireSessionWrite: requireAcademySessionWrite,
+  requireTaskWrite: requireAcademyTaskWrite,
   requireEngagementWrite: requireAcademyEngagementWrite,
   requireReviewWrite: requireAcademyReviewWrite,
 }));

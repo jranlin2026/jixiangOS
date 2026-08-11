@@ -1100,11 +1100,23 @@ model AcademySession {
   title               String   @db.VarChar(200)
   startsAt            DateTime
   endsAt              DateTime
+  deliveryMode        String   @default("LIVE") @db.VarChar(24)
   venue               String   @db.VarChar(240)
+  meetingUrl          String?  @db.VarChar(500)
   capacity            Int
+  inviteTarget        Int      @default(0)
+  registrationTarget  Int      @default(0)
+  attendanceTarget    Int      @default(0)
+  consultationTarget  Int      @default(0)
+  dealTarget          Int      @default(0)
+  targetRevenue       Decimal  @default(0) @db.Decimal(14, 2)
   status              String   @default("PLANNED") @db.VarChar(24)
   facilitatorUserId   String?  @db.VarChar(64)
   facilitatorUserName String?  @db.VarChar(100)
+  lecturerUserId      String?  @db.VarChar(64)
+  lecturerUserName    String?  @db.VarChar(100)
+  collaboratorUserIds Json?
+  collaboratorNames   Json?
   createdById         String   @db.VarChar(64)
   createdByName       String   @db.VarChar(100)
   createdAt           DateTime @default(now())
@@ -1119,6 +1131,7 @@ model AcademySession {
   @@index([startsAt, status])
   @@index([courseId, startsAt])
   @@index([facilitatorUserId, startsAt])
+  @@index([deliveryMode, startsAt])
   @@map("academy_sessions")
 }
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createAcademyService, type AcademyRepository } from "./academyService";
+import { PERMISSION_KEYS } from "../../../src/shared/utils/permissions";
 
 const actor = {
   id: "user-admin",
@@ -24,7 +25,17 @@ function createRepository(): AcademyRepository {
   const users = [
     { id: actor.id, name: actor.name },
     { id: "user-lecturer", name: "课程讲师" },
+    { id: "user-outsider", name: "其他部门负责人" },
   ];
+  const sessionVisible = (session: any, scope?: any) => (
+    !scope
+    || scope.unrestricted
+    || scope.visibleUserIds.includes(session.createdById)
+    || scope.visibleUserIds.includes(session.facilitatorUserId)
+    || scope.visibleUserIds.includes(session.lecturerUserId)
+    || (session.collaboratorUserIds || []).some((id: string) => scope.visibleUserIds.includes(id))
+    || scope.visibleUserIds.includes(courses.find((course) => course.id === session.courseId)?.ownerUserId)
+  );
   const products = [{ id: "product-ai", name: "AI企业升级计划" }];
   return {
     listCourseCategories: async () => categories,
@@ -40,8 +51,11 @@ function createRepository(): AcademyRepository {
     }),
     findCourseByCode: async (code) =>
       courses.find((course) => course.code === code) || null,
-    findCourseById: async (id) =>
-      courses.find((course) => course.id === id) || null,
+    findCourseById: async (id, scope) =>
+      courses.find((course) => (
+        course.id === id
+        && (!scope || scope.unrestricted || scope.visibleUserIds.includes(course.ownerUserId))
+      )) || null,
     findActiveUserById: async (id) => users.find((user) => user.id === id) || null,
     findActiveProductById: async (id) => products.find((product) => product.id === id) || null,
     findLatestCourseVersionId: async (courseId) =>
@@ -79,10 +93,10 @@ function createRepository(): AcademyRepository {
       items: sessions.slice((page - 1) * pageSize, page * pageSize),
       total: sessions.length,
     }),
-    findSessionById: async (id) =>
-      sessions.find((session) => session.id === id) || null,
-    getSessionDetail: async (id) => {
-      const session = sessions.find((item) => item.id === id);
+    findSessionById: async (id, scope) =>
+      sessions.find((session) => session.id === id && sessionVisible(session, scope)) || null,
+    getSessionDetail: async (id, scope) => {
+      const session = sessions.find((item) => item.id === id && sessionVisible(item, scope));
       return session
         ? {
             ...session,
@@ -107,7 +121,10 @@ function createRepository(): AcademyRepository {
     },
     listSessionTasks: async (sessionId) =>
       tasks.filter((task) => task.sessionId === sessionId),
-    findTaskById: async (id) => tasks.find((task) => task.id === id) || null,
+    findTaskById: async (id, scope) => tasks.find((task) => {
+      const session = sessions.find((item) => item.id === task.sessionId);
+      return task.id === id && session && sessionVisible(session, scope);
+    }) || null,
     updateTaskStatus: async (id, update) => {
       const task = tasks.find((item) => item.id === id);
       if (!task) return null;
@@ -125,17 +142,16 @@ function createRepository(): AcademyRepository {
       else engagements.push(engagement);
       return index >= 0 ? engagements[index] : engagement;
     },
-    findEngagementById: async (id) =>
-      engagements.find((engagement) => engagement.id === id) || null,
+    findEngagementById: async (id, scope) =>
+      engagements.find((engagement) => {
+        const session = sessions.find((item) => item.id === engagement.sessionId);
+        return engagement.id === id && session && sessionVisible(session, scope);
+      }) || null,
     findEngagementByKey: async (sessionId, participantKey) =>
       engagements.find(
         (engagement) =>
           engagement.sessionId === sessionId && engagement.participantKey === participantKey,
       ) || null,
-    findOrderById: async (id) =>
-      id === "order-100"
-        ? { id, orderNo: "ORD-20260808-001", customerId: "cust-100" }
-        : null,
     saveReview: async (review) => {
       const index = reviews.findIndex(
         (item) => item.sessionId === review.sessionId,
@@ -163,6 +179,19 @@ function createRepository(): AcademyRepository {
 const repository = createRepository();
 const service = createAcademyService(repository, {
   now: () => new Date("2026-08-08T09:00:00.000Z"),
+  resolveCustomer: async (id) => id === "cust-100" ? {
+    id,
+    name: "CRM测试客户",
+    ownerUserId: actor.id,
+    ownerUserName: actor.name,
+    isPublicPool: false,
+  } : null,
+  resolveLead: async () => null,
+  resolveOrder: async (id) => id === "order-100" ? {
+    id,
+    orderNo: "ORD-20260808-001",
+    customerId: "cust-100",
+  } : null,
 });
 
 const initialCategories = await service.listCourseCategories(actor);
@@ -236,6 +265,92 @@ const nextCourse = await service.createCourse(
 assert.equal(nextCourse.code, 0);
 assert.notEqual(nextCourse.data?.code, courseResult.data?.code, "课程编码必须由服务端自动生成且保持唯一");
 
+const outsider = { ...actor, id: "user-outsider", name: "其他部门负责人" };
+const outsiderService = createAcademyService(repository, {
+  now: () => new Date("2026-08-08T09:00:00.000Z"),
+  resolveScope: async () => ({ unrestricted: false, visibleUserIds: [outsider.id] }),
+  resolveCustomer: async () => null,
+  resolveLead: async () => null,
+  resolveOrder: async () => null,
+});
+const outsiderCourse = await outsiderService.createCourse(
+  {
+    title: "其他部门课程",
+    category: "公开课",
+    summary: "不属于当前用户的数据范围",
+    defaultDurationMinutes: 60,
+    objectives: [],
+  },
+  outsider,
+);
+assert.equal(outsiderCourse.code, 0);
+
+const restrictedService = createAcademyService(repository, {
+  now: () => new Date("2026-08-08T09:00:00.000Z"),
+  resolveScope: async () => ({ unrestricted: false, visibleUserIds: [actor.id] }),
+  resolveCustomer: async () => null,
+  resolveLead: async () => null,
+  resolveOrder: async () => null,
+});
+const forbiddenCourseStatus = await restrictedService.changeCourseStatus(
+  outsiderCourse.data!.id,
+  "ACTIVE",
+  actor,
+);
+assert.equal(forbiddenCourseStatus.code, 404, "范围外课程必须按不存在处理，不能发布或归档");
+
+assert.equal((await outsiderService.changeCourseStatus(outsiderCourse.data!.id, "ACTIVE", outsider)).code, 0);
+const outsiderSession = await outsiderService.createSession(
+  {
+    courseId: outsiderCourse.data!.id,
+    title: "其他部门课程安排",
+    startsAt: "2026-08-12T09:00:00.000Z",
+    endsAt: "2026-08-12T10:00:00.000Z",
+    venue: "其他部门直播间",
+    capacity: 20,
+    audience: "ALL_EMPLOYEES",
+    isInvitable: true,
+    facilitatorUserId: outsider.id,
+  },
+  outsider,
+);
+assert.equal(outsiderSession.code, 0);
+assert.equal(
+  (await restrictedService.changeSessionStatus(outsiderSession.data!.id, "READY", actor)).code,
+  404,
+  "范围外课程安排不能推进状态",
+);
+assert.equal(
+  (await restrictedService.updateTask(outsiderSession.data!.tasks[0].id, { status: "IN_PROGRESS" }, actor)).code,
+  404,
+  "范围外课程任务不能更新",
+);
+assert.equal(
+  (await restrictedService.saveReview({ sessionId: outsiderSession.data!.id, summary: "越权复盘" }, actor)).code,
+  404,
+  "范围外课程结果不能保存",
+);
+const firstInviteService = createAcademyService(repository, {
+  now: () => new Date("2026-08-08T09:00:00.000Z"),
+  resolveScope: async () => ({ unrestricted: false, visibleUserIds: [actor.id] }),
+  resolveCustomer: async (id) => id === "cust-first" ? {
+    id,
+    name: "首次邀约客户",
+    ownerUserId: actor.id,
+    ownerUserName: actor.name,
+    isPublicPool: false,
+  } : null,
+});
+assert.equal(
+  (await firstInviteService.saveEngagement({
+    sessionId: outsiderSession.data!.id,
+    customerId: "cust-first",
+    invitationStatus: "INVITED",
+  }, actor)).code,
+  0,
+  "销售无需已有学员记录，也能向公开课程安排发起首次邀约",
+);
+
 const invalidSession = await service.createSession(
   {
     courseId: courseResult.data!.id,
@@ -261,6 +376,10 @@ const sessionResult = await service.createSession(
     endsAt: "2026-08-10T11:00:00.000Z",
     venue: "极享直播间",
     capacity: 20,
+    deliveryMode: "LIVE",
+    audience: "ALL_EMPLOYEES",
+    isInvitable: true,
+    facilitatorUserId: actor.id,
   },
   actor,
 );
@@ -268,6 +387,11 @@ assert.equal(sessionResult.code, 0);
 assert.equal(sessionResult.data?.tasks[0]?.assigneeUserName, actor.name);
 assert.ok(sessionResult.data?.tasks[0]?.dueAt instanceof Date);
 assert.match(sessionResult.data?.tasks[0]?.acceptanceCriteria || "", /课程目标/);
+assert.equal(
+  "dueOffsetMinutes" in (sessionResult.data?.tasks[0] || {}),
+  false,
+  "任务模板的截止时间偏移只用于计算，不得泄漏到持久化任务记录",
+);
 assert.deepEqual(
   sessionResult.data?.tasks.map((task: any) => task.templateKey),
   [
@@ -343,7 +467,36 @@ const engagement = await service.saveEngagement(
   actor,
 );
 assert.equal(engagement.code, 0);
-assert.equal(engagement.data?.courseAssessment, "A");
+assert.equal(engagement.data?.attendanceStatus, "UNKNOWN", "销售邀约不能直接写入到课状态");
+assert.equal(engagement.data?.courseAssessment, null, "销售邀约不能直接写入课程评估");
+assert.equal(engagement.data?.participantName, "CRM测试客户", "学员名称必须来自服务端可信 CRM 数据");
+
+const invalidExecution = await service.updateEngagementExecution(
+  engagement.data!.id,
+  { attendanceStatus: "ATTENDED", interactionLevel: "VERY_HIGH", courseAssessment: "S" },
+  actor,
+);
+assert.equal(invalidExecution.code, 400, "课堂执行字段必须由服务端限制在允许枚举内");
+
+const executed = await service.updateEngagementExecution(
+  engagement.data!.id,
+  { attendanceStatus: "ATTENDED", interactionLevel: "HIGH", courseAssessment: "A" },
+  actor,
+);
+assert.equal(executed.code, 0);
+assert.equal(executed.data?.attendanceStatus, "ATTENDED");
+assert.equal(executed.data?.courseAssessment, "A");
+
+const invisibleCustomer = await service.saveEngagement(
+  {
+    sessionId: sessionResult.data!.id,
+    participantKey: "customer:cust-hidden",
+    customerId: "cust-hidden",
+    participantName: "伪造客户",
+  },
+  actor,
+);
+assert.equal(invisibleCustomer.code, 404, "销售不能邀约实时 CRM 范围外的客户");
 
 const linkedOrder = await service.linkEngagementOrder(
   engagement.data!.id,
@@ -354,6 +507,20 @@ assert.equal(linkedOrder.code, 0);
 assert.equal(linkedOrder.data?.orderNo, "ORD-20260808-001");
 assert.equal(linkedOrder.data?.handoffStatus, "ORDER_LINKED");
 assert.equal(linkedOrder.data?.followUpStatus, "DONE");
+
+const transferredCustomerService = createAcademyService(repository, {
+  now: () => new Date("2026-08-08T09:00:00.000Z"),
+  resolveScope: async () => ({ unrestricted: true, visibleUserIds: [actor.id] }),
+  resolveCustomer: async () => null,
+  resolveOrder: async (id) => id === "order-100" ? { id, orderNo: "ORD-20260808-001", customerId: "cust-100" } : null,
+});
+assert.equal(
+  (await transferredCustomerService.linkEngagementOrder(engagement.data!.id, { orderId: "order-100" }, actor)).code,
+  404,
+  "客户转让后旧销售不能继续关联订单",
+);
+
+assert.equal((await service.changeSessionStatus(sessionResult.data!.id, "IN_PROGRESS", actor)).code, 0);
 
 const editedAfterHandoff = await service.saveEngagement(
   {
@@ -372,6 +539,7 @@ const editedAfterHandoff = await service.saveEngagement(
 );
 assert.equal(editedAfterHandoff.data?.orderId, "order-100");
 assert.equal(editedAfterHandoff.data?.handoffStatus, "ORDER_LINKED");
+assert.equal(editedAfterHandoff.code, 0, "课程开始后已有学员仍可继续维护销售跟进");
 
 const savedAsset = await service.saveCourseAsset(
   courseResult.data!.id,
@@ -403,9 +571,52 @@ assert.equal(detail.code, 0);
 assert.equal(detail.data?.tasks.length, 9);
 assert.equal(detail.data?.engagements.length, 1);
 
+const viewer = {
+  ...actor,
+  id: "user-viewer",
+  name: "普通员工",
+  role: "普通员工",
+  permissions: [{ module: PERMISSION_KEYS.ACADEMY_VIEW, actions: ["read"] }],
+};
+const viewerService = createAcademyService(repository, {
+  now: () => new Date("2026-08-08T09:00:00.000Z"),
+  resolveScope: async () => ({ unrestricted: false, visibleUserIds: [actor.id] }),
+});
+const viewerDetail = await viewerService.getSessionDetail(sessionResult.data!.id, viewer);
+assert.equal(viewerDetail.code, 0);
+assert.deepEqual(viewerDetail.data?.engagements, [], "普通员工查看课程安排时不得获得客户及转化明细");
+const salesOnly = {
+  ...viewer,
+  id: "user-sales-only",
+  name: "其他销售",
+  permissions: [
+    { module: PERMISSION_KEYS.ACADEMY_VIEW, actions: ["read"] },
+    { module: PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE, actions: ["read", "write"] },
+  ],
+};
+assert.deepEqual(
+  (await viewerService.getSessionDetail(sessionResult.data!.id, salesOnly)).data?.engagements,
+  [],
+  "销售详情必须逐条经过实时 CRM 范围过滤，不能看到同课程其他销售客户",
+);
+
+const operator = {
+  ...viewer,
+  id: "user-operator",
+  name: "课程运营",
+  permissions: [
+    { module: PERMISSION_KEYS.ACADEMY_VIEW, actions: ["read"] },
+    { module: PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, actions: ["read", "write"] },
+  ],
+};
+const operatorDetail = await viewerService.getSessionDetail(sessionResult.data!.id, operator);
+assert.equal(operatorDetail.data?.engagements[0]?.participantName, "CRM测试客户");
+assert.equal(operatorDetail.data?.engagements[0]?.customerId, null, "课程运营不得获得 CRM 客户ID");
+assert.equal(operatorDetail.data?.engagements[0]?.orderId, null, "课程运营不得获得销售订单信息");
+
 const dashboard = await service.getDashboard(actor);
 assert.equal(dashboard.code, 0);
-assert.equal(dashboard.data?.sessionsNeedingAttention, 1);
-assert.equal(dashboard.data?.pendingFollowUps, 0, "订单交接完成后不应继续计入待跟进");
+assert.equal(dashboard.data?.sessionsNeedingAttention, 0);
+assert.equal(dashboard.data?.pendingFollowUps, 1, "已关联订单不再计入待跟进，首次邀约记录仍应保留待跟进");
 
 console.log("academy service tests passed");

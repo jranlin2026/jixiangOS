@@ -3,6 +3,7 @@ import type { BusinessAttachment } from './businessAttachment';
 export type AcademyCourseStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 export type AcademySessionStatus =
   "PLANNED" | "READY" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+export type AcademyDeliveryMode = "OFFLINE" | "LIVE" | "ONLINE";
 export type AcademyTaskStatus =
   | "PENDING"
   | "IN_PROGRESS"
@@ -78,10 +79,26 @@ export interface AcademySession {
   title: string;
   startsAt: string;
   endsAt: string;
+  deliveryMode: AcademyDeliveryMode;
   venue: string;
+  meetingUrl?: string;
   capacity: number;
+  inviteTarget: number;
+  registrationTarget: number;
+  attendanceTarget: number;
+  consultationTarget: number;
+  dealTarget: number;
+  targetRevenue: number;
   status: AcademySessionStatus;
+  audience?: "ALL_EMPLOYEES" | "RESPONSIBLE_ONLY";
+  isInvitable?: boolean;
+  canOpenDetail?: boolean;
+  facilitatorUserId?: string;
   facilitatorUserName?: string;
+  lecturerUserId?: string;
+  lecturerUserName?: string;
+  collaboratorUserIds?: string[];
+  collaboratorNames?: string[];
   course?: Pick<AcademyCourse, "code" | "title" | "category">;
   _count?: { engagements: number; tasks: number };
 }
@@ -174,7 +191,25 @@ export type CreateAcademyCourseInput = Pick<
 export type SaveAcademyCourseCategoryInput = Pick<AcademyCourseCategory, "name" | "description" | "sortOrder" | "isActive"> & { id?: string };
 export type CreateAcademySessionInput = Pick<
   AcademySession,
-  "courseId" | "title" | "startsAt" | "endsAt" | "venue" | "capacity"
+  | "courseId"
+  | "title"
+  | "startsAt"
+  | "endsAt"
+  | "deliveryMode"
+  | "venue"
+  | "meetingUrl"
+  | "capacity"
+  | "inviteTarget"
+  | "registrationTarget"
+  | "attendanceTarget"
+  | "consultationTarget"
+  | "dealTarget"
+  | "targetRevenue"
+  | "audience"
+  | "isInvitable"
+  | "facilitatorUserId"
+  | "lecturerUserId"
+  | "collaboratorUserIds"
 >;
 export type SaveAcademyEngagementInput = Omit<
   AcademyEngagement,

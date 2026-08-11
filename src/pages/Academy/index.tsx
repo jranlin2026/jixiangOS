@@ -1,13 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Autocomplete,
   Box,
   Button,
   Checkbox,
   Chip,
+  CircularProgress,
   Divider,
   Dialog,
   DialogActions,
   DialogContent,
+  Drawer,
   IconButton,
   LinearProgress,
   MenuItem,
@@ -21,6 +24,7 @@ import {
   TableRow,
   Tabs,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
@@ -30,15 +34,21 @@ import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import CloseIcon from "@mui/icons-material/Close";
+import ArchiveOutlinedIcon from "@mui/icons-material/ArchiveOutlined";
 import DownloadIcon from "@mui/icons-material/Download";
+import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
+import EventAvailableOutlinedIcon from "@mui/icons-material/EventAvailableOutlined";
 import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import GroupsIcon from "@mui/icons-material/Groups";
 import InsightsIcon from "@mui/icons-material/Insights";
+import PublishRoundedIcon from "@mui/icons-material/PublishRounded";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import RestoreOutlinedIcon from "@mui/icons-material/RestoreOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
+import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import { useLocation, useNavigate } from "react-router-dom";
 import { academyApi, customerApi, orderApi, productApi, settingsApi } from "../../api";
 import type {
@@ -75,6 +85,13 @@ import {
   ModulePage,
   ModuleTabs,
 } from "../../shared/components/ModuleShell";
+import { Plans } from "./AcademyPlans";
+import {
+  clampPageIndex,
+  getCourseStatusAction,
+  replaceCourseById,
+  updatePendingCourseIds,
+} from "./courseWorkspaceModel";
 
 const palette = {
   blue: "#0868F7",
@@ -103,27 +120,20 @@ type AcademyView =
   | "overview"
   | "courses"
   | "plans"
-  | "sessions"
-  | "engagements"
-  | "handoffs"
+  | "learners"
   | "reviews";
 const viewPath: Record<AcademyView, string> = {
   overview: ROUTES.ACADEMY,
   courses: `${ROUTES.ACADEMY}/courses`,
   plans: `${ROUTES.ACADEMY}/plans`,
-  sessions: `${ROUTES.ACADEMY}/sessions`,
-  engagements: `${ROUTES.ACADEMY}/engagements`,
-  handoffs: `${ROUTES.ACADEMY}/handoffs`,
+  learners: `${ROUTES.ACADEMY}/learners`,
   reviews: `${ROUTES.ACADEMY}/reviews`,
 };
 const navItems: Array<{ value: AcademyView; label: string }> = [
-  { value: "overview", label: "运营工作台" },
+  { value: "overview", label: "我的工作台" },
   { value: "courses", label: "课程资产" },
-  { value: "plans", label: "课程排期" },
-  { value: "sessions", label: "场次执行" },
-  { value: "engagements", label: "邀约与学员" },
-  { value: "handoffs", label: "转化与交接" },
-  { value: "reviews", label: "经营复盘" },
+  { value: "plans", label: "课程运营" },
+  { value: "learners", label: "邀约与转化" },
 ];
 
 const emptyCourse: CreateAcademyCourseInput = {
@@ -144,8 +154,21 @@ const emptySession: CreateAcademySessionInput = {
   title: "",
   startsAt: "",
   endsAt: "",
+  deliveryMode: "LIVE",
   venue: "",
+  meetingUrl: "",
   capacity: 30,
+  inviteTarget: 0,
+  registrationTarget: 0,
+  attendanceTarget: 0,
+  consultationTarget: 0,
+  dealTarget: 0,
+  targetRevenue: 0,
+  audience: "ALL_EMPLOYEES",
+  isInvitable: true,
+  facilitatorUserId: "",
+  lecturerUserId: "",
+  collaboratorUserIds: [],
 };
 const emptyEngagement: SaveAcademyEngagementInput = {
   sessionId: "",
@@ -174,11 +197,16 @@ const assetTypes: Array<{ value: AcademyAssetType; label: string }> = [
 
 const formatDate = (value?: string) =>
   value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "-";
+const deliveryModeLabel: Record<string, string> = {
+  OFFLINE: "线下授课",
+  LIVE: "直播授课",
+  ONLINE: "线上会议",
+};
 const statusLabel: Record<string, string> = {
   DRAFT: "草稿",
   ACTIVE: "已发布",
   ARCHIVED: "已归档",
-  PLANNED: "筹备中",
+  PLANNED: "已排期",
   READY: "已就绪",
   IN_PROGRESS: "进行中",
   COMPLETED: "已完成",
@@ -272,7 +300,7 @@ const Academy: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
-  const { alert, dialog: feedbackDialog } = useAppFeedback();
+  const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
   const [dashboard, setDashboard] = useState<AcademyDashboard>({
     activeCourses: 0,
     upcomingSessions: 0,
@@ -284,6 +312,8 @@ const Academy: React.FC = () => {
   const [details, setDetails] = useState<Record<string, AcademySessionDetail>>(
     {},
   );
+  const [sessionDetailErrors, setSessionDetailErrors] = useState<Record<string, string>>({});
+  const sessionDetailRequestsRef = useRef<Set<string>>(new Set());
   const [selectedSessionId, setSelectedSessionId] = useState("");
   const [selectedCourseId, setSelectedCourseId] = useState("");
   const [detail, setDetail] = useState<AcademySessionDetail | null>(null);
@@ -293,6 +323,9 @@ const Academy: React.FC = () => {
   const [courseSettingsOpen, setCourseSettingsOpen] = useState(false);
   const [sessionOpen, setSessionOpen] = useState(false);
   const [engagementOpen, setEngagementOpen] = useState(false);
+  const [engagementEditingId, setEngagementEditingId] = useState("");
+  const [engagementMode, setEngagementMode] = useState<"sales" | "execution">("sales");
+  const [planOpenSessionId, setPlanOpenSessionId] = useState("");
   const [courseForm, setCourseForm] = useState(emptyCourse);
   const [academyUsers, setAcademyUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -302,7 +335,12 @@ const Academy: React.FC = () => {
   const [engagementForm, setEngagementForm] = useState(emptyEngagement);
   const [reviewForm, setReviewForm] = useState(emptyReview);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
   const [courseAssets, setCourseAssets] = useState<Record<string, AcademyCourseAsset[]>>({});
+  const [courseAssetsLoadingIds, setCourseAssetsLoadingIds] = useState<Set<string>>(new Set());
+  const [courseAssetLoadErrors, setCourseAssetLoadErrors] = useState<Record<string, string>>({});
+  const courseAssetRequestsRef = useRef<Set<string>>(new Set());
   const [assetOpen, setAssetOpen] = useState(false);
   const [assetCourseId, setAssetCourseId] = useState("");
   const [assetType, setAssetType] = useState<AcademyAssetType>("PPT");
@@ -320,6 +358,7 @@ const Academy: React.FC = () => {
   } | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [courseStatusChangingIds, setCourseStatusChangingIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
@@ -328,12 +367,10 @@ const Academy: React.FC = () => {
     ? "plans"
     : location.pathname.endsWith("/courses")
       ? "courses"
-      : location.pathname.endsWith("/sessions")
-        ? "sessions"
-        : location.pathname.endsWith("/engagements")
-          ? "engagements"
-          : location.pathname.endsWith("/handoffs")
-            ? "handoffs"
+      : location.pathname.endsWith("/learners") ||
+          location.pathname.endsWith("/engagements") ||
+          location.pathname.endsWith("/handoffs")
+        ? "learners"
           : location.pathname.endsWith("/reviews")
             ? "reviews"
             : "overview";
@@ -367,19 +404,31 @@ const Academy: React.FC = () => {
     if (item.value === "overview")
       return hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_VIEW);
     if (item.value === "plans")
-      return hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE);
+      return (
+        hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE) ||
+        hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE) ||
+        hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE) ||
+        sessions.some((session) => session.canOpenDetail)
+      );
     if (item.value === "courses")
       return hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE);
-    if (item.value === "sessions")
-      return hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE);
-    if (item.value === "engagements" || item.value === "handoffs")
+    if (item.value === "learners")
       return hasPermission(
         currentUser,
         PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE,
       );
-    return hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE);
+    return false;
   });
   const selectedDetail = details[selectedSessionId];
+
+  useEffect(() => {
+    if (location.pathname.endsWith("/sessions"))
+      navigate(viewPath.plans, { replace: true });
+    if (location.pathname.endsWith("/engagements") || location.pathname.endsWith("/handoffs"))
+      navigate(viewPath.learners, { replace: true });
+    if (location.pathname.endsWith("/reviews"))
+      navigate(viewPath.plans, { replace: true });
+  }, [location.pathname, navigate]);
 
   useEffect(() => {
     if (!courseOpen) return;
@@ -396,6 +445,13 @@ const Academy: React.FC = () => {
     });
   }, [courseOpen, currentUser?.id]);
   useEffect(() => {
+    if (!sessionOpen) return;
+    void settingsApi.fetchAssignableUsers({ isActive: true }).then((response) => {
+      if (response.code === 0)
+        setAcademyUsers(response.data.filter((item) => item.isActive));
+    });
+  }, [sessionOpen]);
+  useEffect(() => {
     if (visibleNavItems.some((item) => item.value === view)) return;
     const fallback = visibleNavItems[0];
     if (fallback) navigate(viewPath[fallback.value], { replace: true });
@@ -410,23 +466,53 @@ const Academy: React.FC = () => {
         academyApi.listSessions({ page: 1, pageSize: 100 }),
         academyApi.listCourseCategories(),
       ]);
-    setLoading(false);
-    if (dashboardResponse.code !== 0)
+    if (dashboardResponse.code !== 0) {
+      setLoading(false);
       return alert(dashboardResponse.message, "商学院数据加载失败");
-    if (courseResponse.code !== 0)
+    }
+    if (courseResponse.code !== 0) {
+      setLoading(false);
       return alert(courseResponse.message, "课程库加载失败");
-    if (sessionResponse.code !== 0)
-      return alert(sessionResponse.message, "场次加载失败");
-    if (categoryResponse.code !== 0)
+    }
+    if (sessionResponse.code !== 0) {
+      setLoading(false);
+      return alert(sessionResponse.message, "课程安排加载失败");
+    }
+    if (categoryResponse.code !== 0) {
+      setLoading(false);
       return alert(categoryResponse.message, "课程分类加载失败");
+    }
+    const remainingSessionPages = Math.max(
+      0,
+      Math.ceil(sessionResponse.data.total / 100) - 1,
+    );
+    const remainingSessionResponses = remainingSessionPages
+      ? await Promise.all(
+          Array.from({ length: remainingSessionPages }, (_, index) =>
+            academyApi.listSessions({ page: index + 2, pageSize: 100 }),
+          ),
+        )
+      : [];
+    const failedSessionPage = remainingSessionResponses.find((response) => response.code !== 0);
+    if (failedSessionPage && failedSessionPage.code !== 0) {
+      setLoading(false);
+      return alert(failedSessionPage.message, "课程安排加载失败");
+    }
+    const allSessions = [
+      ...sessionResponse.data.items,
+      ...remainingSessionResponses.flatMap((response) =>
+        response.code === 0 ? response.data.items : [],
+      ),
+    ];
     setDashboard(dashboardResponse.data);
     setCourses(courseResponse.data.items);
-    setSessions(sessionResponse.data.items);
+    setSessions(allSessions);
     setCourseCategories(categoryResponse.data);
     if (!selectedCourseId && courseResponse.data.items[0])
       setSelectedCourseId(courseResponse.data.items[0].id);
-    if (!selectedSessionId && sessionResponse.data.items[0])
-      setSelectedSessionId(sessionResponse.data.items[0].id);
+    if (!selectedSessionId && allSessions[0])
+      setSelectedSessionId(allSessions[0].id);
+    setLoading(false);
   }, [alert, selectedCourseId, selectedSessionId]);
 
   useEffect(() => {
@@ -440,11 +526,29 @@ const Academy: React.FC = () => {
 
   const loadDetail = useCallback(
     async (sessionId: string, open = false) => {
-      const response = await academyApi.getSessionDetail(sessionId);
-      if (response.code !== 0)
-        return alert(response.message, "场次详情加载失败");
-      setDetails((current) => ({ ...current, [sessionId]: response.data }));
-      if (open) setDetail(response.data);
+      if (sessionDetailRequestsRef.current.has(sessionId)) return;
+      sessionDetailRequestsRef.current.add(sessionId);
+      try {
+        const response = await academyApi.getSessionDetail(sessionId);
+        if (response.code !== 0) {
+          setSessionDetailErrors((current) => ({ ...current, [sessionId]: response.message }));
+          if (open) await alert(response.message, "课程安排详情加载失败");
+          return;
+        }
+        setDetails((current) => ({ ...current, [sessionId]: response.data }));
+        setSessionDetailErrors((current) => {
+          const next = { ...current };
+          delete next[sessionId];
+          return next;
+        });
+        if (open) setDetail(response.data);
+      } catch {
+        const message = "课程安排详情加载失败，请重试。";
+        setSessionDetailErrors((current) => ({ ...current, [sessionId]: message }));
+        if (open) await alert(message, "课程安排详情加载失败");
+      } finally {
+        sessionDetailRequestsRef.current.delete(sessionId);
+      }
     },
     [alert],
   );
@@ -452,38 +556,66 @@ const Academy: React.FC = () => {
   const loadCourseAssets = useCallback(
     async (courseId: string) => {
       if (!courseId) return;
-      const response = await academyApi.listCourseAssets(courseId);
-      if (response.code !== 0)
-        return alert(response.message, "课程资产加载失败");
-      setCourseAssets((current) => ({ ...current, [courseId]: response.data }));
+      if (courseAssetRequestsRef.current.has(courseId)) return;
+      courseAssetRequestsRef.current.add(courseId);
+      setCourseAssetsLoadingIds((current) => updatePendingCourseIds(current, courseId, true));
+      setCourseAssetLoadErrors((current) => {
+        const next = { ...current };
+        delete next[courseId];
+        return next;
+      });
+      try {
+        const response = await academyApi.listCourseAssets(courseId);
+        if (response.code !== 0) {
+          setCourseAssetLoadErrors((current) => ({ ...current, [courseId]: response.message }));
+          await alert(response.message, "课程资产加载失败");
+          return;
+        }
+        setCourseAssets((current) => ({ ...current, [courseId]: response.data }));
+      } catch {
+        const message = "课程资产加载失败，请重试。";
+        setCourseAssetLoadErrors((current) => ({ ...current, [courseId]: message }));
+        await alert(message, "课程资产加载失败");
+      } finally {
+        courseAssetRequestsRef.current.delete(courseId);
+        setCourseAssetsLoadingIds((current) => updatePendingCourseIds(current, courseId, false));
+      }
     },
     [alert],
   );
 
   useEffect(() => {
+    if (view === "overview") {
+      sessions.forEach((session) => {
+        if ((canSession || canPlan || canReview || session.canOpenDetail) && !details[session.id] && !sessionDetailErrors[session.id]) void loadDetail(session.id);
+      });
+      return;
+    }
     if (
-      (view === "engagements" || view === "handoffs" || view === "reviews") &&
+      (view === "learners" || view === "reviews") &&
       selectedSessionId &&
       !details[selectedSessionId]
     )
       void loadDetail(selectedSessionId);
-  }, [details, loadDetail, selectedSessionId, view]);
+  }, [canPlan, canReview, canSession, details, loadDetail, selectedSessionId, sessionDetailErrors, sessions, view]);
   useEffect(() => {
-    if (view === "courses" && selectedCourseId && !courseAssets[selectedCourseId])
-      void loadCourseAssets(selectedCourseId);
-  }, [courseAssets, loadCourseAssets, selectedCourseId, view]);
-  useEffect(() => {
-    if (
-      (view !== "engagements" && view !== "handoffs") ||
-      !canEngagement ||
-      customers.length
-    ) return;
-    void customerApi
-      .fetchCustomers({ page: 1, pageSize: 100 })
-      .then((response) => {
-        if (response.code === 0) setCustomers(response.data.items);
-      });
-  }, [canEngagement, customers.length, view]);
+    if (!engagementOpen || engagementMode !== "sales" || !canEngagement) return;
+    let active = true;
+    setCustomerSearchLoading(true);
+    const timer = window.setTimeout(() => {
+      void customerApi.fetchCustomers({ page: 1, pageSize: 20, search: customerSearch.trim() || undefined })
+        .then((response) => {
+          if (active && response.code === 0) setCustomers(response.data.items);
+        })
+        .finally(() => {
+          if (active) setCustomerSearchLoading(false);
+        });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [canEngagement, customerSearch, engagementMode, engagementOpen]);
   useEffect(() => {
     if (!selectedDetail) return;
     const review = selectedDetail.review;
@@ -525,6 +657,17 @@ const Academy: React.FC = () => {
       })
       .sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt));
   }, [sessions]);
+  const invitableSessions = useMemo(
+    () => sessions.filter((item) => item.audience === "ALL_EMPLOYEES" && item.isInvitable && ["PLANNED", "READY"].includes(item.status)),
+    [sessions],
+  );
+  useEffect(() => {
+    if (view !== "learners") return;
+    if (invitableSessions.some((item) => item.id === selectedSessionId)) return;
+    const nextId = invitableSessions[0]?.id || "";
+    setSelectedSessionId(nextId);
+    if (nextId && !details[nextId]) void loadDetail(nextId);
+  }, [details, invitableSessions, loadDetail, selectedSessionId, view]);
   const selectedEngagements = selectedDetail?.engagements || [];
   const confirmed = selectedEngagements.filter(
     (item) => item.invitationStatus === "CONFIRMED",
@@ -583,20 +726,96 @@ const Academy: React.FC = () => {
     setSaving(true);
     const response = await academyApi.createSession(sessionForm);
     setSaving(false);
-    if (response.code !== 0) return alert(response.message, "场次创建失败");
+    if (response.code !== 0)
+      return alert(
+        /Backend request failed/i.test(response.message)
+          ? "课程安排保存失败，请刷新页面后重试。"
+          : response.message,
+        "课程安排创建失败",
+      );
     setSessionOpen(false);
     setSessionForm(emptySession);
     await loadBase();
+  };
+  const changeSessionStatus = async (
+    session: AcademySession,
+    status: AcademySession["status"],
+  ) => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const response = await academyApi.changeSessionStatus(session.id, status);
+      if (response.code !== 0) {
+        await alert(response.message, "课程安排状态更新失败");
+        return;
+      }
+      setSessions((current) => current.map((item) => (
+        item.id === session.id ? { ...item, ...response.data } : item
+      )));
+      await loadDetail(session.id);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const openSessionCreate = (course?: AcademyCourse, date?: Date) => {
+    const startsAt = date ? new Date(date) : new Date();
+    startsAt.setSeconds(0, 0);
+    if (date) startsAt.setHours(19, 30, 0, 0);
+    const durationMinutes = course?.defaultDurationMinutes || 120;
+    const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
+    const toLocalInput = (value: Date) => {
+      const offset = value.getTimezoneOffset() * 60_000;
+      return new Date(value.getTime() - offset).toISOString().slice(0, 16);
+    };
+    setSessionForm({
+      ...emptySession,
+      courseId: course?.id || "",
+      title: course ? `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}` : "",
+      startsAt: toLocalInput(startsAt),
+      endsAt: toLocalInput(endsAt),
+      facilitatorUserId: currentUser?.id || course?.ownerUserId || "",
+      lecturerUserId: course?.lecturerUserId || "",
+    });
+    setSessionOpen(true);
   };
   const changeCourseStatus = async (
     course: AcademyCourse,
     status: AcademyCourse["status"],
   ) => {
-    setSaving(true);
-    const response = await academyApi.changeCourseStatus(course.id, status);
-    setSaving(false);
-    if (response.code !== 0) return alert(response.message, "课程状态更新失败");
-    await loadBase();
+    const action = getCourseStatusAction(course);
+    if (action.nextStatus !== status) return;
+    if (courseStatusChangingIds.has(course.id)) return;
+    if (action.confirmationRequired) {
+      const confirmed = await confirm(
+        action.label === "发布"
+          ? `发布后课程将可用于课程安排，确认发布“${course.title}”吗？`
+          : `归档后将不能再新建课程安排，确认归档“${course.title}”吗？`,
+        `确认${action.label}课程`,
+        { confirmText: `确认${action.label}` },
+      );
+      if (!confirmed) return;
+    }
+    setCourseStatusChangingIds((current) => updatePendingCourseIds(current, course.id, true));
+    try {
+      const response = await academyApi.changeCourseStatus(course.id, status);
+      if (response.code !== 0) {
+        await alert(response.message, "课程状态更新失败");
+        return;
+      }
+      setCourses((current) => replaceCourseById(current, response.data));
+      const activeDelta = Number(response.data.status === "ACTIVE") - Number(course.status === "ACTIVE");
+      if (activeDelta) {
+        setDashboard((current) => ({
+          ...current,
+          activeCourses: Math.max(0, current.activeCourses + activeDelta),
+        }));
+      }
+      await alert(`课程已${action.label}`, "课程状态更新成功");
+    } catch {
+      await alert("请检查网络连接后重试。", "课程状态更新失败");
+    } finally {
+      setCourseStatusChangingIds((current) => updatePendingCourseIds(current, course.id, false));
+    }
   };
   const updateTask = async (
     task: AcademySessionTask,
@@ -666,10 +885,17 @@ const Academy: React.FC = () => {
   };
   const saveEngagement = async () => {
     setSaving(true);
-    const response = await academyApi.saveEngagement(engagementForm);
+    const response = engagementMode === "execution" && engagementEditingId
+      ? await academyApi.updateEngagementExecution(engagementEditingId, {
+          attendanceStatus: engagementForm.attendanceStatus,
+          interactionLevel: engagementForm.interactionLevel,
+          courseAssessment: engagementForm.courseAssessment,
+        })
+      : await academyApi.saveEngagement(engagementForm);
     setSaving(false);
     if (response.code !== 0) return alert(response.message, "学员记录保存失败");
     setEngagementOpen(false);
+    setEngagementEditingId("");
     setEngagementForm(emptyEngagement);
     await loadDetail(selectedSessionId);
   };
@@ -712,7 +938,7 @@ const Academy: React.FC = () => {
       <ModulePage>
         <ModuleHeader
           title="极享商学院"
-          description="连接课程资产、课程排期、场次执行、学员邀约、转化交接与经营复盘。"
+          description="连接课程资产、课程运营、邀约转化与个人待办。"
         />
         <ModuleTabs
           value={view}
@@ -963,7 +1189,7 @@ const Academy: React.FC = () => {
             </Paper>
             <Stack spacing={1.5}>
               <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
-                <SectionTitle title="场次控制台" />
+                <SectionTitle title="课程安排控制台" />
                 <Typography
                   fontSize={12.5}
                   color="text.secondary"
@@ -1053,7 +1279,7 @@ const Academy: React.FC = () => {
                 </Button>
               </Paper>
               <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
-                <SectionTitle title="场次负责人" />
+                <SectionTitle title="课程安排负责人" />
                 <Stack
                   direction="row"
                   spacing={1}
@@ -1193,7 +1419,7 @@ const Academy: React.FC = () => {
     <ModulePage>
       <ModuleHeader
         title="极享商学院"
-        description="连接课程资产、课程排期、场次执行、学员邀约、转化交接与经营复盘。"
+        description="连接课程资产、课程运营、邀约转化与个人待办。"
       />
       <ModuleTabs
         value={view}
@@ -1213,19 +1439,71 @@ const Academy: React.FC = () => {
             dashboard={dashboard}
             sessions={weekSessions}
             details={details}
-            onOpen={(id) => void loadDetail(id, true)}
+            currentUserId={currentUser?.id || ""}
+            showBusinessMetrics={canEngagement || canReview}
+            canOpenOperations={canPlan || canSession || canReview || sessions.some((session) => session.canOpenDetail)}
+            onOpen={(id) => {
+              setSelectedSessionId(id);
+              setPlanOpenSessionId(id);
+              navigate(viewPath.plans);
+              void loadDetail(id);
+            }}
             onViewPlans={() => navigate(viewPath.plans)}
-            onViewSessions={() => navigate(viewPath.sessions)}
+            onViewSessions={() => navigate(viewPath.plans)}
           />
         )}
         {view === "plans" && (
           <Plans
             sessions={sessions}
             details={details}
-            onCreate={() => setSessionOpen(true)}
-            canCreate={canPlan}
-            onViewAll={() => navigate(viewPath.sessions)}
+            detailErrors={sessionDetailErrors}
+            onCreate={(date) => openSessionCreate(undefined, date)}
+            canCreate={canPlan || canSession}
+            canManageTasks={canSession}
+            currentUserId={currentUser?.id || ""}
+            canManageLearners={canEngagement}
+            canReview={canReview}
+            requestedSessionId={planOpenSessionId}
+            onRequestConsumed={() => setPlanOpenSessionId("")}
             onNeedDetail={loadDetail}
+            onReloadDetail={(id) => void loadDetail(id)}
+            onSelectSession={(id) => {
+              setSelectedSessionId(id);
+            }}
+            onTaskAction={openTaskAction}
+            onAddLearner={(sessionId) => {
+              setEngagementMode("sales");
+              setSelectedSessionId(sessionId);
+              setEngagementEditingId("");
+              setEngagementForm({ ...emptyEngagement, sessionId });
+              setEngagementOpen(true);
+            }}
+            onEditLearner={(engagement) => {
+              setEngagementMode("execution");
+              setSelectedSessionId(engagement.sessionId);
+              setEngagementEditingId(engagement.id);
+              setEngagementForm({
+                sessionId: engagement.sessionId,
+                participantKey: engagement.participantKey,
+                participantName: engagement.participantName,
+                customerId: engagement.customerId,
+                leadId: engagement.leadId,
+                invitationStatus: engagement.invitationStatus,
+                attendanceStatus: engagement.attendanceStatus,
+                interactionLevel: engagement.interactionLevel,
+                courseAssessment: engagement.courseAssessment,
+                followUpStatus: engagement.followUpStatus,
+                nextFollowUpAt: engagement.nextFollowUpAt,
+                notes: engagement.notes,
+              });
+              setEngagementOpen(true);
+            }}
+            onLinkOrder={(engagement) => void openOrderLink(engagement)}
+            onChangeStatus={(session, status) => void changeSessionStatus(session, status)}
+            reviewForm={reviewForm}
+            onReviewFormChange={setReviewForm}
+            onSaveReview={() => void saveReview()}
+            saving={saving}
           />
         )}
         {view === "courses" && (
@@ -1233,58 +1511,29 @@ const Academy: React.FC = () => {
             items={courses}
             sessions={sessions}
             assets={courseAssets}
+            assetLoadingCourseIds={courseAssetsLoadingIds}
+            assetLoadErrors={courseAssetLoadErrors}
             categories={courseCategories}
             canManage={canCourse}
             onCreate={openCourseCreate}
             onSettings={() => setCourseSettingsOpen(true)}
             onView={(course) => {
               setSelectedCourseId(course.id);
-              void loadCourseAssets(course.id);
+              if (!courseAssets[course.id]) void loadCourseAssets(course.id);
             }}
             onEdit={openCourseEdit}
             onUploadAsset={openAssetUpload}
+            onReloadAssets={(course) => void loadCourseAssets(course.id)}
             onStatusChange={(course, status) =>
               void changeCourseStatus(course, status)
             }
-            onCreateSession={(course) => {
-              setSessionForm({ ...emptySession, courseId: course.id, title: `${course.title}场次` });
-              setSessionOpen(true);
-            }}
+            statusChangingCourseIds={courseStatusChangingIds}
+            onCreateSession={(course) => openSessionCreate(course)}
           />
         )}
-        {view === "sessions" && (
-          <>
-            <SectionTitle
-              title="场次执行"
-              helper="按场次推进课前准备、现场执行、课后跟进和复盘门禁。"
-              action={
-                <TextField
-                  size="small"
-                  placeholder="搜索场次、课程或场地"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-              }
-            />
-            <SessionTable
-              items={pagedSessions}
-              onOpen={(id) => void loadDetail(id, true)}
-            />
-            <TablePagination
-              count={filteredSessions.length}
-              page={page}
-              rowsPerPage={pageSize}
-              onPageChange={(_, next) => setPage(next)}
-              onRowsPerPageChange={(event) => {
-                setPageSize(Number(event.target.value));
-                setPage(0);
-              }}
-            />
-          </>
-        )}
-        {view === "engagements" && (
-          <EngagementWorkspace
-            sessions={sessions}
+        {view === "learners" && (
+          <LearnerConversionWorkspace
+            sessions={invitableSessions}
             selectedSessionId={selectedSessionId}
             onSelectSession={(id) => {
               setSelectedSessionId(id);
@@ -1293,46 +1542,36 @@ const Academy: React.FC = () => {
             detail={selectedDetail}
             canManage={canEngagement}
             onAdd={() => {
+              setEngagementMode("sales");
+              setEngagementEditingId("");
               setEngagementForm({
                 ...emptyEngagement,
                 sessionId: selectedSessionId,
               });
               setEngagementOpen(true);
             }}
-          />
-        )}
-        {view === "handoffs" && (
-          <HandoffWorkspace
-            sessions={sessions}
-            selectedSessionId={selectedSessionId}
-            onSelectSession={(id) => {
-              setSelectedSessionId(id);
-              void loadDetail(id);
-            }}
-            detail={selectedDetail}
-            canManage={canEngagement}
             onLinkOrder={(engagement) => void openOrderLink(engagement)}
+            onEdit={(engagement) => {
+              setEngagementMode("sales");
+              setEngagementEditingId(engagement.id);
+              setEngagementForm({
+                sessionId: engagement.sessionId,
+                participantKey: engagement.participantKey,
+                participantName: engagement.participantName,
+                customerId: engagement.customerId,
+                leadId: engagement.leadId,
+                invitationStatus: engagement.invitationStatus,
+                attendanceStatus: engagement.attendanceStatus,
+                interactionLevel: engagement.interactionLevel,
+                courseAssessment: engagement.courseAssessment,
+                followUpStatus: engagement.followUpStatus,
+                nextFollowUpAt: engagement.nextFollowUpAt,
+                notes: engagement.notes,
+              });
+              setEngagementOpen(true);
+            }}
             onGoCustomers={() => navigate(ROUTES.CUSTOMERS)}
             onGoOrders={() => navigate(ROUTES.ORDERS)}
-          />
-        )}
-        {view === "reviews" && (
-          <Reviews
-            sessions={sessions}
-            details={details}
-            selectedId={selectedSessionId}
-            onSelect={(id) => {
-              setSelectedSessionId(id);
-              void loadDetail(id);
-            }}
-            confirmed={confirmed}
-            attended={attended}
-            hot={hot}
-            canEdit={canReview}
-            form={reviewForm}
-            onFormChange={setReviewForm}
-            onSave={() => void saveReview()}
-            saving={saving}
           />
         )}
       </Stack>
@@ -1497,106 +1736,85 @@ const Academy: React.FC = () => {
         {({ markDirty, requestClose }) => (
           <>
             <DialogCloseTitle onClose={() => void requestClose()}>
-              新建课程场次
+              新建课程安排
             </DialogCloseTitle>
-            <DialogContent dividers>
+            <DialogContent dividers sx={{ bgcolor: palette.soft }}>
               <Stack spacing={2}>
-                <TextField
-                  select
-                  label="课程 *"
-                  value={sessionForm.courseId}
-                  onChange={(event) => {
-                    markDirty();
-                    setSessionForm({
-                      ...sessionForm,
-                      courseId: event.target.value,
-                    });
-                  }}
-                >
-                  {courses
-                    .filter((item) => item.status === "ACTIVE")
-                    .map((item) => (
-                      <MenuItem key={item.id} value={item.id}>
-                        {item.code} · {item.title}
-                      </MenuItem>
+                <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
+                  <SectionTitle title="1 课程信息" helper="选择课程资产，安排名称可按当期主题调整。" />
+                  <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
+                    <TextField select label="课程 *" value={sessionForm.courseId} onChange={(event) => {
+                      markDirty();
+                      const course = courses.find((item) => item.id === event.target.value);
+                      const startsAt = sessionForm.startsAt ? new Date(sessionForm.startsAt) : new Date();
+                      setSessionForm({ ...sessionForm, courseId: event.target.value, title: course ? `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}` : "", lecturerUserId: course?.lecturerUserId || "" });
+                    }}>
+                      {courses.filter((item) => item.status === "ACTIVE").map((item) => <MenuItem key={item.id} value={item.id}>{item.code} · {item.title}</MenuItem>)}
+                    </TextField>
+                    <TextField label="安排名称" helperText="未填写时系统会按课程名称和日期自动生成" value={sessionForm.title} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, title: event.target.value }); }} />
+                    <TextField select label="课程运营负责人 *" value={sessionForm.facilitatorUserId} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, facilitatorUserId: event.target.value }); }}>
+                      {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}
+                    </TextField>
+                    <TextField select label="主讲人 *" value={sessionForm.lecturerUserId || ""} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, lecturerUserId: event.target.value }); }}>
+                      {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}
+                    </TextField>
+                  </Box>
+                </Paper>
+
+                <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
+                  <SectionTitle title="2 时间与授课" helper="授课方式决定需要填写场地还是会议链接。" />
+                  <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
+                    <TextField type="datetime-local" label="开始时间 *" InputLabelProps={{ shrink: true }} value={sessionForm.startsAt} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, startsAt: event.target.value }); }} />
+                    <TextField type="datetime-local" label="结束时间 *" InputLabelProps={{ shrink: true }} value={sessionForm.endsAt} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, endsAt: event.target.value }); }} />
+                    <TextField select label="授课方式 *" value={sessionForm.deliveryMode} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, deliveryMode: event.target.value as CreateAcademySessionInput["deliveryMode"], venue: "", meetingUrl: "" }); }}>
+                      {Object.entries(deliveryModeLabel).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                    </TextField>
+                    {sessionForm.deliveryMode === "ONLINE"
+                      ? <TextField label="线上会议链接 *" value={sessionForm.meetingUrl || ""} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, meetingUrl: event.target.value }); }} />
+                      : <TextField label={sessionForm.deliveryMode === "LIVE" ? "直播间 / 直播账号 *" : "授课场地 *"} value={sessionForm.venue} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, venue: event.target.value }); }} />}
+                    <TextField select label="协作人员" value={sessionForm.collaboratorUserIds || []} SelectProps={{ multiple: true, renderValue: (selected) => (selected as string[]).map((id) => academyUsers.find((user) => user.id === id)?.name).filter(Boolean).join("、") }} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, collaboratorUserIds: typeof event.target.value === "string" ? event.target.value.split(",") : event.target.value as string[] }); }} sx={{ gridColumn: { md: "1 / -1" } }}>
+                      {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}><Checkbox checked={(sessionForm.collaboratorUserIds || []).includes(user.id)} />{user.name}（{user.positionName || user.role}）</MenuItem>)}
+                    </TextField>
+                  </Box>
+                </Paper>
+
+                <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
+                  <SectionTitle title="3 经营目标" helper="用于周计划和经营复盘；暂不作为创建门禁。" />
+                  <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4, 1fr)" }, gap: 2 }}>
+                    {[["capacity", "计划容量"], ["inviteTarget", "计划邀约人数"], ["registrationTarget", "计划报名人数"], ["attendanceTarget", "计划到课人数"], ["consultationTarget", "计划咨询人数"], ["dealTarget", "计划成交人数"], ["targetRevenue", "目标成交金额（元）"]].map(([key, label]) => (
+                      <TextField key={key} type="number" label={label} value={Number(sessionForm[key as keyof CreateAcademySessionInput] || 0)} inputProps={{ min: 0 }} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, [key]: Number(event.target.value) }); }} />
                     ))}
-                </TextField>
-                <TextField
-                  label="场次名称 *"
-                  value={sessionForm.title}
-                  onChange={(event) => {
-                    markDirty();
-                    setSessionForm({
-                      ...sessionForm,
-                      title: event.target.value,
-                    });
-                  }}
-                />
-                <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-                  <TextField
-                    fullWidth
-                    type="datetime-local"
-                    label="开始时间 *"
-                    InputLabelProps={{ shrink: true }}
-                    value={sessionForm.startsAt}
-                    onChange={(event) => {
-                      markDirty();
-                      setSessionForm({
-                        ...sessionForm,
-                        startsAt: event.target.value,
-                      });
-                    }}
-                  />
-                  <TextField
-                    fullWidth
-                    type="datetime-local"
-                    label="结束时间 *"
-                    InputLabelProps={{ shrink: true }}
-                    value={sessionForm.endsAt}
-                    onChange={(event) => {
-                      markDirty();
-                      setSessionForm({
-                        ...sessionForm,
-                        endsAt: event.target.value,
-                      });
-                    }}
-                  />
-                </Stack>
-                <TextField
-                  label="场地 / 直播间"
-                  value={sessionForm.venue}
-                  onChange={(event) => {
-                    markDirty();
-                    setSessionForm({
-                      ...sessionForm,
-                      venue: event.target.value,
-                    });
-                  }}
-                />
-                <TextField
-                  label="计划容量 *"
-                  type="number"
-                  value={sessionForm.capacity}
-                  onChange={(event) => {
-                    markDirty();
-                    setSessionForm({
-                      ...sessionForm,
-                      capacity: Number(event.target.value),
-                    });
-                  }}
-                />
+                  </Box>
+                </Paper>
+
+                <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
+                  <SectionTitle title="4 可见与邀约范围" helper="内部安排只对课程责任人可见；全员安排会出现在员工工作台。" />
+                  <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
+                    <TextField select label="可见范围 *" value={sessionForm.audience} onChange={(event) => { markDirty(); const audience = event.target.value as CreateAcademySessionInput["audience"]; setSessionForm({ ...sessionForm, audience, isInvitable: audience === "ALL_EMPLOYEES" ? sessionForm.isInvitable : false }); }}>
+                      <MenuItem value="ALL_EMPLOYEES">全体员工可见</MenuItem>
+                      <MenuItem value="RESPONSIBLE_ONLY">仅课程责任人可见</MenuItem>
+                    </TextField>
+                    <TextField select label="销售是否可邀约 *" value={sessionForm.isInvitable ? "YES" : "NO"} disabled={sessionForm.audience !== "ALL_EMPLOYEES"} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, isInvitable: event.target.value === "YES" }); }}>
+                      <MenuItem value="YES">允许销售邀约本人可见客户</MenuItem>
+                      <MenuItem value="NO">不允许销售邀约</MenuItem>
+                    </TextField>
+                  </Box>
+                </Paper>
+
+                <Paper variant="outlined" sx={{ ...panelSx, p: 2, bgcolor: palette.blueSoft }}>
+                  <Typography fontWeight={900}>保存后将自动生成执行清单</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>包含课前准备、现场执行和课后跟进任务，可在课程安排详情中逐项推进与验收。</Typography>
+                </Paper>
               </Stack>
             </DialogContent>
             <DialogActions>
               <Button onClick={() => void requestClose()}>取消</Button>
               <Button
                 variant="contained"
-                disabled={
-                  saving || !sessionForm.courseId || !sessionForm.title.trim()
-                }
+                disabled={saving || !sessionForm.courseId || !sessionForm.startsAt || !sessionForm.endsAt || !sessionForm.facilitatorUserId || !sessionForm.lecturerUserId || (sessionForm.deliveryMode === "ONLINE" ? !sessionForm.meetingUrl?.trim() : !sessionForm.venue.trim())}
                 onClick={() => void saveSession()}
               >
-                创建场次并生成任务
+                保存课程安排并生成任务
               </Button>
             </DialogActions>
           </>
@@ -1614,75 +1832,103 @@ const Academy: React.FC = () => {
         {({ markDirty, requestClose }) => (
           <>
             <DialogCloseTitle onClose={() => void requestClose()}>
-              添加场次学员
+              {engagementMode === "execution" ? "记录学员执行" : engagementEditingId ? "更新销售跟进" : "从 CRM 邀约客户"}
             </DialogCloseTitle>
             <DialogContent dividers>
               <Stack spacing={2}>
-                <TextField
-                  select
-                  label="CRM客户 *"
-                  value={engagementForm.customerId || ""}
-                  onChange={(event) => {
-                    markDirty();
-                    const customer = customers.find(
-                      (item) => item.id === event.target.value,
-                    );
-                    if (!customer) return;
-                    setEngagementForm({
-                      ...engagementForm,
-                      customerId: customer.id,
-                      participantKey: `customer:${customer.id}`,
-                      participantName: customer.name,
-                    });
-                  }}
-                >
-                  {customers.map((customer) => (
-                    <MenuItem key={customer.id} value={customer.id}>
-                      {customer.name} · {customer.company || "未填写公司"} ·{" "}
-                      {customer.owner || "待分配"}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                <TextField
-                  select
-                  label="邀约状态"
-                  value={engagementForm.invitationStatus}
-                  onChange={(event) => {
-                    markDirty();
-                    setEngagementForm({
-                      ...engagementForm,
-                      invitationStatus: event.target.value,
-                    });
-                  }}
-                >
-                  <MenuItem value="PENDING">待邀约</MenuItem>
-                  <MenuItem value="INVITED">已邀约</MenuItem>
-                  <MenuItem value="CONFIRMED">已确认</MenuItem>
-                  <MenuItem value="DECLINED">已拒绝</MenuItem>
-                </TextField>
-                <TextField
-                  multiline
-                  minRows={2}
-                  label="邀约备注"
-                  value={engagementForm.notes || ""}
-                  onChange={(event) => {
-                    markDirty();
-                    setEngagementForm({
-                      ...engagementForm,
-                      notes: event.target.value,
-                    });
-                  }}
-                />
+                {engagementMode === "execution" ? (
+                  <>
+                    <TextField label="学员" value={engagementForm.participantName} disabled />
+                    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
+                  <TextField
+                    select
+                    label="到课状态"
+                    value={engagementForm.attendanceStatus}
+                    onChange={(event) => {
+                      markDirty();
+                      setEngagementForm({ ...engagementForm, attendanceStatus: event.target.value });
+                    }}
+                  >
+                    <MenuItem value="UNKNOWN">未确认</MenuItem>
+                    <MenuItem value="ATTENDED">已到课</MenuItem>
+                    <MenuItem value="ABSENT">未到课</MenuItem>
+                  </TextField>
+                  <TextField
+                    select
+                    label="课堂互动"
+                    value={engagementForm.interactionLevel || ""}
+                    onChange={(event) => {
+                      markDirty();
+                      setEngagementForm({ ...engagementForm, interactionLevel: event.target.value });
+                    }}
+                  >
+                    <MenuItem value="">待记录</MenuItem>
+                    <MenuItem value="HIGH">高</MenuItem>
+                    <MenuItem value="MEDIUM">中</MenuItem>
+                    <MenuItem value="LOW">低</MenuItem>
+                  </TextField>
+                  <TextField
+                    select
+                    label="课程评估"
+                    value={engagementForm.courseAssessment || ""}
+                    onChange={(event) => {
+                      markDirty();
+                      setEngagementForm({ ...engagementForm, courseAssessment: event.target.value });
+                    }}
+                  >
+                    <MenuItem value="">待评估</MenuItem>
+                    <MenuItem value="A">A类重点跟进</MenuItem>
+                    <MenuItem value="B">B类建立计划</MenuItem>
+                    <MenuItem value="C">C类持续培育</MenuItem>
+                  </TextField>
+                    </Box>
+                  </>
+                ) : (
+                  <>
+                    {engagementEditingId ? (
+                      <TextField label="CRM客户" value={engagementForm.participantName} disabled />
+                    ) : (
+                      <Autocomplete
+                        options={customers}
+                        loading={customerSearchLoading}
+                        filterOptions={(options) => options}
+                        getOptionLabel={(customer) => `${customer.name} · ${customer.company || "未填写公司"} · ${customer.owner || "待分配"}`}
+                        isOptionEqualToValue={(option, value) => option.id === value.id}
+                        onInputChange={(_, value, reason) => {
+                          if (reason === "input" || reason === "clear") setCustomerSearch(value);
+                        }}
+                        onChange={(_, customer) => {
+                          markDirty();
+                          setEngagementForm(customer
+                            ? { ...engagementForm, customerId: customer.id, participantKey: `customer:${customer.id}`, participantName: customer.name }
+                            : { ...engagementForm, customerId: undefined, participantKey: "", participantName: "" });
+                        }}
+                        renderInput={(params) => <TextField {...params} label="CRM客户 *" placeholder="搜索姓名、公司或手机号" />}
+                        noOptionsText={customerSearch ? "未找到本人可见客户" : "请输入客户信息搜索"}
+                      />
+                    )}
+                    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
+                      <TextField select label="邀约状态" value={engagementForm.invitationStatus} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, invitationStatus: event.target.value }); }}>
+                        <MenuItem value="PENDING">待邀约</MenuItem><MenuItem value="INVITED">已邀约</MenuItem><MenuItem value="CONFIRMED">已确认</MenuItem><MenuItem value="DECLINED">已拒绝</MenuItem>
+                      </TextField>
+                      <TextField select label="跟进状态" value={engagementForm.followUpStatus} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, followUpStatus: event.target.value }); }}>
+                        <MenuItem value="PENDING">待跟进</MenuItem><MenuItem value="IN_PROGRESS">跟进中</MenuItem><MenuItem value="DONE">已完成</MenuItem>
+                      </TextField>
+                    </Box>
+                    <TextField type="datetime-local" label="下次跟进时间" InputLabelProps={{ shrink: true }} value={engagementForm.nextFollowUpAt?.slice(0, 16) || ""} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, nextFollowUpAt: event.target.value }); }} />
+                    <TextField multiline minRows={2} label="销售跟进备注" value={engagementForm.notes || ""} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, notes: event.target.value }); }} />
+                  </>
+                )}
               </Stack>
             </DialogContent>
             <DialogActions>
               <Button onClick={() => void requestClose()}>取消</Button>
               <Button
                 variant="contained"
-                disabled={saving || !engagementForm.customerId}
+                disabled={saving || (engagementMode === "sales" && !engagementForm.customerId)}
                 onClick={() => void saveEngagement()}
               >
-                加入场次
+                {engagementMode === "execution" ? "保存学员执行" : engagementEditingId ? "保存销售跟进" : "加入邀约名单"}
               </Button>
             </DialogActions>
           </>
@@ -1834,10 +2080,13 @@ const Overview: React.FC<{
   dashboard: AcademyDashboard;
   sessions: AcademySession[];
   details: Record<string, AcademySessionDetail>;
+  currentUserId: string;
+  showBusinessMetrics: boolean;
+  canOpenOperations: boolean;
   onOpen: (id: string) => void;
   onViewPlans: () => void;
   onViewSessions: () => void;
-}> = ({ dashboard, sessions, details, onOpen, onViewPlans, onViewSessions }) => {
+}> = ({ dashboard, sessions, details, currentUserId, showBusinessMetrics, canOpenOperations, onOpen, onViewPlans, onViewSessions }) => {
   const engagementList = Object.values(details).flatMap(
     (item) => item.engagements,
   );
@@ -1880,10 +2129,10 @@ const Overview: React.FC<{
     item.tasks.map((task) => ({ ...task, sessionTitle: item.title })),
   );
   const riskTasks = allTasks
-    .filter((task) => task.status === "BLOCKED" || task.status === "PENDING")
+    .filter((task) => task.assigneeUserId === currentUserId && (task.status === "BLOCKED" || task.status === "PENDING"))
     .slice(0, 3);
   const todoTasks = allTasks
-    .filter((task) => task.status !== "DONE")
+    .filter((task) => task.assigneeUserId === currentUserId && task.status !== "DONE")
     .slice(0, 6);
   return (
     <>
@@ -1925,9 +2174,11 @@ const Overview: React.FC<{
               <ChevronRightIcon fontSize="small" />
             </IconButton>
           </Stack>
-          <Button size="small" variant="outlined" onClick={onViewSessions}>
-            查看全部场次
-          </Button>
+          {canOpenOperations && (
+            <Button size="small" variant="outlined" onClick={onViewSessions}>
+              查看全部课程安排
+            </Button>
+          )}
         </Stack>
         <Box
           sx={{
@@ -2002,14 +2253,11 @@ const Overview: React.FC<{
                         fontWeight: 800,
                       }}
                     />
-                    <Button
-                      size="small"
-                      variant="contained"
-                      onClick={() => onOpen(session.id)}
-                      sx={{ mt: 0.5 }}
-                    >
-                      进入场次
-                    </Button>
+                    {canOpenOperations && session.canOpenDetail !== false && (
+                      <Button size="small" variant="contained" onClick={() => onOpen(session.id)} sx={{ mt: 0.5 }}>
+                        进入课程运营
+                      </Button>
+                    )}
                   </Stack>
                 ))
               ) : (
@@ -2039,7 +2287,7 @@ const Overview: React.FC<{
         <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
           <SectionTitle
             title="准备度风险预警"
-            helper={`${Math.max(dashboard.sessionsNeedingAttention, riskTasks.length)} 项需关注`}
+            helper={`${riskTasks.length} 项需关注`}
           />
           <TableContainer sx={{ mt: 1 }}>
             <SystemDataTable
@@ -2061,7 +2309,7 @@ const Overview: React.FC<{
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ width: "30%" }}>风险事项</TableCell>
-                  <TableCell sx={{ width: "25%" }}>关联场次</TableCell>
+                  <TableCell sx={{ width: "25%" }}>关联课程安排</TableCell>
                   <TableCell sx={{ width: "15%" }}>风险</TableCell>
                   <TableCell sx={{ width: "17%" }}>负责人</TableCell>
                   <TableCell sx={{ width: "13%" }}>状态</TableCell>
@@ -2083,7 +2331,7 @@ const Overview: React.FC<{
                         }}
                       />
                     </TableCell>
-                    <TableCell>{task.completedByName || "待分配"}</TableCell>
+                    <TableCell>{task.assigneeUserName || "待分配"}</TableCell>
                     <TableCell
                       sx={{
                         color:
@@ -2110,7 +2358,7 @@ const Overview: React.FC<{
           查看全部风险 <ChevronRightIcon fontSize="small" />
         </Button>
         </Paper>
-        <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+        {showBusinessMetrics && <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
           <SectionTitle
             title="本周转化漏斗概览"
             helper="按当前有权查看的场次统计"
@@ -2168,20 +2416,20 @@ const Overview: React.FC<{
               ? `${((funnel[3].value / funnel[0].value) * 100).toFixed(1)}%`
               : "0.0%"}
           </Typography>
-        </Paper>
+        </Paper>}
       </Box>
 
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
         <SectionTitle
           title="我的待办"
-          helper={`${Math.max(dashboard.pendingFollowUps, todoTasks.length)} 项待推进`}
+          helper={`${todoTasks.length} 项待推进`}
         />
         <TableContainer sx={{ mt: 1 }}>
           <SystemDataTable tableId="academy-overview-execution-tasks">
             <TableHead>
               <TableRow>
                 <TableCell>任务内容</TableCell>
-                <TableCell>关联场次</TableCell>
+                <TableCell>关联课程安排</TableCell>
                 <TableCell>任务类型</TableCell>
                 <TableCell>负责人</TableCell>
                 <TableCell>截止时间</TableCell>
@@ -2200,8 +2448,8 @@ const Overview: React.FC<{
                         ? "现场执行"
                         : "课后跟进"}
                   </TableCell>
-                  <TableCell>{task.completedByName || "待分配"}</TableCell>
-                  <TableCell>-</TableCell>
+                  <TableCell>{task.assigneeUserName || "待分配"}</TableCell>
+                  <TableCell>{formatDate(task.dueAt)}</TableCell>
                   <TableCell>
                     <Chip
                       size="small"
@@ -2236,14 +2484,14 @@ const Overview: React.FC<{
   );
 };
 
-const Plans: React.FC<{
+export const LegacyPlans: React.FC<{
   sessions: AcademySession[];
   details: Record<string, AcademySessionDetail>;
-  onCreate: () => void;
+  onCreate: (date?: Date) => void;
   canCreate: boolean;
-  onViewAll: () => void;
   onNeedDetail: (id: string) => void;
-}> = ({ sessions, details, onCreate, canCreate, onViewAll, onNeedDetail }) => {
+  onExecute: (id: string) => void;
+}> = ({ sessions, details, onCreate, canCreate, onNeedDetail, onExecute }) => {
   const [weekOffset, setWeekOffset] = useState(0);
   const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
   const monday = new Date();
@@ -2305,17 +2553,22 @@ const Plans: React.FC<{
             </IconButton>
           </Stack>
           <Stack direction="row" spacing={1}>
-            <Button size="small" variant="outlined" onClick={onViewAll}>
-              查看全部场次
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={!selected}
+              onClick={() => selected && onExecute(selected.id)}
+            >
+              打开课程安排
             </Button>
             {canCreate && (
               <Button
                 size="small"
                 variant="contained"
                 startIcon={<AddIcon />}
-                onClick={onCreate}
+                onClick={() => onCreate()}
               >
-                新建课程计划
+                新建课程安排
               </Button>
             )}
           </Stack>
@@ -2487,7 +2740,7 @@ const Plans: React.FC<{
               color="text.secondary"
               sx={{ py: 5, textAlign: "center" }}
             >
-              请先创建本周课程场次
+              请先创建本周课程安排
             </Typography>
           )}
         </Paper>
@@ -2568,7 +2821,7 @@ const Plans: React.FC<{
                 {!selected && (
                   <TableRow>
                     <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                      当前周暂无课程场次
+                      当前周暂无课程安排
                     </TableCell>
                   </TableRow>
                 )}
@@ -2581,10 +2834,388 @@ const Plans: React.FC<{
   );
 };
 
-const CourseWorkspace: React.FC<{
+const courseStatusIcon = (label: "发布" | "归档" | "恢复") => {
+  if (label === "发布") return <PublishRoundedIcon fontSize="small" />;
+  if (label === "归档") return <ArchiveOutlinedIcon fontSize="small" />;
+  return <RestoreOutlinedIcon fontSize="small" />;
+};
+
+const courseStatusChipSx = (status: AcademyCourse["status"]) => ({
+  height: 24,
+  fontWeight: 800,
+  bgcolor:
+    status === "ACTIVE"
+      ? palette.greenSoft
+      : status === "DRAFT"
+        ? palette.soft
+        : palette.blueSoft,
+  color:
+    status === "ACTIVE"
+      ? palette.green
+      : status === "ARCHIVED"
+        ? palette.muted
+        : palette.ink,
+});
+
+export const CourseDetailWorkspace: React.FC<{
+  course: AcademyCourse;
+  sessions: AcademySession[];
+  assets: AcademyCourseAsset[];
+  assetsLoading: boolean;
+  assetsError?: string;
+  canManage: boolean;
+  statusChanging: boolean;
+  onBack: () => void;
+  onEdit: (course: AcademyCourse) => void;
+  onUploadAsset: (course: AcademyCourse, assetType: AcademyAssetType) => void;
+  onReloadAssets: (course: AcademyCourse) => void;
+  onStatusChange: (course: AcademyCourse, status: AcademyCourse["status"]) => void;
+  onCreateSession: (course: AcademyCourse) => void;
+}> = ({
+  course,
+  sessions,
+  assets,
+  assetsLoading,
+  assetsError,
+  canManage,
+  statusChanging,
+  onBack,
+  onEdit,
+  onUploadAsset,
+  onReloadAssets,
+  onStatusChange,
+  onCreateSession,
+}) => {
+  const [detailTab, setDetailTab] = useState(0);
+  const [sessionPage, setSessionPage] = useState(0);
+  const [sessionPageSize, setSessionPageSize] = useState(10);
+  const statusAction = getCourseStatusAction(course);
+  const pagedSessions = sessions.slice(
+    sessionPage * sessionPageSize,
+    sessionPage * sessionPageSize + sessionPageSize,
+  );
+  const overviewRows = [
+    { label: "课程分类", value: course.category },
+    { label: "转化产品", value: course.conversionProductName || "未关联" },
+    { label: "课程负责人", value: course.ownerUserName },
+    { label: "主讲人", value: course.lecturerUserName || "待确定" },
+    { label: "默认时长", value: `${course.defaultDurationMinutes} 分钟` },
+    { label: "最近更新", value: new Date(course.updatedAt).toLocaleDateString("zh-CN") },
+  ];
+
+  return (
+    <Stack spacing={1.5}>
+      <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          justifyContent="space-between"
+          spacing={2}
+          sx={{ p: { xs: 1.5, md: 2 } }}
+        >
+          <Box minWidth={0}>
+            <Button
+              size="small"
+              startIcon={<CloseIcon />}
+              onClick={onBack}
+              sx={{ mb: 1, ml: -1 }}
+            >
+              关闭课程详情
+            </Button>
+            <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+              <Typography fontSize={{ xs: 21, md: 24 }} fontWeight={950}>
+                {course.title}
+              </Typography>
+              <Chip size="small" label={statusLabel[course.status]} sx={courseStatusChipSx(course.status)} />
+            </Stack>
+            <Stack direction="row" spacing={0.8} useFlexGap flexWrap="wrap" sx={{ mt: 0.7 }}>
+              <Typography fontSize={13} color="text.secondary" fontWeight={700}>
+                {course.code}
+              </Typography>
+              <Typography fontSize={13} color="text.disabled">·</Typography>
+              <Typography fontSize={13} color="text.secondary">{course.category}</Typography>
+              <Typography fontSize={13} color="text.disabled">·</Typography>
+              <Typography fontSize={13} color="text.secondary">
+                最近更新 {new Date(course.updatedAt).toLocaleDateString("zh-CN")}
+              </Typography>
+            </Stack>
+            {assetsLoading && (
+              <Typography role="status" fontSize={12} color="primary" sx={{ mt: 0.7 }}>
+                正在加载课程资产…
+              </Typography>
+            )}
+            {assetsError && !assetsLoading && (
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.7 }}>
+                <Typography role="alert" fontSize={12} color="error">
+                  课程资产加载失败
+                </Typography>
+                <Button size="small" color="error" onClick={() => onReloadAssets(course)}>
+                  重新加载课程资产
+                </Button>
+              </Stack>
+            )}
+          </Box>
+          {canManage && (
+            <Stack direction="row" spacing={0.8} alignItems="center" alignSelf={{ md: "center" }}>
+              <Tooltip title="编辑课程" arrow>
+                <IconButton
+                  color="primary"
+                  aria-label={`编辑课程 ${course.title}`}
+                  onClick={() => onEdit(course)}
+                >
+                  <EditOutlinedIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title={`${statusAction.label}课程`} arrow>
+                <span>
+                  <IconButton
+                    color={statusAction.label === "归档" ? "warning" : "success"}
+                    aria-label={`${statusAction.label}课程 ${course.title}`}
+                    disabled={statusChanging}
+                    onClick={() => onStatusChange(course, statusAction.nextStatus)}
+                  >
+                    {statusChanging ? <CircularProgress size={20} /> : courseStatusIcon(statusAction.label)}
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Button
+                variant="contained"
+                startIcon={<EventAvailableOutlinedIcon />}
+                onClick={() => onCreateSession(course)}
+              >
+                新建课程安排
+              </Button>
+            </Stack>
+          )}
+        </Stack>
+      </Paper>
+
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 2fr) minmax(280px, 1fr)" },
+          gap: 1.5,
+        }}
+      >
+        <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
+          <Typography fontSize={16} fontWeight={950}>课程定位</Typography>
+          <Typography fontSize={13.5} lineHeight={1.75} sx={{ mt: 1 }}>
+            {course.summary || "当前还没有维护课程定位与简介。"}
+          </Typography>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+              gap: 1.2,
+              mt: 1.8,
+            }}
+          >
+            {[
+              { label: "目标客户", value: course.targetAudience || "未填写" },
+              { label: "客户核心问题", value: course.customerProblem || "未填写" },
+              { label: "核心观点", value: course.coreViewpoint || "未填写" },
+              { label: "课程目标", value: course.objectives.join("；") || "未填写" },
+            ].map((row) => (
+              <Box key={row.label} sx={{ p: 1.35, borderRadius: 1.2, bgcolor: palette.soft }}>
+                <Typography fontSize={11.5} color="text.secondary" fontWeight={800}>{row.label}</Typography>
+                <Typography fontSize={13} lineHeight={1.6} sx={{ mt: 0.45 }}>{row.value}</Typography>
+              </Box>
+            ))}
+          </Box>
+        </Paper>
+        <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
+          <Typography fontSize={16} fontWeight={950}>课程运营信息</Typography>
+          <Stack spacing={1.25} sx={{ mt: 1.4 }}>
+            {overviewRows.map((row) => (
+              <Stack key={row.label} direction="row" justifyContent="space-between" spacing={2}>
+                <Typography fontSize={12.5} color="text.secondary" fontWeight={700}>{row.label}</Typography>
+                <Typography fontSize={13} fontWeight={800} textAlign="right">{row.value}</Typography>
+              </Stack>
+            ))}
+          </Stack>
+        </Paper>
+      </Box>
+
+      <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
+        <Tabs
+          value={detailTab}
+          onChange={(_, value: number) => setDetailTab(value)}
+          variant="scrollable"
+          allowScrollButtonsMobile
+          sx={{ px: 1.2, borderBottom: `1px solid ${palette.line}` }}
+        >
+          <Tab label="课程内容" />
+          <Tab label={assetsLoading ? "课程资产（加载中）" : assetsError ? "课程资产（加载失败）" : `课程资产（${assets.length}）`} />
+          <Tab label={`场次记录（${sessions.length}）`} />
+        </Tabs>
+        <Box sx={{ p: { xs: 1.5, md: 2 } }}>
+          {detailTab === 0 && (
+            course.objectives.length ? (
+              <Stack spacing={1}>
+                {course.objectives.map((objective, index) => (
+                  <Stack
+                    key={`${objective}-${index}`}
+                    direction="row"
+                    spacing={1.2}
+                    alignItems="flex-start"
+                    sx={{ p: 1.4, border: `1px solid ${palette.line}`, borderRadius: 1.2 }}
+                  >
+                    <Chip size="small" label={index + 1} color="primary" />
+                    <Box>
+                      <Typography fontSize={13.5} fontWeight={850}>{objective}</Typography>
+                      <Typography fontSize={11.5} color="text.secondary" sx={{ mt: 0.3 }}>课程内容节点</Typography>
+                    </Box>
+                  </Stack>
+                ))}
+              </Stack>
+            ) : (
+              <Stack alignItems="center" spacing={1} sx={{ py: 5 }}>
+                <AutoStoriesIcon color="primary" sx={{ fontSize: 34 }} />
+                <Typography fontWeight={900}>当前还没有课程内容结构</Typography>
+                <Typography fontSize={12.5} color="text.secondary" textAlign="center">
+                  完善课程目标后，可以继续维护课程内容节点。
+                </Typography>
+                {canManage && <Button variant="outlined" onClick={() => onEdit(course)}>完善课程内容</Button>}
+              </Stack>
+            )
+          )}
+          {detailTab === 1 && (
+            assetsLoading ? (
+              <Stack alignItems="center" spacing={1.2} sx={{ py: 6 }}>
+                <CircularProgress size={28} />
+                <Typography fontSize={13} color="text.secondary">正在加载课程资产…</Typography>
+              </Stack>
+            ) : assetsError ? (
+              <Stack alignItems="center" spacing={1.2} sx={{ py: 6 }}>
+                <WarningAmberIcon color="error" sx={{ fontSize: 34 }} />
+                <Typography fontWeight={900}>课程资产加载失败</Typography>
+                <Typography fontSize={12.5} color="text.secondary">当前不展示空数据，重新加载后再进行资产操作。</Typography>
+                <Button variant="outlined" onClick={() => onReloadAssets(course)}>重新加载课程资产</Button>
+              </Stack>
+            ) : <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: { xs: "1fr", md: "1fr 1fr", xl: "repeat(3, 1fr)" },
+                gap: 1.2,
+              }}
+            >
+              {assetTypes.map((assetType) => {
+                const asset = assets.find((item) => item.assetType === assetType.value);
+                return (
+                  <Paper key={assetType.value} variant="outlined" sx={{ p: 1.5, borderColor: palette.line }}>
+                    <Stack direction="row" justifyContent="space-between" spacing={1}>
+                      <Box minWidth={0}>
+                        <Typography fontSize={13.5} fontWeight={900}>{assetType.label}</Typography>
+                        <Typography fontSize={11.5} color="text.secondary" sx={{ mt: 0.5 }}>
+                          {asset
+                            ? `${asset.attachments.length} 个文件 · ${asset.ownerUserName} · ${formatDate(asset.updatedAt)}`
+                            : "当前还没有上传文件"}
+                        </Typography>
+                      </Box>
+                      {canManage && (
+                        <Button size="small" onClick={() => onUploadAsset(course, assetType.value)}>
+                          {asset ? "更新" : "上传"}
+                        </Button>
+                      )}
+                    </Stack>
+                  </Paper>
+                );
+              })}
+            </Box>
+          )}
+          {detailTab === 2 && (
+            <>
+              <TableContainer sx={{ overflowX: "auto" }}>
+                <SystemDataTable tableId="academy-course-session-records" sx={{ minWidth: 760 }}>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>课程安排名称</TableCell>
+                      <TableCell>开课时间</TableCell>
+                      <TableCell>场地</TableCell>
+                      <TableCell>负责人</TableCell>
+                      <TableCell>学员</TableCell>
+                      <TableCell>状态</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {pagedSessions.map((session) => (
+                      <TableRow key={session.id} hover>
+                        <TableCell sx={{ fontWeight: 800 }}>{session.title}</TableCell>
+                        <TableCell>{formatDate(session.startsAt)}</TableCell>
+                        <TableCell>{session.venue || "待定"}</TableCell>
+                        <TableCell>{session.facilitatorUserName || "待分配"}</TableCell>
+                        <TableCell>{session._count?.engagements || 0}/{session.capacity}</TableCell>
+                        <TableCell><Chip size="small" label={statusLabel[session.status] || session.status} /></TableCell>
+                      </TableRow>
+                    ))}
+                    {!pagedSessions.length && (
+                      <TableRow>
+                        <TableCell colSpan={6} align="center" sx={{ py: 5 }}>
+                          <Stack alignItems="center" spacing={1}>
+                            <CalendarMonthIcon color="primary" />
+                            <Typography fontWeight={850}>当前课程还没有排期记录</Typography>
+                            {canManage && (
+                              <Button variant="outlined" onClick={() => onCreateSession(course)}>
+                                新建课程安排
+                              </Button>
+                            )}
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </SystemDataTable>
+              </TableContainer>
+              <TablePagination
+                count={sessions.length}
+                page={sessionPage}
+                rowsPerPage={sessionPageSize}
+                onPageChange={(_, next) => setSessionPage(next)}
+                onRowsPerPageChange={(event) => {
+                  setSessionPageSize(Number(event.target.value));
+                  setSessionPage(0);
+                }}
+              />
+            </>
+          )}
+        </Box>
+      </Paper>
+    </Stack>
+  );
+};
+
+export const CourseDetailDrawer: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}> = ({ open, onClose, children }) => (
+  <Drawer
+    anchor="right"
+    open={open}
+    onClose={onClose}
+    ModalProps={{ keepMounted: true }}
+    PaperProps={{
+      role: "dialog",
+      "aria-modal": true,
+      "aria-label": "课程详情",
+      sx: {
+        width: { xs: "100%", sm: 680, lg: 780 },
+        maxWidth: "100vw",
+        bgcolor: palette.soft,
+      },
+    }}
+  >
+    <Box sx={{ height: "100%", overflowY: "auto", p: { xs: 1, sm: 1.5 } }}>
+      {children}
+    </Box>
+  </Drawer>
+);
+
+export const CourseWorkspace: React.FC<{
   items: AcademyCourse[];
   sessions: AcademySession[];
   assets: Record<string, AcademyCourseAsset[]>;
+  assetLoadingCourseIds: ReadonlySet<string>;
+  assetLoadErrors: Record<string, string>;
   categories: AcademyCourseCategory[];
   canManage: boolean;
   onCreate: () => void;
@@ -2592,15 +3223,19 @@ const CourseWorkspace: React.FC<{
   onView: (course: AcademyCourse) => void;
   onEdit: (course: AcademyCourse) => void;
   onUploadAsset: (course: AcademyCourse, assetType: AcademyAssetType) => void;
+  onReloadAssets: (course: AcademyCourse) => void;
   onStatusChange: (
     course: AcademyCourse,
     status: AcademyCourse["status"],
   ) => void;
+  statusChangingCourseIds: ReadonlySet<string>;
   onCreateSession: (course: AcademyCourse) => void;
 }> = ({
   items,
   sessions,
   assets,
+  assetLoadingCourseIds,
+  assetLoadErrors,
   categories,
   canManage,
   onCreate,
@@ -2608,10 +3243,11 @@ const CourseWorkspace: React.FC<{
   onView,
   onEdit,
   onUploadAsset,
+  onReloadAssets,
   onStatusChange,
+  statusChangingCourseIds,
   onCreateSession,
 }) => {
-  const [detailTab, setDetailTab] = useState(0);
   const [detailCourse, setDetailCourse] = useState<AcademyCourse | null>(null);
   const [draftFilters, setDraftFilters] = useState({ search: "", category: "", status: "" });
   const [filters, setFilters] = useState({ search: "", category: "", status: "" });
@@ -2621,6 +3257,10 @@ const CourseWorkspace: React.FC<{
     const matchesSearch = !filters.search || `${item.code}${item.title}${item.ownerUserName}${item.lecturerUserName || ""}${item.conversionProductName || ""}`.toLowerCase().includes(filters.search.toLowerCase());
     return matchesSearch && (!filters.category || item.category === filters.category) && (!filters.status || item.status === filters.status);
   }), [filters, items]);
+  useEffect(() => {
+    const nextPage = clampPageIndex(coursePage, filtered.length, coursePageSize);
+    if (nextPage !== coursePage) setCoursePage(nextPage);
+  }, [coursePage, coursePageSize, filtered.length]);
   const pageItems = filtered.slice(coursePage * coursePageSize, coursePage * coursePageSize + coursePageSize);
   const selectedSessions = detailCourse ? sessions.filter((item) => item.courseId === detailCourse.id) : [];
   const selectedAssets = detailCourse ? assets[detailCourse.id] || [] : [];
@@ -2636,9 +3276,13 @@ const CourseWorkspace: React.FC<{
   };
   const openDetail = (course: AcademyCourse) => {
     setDetailCourse(course);
-    setDetailTab(0);
     onView(course);
   };
+  useEffect(() => {
+    if (!detailCourse) return;
+    setDetailCourse(items.find((item) => item.id === detailCourse.id) || null);
+  }, [detailCourse?.id, items]);
+
   return (
     <>
       <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
@@ -2685,7 +3329,7 @@ const CourseWorkspace: React.FC<{
           >
             <MenuItem value="">全部</MenuItem>
             <MenuItem value="DRAFT">草稿</MenuItem>
-            <MenuItem value="ACTIVE">已启用</MenuItem>
+            <MenuItem value="ACTIVE">已发布</MenuItem>
             <MenuItem value="ARCHIVED">已归档</MenuItem>
           </TextField>
           <Box flex={1} />
@@ -2717,7 +3361,8 @@ const CourseWorkspace: React.FC<{
           >
             <TableHead>
               <TableRow>
-                <TableCell sx={{ minWidth: 220 }}>课程名称</TableCell>
+                <TableCell sx={{ minWidth: 175 }}>课程编码</TableCell>
+                <TableCell sx={{ minWidth: 180 }}>课程名称</TableCell>
                 <TableCell sx={{ minWidth: 120 }}>课程分类</TableCell>
                 <TableCell sx={{ minWidth: 200 }}>目标客户</TableCell>
                 <TableCell sx={{ minWidth: 180 }}>转化产品</TableCell>
@@ -2726,7 +3371,7 @@ const CourseWorkspace: React.FC<{
                 <TableCell sx={{ minWidth: 100 }}>状态</TableCell>
                 <TableCell sx={{ minWidth: 140 }}>最近更新</TableCell>
                 <TableCell sx={{ minWidth: 80 }}>场次</TableCell>
-                <TableCell sx={{ minWidth: 210 }} align="right">
+                <TableCell sx={{ minWidth: 150 }} align="center">
                   操作
                 </TableCell>
               </TableRow>
@@ -2743,7 +3388,8 @@ const CourseWorkspace: React.FC<{
                     "&.Mui-selected:hover": { bgcolor: "#EDF4FF" },
                   }}
                 >
-                  <TableCell sx={{ fontWeight: 800 }}>{item.title}<Typography component="div" fontSize={11.5} color="text.secondary">{item.code}</Typography></TableCell>
+                  <TableCell sx={{ fontWeight: 750, color: "text.secondary" }}>{item.code}</TableCell>
+                  <TableCell sx={{ fontWeight: 850 }}>{item.title}</TableCell>
                   <TableCell>{item.category}</TableCell>
                   <TableCell>{item.targetAudience || "未填写"}</TableCell>
                   <TableCell>{item.conversionProductName || "未关联"}</TableCell>
@@ -2753,19 +3399,7 @@ const CourseWorkspace: React.FC<{
                     <Chip
                       size="small"
                       label={statusLabel[item.status]}
-                      sx={{
-                        height: 22,
-                        bgcolor:
-                          item.status === "ACTIVE"
-                            ? palette.greenSoft
-                            : item.status === "DRAFT"
-                              ? palette.soft
-                              : palette.blueSoft,
-                        color:
-                          item.status === "ACTIVE"
-                            ? palette.green
-                            : palette.muted,
-                      }}
+                      sx={courseStatusChipSx(item.status)}
                     />
                   </TableCell>
                   <TableCell>
@@ -2775,31 +3409,58 @@ const CourseWorkspace: React.FC<{
                     {sessions.filter((session) => session.courseId === item.id).length}
                   </TableCell>
                   <TableCell
-                    align="right"
+                    align="center"
                     onClick={(event) => event.stopPropagation()}
                   >
-                    <Button size="small" onClick={() => openDetail(item)}>查看</Button>
-                    {canManage && <Button size="small" onClick={() => onEdit(item)}>编辑</Button>}
-                    {canManage && item.status === "DRAFT" && (
-                      <Button
-                        size="small"
-                        onClick={() => onStatusChange(item, "ACTIVE")}
-                      >
-                        发布
-                      </Button>
-                    )}
-                    {canManage && item.status === "ACTIVE" && (
-                      <Button size="small" color="warning" onClick={() => onStatusChange(item, "ARCHIVED")}>归档</Button>
-                    )}
-                    {canManage && item.status === "ARCHIVED" && (
-                      <Button size="small" onClick={() => onStatusChange(item, "ACTIVE")}>恢复</Button>
-                    )}
+                    <Stack direction="row" spacing={0.25} justifyContent="center">
+                      <Tooltip title="查看详情" arrow>
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          aria-label={`查看课程 ${item.title}`}
+                          onClick={() => openDetail(item)}
+                        >
+                          <VisibilityOutlinedIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      {canManage && (
+                        <Tooltip title="编辑课程" arrow>
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            aria-label={`编辑课程 ${item.title}`}
+                            onClick={() => onEdit(item)}
+                          >
+                            <EditOutlinedIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {canManage && (() => {
+                        const action = getCourseStatusAction(item);
+                        const changing = statusChangingCourseIds.has(item.id);
+                        return (
+                          <Tooltip title={`${action.label}课程`} arrow>
+                            <span>
+                              <IconButton
+                                size="small"
+                                color={action.label === "归档" ? "warning" : "success"}
+                                aria-label={`${action.label}课程 ${item.title}`}
+                                disabled={changing}
+                                onClick={() => onStatusChange(item, action.nextStatus)}
+                              >
+                                {changing ? <CircularProgress size={18} /> : courseStatusIcon(action.label)}
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        );
+                      })()}
+                    </Stack>
                   </TableCell>
                 </TableRow>
               ))}
               {!pageItems.length && (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 6 }}>
                     {items.length ? "当前筛选无结果" : "暂无课程数据"}
                   </TableCell>
                 </TableRow>
@@ -2815,207 +3476,25 @@ const CourseWorkspace: React.FC<{
           onRowsPerPageChange={(event) => { setCoursePageSize(Number(event.target.value)); setCoursePage(0); }}
         />
       </Paper>
-
-      <Dialog open={Boolean(detailCourse)} onClose={() => setDetailCourse(null)} fullWidth maxWidth="lg">
+      <CourseDetailDrawer open={Boolean(detailCourse)} onClose={() => setDetailCourse(null)}>
         {detailCourse && (
-          <>
-            <Stack
-              direction="row"
-              justifyContent="space-between"
-              alignItems="flex-start"
-              sx={{ p: 1.7, borderBottom: `1px solid ${palette.line}` }}
-            >
-              <Box>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography fontSize={18} fontWeight={950}>
-                    {detailCourse.title}
-                  </Typography>
-                  <Chip
-                    size="small"
-                    label={statusLabel[detailCourse.status]}
-                    sx={{
-                      bgcolor: palette.greenSoft,
-                      color: palette.green,
-                      height: 22,
-                    }}
-                  />
-                </Stack>
-                <Typography
-                  fontSize={12.5}
-                  color="text.secondary"
-                  sx={{ mt: 0.5 }}
-                >
-                  {detailCourse.code} · {detailCourse.category}
-                </Typography>
-              </Box>
-              <IconButton size="small" onClick={() => setDetailCourse(null)}>
-                <CloseIcon fontSize="small" />
-              </IconButton>
-            </Stack>
-            <Box sx={{ p: 1.7 }}>
-              <SectionTitle
-                title="课程概览"
-                action={
-                  canManage ? <Stack direction="row" spacing={1}><Button size="small" onClick={() => { setDetailCourse(null); onEdit(detailCourse); }}>编辑</Button><Button size="small" variant="contained" onClick={() => { setDetailCourse(null); onCreateSession(detailCourse); }}>新建场次</Button></Stack> : undefined
-                }
-              />
-              <Stack spacing={1.35} sx={{ mt: 1.4 }}>
-                {[
-                  {
-                    label: "课程定位",
-                    value: detailCourse.summary || "未填写",
-                  },
-                  {
-                    label: "目标客户",
-                    value: detailCourse.targetAudience || "未填写",
-                  },
-                  {
-                    label: "客户核心问题",
-                    value: detailCourse.customerProblem || "未填写",
-                  },
-                  {
-                    label: "课程目标",
-                    value: detailCourse.objectives.join("；") || "未填写",
-                  },
-                  {
-                    label: "核心观点",
-                    value: detailCourse.coreViewpoint || "未填写",
-                  },
-                  { label: "转化产品", value: detailCourse.conversionProductName || "未关联" },
-                  { label: "课程负责人", value: detailCourse.ownerUserName },
-                  { label: "主讲人", value: detailCourse.lecturerUserName || "待确定" },
-                  {
-                    label: "版本状态",
-                    value: `最近更新 · ${new Date(detailCourse.updatedAt).toLocaleDateString("zh-CN")}`,
-                  },
-                ].map((row) => (
-                  <Box
-                    key={row.label}
-                    sx={{
-                      display: "grid",
-                      gridTemplateColumns: "88px 1fr",
-                      gap: 1,
-                    }}
-                  >
-                    <Typography
-                      fontSize={12.5}
-                      color="text.secondary"
-                      fontWeight={800}
-                    >
-                      {row.label}
-                    </Typography>
-                    <Typography fontSize={13} lineHeight={1.55}>
-                      {row.value}
-                    </Typography>
-                  </Box>
-                ))}
-              </Stack>
-            </Box>
-            <Divider />
-            <Tabs
-              value={detailTab}
-              onChange={(_, value: number) => setDetailTab(value)}
-              sx={{
-                px: 1.2,
-                minHeight: 44,
-                "& .MuiTab-root": { minHeight: 44, fontSize: 13, px: 1.4 },
-              }}
-            >
-              <Tab label="内容结构" />
-              <Tab label="课程资产" />
-              <Tab label={`场次记录（${selectedSessions.length}）`} />
-            </Tabs>
-            <Box sx={{ p: 1.7 }}>
-              {detailTab === 0 && (
-                <Stack spacing={1}>
-                  {(detailCourse.objectives.length
-                    ? detailCourse.objectives
-                    : ["尚未维护课程目标与内容结构"]
-                  ).map((objective, index) => (
-                    <Stack
-                      key={`${objective}-${index}`}
-                      direction="row"
-                      spacing={1.2}
-                      sx={{ p: 1.1, borderBottom: `1px solid ${palette.line}` }}
-                    >
-                      <Chip size="small" label={index + 1} color="primary" />
-                      <Box>
-                        <Typography fontSize={13} fontWeight={800}>
-                          {objective}
-                        </Typography>
-                        <Typography fontSize={11.5} color="text.secondary">
-                          课程内容节点
-                        </Typography>
-                      </Box>
-                    </Stack>
-                  ))}
-                </Stack>
-              )}
-              {detailTab === 1 && (
-                <Stack spacing={1}>
-                  {assetTypes.map((assetType) => {
-                    const asset = selectedAssets.find((item) => item.assetType === assetType.value);
-                    return (
-                    <Stack
-                      key={assetType.value}
-                      direction="row"
-                      justifyContent="space-between"
-                      alignItems="center"
-                      sx={{ p: 1.1, borderBottom: `1px solid ${palette.line}` }}
-                    >
-                      <Box>
-                        <Typography fontSize={13} fontWeight={800}>{assetType.label}</Typography>
-                        <Typography fontSize={11.5} color="text.secondary">
-                          {asset
-                            ? `${asset.attachments.length} 个文件 · ${asset.ownerUserName} · ${formatDate(asset.updatedAt)}`
-                            : "当前课程尚未保存该类资产文件"}
-                        </Typography>
-                      </Box>
-                      {canManage ? (
-                        <Button size="small" onClick={() => onUploadAsset(detailCourse, assetType.value)}>
-                          {asset ? "更新" : "上传"}
-                        </Button>
-                      ) : (
-                        <Chip
-                          size="small"
-                          label={asset ? "已保存" : "待上传"}
-                          sx={{ height: 21, bgcolor: asset ? palette.greenSoft : palette.soft, color: asset ? palette.green : palette.muted }}
-                        />
-                      )}
-                    </Stack>
-                    );
-                  })}
-                </Stack>
-              )}
-              {detailTab === 2 && (
-                <Stack spacing={1}>
-                  {selectedSessions.map((session) => (
-                    <Stack
-                      key={session.id}
-                      direction="row"
-                      justifyContent="space-between"
-                      sx={{ p: 1.1, borderBottom: `1px solid ${palette.line}` }}
-                    >
-                      <Box>
-                        <Typography fontSize={13} fontWeight={800}>{session.title}</Typography>
-                        <Typography fontSize={11.5} color="text.secondary">
-                          {formatDate(session.startsAt)} · {session.venue || "场地待定"}
-                        </Typography>
-                      </Box>
-                      <Chip size="small" label={statusLabel[session.status] || session.status} />
-                    </Stack>
-                  ))}
-                  {!selectedSessions.length && (
-                    <Typography color="text.secondary" textAlign="center" sx={{ py: 5 }}>
-                      当前课程尚未创建场次
-                    </Typography>
-                  )}
-                </Stack>
-              )}
-            </Box>
-          </>
+          <CourseDetailWorkspace
+            course={detailCourse}
+            sessions={selectedSessions}
+            assets={selectedAssets}
+            assetsLoading={assetLoadingCourseIds.has(detailCourse.id)}
+            assetsError={assetLoadErrors[detailCourse.id]}
+            canManage={canManage}
+            statusChanging={statusChangingCourseIds.has(detailCourse.id)}
+            onBack={() => setDetailCourse(null)}
+            onEdit={onEdit}
+            onUploadAsset={onUploadAsset}
+            onReloadAssets={onReloadAssets}
+            onStatusChange={onStatusChange}
+            onCreateSession={onCreateSession}
+          />
         )}
-      </Dialog>
+      </CourseDetailDrawer>
     </>
   );
 };
@@ -3105,7 +3584,7 @@ const EngagementWorkspace: React.FC<{
           <TextField
             select
             size="small"
-            label="课程场次"
+            label="课程安排"
             value={selectedSessionId}
             onChange={(event) => onSelectSession(event.target.value)}
             sx={{ minWidth: 320 }}
@@ -3297,7 +3776,7 @@ const EngagementWorkspace: React.FC<{
                 {!items.length && (
                   <TableRow>
                     <TableCell colSpan={11} align="center" sx={{ py: 7 }}>
-                      当前场次暂无学员，请从CRM添加
+                      当前课程安排暂无学员，请从CRM添加
                     </TableCell>
                   </TableRow>
                 )}
@@ -3404,6 +3883,7 @@ const HandoffWorkspace: React.FC<{
   detail?: AcademySessionDetail;
   canManage: boolean;
   onLinkOrder: (engagement: AcademyEngagement) => void;
+  onEdit: (engagement: AcademyEngagement) => void;
   onGoCustomers: () => void;
   onGoOrders: () => void;
 }> = ({
@@ -3413,6 +3893,7 @@ const HandoffWorkspace: React.FC<{
   detail,
   canManage,
   onLinkOrder,
+  onEdit,
   onGoCustomers,
   onGoOrders,
 }) => {
@@ -3434,7 +3915,7 @@ const HandoffWorkspace: React.FC<{
         >
           <Box>
             <Typography fontWeight={900} fontSize={16}>
-              转化与交接
+              销售转化
             </Typography>
             <Typography fontSize={12.5} color="text.secondary">
               商学院只负责形成转化线索和交接入口，客户主档、订单和交付继续使用极享OS现有模块。
@@ -3444,7 +3925,7 @@ const HandoffWorkspace: React.FC<{
           <TextField
             select
             size="small"
-            label="课程场次"
+            label="课程安排"
             value={selectedSessionId}
             onChange={(event) => onSelectSession(event.target.value)}
             sx={{ minWidth: 320 }}
@@ -3500,7 +3981,7 @@ const HandoffWorkspace: React.FC<{
             <TableHead>
               <TableRow>
                 <TableCell>学员</TableCell>
-                <TableCell>课程场次</TableCell>
+                <TableCell>课程安排</TableCell>
                 <TableCell>CRM关联</TableCell>
                 <TableCell>课程分层</TableCell>
                 <TableCell>销售负责人</TableCell>
@@ -3508,6 +3989,7 @@ const HandoffWorkspace: React.FC<{
                 <TableCell>建议动作</TableCell>
                 <TableCell>正式订单</TableCell>
                 <TableCell>业务去向</TableCell>
+                <TableCell>操作</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -3524,21 +4006,6 @@ const HandoffWorkspace: React.FC<{
                         color: item.customerId ? palette.green : palette.amber,
                       }}
                     />
-                  </TableCell>
-                  <TableCell>
-                    {item.orderNo ? (
-                      <Chip size="small" color="success" label={item.orderNo} />
-                    ) : canManage ? (
-                      <Button
-                        size="small"
-                        disabled={!item.customerId}
-                        onClick={() => onLinkOrder(item)}
-                      >
-                        关联订单
-                      </Button>
-                    ) : (
-                      "待关联"
-                    )}
                   </TableCell>
                   <TableCell>
                     <Chip
@@ -3570,17 +4037,29 @@ const HandoffWorkspace: React.FC<{
                         : "进入长期培育"}
                   </TableCell>
                   <TableCell>
+                    {item.orderNo ? (
+                      <Chip size="small" color="success" label={item.orderNo} />
+                    ) : canManage ? (
+                      <Button size="small" disabled={!item.customerId} onClick={() => onLinkOrder(item)}>
+                        关联订单
+                      </Button>
+                    ) : (
+                      "待关联"
+                    )}
+                  </TableCell>
+                  <TableCell>
                     <Stack direction="row" spacing={0.5}>
                       <Button size="small" onClick={onGoCustomers}>客户</Button>
                       <Button size="small" onClick={onGoOrders}>订单</Button>
                     </Stack>
                   </TableCell>
+                  <TableCell>{canManage && <Button size="small" onClick={() => onEdit(item)}>更新跟进</Button>}</TableCell>
                 </TableRow>
               ))}
               {!items.length && (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 7 }}>
-                    当前场次暂无学员转化数据
+                  <TableCell colSpan={10} align="center" sx={{ py: 7 }}>
+                    当前课程安排暂无学员转化数据
                   </TableCell>
                 </TableRow>
               )}
@@ -3589,6 +4068,46 @@ const HandoffWorkspace: React.FC<{
         </TableContainer>
       </Paper>
     </>
+  );
+};
+
+const LearnerConversionWorkspace: React.FC<{
+  sessions: AcademySession[];
+  selectedSessionId: string;
+  onSelectSession: (id: string) => void;
+  detail?: AcademySessionDetail;
+  canManage: boolean;
+  onAdd: () => void;
+  onLinkOrder: (engagement: AcademyEngagement) => void;
+  onEdit: (engagement: AcademyEngagement) => void;
+  onGoCustomers: () => void;
+  onGoOrders: () => void;
+}> = (props) => {
+  return (
+    <Stack spacing={1.5}>
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1}>
+          <Box>
+          <Typography fontSize={16} fontWeight={950}>邀约与转化</Typography>
+          <Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.4 }}>
+            销售只从本人有权查看的 CRM 客户中邀约，统一维护跟进计划和正式订单关联。
+          </Typography>
+          </Box>
+          {props.canManage && <Button variant="contained" startIcon={<GroupsIcon />} disabled={!props.selectedSessionId} onClick={props.onAdd}>从 CRM 邀约客户</Button>}
+        </Stack>
+      </Paper>
+      <HandoffWorkspace
+        sessions={props.sessions}
+        selectedSessionId={props.selectedSessionId}
+        onSelectSession={props.onSelectSession}
+        detail={props.detail}
+        canManage={props.canManage}
+        onLinkOrder={props.onLinkOrder}
+        onEdit={props.onEdit}
+        onGoCustomers={props.onGoCustomers}
+        onGoOrders={props.onGoOrders}
+      />
+    </Stack>
   );
 };
 
@@ -3713,7 +4232,7 @@ const Reviews: React.FC<{
           helper={
             detail
               ? `${new Date(detail.startsAt).toLocaleDateString("zh-CN")} · ${detail.title}`
-              : "请选择复盘场次"
+              : "请选择课程安排"
           }
         />
         <Box
@@ -3772,7 +4291,7 @@ const Reviews: React.FC<{
           ))}
         </Box>
         <Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>
-          整体到课率 {conversion}% · A类客户 {hot} 人 · 数据来自当前选择场次
+          整体到课率 {conversion}% · A类客户 {hot} 人 · 数据来自当前选择课程安排
         </Typography>
       </Paper>
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
@@ -3781,8 +4300,8 @@ const Reviews: React.FC<{
           <SystemDataTable tableId="academy-review-session-performance">
             <TableHead>
               <TableRow>
-                <TableCell>场次日期</TableCell>
-                <TableCell>场次名称</TableCell>
+                <TableCell>课程安排日期</TableCell>
+                <TableCell>课程安排名称</TableCell>
                 <TableCell>目标到场</TableCell>
                 <TableCell>实际到场</TableCell>
                 <TableCell>到课率</TableCell>
@@ -3838,7 +4357,7 @@ const Reviews: React.FC<{
               {!sessions.length && (
                 <TableRow>
                   <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
-                    暂无可复盘场次
+                    暂无可分析课程安排
                   </TableCell>
                 </TableRow>
               )}

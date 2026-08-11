@@ -17,7 +17,9 @@ export function createAcademyRouter(deps: {
   service: AcademyService;
   requireRead: express.RequestHandler;
   requireCourseWrite: express.RequestHandler;
+  requireArrangementWrite: express.RequestHandler;
   requireSessionWrite: express.RequestHandler;
+  requireTaskWrite: express.RequestHandler;
   requireEngagementWrite: express.RequestHandler;
   requireReviewWrite: express.RequestHandler;
 }) {
@@ -67,7 +69,7 @@ export function createAcademyRouter(deps: {
     const result = await deps.service.getSessionDetail(String(req.params.sessionId), req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
-  router.post('/sessions', deps.requireSessionWrite, async (req: AuthenticatedRequest, res) => {
+  router.post('/sessions', deps.requireArrangementWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.createSession(req.body || {}, req.currentUser!);
     res.status(statusFor(result.code, 201)).json(result);
   });
@@ -75,12 +77,16 @@ export function createAcademyRouter(deps: {
     const result = await deps.service.changeSessionStatus(String(req.params.sessionId), String(req.body?.status || '') as AcademySessionStatus, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
-  router.patch('/tasks/:taskId', deps.requireSessionWrite, async (req: AuthenticatedRequest, res) => {
+  router.patch('/tasks/:taskId', deps.requireTaskWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.updateTask(String(req.params.taskId), req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
   router.put('/engagements', deps.requireEngagementWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.saveEngagement(req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+  router.patch('/engagements/:engagementId/execution', deps.requireSessionWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.updateEngagementExecution(String(req.params.engagementId), req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
   router.put('/engagements/:engagementId/order', deps.requireEngagementWrite, async (req: AuthenticatedRequest, res) => {

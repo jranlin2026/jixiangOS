@@ -78,6 +78,12 @@ export const academyApi = {
   saveEngagement(input: SaveAcademyEngagementInput): Promise<ApiResponse<AcademyEngagement>> {
     return backendRequest('/academy/engagements', { method: 'PUT', body: JSON.stringify(input) });
   },
+  updateEngagementExecution(id: string, input: { attendanceStatus: string; interactionLevel?: string; courseAssessment?: string }): Promise<ApiResponse<AcademyEngagement>> {
+    return backendRequest(`/academy/engagements/${encodeURIComponent(id)}/execution`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
   linkEngagementOrder(id: string, input: { orderId: string }): Promise<ApiResponse<AcademyEngagement>> {
     return backendRequest(`/academy/engagements/${encodeURIComponent(id)}/order`, {
       method: 'PUT',

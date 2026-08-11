@@ -1118,6 +1118,12 @@ export function createCustomerAtomicCommandService(options: {
           data: { assigneeId: target.id, assigneeName: target.name, updatedAt: at },
         });
         reassignedTodoCount = result.count;
+        if ((tx as any).academyEngagement?.updateMany) {
+          await (tx as any).academyEngagement.updateMany({
+            where: { customerId: customer.id, followUpStatus: { not: 'DONE' } },
+            data: { ownerUserId: target.id, ownerUserName: target.name, updatedAt: at },
+          });
+        }
         if (options.notificationWorkflow) {
           const department = target.departmentId ? await (tx as any).department.findUnique({ where: { id: target.departmentId } }) : null;
           const manager = department?.managerId ? await (tx as any).user.findUnique({ where: { id: department.managerId } }) : null;
