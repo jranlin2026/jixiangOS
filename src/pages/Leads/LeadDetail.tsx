@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Button,
   Chip,
@@ -17,6 +20,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import HistoryIcon from '@mui/icons-material/History';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import type { Lead, LeadFlowConfig } from '../../types/lead';
 import type { LeadSourceConfig, User } from '../../types/settings';
 import { leadApi, leadFlowApi, settingsApi } from '../../api';
@@ -42,6 +46,14 @@ import {
   getContactPhoneValuesError,
 } from '../../shared/utils/contactPhones';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import { formatSocialProfileSummary } from '../../shared/utils/socialProfile';
+import {
+  editableLeadDetailSections,
+  LEAD_DETAIL_SECTION_DEFAULTS,
+  LEAD_DETAIL_SECTION_STORAGE_KEY,
+  normalizeLeadDetailSectionState,
+  type LeadDetailSectionKey,
+} from './leadDetailSections';
 
 interface LeadDetailProps {
   lead: Lead;
@@ -56,6 +68,9 @@ type LeadDraft = {
   phone: string;
   alternatePhone: string;
   wechat: string;
+  wechatNickname: string;
+  douyinId: string;
+  douyinNickname: string;
   source: string;
   sourceName: string;
   sourceType: string;
@@ -99,6 +114,9 @@ const toDraft = (lead: Lead): LeadDraft => ({
   phone: lead.phone || '',
   alternatePhone: alternateContactPhone(lead.phone, lead.phones),
   wechat: lead.wechat || '',
+  wechatNickname: lead.wechatNickname || '',
+  douyinId: lead.douyinId || '',
+  douyinNickname: lead.douyinNickname || '',
   source: lead.source || '',
   sourceName: lead.sourceName || '',
   sourceType: normalizeResourceOwnership(lead.sourceType),
@@ -141,6 +159,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   onUpdated,
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
+  const sectionStorageKey = `${LEAD_DETAIL_SECTION_STORAGE_KEY}:${currentUser?.id || 'anonymous'}`;
   const { alert, dialog: feedbackDialog } = useAppFeedback();
   const [currentLead, setCurrentLead] = useState<Lead>(lead);
   const [editing, setEditing] = useState(false);
@@ -151,6 +170,13 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignSalesName, setAssignSalesName] = useState('');
+  const [sectionState, setSectionState] = useState(() => {
+    try {
+      return normalizeLeadDetailSectionState(JSON.parse(localStorage.getItem(sectionStorageKey) || 'null'));
+    } catch {
+      return { ...LEAD_DETAIL_SECTION_DEFAULTS };
+    }
+  });
 
   useEffect(() => {
     setCurrentLead(lead);
@@ -171,6 +197,10 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
     });
   }, [open]);
+
+  useEffect(() => {
+    localStorage.setItem(sectionStorageKey, JSON.stringify(sectionState));
+  }, [sectionState, sectionStorageKey]);
 
   const parentSources = useMemo(
     () => sourceConfigs.filter((item) => !item.parentId).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -272,6 +302,9 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         ? contactPhonesFromValues(nextPhone, nextAlternatePhone)
         : currentLead.phones,
       wechat: canEditLockedContact || canCompleteContactField(currentLead.wechat) ? draft.wechat.trim() : currentLead.wechat,
+      wechatNickname: draft.wechatNickname,
+      douyinId: draft.douyinId,
+      douyinNickname: draft.douyinNickname,
       source: draft.source,
       sourceName: draft.sourceName,
       sourceType: normalizeResourceOwnership(draft.sourceType),
@@ -438,7 +471,15 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                 ))}
               </TextField>
             ) : (
-              <TextField value={currentValue} onChange={handleDraftChange(field)} size="small" fullWidth />
+              <TextField
+                value={currentValue}
+                onChange={handleDraftChange(field)}
+                size="small"
+                fullWidth
+                inputProps={field === 'wechatNickname' || field === 'douyinId' || field === 'douyinNickname'
+                  ? { maxLength: 100 }
+                  : undefined}
+              />
             )
           ) : emptyText(displayValue as string)}
         </Box>
@@ -496,6 +537,44 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
     </Box>
   );
 
+  const toggleSection = (key: LeadDetailSectionKey) => {
+    setSectionState((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  const renderInfoSection = (
+    key: LeadDetailSectionKey,
+    title: string,
+    summary: string,
+    content: React.ReactNode,
+  ) => (
+    <Accordion
+      expanded={sectionState[key]}
+      onChange={() => toggleSection(key)}
+      disableGutters
+      elevation={0}
+      square
+      sx={{
+        '&:before': { display: 'none' },
+        borderBottom: '1px solid #e5e7eb',
+        '&:last-of-type': { borderBottom: 0 },
+      }}
+    >
+      <AccordionSummary
+        expandIcon={<ExpandMoreIcon fontSize="small" />}
+        sx={{
+          minHeight: 44,
+          px: 1.5,
+          bgcolor: '#fbfdff',
+          '& .MuiAccordionSummary-content': { my: 1, minWidth: 0, alignItems: 'center', gap: 1 },
+        }}
+      >
+        <Typography variant="body2" sx={{ fontWeight: 750, color: '#334155', flexShrink: 0 }}>{title}</Typography>
+        <Typography variant="caption" noWrap sx={{ color: '#94a3b8', minWidth: 0 }}>{summary}</Typography>
+      </AccordionSummary>
+      <AccordionDetails sx={{ p: 0 }}>{content}</AccordionDetails>
+    </Accordion>
+  );
+
   return (
     <>
     <Dialog
@@ -540,48 +619,58 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                     <Button size="small" variant="contained" onClick={handleSaveProfile}>保存</Button>
                   </>
                 ) : canEditProfile ? (
-                  <Button size="small" variant="outlined" onClick={() => setEditing(true)}>编辑资料</Button>
+                  <Button size="small" variant="outlined" onClick={() => {
+                    setSectionState((current) => editableLeadDetailSections(current));
+                    setEditing(true);
+                  }}>编辑资料</Button>
                 ) : null}
               </Box>
             </Box>
             <Box sx={{ minHeight: 0, overflowY: { lg: 'auto' } }}>
-              {renderInfoRow('姓名', 'name')}
-              {renderInfoRow('公司', 'company')}
-              <ContactPhoneDetailRows
-                primaryPhone={editing ? draft.phone : currentLead.phone}
-                alternatePhone={editing
-                  ? draft.alternatePhone
-                  : alternateContactPhone(currentLead.phone, currentLead.phones)}
-                editing={editing}
-                editable={canEditLockedContact || canCompleteContactField(currentLead.phone)}
-                onPrimaryChange={(value) => setDraft((prev) => ({ ...prev, phone: value }))}
-                onAlternateChange={(value) => setDraft((prev) => ({ ...prev, alternatePhone: value }))}
-              />
-              {renderInfoRow('微信', 'wechat', canEditLockedContact || canCompleteContactField(currentLead.wechat))}
-              {renderInfoRow('资源归属', 'sourceType')}
-              {renderSourceRow()}
-              {renderStatusRow('来源平台', currentLead.sourcePlatformName || '-')}
-              {renderStatusRow('来源店铺', currentLead.sourceShopName || '-')}
-              {renderStatusRow('平台订单号', currentLead.platformOrderNo || '-')}
-              {renderStatusRow('平台购买产品', currentLead.sourceProductName || '-')}
-              {renderStatusRow('平台付款金额', currentLead.sourcePaymentAmount == null ? '-' : formatCurrency(currentLead.sourcePaymentAmount))}
-              {renderStatusRow('平台付款时间', currentLead.sourcePaymentAt ? formatDate(currentLead.sourcePaymentAt, 'yyyy-MM-dd HH:mm') : '-')}
-              {renderInfoRow('行业', 'industry')}
-              {renderInfoRow('城市', 'city')}
-              {renderInfoRow('线索录入人', 'inputBy', false)}
-              {renderInfoRow('线索贡献人', 'leadContributorName')}
-              {renderInfoRow('分配销售', 'assignedTo', false)}
-              {renderStatusRow('入库状态', (
-                <Chip
-                  label={currentLead.intakeStatus || '入库成功'}
-                  size="small"
-                  color={currentLead.intakeStatus === '待分配' ? 'warning' : currentLead.intakeStatus === '入库失败' ? 'error' : 'success'}
+              {renderInfoSection('basic', '基本资料', [currentLead.company, currentLead.phone].filter(Boolean).join(' · ') || '待完善', <>
+                {renderInfoRow('姓名', 'name')}
+                {renderInfoRow('公司', 'company')}
+                <ContactPhoneDetailRows
+                  primaryPhone={editing ? draft.phone : currentLead.phone}
+                  alternatePhone={editing
+                    ? draft.alternatePhone
+                    : alternateContactPhone(currentLead.phone, currentLead.phones)}
+                  editing={editing}
+                  editable={canEditLockedContact || canCompleteContactField(currentLead.phone)}
+                  onPrimaryChange={(value) => setDraft((prev) => ({ ...prev, phone: value }))}
+                  onAlternateChange={(value) => setDraft((prev) => ({ ...prev, alternatePhone: value }))}
                 />
-              ))}
-              {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
-              {renderStatusRow('创建时间', formatDate(currentLead.createdAt, 'yyyy-MM-dd HH:mm'))}
-              {renderStatusRow('更新时间', formatDate(currentLead.updatedAt, 'yyyy-MM-dd HH:mm'))}
-              {renderRemarkRow()}
+                {renderInfoRow('行业', 'industry')}
+                {renderInfoRow('城市', 'city')}
+                {renderRemarkRow()}
+              </>)}
+              {renderInfoSection('social', '社交账号', formatSocialProfileSummary(currentLead), <>
+                {renderInfoRow('微信号', 'wechat', canEditLockedContact || canCompleteContactField(currentLead.wechat))}
+                {renderInfoRow('微信昵称', 'wechatNickname')}
+                {renderInfoRow('抖音号', 'douyinId')}
+                {renderInfoRow('抖音昵称', 'douyinNickname')}
+              </>)}
+              {renderInfoSection('attribution', '线索与归因', [formatSource(currentLead), normalizeResourceOwnership(currentLead.sourceType)].filter((value) => value && value !== '未填写').join(' · ') || '待完善', <>
+                {renderSourceRow()}
+                {renderInfoRow('资源归属', 'sourceType')}
+                {renderInfoRow('线索录入人', 'inputBy', false)}
+                {renderInfoRow('线索贡献人', 'leadContributorName')}
+              </>)}
+              {renderInfoSection('platform', '首次平台交易', [currentLead.sourcePlatformName, currentLead.sourceShopName, currentLead.sourcePaymentAmount == null ? '' : formatCurrency(currentLead.sourcePaymentAmount)].filter(Boolean).join(' · ') || '暂无平台交易信息', <>
+                {renderStatusRow('来源平台', currentLead.sourcePlatformName || '-')}
+                {renderStatusRow('来源店铺', currentLead.sourceShopName || '-')}
+                {renderStatusRow('平台订单号', currentLead.platformOrderNo || '-')}
+                {renderStatusRow('平台购买产品', currentLead.sourceProductName || '-')}
+                {renderStatusRow('平台付款金额', currentLead.sourcePaymentAmount == null ? '-' : formatCurrency(currentLead.sourcePaymentAmount))}
+                {renderStatusRow('平台付款时间', currentLead.sourcePaymentAt ? formatDate(currentLead.sourcePaymentAt, 'yyyy-MM-dd HH:mm') : '-')}
+              </>)}
+              {renderInfoSection('ownership', '负责人及系统信息', [followerName, lifecycleConfig.name].join(' · '), <>
+                {renderInfoRow('分配销售', 'assignedTo', false)}
+                {renderStatusRow('入库状态', <Chip label={currentLead.intakeStatus || '入库成功'} size="small" color={currentLead.intakeStatus === '待分配' ? 'warning' : currentLead.intakeStatus === '入库失败' ? 'error' : 'success'} />)}
+                {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
+                {renderStatusRow('创建时间', formatDate(currentLead.createdAt, 'yyyy-MM-dd HH:mm'))}
+                {renderStatusRow('更新时间', formatDate(currentLead.updatedAt, 'yyyy-MM-dd HH:mm'))}
+              </>)}
             </Box>
           </Paper>
 

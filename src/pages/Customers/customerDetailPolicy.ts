@@ -122,6 +122,9 @@ export function buildCustomerDetailPatch({
       'customerLevel',
       'industry',
       'remark',
+      'wechatNickname',
+      'douyinId',
+      'douyinNickname',
     ] as const;
     plainProfileFields.forEach((field) => addChanged(patch, current, field, draftValue(current, draft, field)));
 

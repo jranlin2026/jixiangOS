@@ -1,16 +1,17 @@
 export const CUSTOMER_DETAIL_SECTION_STORAGE_KEY = 'jixiangos_customer_detail_sections_v1';
 
-export type CustomerDetailSectionKey = 'basic' | 'attribution' | 'platform' | 'ownership';
+export type CustomerDetailSectionKey = 'basic' | 'social' | 'attribution' | 'platform' | 'ownership';
 export type CustomerDetailSectionState = Record<CustomerDetailSectionKey, boolean>;
 
 export const CUSTOMER_DETAIL_SECTION_DEFAULTS: CustomerDetailSectionState = {
   basic: true,
+  social: false,
   attribution: false,
   platform: false,
   ownership: false,
 };
 
-const SECTION_KEYS: CustomerDetailSectionKey[] = ['basic', 'attribution', 'platform', 'ownership'];
+const SECTION_KEYS: CustomerDetailSectionKey[] = ['basic', 'social', 'attribution', 'platform', 'ownership'];
 
 export function normalizeCustomerDetailSectionState(value: unknown): CustomerDetailSectionState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...CUSTOMER_DETAIL_SECTION_DEFAULTS };
@@ -22,5 +23,5 @@ export function normalizeCustomerDetailSectionState(value: unknown): CustomerDet
 }
 
 export function editableCustomerDetailSections(state: CustomerDetailSectionState): CustomerDetailSectionState {
-  return { ...state, basic: true, attribution: true, ownership: true };
+  return { ...state, basic: true, social: true, attribution: true, ownership: true };
 }

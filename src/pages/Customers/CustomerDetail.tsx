@@ -59,6 +59,7 @@ import {
   buildManageableOwnerIds,
 } from './customerDetailPolicy';
 import { buildLeadSourceOptions } from '../../shared/utils/leadSourceOptions';
+import { formatSocialProfileSummary } from '../../shared/utils/socialProfile';
 import {
   CUSTOMER_DETAIL_SECTION_DEFAULTS,
   CUSTOMER_DETAIL_SECTION_STORAGE_KEY,
@@ -1098,12 +1099,17 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                   onPrimaryChange={handlePhoneChange}
                   onAlternateChange={handleAlternatePhoneChange}
                 />
-                {renderInfoRow('微信', 'wechat', detailActions.actions.editProfile && (canEditLockedContact || canCompleteContactField(currentCustomer.wechat)))}
                 {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
                 {renderInfoRow('客户等级', 'customerLevel', detailActions.actions.editProfile)}
                 {renderInfoRow('行业', 'industry', detailActions.actions.editProfile)}
                 {renderInfoRow('城市', 'city', detailActions.actions.editProfile)}
                 {renderRemarkRow()}
+              </>)}
+              {renderInfoSection('social', '社交账号', formatSocialProfileSummary(currentCustomer), <>
+                {renderInfoRow('微信号', 'wechat', detailActions.actions.editProfile && (canEditLockedContact || canCompleteContactField(currentCustomer.wechat)))}
+                {renderInfoRow('微信昵称', 'wechatNickname', detailActions.actions.editProfile)}
+                {renderInfoRow('抖音号', 'douyinId', detailActions.actions.editProfile)}
+                {renderInfoRow('抖音昵称', 'douyinNickname', detailActions.actions.editProfile)}
               </>)}
               {renderInfoSection('attribution', '线索与归因', [formatCustomerSource(currentCustomer), normalizeResourceOwnership(currentCustomer.sourceType)].filter((value) => value && value !== '未填写').join(' · ') || '待完善', <>
                 {renderSourceRow()}
