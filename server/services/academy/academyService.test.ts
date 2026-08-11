@@ -14,11 +14,17 @@ const actor = {
 
 function createRepository(): AcademyRepository {
   const courses: any[] = [];
+  const courseVersions: any[] = [];
   const assets: any[] = [];
   const sessions: any[] = [];
   const tasks: any[] = [];
   const engagements: any[] = [];
   const reviews: any[] = [];
+  const users = [
+    { id: actor.id, name: actor.name },
+    { id: "user-lecturer", name: "课程讲师" },
+  ];
+  const products = [{ id: "product-ai", name: "AI企业升级计划" }];
   return {
     listCourses: async ({ page, pageSize }) => ({
       items: courses.slice((page - 1) * pageSize, page * pageSize),
@@ -28,12 +34,14 @@ function createRepository(): AcademyRepository {
       courses.find((course) => course.code === code) || null,
     findCourseById: async (id) =>
       courses.find((course) => course.id === id) || null,
+    findActiveUserById: async (id) => users.find((user) => user.id === id) || null,
+    findActiveProductById: async (id) => products.find((product) => product.id === id) || null,
     findLatestCourseVersionId: async (courseId) =>
       courses.some((course) => course.id === courseId)
         ? `version-${courseId}`
         : null,
     createCourse: async (course) => (courses.push(course), course),
-    createCourseVersion: async (version) => version,
+    createCourseVersion: async (version) => (courseVersions.push(version), version),
     listCourseAssets: async (courseId) =>
       assets.filter((asset) => asset.courseId === courseId),
     upsertCourseAsset: async (asset) => {
@@ -144,10 +152,16 @@ const service = createAcademyService(repository, {
 
 const courseResult = await service.createCourse(
   {
-    code: "AI-OPEN-01",
+    code: "CLIENT-SHOULD-NOT-CONTROL-CODE",
     title: "AI企业升级公开课",
     category: "公开课",
     summary: "帮助企业老板理解AI升级路径",
+    targetAudience: "传统企业经营者",
+    customerProblem: "团队不会把AI落到业务流程",
+    coreViewpoint: "先改流程，再谈工具",
+    conversionProductId: "product-ai",
+    ownerUserId: actor.id,
+    lecturerUserId: "user-lecturer",
     defaultDurationMinutes: 120,
     objectives: ["识别企业AI升级机会"],
   },
@@ -155,6 +169,14 @@ const courseResult = await service.createCourse(
 );
 assert.equal(courseResult.code, 0);
 assert.equal(courseResult.data?.status, "DRAFT");
+assert.match(courseResult.data?.code || "", /^AC-202608-[A-Z0-9]{6}$/);
+assert.notEqual(courseResult.data?.code, "CLIENT-SHOULD-NOT-CONTROL-CODE");
+assert.equal(courseResult.data?.ownerUserName, actor.name);
+assert.equal(courseResult.data?.lecturerUserName, "课程讲师");
+assert.equal(courseResult.data?.conversionProductName, "AI企业升级计划");
+assert.equal(courseResult.data?.targetAudience, "传统企业经营者");
+assert.equal(courseResult.data?.customerProblem, "团队不会把AI落到业务流程");
+assert.equal(courseResult.data?.coreViewpoint, "先改流程，再谈工具");
 
 const activatedCourse = await service.changeCourseStatus(
   courseResult.data!.id,
@@ -168,10 +190,10 @@ assert.equal(
   "课程草稿应可由课程管理员正式启用",
 );
 
-const duplicateCourse = await service.createCourse(
+const nextCourse = await service.createCourse(
   {
-    code: " ai-open-01 ",
-    title: "重复课程",
+    code: courseResult.data?.code,
+    title: "第二门课程",
     category: "公开课",
     summary: "",
     defaultDurationMinutes: 60,
@@ -179,11 +201,8 @@ const duplicateCourse = await service.createCourse(
   },
   actor,
 );
-assert.equal(
-  duplicateCourse.code,
-  409,
-  "课程编码应在去空格和大小写归一后保持唯一",
-);
+assert.equal(nextCourse.code, 0);
+assert.notEqual(nextCourse.data?.code, courseResult.data?.code, "课程编码必须由服务端自动生成且保持唯一");
 
 const invalidSession = await service.createSession(
   {

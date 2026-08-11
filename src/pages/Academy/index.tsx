@@ -40,7 +40,7 @@ import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useLocation, useNavigate } from "react-router-dom";
-import { academyApi, customerApi, orderApi } from "../../api";
+import { academyApi, customerApi, orderApi, productApi, settingsApi } from "../../api";
 import type {
   AcademyAssetType,
   AcademyCourse,
@@ -58,6 +58,8 @@ import type {
 import type { BusinessAttachment } from "../../types/businessAttachment";
 import type { Customer } from "../../types/customer";
 import type { Order } from "../../types/order";
+import type { Product } from "../../types/product";
+import type { User } from "../../types/settings";
 import { ROUTES } from "../../shared/utils/constants";
 import { hasPermission, PERMISSION_KEYS } from "../../shared/utils/permissions";
 import useAuthStore from "../../store/useAuthStore";
@@ -124,13 +126,27 @@ const navItems: Array<{ value: AcademyView; label: string }> = [
 ];
 
 const emptyCourse: CreateAcademyCourseInput = {
-  code: "",
   title: "",
   category: "",
   summary: "",
+  targetAudience: "",
+  customerProblem: "",
+  coreViewpoint: "",
+  conversionProductId: "",
+  ownerUserId: "",
+  lecturerUserId: "",
   defaultDurationMinutes: 120,
   objectives: [],
 };
+const courseCategories = [
+  "公开课",
+  "训练营",
+  "企业内训",
+  "产品培训",
+  "销售转化课",
+  "客户服务课",
+  "内部员工培训",
+];
 const emptySession: CreateAcademySessionInput = {
   courseId: "",
   title: "",
@@ -284,6 +300,8 @@ const Academy: React.FC = () => {
   const [sessionOpen, setSessionOpen] = useState(false);
   const [engagementOpen, setEngagementOpen] = useState(false);
   const [courseForm, setCourseForm] = useState(emptyCourse);
+  const [academyUsers, setAcademyUsers] = useState<User[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [sessionForm, setSessionForm] = useState(emptySession);
   const [engagementForm, setEngagementForm] = useState(emptyEngagement);
   const [reviewForm, setReviewForm] = useState(emptyReview);
@@ -367,6 +385,20 @@ const Academy: React.FC = () => {
   });
   const selectedDetail = details[selectedSessionId];
 
+  useEffect(() => {
+    if (!courseOpen) return;
+    setCourseForm((current) => ({
+      ...current,
+      ownerUserId: current.ownerUserId || currentUser?.id || "",
+    }));
+    void Promise.all([
+      settingsApi.fetchAssignableUsers({ isActive: true }),
+      productApi.getProducts(),
+    ]).then(([usersResponse, productsResponse]) => {
+      if (usersResponse.code === 0) setAcademyUsers(usersResponse.data.filter((item) => item.isActive));
+      if (productsResponse.code === 0) setProducts(productsResponse.data);
+    });
+  }, [courseOpen, currentUser?.id]);
   useEffect(() => {
     if (visibleNavItems.some((item) => item.value === view)) return;
     const fallback = visibleNavItems[0];
@@ -1083,6 +1115,7 @@ const Academy: React.FC = () => {
           open={Boolean(taskAction)}
           onClose={() => setTaskAction(null)}
           submitting={saving}
+          markButtonClicksDirty={false}
           fullWidth
           maxWidth="sm"
           resetKey={`${taskAction?.task.id || ""}:${taskAction?.status || ""}`}
@@ -1185,7 +1218,10 @@ const Academy: React.FC = () => {
             search={search}
             onSearch={setSearch}
             canManage={canCourse}
-            onCreate={() => setCourseOpen(true)}
+            onCreate={() => {
+              setCourseForm({ ...emptyCourse, ownerUserId: currentUser?.id || "" });
+              setCourseOpen(true);
+            }}
             onUploadAsset={openAssetUpload}
             onStatusChange={(course, status) =>
               void changeCourseStatus(course, status)
@@ -1288,6 +1324,7 @@ const Academy: React.FC = () => {
         open={courseOpen}
         onClose={() => setCourseOpen(false)}
         submitting={saving}
+        markButtonClicksDirty={false}
         fullWidth
         maxWidth="md"
         resetKey={String(courseOpen)}
@@ -1298,75 +1335,45 @@ const Academy: React.FC = () => {
               新建课程
             </DialogCloseTitle>
             <DialogContent dividers>
-              <Stack spacing={2}>
-                <TextField
-                  label="课程编码 *"
-                  value={courseForm.code}
-                  onChange={(event) => {
-                    markDirty();
-                    setCourseForm({ ...courseForm, code: event.target.value });
-                  }}
-                />
-                <TextField
-                  label="课程名称 *"
-                  value={courseForm.title}
-                  onChange={(event) => {
-                    markDirty();
-                    setCourseForm({ ...courseForm, title: event.target.value });
-                  }}
-                />
-                <TextField
-                  label="课程分类 *"
-                  placeholder="公开课 / 训练营 / 内训"
-                  value={courseForm.category}
-                  onChange={(event) => {
-                    markDirty();
-                    setCourseForm({
-                      ...courseForm,
-                      category: event.target.value,
-                    });
-                  }}
-                />
-                <TextField
-                  label="课程定位与简介"
-                  multiline
-                  minRows={3}
-                  value={courseForm.summary}
-                  onChange={(event) => {
-                    markDirty();
-                    setCourseForm({
-                      ...courseForm,
-                      summary: event.target.value,
-                    });
-                  }}
-                />
-                <TextField
-                  label="默认时长（分钟）*"
-                  type="number"
-                  value={courseForm.defaultDurationMinutes}
-                  onChange={(event) => {
-                    markDirty();
-                    setCourseForm({
-                      ...courseForm,
-                      defaultDurationMinutes: Number(event.target.value),
-                    });
-                  }}
-                />
-                <TextField
-                  label="课程目标（每行一条）"
-                  multiline
-                  minRows={3}
-                  value={courseForm.objectives.join("\n")}
-                  onChange={(event) => {
-                    markDirty();
-                    setCourseForm({
-                      ...courseForm,
-                      objectives: event.target.value
-                        .split("\n")
-                        .filter(Boolean),
-                    });
-                  }}
-                />
+              <Stack spacing={2.2}>
+                <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
+                  <SectionTitle title="1 基础信息" helper="定义课程身份与日常运营负责人，课程编码保存后由系统自动生成。" />
+                  <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
+                    <TextField label="课程名称 *" value={courseForm.title} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, title: event.target.value }); }} />
+                    <TextField select label="课程分类 *" value={courseForm.category} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, category: event.target.value }); }}>
+                      {courseCategories.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
+                    </TextField>
+                    <TextField select label="课程负责人 *" value={courseForm.ownerUserId} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, ownerUserId: event.target.value }); }}>
+                      {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}
+                    </TextField>
+                    <TextField select label="主讲人" value={courseForm.lecturerUserId || ""} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, lecturerUserId: event.target.value }); }}>
+                      <MenuItem value="">待确定</MenuItem>
+                      {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}
+                    </TextField>
+                    <TextField label="默认时长（分钟）*" type="number" value={courseForm.defaultDurationMinutes} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, defaultDurationMinutes: Number(event.target.value) }); }} />
+                  </Box>
+                </Paper>
+
+                <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
+                  <SectionTitle title="2 课程定位" helper="明确这门课讲给谁、解决什么问题。" />
+                  <Stack spacing={2} sx={{ mt: 2 }}>
+                    <TextField label="课程定位与简介" multiline minRows={3} value={courseForm.summary} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, summary: event.target.value }); }} />
+                    <TextField label="目标客户" multiline minRows={2} placeholder="例如：正在推进企业AI升级的传统企业经营者" value={courseForm.targetAudience || ""} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, targetAudience: event.target.value }); }} />
+                  </Stack>
+                </Paper>
+
+                <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
+                  <SectionTitle title="3 业务目标" helper="沉淀课程交付目标，并连接后续转化产品。" />
+                  <Stack spacing={2} sx={{ mt: 2 }}>
+                    <TextField label="客户核心问题" multiline minRows={2} value={courseForm.customerProblem || ""} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, customerProblem: event.target.value }); }} />
+                    <TextField label="课程目标（每行一条）" multiline minRows={3} value={courseForm.objectives.join("\n")} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, objectives: event.target.value.split("\n").map((item) => item.trim()).filter(Boolean) }); }} />
+                    <TextField label="核心观点" multiline minRows={2} value={courseForm.coreViewpoint || ""} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, coreViewpoint: event.target.value }); }} />
+                    <TextField select label="转化产品" value={courseForm.conversionProductId || ""} helperText="可选；关联系统设置中已启用的产品，后续用于转化与复盘。" onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, conversionProductId: event.target.value }); }}>
+                      <MenuItem value="">暂不关联</MenuItem>
+                      {products.map((product) => <MenuItem key={product.id} value={product.id}>{product.name} · ¥{product.price.toLocaleString("zh-CN")}</MenuItem>)}
+                    </TextField>
+                  </Stack>
+                </Paper>
               </Stack>
             </DialogContent>
             <DialogActions>
@@ -1374,7 +1381,7 @@ const Academy: React.FC = () => {
               <Button
                 variant="contained"
                 disabled={
-                  saving || !courseForm.code.trim() || !courseForm.title.trim()
+                  saving || !courseForm.title.trim() || !courseForm.category || !courseForm.ownerUserId || !courseForm.defaultDurationMinutes
                 }
                 onClick={() => void saveCourse()}
               >
@@ -1388,6 +1395,7 @@ const Academy: React.FC = () => {
         open={sessionOpen}
         onClose={() => setSessionOpen(false)}
         submitting={saving}
+        markButtonClicksDirty={false}
         fullWidth
         maxWidth="md"
         resetKey={String(sessionOpen)}
@@ -1504,6 +1512,7 @@ const Academy: React.FC = () => {
         open={engagementOpen}
         onClose={() => setEngagementOpen(false)}
         submitting={saving}
+        markButtonClicksDirty={false}
         fullWidth
         maxWidth="sm"
         resetKey={String(engagementOpen)}
@@ -1589,6 +1598,7 @@ const Academy: React.FC = () => {
         open={assetOpen}
         onClose={() => setAssetOpen(false)}
         submitting={saving}
+        markButtonClicksDirty={false}
         fullWidth
         maxWidth="md"
         resetKey={`${assetCourseId}:${assetType}:${assetOpen}`}
@@ -1677,6 +1687,7 @@ const Academy: React.FC = () => {
         open={Boolean(orderLink)}
         onClose={() => setOrderLink(null)}
         submitting={saving}
+        markButtonClicksDirty={false}
         fullWidth
         maxWidth="sm"
         resetKey={orderLink?.engagement.id || ""}
@@ -2640,8 +2651,8 @@ const CourseWorkspace: React.FC<{
                   }}
                 >
                   <TableCell sx={{ fontWeight: 800 }}>{item.title}</TableCell>
-                  <TableCell>{item.objectives[0] || "企业管理者"}</TableCell>
-                  <TableCell>{item.category}</TableCell>
+                  <TableCell>{item.targetAudience || "未填写"}</TableCell>
+                  <TableCell>{item.conversionProductName || "未关联"}</TableCell>
                   <TableCell>V1.0</TableCell>
                   <TableCell>
                     <Chip
@@ -2765,26 +2776,27 @@ const CourseWorkspace: React.FC<{
                 {[
                   {
                     label: "课程定位",
-                    value:
-                      selected.summary ||
-                      "面向目标客户，解决真实业务问题并形成可落地行动。",
+                    value: selected.summary || "未填写",
+                  },
+                  {
+                    label: "目标客户",
+                    value: selected.targetAudience || "未填写",
                   },
                   {
                     label: "客户核心问题",
-                    value:
-                      selected.objectives[0] || "增长方法零散、执行难以闭环。",
+                    value: selected.customerProblem || "未填写",
                   },
                   {
                     label: "课程目标",
-                    value:
-                      selected.objectives.slice(0, 2).join("；") ||
-                      "形成清晰方法、行动清单与复盘机制。",
+                    value: selected.objectives.join("；") || "未填写",
                   },
                   {
                     label: "核心观点",
-                    value: "从问题出发，以流程、数据和复盘形成持续改进。",
+                    value: selected.coreViewpoint || "未填写",
                   },
-                  { label: "目标产品", value: selected.category },
+                  { label: "转化产品", value: selected.conversionProductName || "未关联" },
+                  { label: "课程负责人", value: selected.ownerUserName },
+                  { label: "主讲人", value: selected.lecturerUserName || "待确定" },
                   {
                     label: "版本状态",
                     value: `当前版本 V1.0 · ${new Date(selected.updatedAt).toLocaleDateString("zh-CN")}`,

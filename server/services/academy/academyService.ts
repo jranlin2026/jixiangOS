@@ -22,11 +22,18 @@ export type AcademyCourseRecord = {
   title: string;
   category: string;
   summary: string;
+  targetAudience?: string | null;
+  customerProblem?: string | null;
+  coreViewpoint?: string | null;
+  conversionProductId?: string | null;
+  conversionProductName?: string | null;
   defaultDurationMinutes: number;
   objectives: string[];
   status: AcademyCourseStatus;
   ownerUserId: string;
   ownerUserName: string;
+  lecturerUserId?: string | null;
+  lecturerUserName?: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -143,6 +150,8 @@ export interface AcademyRepository {
   ): Promise<{ items: AcademyCourseRecord[]; total: number }>;
   findCourseByCode(code: string): Promise<AcademyCourseRecord | null>;
   findCourseById(id: string, scope?: AcademyAccessScope): Promise<AcademyCourseRecord | null>;
+  findActiveUserById(id: string): Promise<{ id: string; name: string } | null>;
+  findActiveProductById(id: string): Promise<{ id: string; name: string } | null>;
   findLatestCourseVersionId(courseId: string): Promise<string | null>;
   createCourse(course: AcademyCourseRecord): Promise<AcademyCourseRecord>;
   createCourseVersion(version: Record<string, unknown>): Promise<unknown>;
@@ -317,7 +326,10 @@ const ASSET_TYPES = new Set<AcademyAssetType>([
 ]);
 
 const invalid = (message: string, code = 400) => failure<never>(message, code);
-const normalizedCode = (value: string) => value.trim().toUpperCase();
+const buildCourseCode = (at: Date) => {
+  const yearMonth = `${at.getUTCFullYear()}${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
+  return `AC-${yearMonth}-${randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+};
 
 export function createAcademyService(
   repository: AcademyRepository,
@@ -403,23 +415,50 @@ export function createAcademyService(
       );
     },
     async createCourse(raw: Record<string, unknown>, actor: AuthenticatedUser) {
-      const code = normalizedCode(String(raw.code || ""));
       const title = String(raw.title || "").trim();
       const category = String(raw.category || "").trim();
       const duration = Number(raw.defaultDurationMinutes);
-      if (!code || !title || !category)
-        return invalid("课程编码、名称和分类不能为空");
+      if (!title || !category) return invalid("课程名称和分类不能为空");
       if (!Number.isInteger(duration) || duration <= 0 || duration > 1440)
         return invalid("课程时长必须是1到1440分钟的整数");
-      if (await repository.findCourseByCode(code))
-        return invalid("课程编码已存在", 409);
       const timestamp = now();
+      let code = "";
+      for (let attempts = 0; attempts < 5; attempts += 1) {
+        const candidate = buildCourseCode(timestamp);
+        if (!await repository.findCourseByCode(candidate)) {
+          code = candidate;
+          break;
+        }
+      }
+      if (!code) return invalid("课程编码生成失败，请重试", 409);
+
+      const requestedOwnerId = String(raw.ownerUserId || actor.id).trim();
+      const owner = requestedOwnerId === actor.id
+        ? { id: actor.id, name: actor.name }
+        : await repository.findActiveUserById(requestedOwnerId);
+      if (!owner) return invalid("课程负责人不存在或已停用");
+      const lecturerUserId = String(raw.lecturerUserId || "").trim();
+      const lecturer = lecturerUserId
+        ? await repository.findActiveUserById(lecturerUserId)
+        : null;
+      if (lecturerUserId && !lecturer) return invalid("主讲人不存在或已停用");
+      const conversionProductId = String(raw.conversionProductId || "").trim();
+      const conversionProduct = conversionProductId
+        ? await repository.findActiveProductById(conversionProductId)
+        : null;
+      if (conversionProductId && !conversionProduct) return invalid("转化产品不存在或已停用");
+
       const course: AcademyCourseRecord = {
         id: `academy-course-${randomUUID()}`,
         code,
         title,
         category,
         summary: String(raw.summary || "").trim(),
+        targetAudience: String(raw.targetAudience || "").trim() || null,
+        customerProblem: String(raw.customerProblem || "").trim() || null,
+        coreViewpoint: String(raw.coreViewpoint || "").trim() || null,
+        conversionProductId: conversionProduct?.id || null,
+        conversionProductName: conversionProduct?.name || null,
         defaultDurationMinutes: duration,
         objectives: Array.isArray(raw.objectives)
           ? raw.objectives
@@ -428,8 +467,10 @@ export function createAcademyService(
               .filter(Boolean)
           : [],
         status: "DRAFT",
-        ownerUserId: actor.id,
-        ownerUserName: actor.name,
+        ownerUserId: owner.id,
+        ownerUserName: owner.name,
+        lecturerUserId: lecturer?.id || null,
+        lecturerUserName: lecturer?.name || null,
         createdAt: timestamp,
         updatedAt: timestamp,
       };
@@ -440,6 +481,11 @@ export function createAcademyService(
         versionNumber: 1,
         title: created.title,
         summary: created.summary,
+        targetAudience: created.targetAudience,
+        customerProblem: created.customerProblem,
+        coreViewpoint: created.coreViewpoint,
+        conversionProductId: created.conversionProductId,
+        conversionProductName: created.conversionProductName,
         objectives: created.objectives,
         status: "DRAFT",
         createdById: actor.id,

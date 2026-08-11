@@ -1043,11 +1043,18 @@ model AcademyCourse {
   title                  String   @db.VarChar(200)
   category               String   @db.VarChar(80)
   summary                String   @db.Text
+  targetAudience         String?  @db.Text
+  customerProblem        String?  @db.Text
+  coreViewpoint          String?  @db.Text
+  conversionProductId    String?  @db.VarChar(64)
+  conversionProductName  String?  @db.VarChar(200)
   defaultDurationMinutes Int
   objectives             Json
   status                 String   @default("DRAFT") @db.VarChar(24)
   ownerUserId            String   @db.VarChar(64)
   ownerUserName          String   @db.VarChar(100)
+  lecturerUserId         String?  @db.VarChar(64)
+  lecturerUserName       String?  @db.VarChar(100)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
@@ -1066,6 +1073,11 @@ model AcademyCourseVersion {
   status        String   @default("DRAFT") @db.VarChar(24)
   title         String   @db.VarChar(200)
   summary       String   @db.Text
+  targetAudience        String? @db.Text
+  customerProblem       String? @db.Text
+  coreViewpoint         String? @db.Text
+  conversionProductId   String? @db.VarChar(64)
+  conversionProductName String? @db.VarChar(200)
   objectives    Json
   outline       Json?
   createdById   String   @db.VarChar(64)

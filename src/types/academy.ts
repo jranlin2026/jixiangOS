@@ -32,10 +32,18 @@ export interface AcademyCourse {
   title: string;
   category: string;
   summary: string;
+  targetAudience?: string | null;
+  customerProblem?: string | null;
+  coreViewpoint?: string | null;
+  conversionProductId?: string | null;
+  conversionProductName?: string | null;
   defaultDurationMinutes: number;
   objectives: string[];
   status: AcademyCourseStatus;
   ownerUserName: string;
+  ownerUserId: string;
+  lecturerUserId?: string | null;
+  lecturerUserName?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -141,10 +149,15 @@ export interface AcademyPage<T> {
 
 export type CreateAcademyCourseInput = Pick<
   AcademyCourse,
-  | "code"
   | "title"
   | "category"
   | "summary"
+  | "targetAudience"
+  | "customerProblem"
+  | "coreViewpoint"
+  | "conversionProductId"
+  | "ownerUserId"
+  | "lecturerUserId"
   | "defaultDurationMinutes"
   | "objectives"
 >;

@@ -9,6 +9,7 @@ import type {
   AcademySessionStatus,
   AcademySessionTaskRecord,
 } from "./academyService";
+import { STORAGE_KEYS } from "../../../src/shared/utils/constants";
 
 const ACADEMY_COURSE_ASSET_DOMAIN = "academy_course_assets";
 
@@ -77,6 +78,21 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         ? await prisma.academyCourse.findFirst({ where: { id, ...courseScopeWhere(scope) } })
         : await prisma.academyCourse.findUnique({ where: { id } });
       return record ? mapCourse(record) : null;
+    },
+    async findActiveUserById(id) {
+      return prisma.user.findFirst({
+        where: { id, isActive: true, employmentStatus: "active" },
+        select: { id: true, name: true },
+      });
+    },
+    async findActiveProductById(id) {
+      const record = await prisma.businessRecord.findFirst({
+        where: { domain: STORAGE_KEYS.PRODUCTS, recordId: id },
+        select: { recordId: true, data: true },
+      });
+      const data = record?.data as any;
+      if (!record || data?.isActive === false || !String(data?.name || "").trim()) return null;
+      return { id: record.recordId, name: String(data.name).trim() };
     },
     async findLatestCourseVersionId(courseId) {
       const version = await prisma.academyCourseVersion.findFirst({
