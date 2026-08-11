@@ -425,7 +425,7 @@ export function createBrowserLeadIntakeService(deps: {
       if (!attemptToken) {
         return failure<BrowserLeadIntakeResult>('入库任务租约缺失，请稍后重试', 500);
       }
-      if (reservation.existingLeadState === 'MISSING') {
+      if (reservation.existingLeadState === 'MISSING' && reserved.storedContact) {
         const differences = strictContactConflictLabels(normalized, reserved.storedContact);
         if (differences.length) {
           const message = `该订单的原线索已不存在，但本次提交资料存在冲突（${differences.join('、')}）。请先核对当前飞鸽会话和订单后重试；本次不会修改飞鸽订单。`;

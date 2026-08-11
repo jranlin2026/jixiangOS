@@ -591,6 +591,9 @@ const retryOrderInput = {
 };
 const failedFirstAttempt = await retryService.intake(retryOrderInput, actor);
 assert.equal(failedFirstAttempt.code, 503);
+const failedRetryRecord = records.get('DOUYIN:jixiang-a:DY-20260808-RETRY');
+failedRetryRecord.existingLeadState = 'MISSING';
+assert.equal(failedRetryRecord.storedContact, undefined, '从未成功入库的失败记录不应有联系人快照');
 const originalMapping = { ...mappings[0] };
 products.push({ id: 'prod-corrected', name: '更正后OS产品', price: 599, isActive: true });
 Object.assign(mappings[0], {
