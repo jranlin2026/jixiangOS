@@ -32,6 +32,7 @@ import useAuthStore from '../../store/useAuthStore';
 import BusinessSourceFields from '../../shared/components/BusinessSourceFields';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import useProtectedFormClose from '../../shared/hooks/useProtectedFormClose';
+import { normalizeOptionalSocialProfileFields } from '../../shared/utils/socialProfile';
 
 interface CustomerFormProps {
   open: boolean;
@@ -113,6 +114,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     phone: '',
     alternatePhone: '',
     wechat: '',
+    wechatNickname: '',
+    douyinId: '',
+    douyinNickname: '',
     sourceType: '公司资源',
     leadSource: '',
     sourceName: '',
@@ -173,6 +177,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       phone: customer?.phone || '',
       alternatePhone: alternateContactPhone(customer?.phone, customer?.phones),
       wechat: customer?.wechat || '',
+      wechatNickname: customer?.wechatNickname || '',
+      douyinId: customer?.douyinId || '',
+      douyinNickname: customer?.douyinNickname || '',
       sourceType: normalizeResourceOwnership(customer?.sourceType),
       leadSource: customer?.leadSource || defaultSourceOption?.parentName || '',
       sourceName: customer?.sourceName || defaultSourceOption?.childName || '',
@@ -239,21 +246,20 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   };
 
   const handleSubmit = async () => {
-    const phones = contactPhonesFromValues(form.phone, form.alternatePhone);
-    const payload = {
-      ...form,
-      alternatePhone: undefined,
-      phone: phones[0]?.number || '',
-      phones,
-      sourcePaymentAmount: form.sourcePaymentAmount === '' ? (isEdit ? null : undefined) : Number(form.sourcePaymentAmount),
-      sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : (isEdit ? null : undefined),
-      city: completeCityFromPhone(form.city, form.phone),
-      manualTagIds: form.manualTagIds,
-      sourceType: normalizeResourceOwnership(form.sourceType),
-    };
-
     setSubmitting(true);
     try {
+      const phones = contactPhonesFromValues(form.phone, form.alternatePhone);
+      const payload = normalizeOptionalSocialProfileFields({
+        ...form,
+        alternatePhone: undefined,
+        phone: phones[0]?.number || '',
+        phones,
+        sourcePaymentAmount: form.sourcePaymentAmount === '' ? (isEdit ? null : undefined) : Number(form.sourcePaymentAmount),
+        sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : (isEdit ? null : undefined),
+        city: completeCityFromPhone(form.city, form.phone),
+        manualTagIds: form.manualTagIds,
+        sourceType: normalizeResourceOwnership(form.sourceType),
+      });
       const saved = isEdit && customer
         ? await update(customer.id, payload)
         : await create(applyCurrentLeadInputBy(payload, 'leadInputBy'));
@@ -335,14 +341,18 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
                 helperText={phoneError || (showContactError ? '手机号或微信至少填写一项' : '')}
                 size="small"
               />
+              <Typography variant="overline" sx={{ gridColumn: '1 / -1', color: '#64748b', fontWeight: 800 }}>社交账号</Typography>
               <TextField
-                label="微信"
+                label="微信号"
                 value={form.wechat}
                 onChange={handleChange('wechat')}
                 error={showContactError}
                 helperText={showContactError ? '手机号或微信至少填写一项' : '用于查重和线索同步'}
                 fullWidth
               />
+              <TextField label="微信昵称" value={form.wechatNickname} onChange={handleChange('wechatNickname')} inputProps={{ maxLength: 100 }} fullWidth />
+              <TextField label="抖音号" value={form.douyinId} onChange={handleChange('douyinId')} inputProps={{ maxLength: 100 }} fullWidth />
+              <TextField label="抖音昵称" value={form.douyinNickname} onChange={handleChange('douyinNickname')} inputProps={{ maxLength: 100 }} fullWidth />
               <TextField label="行业" value={form.industry} onChange={handleChange('industry')} fullWidth />
               <TextField label="城市" value={form.city} onChange={handleChange('city')} fullWidth />
               <TextField select label="客户等级" value={form.customerLevel} onChange={handleChange('customerLevel')} fullWidth>
@@ -432,14 +442,18 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             helperText={phoneError || (showContactError ? '手机号或微信至少填写一项' : '')}
             size="small"
           />
+          <Typography variant="overline" sx={{ gridColumn: '1 / -1', color: '#64748b', fontWeight: 800 }}>社交账号</Typography>
           <TextField
-            label="微信"
+            label="微信号"
             value={form.wechat}
             onChange={handleChange('wechat')}
             error={showContactError}
             helperText={showContactError ? '手机号或微信至少填写一项' : '用于查重和线索同步'}
             fullWidth
           />
+          <TextField label="微信昵称" value={form.wechatNickname} onChange={handleChange('wechatNickname')} inputProps={{ maxLength: 100 }} fullWidth />
+          <TextField label="抖音号" value={form.douyinId} onChange={handleChange('douyinId')} inputProps={{ maxLength: 100 }} fullWidth />
+          <TextField label="抖音昵称" value={form.douyinNickname} onChange={handleChange('douyinNickname')} inputProps={{ maxLength: 100 }} fullWidth />
           <TextField select label="资源归属" value={form.sourceType} onChange={handleChange('sourceType')} fullWidth>
             {RESOURCE_OWNERSHIPS.map((item) => (
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>

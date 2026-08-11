@@ -34,6 +34,7 @@ import BusinessFormSection from '../../shared/components/BusinessFormSection';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import useProtectedFormClose from '../../shared/hooks/useProtectedFormClose';
 import BusinessSourceFields from '../../shared/components/BusinessSourceFields';
+import { normalizeOptionalSocialProfileFields } from '../../shared/utils/socialProfile';
 
 interface LeadFormProps {
   open: boolean;
@@ -91,6 +92,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     phone: '',
     alternatePhone: '',
     wechat: '',
+    wechatNickname: '',
+    douyinId: '',
+    douyinNickname: '',
     source: '',
     sourceName: '',
     owner: '待分配',
@@ -149,6 +153,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       phone: lead?.phone || '',
       alternatePhone: alternateContactPhone(lead?.phone, lead?.phones),
       wechat: lead?.wechat || '',
+      wechatNickname: lead?.wechatNickname || '',
+      douyinId: lead?.douyinId || '',
+      douyinNickname: lead?.douyinNickname || '',
       source: defaultSource,
       sourceName: defaultSourceName,
       owner: lead?.owner || '待分配',
@@ -213,7 +220,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
         : isEdit
           ? (lead?.assignedTo || lead?.owner || '待分配')
           : '待分配';
-      const payload = {
+      const payload = normalizeOptionalSocialProfileFields({
         ...form,
         alternatePhone: undefined,
         owner: effectiveOwner,
@@ -224,7 +231,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
         sourcePaymentAt: form.sourcePaymentAt ? new Date(form.sourcePaymentAt).toISOString() : (isEdit ? null : undefined),
         sourceType: normalizeResourceOwnership(form.sourceType),
         status: lead?.status || '新线索',
-      };
+      });
       if (isEdit && lead) {
         await update(lead.id, payload);
         onSuccess?.();
@@ -240,6 +247,11 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       }
       onSuccess?.();
       onClose();
+    } catch (error) {
+      await alert(
+        error instanceof Error ? error.message : '线索资料保存失败',
+        isEdit ? '无法保存线索资料' : '无法新增线索',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -299,7 +311,11 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
                 helperText={phoneError || (showContactError ? '手机号或微信至少填写一项' : '')}
                 size="small"
               />
-              <TextField label="微信" value={form.wechat} onChange={handleChange('wechat')} error={showContactError} helperText={showContactError ? '手机号或微信至少填写一项' : '用于查重和客户同步'} fullWidth />
+              <Typography variant="overline" sx={{ gridColumn: '1 / -1', color: '#64748b', fontWeight: 800 }}>社交账号</Typography>
+              <TextField label="微信号" value={form.wechat} onChange={handleChange('wechat')} error={showContactError} helperText={showContactError ? '手机号或微信至少填写一项' : '用于查重和客户同步'} fullWidth />
+              <TextField label="微信昵称" value={form.wechatNickname} onChange={handleChange('wechatNickname')} inputProps={{ maxLength: 100 }} fullWidth />
+              <TextField label="抖音号" value={form.douyinId} onChange={handleChange('douyinId')} inputProps={{ maxLength: 100 }} fullWidth />
+              <TextField label="抖音昵称" value={form.douyinNickname} onChange={handleChange('douyinNickname')} inputProps={{ maxLength: 100 }} fullWidth />
               <TextField label="行业" value={form.industry} onChange={handleChange('industry')} fullWidth />
               <TextField label="城市" value={form.city} onChange={handleChange('city')} fullWidth />
             </BusinessFormSection>
@@ -372,8 +388,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
             helperText={phoneError || (isEdit ? '唯一识别字段，入库后不可修改' : showContactError ? '手机号或微信至少填写一项' : '')}
             readOnly={isEdit}
           />
+          <Typography variant="overline" sx={{ gridColumn: '1 / -1', color: '#64748b', fontWeight: 800 }}>社交账号</Typography>
           <TextField
-            label="微信"
+            label="微信号"
             value={form.wechat}
             onChange={handleChange('wechat')}
             error={showContactError}
@@ -381,6 +398,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
             helperText={isEdit ? '唯一识别字段，入库后不可修改' : showContactError ? '手机号或微信至少填写一项' : '用于查重和客户同步'}
             InputProps={{ readOnly: isEdit }}
           />
+          <TextField label="微信昵称" value={form.wechatNickname} onChange={handleChange('wechatNickname')} inputProps={{ maxLength: 100 }} fullWidth />
+          <TextField label="抖音号" value={form.douyinId} onChange={handleChange('douyinId')} inputProps={{ maxLength: 100 }} fullWidth />
+          <TextField label="抖音昵称" value={form.douyinNickname} onChange={handleChange('douyinNickname')} inputProps={{ maxLength: 100 }} fullWidth />
           <TextField select label="资源归属" value={form.sourceType} onChange={handleChange('sourceType')} fullWidth>
             {RESOURCE_OWNERSHIPS.map((item) => (
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
