@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "极享AI浏览器员工",
   "description": "连接抖店飞鸽与极享OS，辅助客服完成话术、联系方式确认、线索入库和订单备注。",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnmVA5DhQdl57soBkJRci4PVvy8mUd2EjakWKwH0BJWOsZiZOaXapr5Nx0v+JU0wRFoYtnnWC4jhXzoro1+DhHGYNVqSte8/kCs3NfMaRj5NJ2PFcpXPNqfx2i8zly4wD1v2S2/F3hiaEsH2StMw3fx2teoQi11nmDnU3dFIB5hmy4gb18K8dXrMVOq/7mgTsls5ksK2QMCgZrINE+9G1Qfq+SU6a3+vX54358rBuRYrpEuYtbJSsy5kFGG0zlAz6taASS3hgnDcTgBEJhFLp2JUOr+/75gSMffGoigdsPrYEZVDnuY5UE2LIaQHrK2zVO9SHh5KRWI79nBODN1AS+wIDAQAB",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "scripting", "sidePanel", "storage", "tabs", "identity"],

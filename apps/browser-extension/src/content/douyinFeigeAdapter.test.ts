@@ -1058,6 +1058,22 @@ assert.deepEqual(blankRemarkIconEntryResult, {
   greenFlagStatus: 'SUCCEEDED',
 }, '无历史备注的订单应从卡片顶部“备”按钮首次新增备注');
 
+const blankRemarkNonButtonEntryFixture = createGuardBoundaryFixture({
+  existingRemark: '',
+  remarkEntryMarkup: '<div data-test-blank-order-remark-entry class="order-action"><span>备</span></div>',
+});
+const blankRemarkNonButtonEntryResult = await blankRemarkNonButtonEntryFixture.adapter.completeOsOrder({
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: backendRemarkLines,
+});
+assert.deepEqual(blankRemarkNonButtonEntryResult, {
+  ok: true,
+  remarkText: backendRemarkLines.join('\n'),
+  remarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'SUCCEEDED',
+}, '飞鸽以普通 div/span 渲染卡片顶部“备”入口时也应能首次新增备注');
+
 const malformedLinesFixture = createGuardBoundaryFixture();
 const malformedLinesResult = await malformedLinesFixture.adapter.completeOsOrder({
   expectedOrderNo: '6925095897028853458',

@@ -70,6 +70,12 @@ assert.match(archiveExcludes, /"private_uploads"/);
 assert.match(deploySource, /path\.name\.startswith\("\.env\."\)/);
 assert.match(deploySource, /\.env\.example/);
 assert.match(deploySource, /BROWSER_EMPLOYEE_ARCHIVE = "server\/assets\/browser-agent\/jixiang-ai-browser-employee\.zip"/);
+assert.match(deploySource, /FRONTEND_ENTRY = "dist\/index\.html"/);
+assert.match(
+  deploySource,
+  /if not frontend_entry\.is_file\(\) or frontend_entry\.stat\(\)\.st_size == 0:[\s\S]*?--skip-build/,
+  '跳过本地构建时仍必须拒绝缺少前端入口的发布包',
+);
 assert.match(
   deploySource,
   /path\.suffix in EXCLUDE_SUFFIXES and relative\.as_posix\(\) != BROWSER_EMPLOYEE_ARCHIVE/,
