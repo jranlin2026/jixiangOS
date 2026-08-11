@@ -1158,6 +1158,12 @@ assert.equal(
 function createLiveGreenFlagCompletionFixture(options: {
   truncateCardSummaryAfterSave?: boolean;
   obscureCardFlagAfterSave?: boolean;
+  persistDelayMs?: number;
+  rerenderOrderCardOnPersist?: boolean;
+  initialCardRed?: boolean;
+  persistRedFlag?: boolean;
+  transientRedFlag?: { startMs: number; durationMs: number };
+  transientContextLoss?: { startMs: number; durationMs: number };
 } = {}) {
   const fixture = new JSDOM(`<!doctype html><html><body>
     <main id="workspace-chat">
@@ -1168,7 +1174,7 @@ function createLiveGreenFlagCompletionFixture(options: {
         <div>已发货</div>
         <span>6955059225013785777</span>
         <div data-real-remark-summary>
-          <span data-real-current-flag class="i-icon i-icon-flag" style="color: rgb(255, 59, 82)"><svg><path fill="currentColor"></path></svg></span>
+          <span data-real-current-flag class="i-icon i-icon-flag" style="color: ${options.initialCardRed === false ? '' : 'rgb(255, 59, 82)'}"><svg><path fill="currentColor"></path></svg></span>
           <span data-real-remark-lines>#销售：小王</span>
           <button type="button" render_type="feature_button">修改</button>
         </div>
@@ -1196,6 +1202,7 @@ function createLiveGreenFlagCompletionFixture(options: {
   const summaryLines = fixtureDocument.querySelector('[data-real-remark-lines]') as HTMLElement;
   const currentFlag = fixtureDocument.querySelector('[data-real-current-flag]') as HTMLElement;
   const signature = fixtureDocument.querySelector('[data-real-signature]') as HTMLInputElement;
+  const redFlag = drawer.querySelector<HTMLInputElement>('input[type="radio"][value="5"]')!;
   let persistedRemark = summaryLines.textContent || '';
   fixtureDocument.querySelector('button[render_type="feature_button"]')?.addEventListener('click', () => {
     drawer.hidden = false;
@@ -1204,11 +1211,42 @@ function createLiveGreenFlagCompletionFixture(options: {
   [...drawer.querySelectorAll('button')]
     .find((button) => button.textContent?.trim() === '确定')
     ?.addEventListener('click', () => {
-      persistedRemark = signature.checked ? `${input.value}【林恩光 08-09 13:26】` : input.value;
-      summaryLines.textContent = options.truncateCardSummaryAfterSave
-        ? `${persistedRemark.slice(0, 18)}...`
-        : persistedRemark;
-      currentFlag.style.color = options.obscureCardFlagAfterSave ? '' : 'rgb(255, 59, 82)';
+      const submittedRemark = signature.checked ? `${input.value}【林恩光 08-09 13:26】` : input.value;
+      const persist = () => {
+        persistedRemark = submittedRemark;
+        summaryLines.textContent = options.truncateCardSummaryAfterSave
+          ? `${persistedRemark.slice(0, 18)}...`
+          : persistedRemark;
+        currentFlag.style.color = options.obscureCardFlagAfterSave ? '' : 'rgb(255, 59, 82)';
+        input.value = persistedRemark;
+        redFlag.checked = options.persistRedFlag !== false;
+        if (options.rerenderOrderCardOnPersist) {
+          const orderCard = fixtureDocument.querySelector('.ecom-collapse-item') as HTMLElement;
+          orderCard.replaceWith(orderCard.cloneNode(true));
+        }
+      };
+      if (options.persistDelayMs) {
+        redFlag.checked = false;
+        if (options.transientRedFlag) {
+          fixture.window.setTimeout(() => { redFlag.checked = true; }, options.transientRedFlag.startMs);
+          fixture.window.setTimeout(() => { redFlag.checked = false; },
+            options.transientRedFlag.startMs + options.transientRedFlag.durationMs);
+        }
+        if (options.transientContextLoss) {
+          const orderCard = fixtureDocument.querySelector('.ecom-collapse-item') as HTMLElement;
+          fixture.window.setTimeout(() => {
+            orderCard.hidden = true;
+            drawer.hidden = true;
+          }, options.transientContextLoss!.startMs);
+          fixture.window.setTimeout(() => {
+            orderCard.hidden = false;
+            drawer.hidden = false;
+          }, options.transientContextLoss.startMs + options.transientContextLoss.durationMs);
+        }
+        fixture.window.setTimeout(persist, options.persistDelayMs);
+      } else {
+        persist();
+      }
       drawer.hidden = true;
     });
   [...drawer.querySelectorAll('button')]
@@ -1245,6 +1283,83 @@ assert.deepEqual(truncatedLiveCompletionResult, {
   remarkStatus: 'SUCCEEDED',
   greenFlagStatus: 'SUCCEEDED',
 }, '订单卡只显示省略备注和旗帜计数时，应重新打开备注抽屉校验完整持久化结果');
+
+const delayedLiveCompletionResult = await createLiveGreenFlagCompletionFixture({
+  truncateCardSummaryAfterSave: true,
+  obscureCardFlagAfterSave: true,
+  persistDelayMs: 1800,
+}).completeOsOrder({
+  expectedOrderNo: '6955059225013785777',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: backendRemarkLines,
+});
+assert.deepEqual(delayedLiveCompletionResult, {
+  ok: true,
+  remarkText: `#销售：小王\n${backendRemarkLines.join('\n')}`,
+  remarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'SUCCEEDED',
+}, '飞鸽延迟回填备注和红旗时，应在有限窗口内等待持久化结果');
+
+const delayedRerenderedCompletionResult = await createLiveGreenFlagCompletionFixture({
+  truncateCardSummaryAfterSave: true,
+  obscureCardFlagAfterSave: true,
+  persistDelayMs: 1800,
+  rerenderOrderCardOnPersist: true,
+}).completeOsOrder({
+  expectedOrderNo: '6955059225013785777',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: backendRemarkLines,
+});
+assert.deepEqual(delayedRerenderedCompletionResult, {
+  ok: true,
+  remarkText: `#销售：小王\n${backendRemarkLines.join('\n')}`,
+  remarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'SUCCEEDED',
+}, '飞鸽延迟回填并重绘同一订单卡时，应按客户和订单号继续验证');
+
+const transientRedFlagResult = await createLiveGreenFlagCompletionFixture({
+  truncateCardSummaryAfterSave: true,
+  obscureCardFlagAfterSave: true,
+  initialCardRed: false,
+  persistDelayMs: 2000,
+  persistRedFlag: false,
+  transientRedFlag: { startMs: 1600, durationMs: 200 },
+}).completeOsOrder({
+  expectedOrderNo: '6955059225013785777',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: backendRemarkLines,
+});
+assert.equal(transientRedFlagResult.ok, false, '红旗短暂选中后回退，不得与后续备注状态跨时刻拼成成功');
+if (!transientRedFlagResult.ok) {
+  assert.equal(transientRedFlagResult.remarkStatus, 'SUCCEEDED');
+  assert.equal(transientRedFlagResult.greenFlagStatus, 'FAILED');
+}
+
+const transientContextLossResult = await createLiveGreenFlagCompletionFixture({
+  truncateCardSummaryAfterSave: true,
+  obscureCardFlagAfterSave: true,
+  persistDelayMs: 2000,
+  transientContextLoss: { startMs: 1600, durationMs: 200 },
+}).completeOsOrder({
+  expectedOrderNo: '6955059225013785777',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: backendRemarkLines,
+});
+assert.equal(transientContextLossResult.ok, false, '验证期间订单卡和弹层同时消失后即使恢复，也不得报告成功');
+assert.equal(transientContextLossResult.ok ? '' : transientContextLossResult.code, 'CONTEXT_CHANGED');
+
+const initialVerificationContextLossResult = await createLiveGreenFlagCompletionFixture({
+  truncateCardSummaryAfterSave: true,
+  obscureCardFlagAfterSave: true,
+  persistDelayMs: 1800,
+  transientContextLoss: { startMs: 500, durationMs: 200 },
+}).completeOsOrder({
+  expectedOrderNo: '6955059225013785777',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: backendRemarkLines,
+});
+assert.equal(initialVerificationContextLossResult.ok, false, '首次保存验证窗口内上下文曾消失，恢复后也不得报告成功');
+assert.equal(initialVerificationContextLossResult.ok ? '' : initialVerificationContextLossResult.code, 'CONTEXT_CHANGED');
 
 function createCalibratedPaidOrderFixture(options: { includeConfirm?: boolean } = {}) {
   const fixture = new JSDOM(`<!doctype html><html><body>

@@ -278,13 +278,18 @@ async function waitForElement(
       if (settled) return;
       settled = true;
       observer.disconnect();
+      clearInterval(poll);
       clearTimeout(timeout);
       resolve(element);
     };
-    const observer = new MutationObserverConstructor(() => {
+    const check = () => {
       const element = lookup();
       if (element) finish(element);
-    });
+    };
+    const observer = new MutationObserverConstructor(check);
+    // 飞鸽会直接更新 textarea.value / radio.checked，这些属性变化
+    // 不一定会触发 MutationObserver，因此仍需要短间隔轮询。
+    const poll = setInterval(check, 50);
     const timeout = setTimeout(() => finish(null), timeoutMs);
     observer.observe(document.documentElement, {
       attributes: true,
@@ -917,9 +922,14 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
       }
       saveAfterGreen.click();
 
+      let verificationContextChanged = false;
       const verified = await waitForElement(document, () => {
         const latestOrderCard = currentBoundOrderCard();
-        if (!latestOrderCard) return null;
+        if (!latestOrderCard) {
+          verificationContextChanged = true;
+          return null;
+        }
+        if (verificationContextChanged) return null;
         const closed = !dialog.isConnected || !isVisible(dialog);
         return closed && hasSavedRemark(latestOrderCard, remarkText, existing)
           && isGreenActive(latestOrderCard)
@@ -940,6 +950,15 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
         let savedSummary = savedRemarkSummary(latestOrderCard);
         let remarkSaved = hasSavedRemarkValue(savedSummary, remarkText, existing);
         let redFlagSaved = isGreenActive(latestOrderCard);
+        if (verificationContextChanged) {
+          return {
+            ok: false,
+            code: 'CONTEXT_CHANGED',
+            message: '保存后验证期间当前飞鸽客户或订单曾发生变化，未报告成功',
+            stage: 'CONTEXT',
+            remarkText,
+          };
+        }
 
         // 飞鸽订单卡可能只展示被省略的备注摘要和“旗帜 + 数量”，
         // 无法从卡片本身确认完整持久化结果。此时重新打开同一订单的
@@ -951,16 +970,30 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           if (verificationEdit && currentBoundOrderCard() === latestOrderCard) {
             verificationEdit.click();
             const verificationDialog = await waitForElement(document, () => findUniqueRemarkDialog(document));
-            if (verificationDialog && currentBoundOrderCard() === latestOrderCard) {
+            if (verificationDialog && currentBoundOrderCard()) {
               verificationDialogClosed = false;
-              const persistedEditor = first(verificationDialog, selectors.orderRemark);
-              const persistedRedFlag = findUniqueGreenFlag(verificationDialog);
-              const persistedRemark = persistedEditor ? editableValue(persistedEditor) : '';
-              if (persistedRemark) {
-                savedSummary = persistedRemark;
-                remarkSaved = hasSavedRemarkValue(persistedRemark, remarkText, existing);
-              }
-              redFlagSaved = redFlagSaved || isSelectedFlagControl(persistedRedFlag);
+              await waitForElement(document, () => {
+                const currentVerificationCard = currentBoundOrderCard();
+                if (!currentVerificationCard) {
+                  verificationContextChanged = true;
+                  return null;
+                }
+                const currentDialog = findUniqueRemarkDialog(document);
+                if (!currentDialog) return null;
+                const persistedEditor = first(currentDialog, selectors.orderRemark);
+                const persistedRedFlag = findUniqueGreenFlag(currentDialog);
+                const persistedRemark = persistedEditor ? editableValue(persistedEditor) : '';
+                if (persistedRemark) {
+                  savedSummary = persistedRemark;
+                  remarkSaved = hasSavedRemarkValue(persistedRemark, remarkText, existing);
+                } else {
+                  savedSummary = savedRemarkSummary(currentVerificationCard);
+                  remarkSaved = hasSavedRemarkValue(savedSummary, remarkText, existing);
+                }
+                redFlagSaved = isGreenActive(currentVerificationCard)
+                  || isSelectedFlagControl(persistedRedFlag);
+                return remarkSaved && redFlagSaved ? currentDialog : null;
+              }, 5000);
 
               const cancel = findButtonByText(verificationDialog, ['取消']);
               if (cancel && isVisible(cancel) && isEnabled(cancel)) {
@@ -975,7 +1008,7 @@ export function createDouyinFeigeAdapter(document: Document, pageUrl: string) {
           }
         }
 
-        if (!currentBoundOrderCard()) {
+        if (verificationContextChanged || !currentBoundOrderCard()) {
           return {
             ok: false,
             code: 'CONTEXT_CHANGED',
