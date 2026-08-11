@@ -31,9 +31,21 @@ export function createAcademyRouter(deps: {
     const result = await deps.service.listCourses(pageQuery(req.query as any), req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
+  router.get('/course-categories', deps.requireRead, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.listCourseCategories(req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+  router.put('/course-categories', deps.requireCourseWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.saveCourseCategory(req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
   router.post('/courses', deps.requireCourseWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.createCourse(req.body || {}, req.currentUser!);
     res.status(statusFor(result.code, 201)).json(result);
+  });
+  router.put('/courses/:courseId', deps.requireCourseWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.updateCourse(String(req.params.courseId), req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
   });
   router.post('/courses/:courseId/status', deps.requireCourseWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.changeCourseStatus(String(req.params.courseId), String(req.body?.status || '') as any, req.currentUser!);

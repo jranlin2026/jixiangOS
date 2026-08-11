@@ -16,6 +16,13 @@ const client: any = {
     findFirst: async () => null,
     findUnique: async () => null,
     create: async ({ data }: any) => data,
+    update: async ({ data }: any) => ({
+      id: "course-1",
+      code: "AC-1",
+      status: "DRAFT",
+      createdAt: now,
+      ...data,
+    }),
     updateMany: async (args: any) => (
       calls.push({ model: "course", method: "updateMany", args }),
       { count: 1 }
@@ -24,6 +31,7 @@ const client: any = {
   academyCourseVersion: {
     create: async ({ data }: any) => data,
     findFirst: async () => ({ id: "version-1" }),
+    aggregate: async () => ({ _max: { versionNumber: 2 } }),
   },
   businessRecord: {
     findMany: async (args: any) => (
@@ -76,6 +84,34 @@ const client: any = {
 };
 
 const repository = createPrismaAcademyRepository(client);
+const initialCategories = await repository.listCourseCategories();
+assert.deepEqual(initialCategories, []);
+const categoryListCall = calls.find(
+  (call) => call.model === "businessRecord" && call.method === "findMany",
+);
+assert.deepEqual(categoryListCall?.args.where, { domain: "academy_course_categories" });
+
+await repository.upsertCourseCategory({
+  id: "category-1",
+  name: "老板增长课",
+  description: "面向老板",
+  sortOrder: 8,
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+});
+const categorySaveCall = calls.find(
+  (call) => call.model === "businessRecord" && call.method === "upsert",
+);
+assert.deepEqual(categorySaveCall?.args.where.domain_recordId, {
+  domain: "academy_course_categories",
+  recordId: "category-1",
+});
+
+assert.equal(await repository.getNextCourseVersionNumber("course-1"), 3);
+const updatedCourse = await repository.updateCourse("course-1", { title: "更新后课程" });
+assert.equal(updatedCourse?.title, "更新后课程");
+
 const result = await repository.listCourses(
   { page: 3, pageSize: 10, search: "AI", status: "ACTIVE" },
   { unrestricted: true, visibleUserIds: [] },
@@ -152,7 +188,7 @@ assert.deepEqual(
 
 await repository.listCourseAssets("course-1");
 const assetListCall = calls.find(
-  (call) => call.model === "businessRecord" && call.method === "findMany",
+  (call) => call.model === "businessRecord" && call.method === "findMany" && call.args.where.domain === "academy_course_assets",
 );
 assert.deepEqual(assetListCall?.args.where, {
   domain: "academy_course_assets",
@@ -172,7 +208,7 @@ await repository.upsertCourseAsset({
   updatedAt: now,
 });
 const assetSaveCall = calls.find(
-  (call) => call.model === "businessRecord" && call.method === "upsert",
+  (call) => call.model === "businessRecord" && call.method === "upsert" && call.args.where.domain_recordId.domain === "academy_course_assets",
 );
 assert.deepEqual(assetSaveCall?.args.where.domain_recordId, {
   domain: "academy_course_assets",

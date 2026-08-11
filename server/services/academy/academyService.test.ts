@@ -15,6 +15,7 @@ const actor = {
 function createRepository(): AcademyRepository {
   const courses: any[] = [];
   const courseVersions: any[] = [];
+  const categories: any[] = [];
   const assets: any[] = [];
   const sessions: any[] = [];
   const tasks: any[] = [];
@@ -26,6 +27,13 @@ function createRepository(): AcademyRepository {
   ];
   const products = [{ id: "product-ai", name: "AI企业升级计划" }];
   return {
+    listCourseCategories: async () => categories,
+    upsertCourseCategory: async (category) => {
+      const index = categories.findIndex((item) => item.id === category.id);
+      if (index >= 0) categories[index] = category;
+      else categories.push(category);
+      return category;
+    },
     listCourses: async ({ page, pageSize }) => ({
       items: courses.slice((page - 1) * pageSize, page * pageSize),
       total: courses.length,
@@ -42,6 +50,13 @@ function createRepository(): AcademyRepository {
         : null,
     createCourse: async (course) => (courses.push(course), course),
     createCourseVersion: async (version) => (courseVersions.push(version), version),
+    getNextCourseVersionNumber: async (courseId) => courseVersions.filter((item) => item.courseId === courseId).length + 1,
+    updateCourse: async (id, update) => {
+      const course = courses.find((item) => item.id === id);
+      if (!course) return null;
+      Object.assign(course, update);
+      return course;
+    },
     listCourseAssets: async (courseId) =>
       assets.filter((asset) => asset.courseId === courseId),
     upsertCourseAsset: async (asset) => {
@@ -150,6 +165,13 @@ const service = createAcademyService(repository, {
   now: () => new Date("2026-08-08T09:00:00.000Z"),
 });
 
+const initialCategories = await service.listCourseCategories(actor);
+assert.equal(initialCategories.code, 0);
+assert.ok(initialCategories.data!.some((item) => item.name === "公开课"), "系统应提供可配置的默认课程分类");
+const customCategory = await service.saveCourseCategory({ name: "老板增长课", description: "面向企业老板", sortOrder: 8, isActive: true }, actor);
+assert.equal(customCategory.code, 0);
+assert.equal(customCategory.data?.name, "老板增长课");
+
 const courseResult = await service.createCourse(
   {
     code: "CLIENT-SHOULD-NOT-CONTROL-CODE",
@@ -177,6 +199,16 @@ assert.equal(courseResult.data?.conversionProductName, "AI企业升级计划");
 assert.equal(courseResult.data?.targetAudience, "传统企业经营者");
 assert.equal(courseResult.data?.customerProblem, "团队不会把AI落到业务流程");
 assert.equal(courseResult.data?.coreViewpoint, "先改流程，再谈工具");
+
+const updatedCourse = await service.updateCourse(courseResult.data!.id, {
+  ...courseResult.data,
+  title: "AI企业升级公开课 V2",
+  objectives: ["识别机会", "形成行动清单"],
+  category: "老板增长课",
+}, actor);
+assert.equal(updatedCourse.code, 0);
+assert.equal(updatedCourse.data?.title, "AI企业升级公开课 V2");
+assert.deepEqual(updatedCourse.data?.objectives, ["识别机会", "形成行动清单"]);
 
 const activatedCourse = await service.changeCourseStatus(
   courseResult.data!.id,

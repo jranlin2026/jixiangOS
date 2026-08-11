@@ -15,5 +15,11 @@ assert.match(source, /item\.targetAudience \|\| "未填写"/, '课程列表应�
 assert.match(source, /item\.conversionProductName \|\| "未关联"/, '课程列表应展示真实转化产品');
 assert.doesNotMatch(source, /item\.objectives\[0\] \|\| "企业管理者"/, '课程列表不得用课程目标伪装目标客户');
 assert.match(source, /markButtonClicksDirty=\{false\}/, '商学院表单关闭按钮不应被误判为内容修改');
+assert.match(source, /academyApi\.listCourseCategories\(\)/, '课程分类应从后端配置读取');
+assert.match(source, /分类设置/, '课程资产页应提供分类配置入口');
+assert.match(source, /添加课程目标/, '课程目标应支持多条结构化录入');
+assert.match(source, /tableId="academy-course-library"/, '课程列表应复用系统统一表格');
+assert.match(source, /<TablePagination[\s\S]*count=\{filtered\.length\}/, '课程列表应使用统一分页语义');
+assert.doesNotMatch(source, /<Tab label="版本记录"/, '版本历史尚未开放时不应展示假入口');
 
 console.log('academy course form static tests passed');

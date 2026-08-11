@@ -12,6 +12,7 @@ import type {
 import { STORAGE_KEYS } from "../../../src/shared/utils/constants";
 
 const ACADEMY_COURSE_ASSET_DOMAIN = "academy_course_assets";
+const ACADEMY_COURSE_CATEGORY_DOMAIN = "academy_course_categories";
 
 const mapCourse = (record: any): AcademyCourseRecord => ({
   ...record,
@@ -44,6 +45,53 @@ const sessionScopeWhere = (scope: AcademyAccessScope) =>
 
 export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
   return {
+    async listCourseCategories() {
+      const rows = await prisma.businessRecord.findMany({
+        where: { domain: ACADEMY_COURSE_CATEGORY_DOMAIN },
+        orderBy: { createdAt: "asc" },
+      });
+      return rows.map((row: any) => {
+        const data = row.data as any;
+        return {
+          id: row.recordId,
+          name: String(data.name || row.title || ""),
+          description: String(data.description || ""),
+          sortOrder: Number(data.sortOrder) || 1,
+          isActive: data.isActive !== false,
+          createdAt: new Date(data.createdAt || row.createdAt),
+          updatedAt: new Date(data.updatedAt || row.updatedAt),
+        };
+      });
+    },
+    async upsertCourseCategory(category) {
+      const data = {
+        ...category,
+        createdAt: category.createdAt.toISOString(),
+        updatedAt: category.updatedAt.toISOString(),
+      };
+      const row = await prisma.businessRecord.upsert({
+        where: { domain_recordId: { domain: ACADEMY_COURSE_CATEGORY_DOMAIN, recordId: category.id } },
+        create: {
+          id: `${ACADEMY_COURSE_CATEGORY_DOMAIN}:${category.id}`,
+          domain: ACADEMY_COURSE_CATEGORY_DOMAIN,
+          recordId: category.id,
+          title: category.name,
+          status: category.isActive ? "ACTIVE" : "INACTIVE",
+          data,
+        },
+        update: {
+          title: category.name,
+          status: category.isActive ? "ACTIVE" : "INACTIVE",
+          data,
+        },
+      });
+      const saved = row.data as any;
+      return {
+        ...saved,
+        createdAt: new Date(saved.createdAt || row.createdAt),
+        updatedAt: new Date(saved.updatedAt || row.updatedAt),
+      };
+    },
     async listCourses({ page, pageSize, search, status }, scope) {
       const where = {
         ...courseScopeWhere(scope),
@@ -107,6 +155,21 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
     },
     async createCourseVersion(version) {
       return prisma.academyCourseVersion.create({ data: version });
+    },
+    async getNextCourseVersionNumber(courseId) {
+      const aggregate = await prisma.academyCourseVersion.aggregate({
+        where: { courseId },
+        _max: { versionNumber: true },
+      });
+      return Number(aggregate._max.versionNumber || 0) + 1;
+    },
+    async updateCourse(id, update) {
+      try {
+        return mapCourse(await prisma.academyCourse.update({ where: { id }, data: update }));
+      } catch (error: any) {
+        if (error?.code === "P2025") return null;
+        throw error;
+      }
     },
     async listCourseAssets(courseId) {
       const rows = await prisma.businessRecord.findMany({

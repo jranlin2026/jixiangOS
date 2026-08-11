@@ -38,6 +38,16 @@ export type AcademyCourseRecord = {
   updatedAt: Date;
 };
 
+export type AcademyCourseCategoryRecord = {
+  id: string;
+  name: string;
+  description: string;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type AcademyCourseAssetRecord = {
   id: string;
   courseId: string;
@@ -144,6 +154,8 @@ export type AcademyAccessScope = {
 };
 
 export interface AcademyRepository {
+  listCourseCategories(): Promise<AcademyCourseCategoryRecord[]>;
+  upsertCourseCategory(category: AcademyCourseCategoryRecord): Promise<AcademyCourseCategoryRecord>;
   listCourses(
     input: { page: number; pageSize: number; search?: string; status?: string },
     scope: AcademyAccessScope,
@@ -155,6 +167,8 @@ export interface AcademyRepository {
   findLatestCourseVersionId(courseId: string): Promise<string | null>;
   createCourse(course: AcademyCourseRecord): Promise<AcademyCourseRecord>;
   createCourseVersion(version: Record<string, unknown>): Promise<unknown>;
+  getNextCourseVersionNumber(courseId: string): Promise<number>;
+  updateCourse(id: string, update: Partial<AcademyCourseRecord>): Promise<AcademyCourseRecord | null>;
   listCourseAssets(courseId: string): Promise<AcademyCourseAssetRecord[]>;
   upsertCourseAsset(asset: AcademyCourseAssetRecord): Promise<AcademyCourseAssetRecord>;
   updateCourseStatus(
@@ -326,6 +340,21 @@ const ASSET_TYPES = new Set<AcademyAssetType>([
 ]);
 
 const invalid = (message: string, code = 400) => failure<never>(message, code);
+const DEFAULT_COURSE_CATEGORIES = [
+  "公开课",
+  "训练营",
+  "企业内训",
+  "产品培训",
+  "销售转化课",
+  "客户服务课",
+  "内部员工培训",
+].map((name, index) => ({
+  id: `academy-category-${index + 1}`,
+  name,
+  description: "",
+  sortOrder: index + 1,
+  isActive: true,
+}));
 const buildCourseCode = (at: Date) => {
   const yearMonth = `${at.getUTCFullYear()}${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
   return `AC-${yearMonth}-${randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase()}`;
@@ -345,7 +374,45 @@ export function createAcademyService(
       unrestricted: false,
       visibleUserIds: [actor.id],
     }));
+  const loadCourseCategories = async () => {
+    const stored = await repository.listCourseCategories();
+    const byId = new Map(stored.map((item) => [item.id, item]));
+    const timestamp = now();
+    const defaults = DEFAULT_COURSE_CATEGORIES.map((item) => ({
+      ...item,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      ...byId.get(item.id),
+    }));
+    const custom = stored.filter(
+      (item) => !DEFAULT_COURSE_CATEGORIES.some((preset) => preset.id === item.id),
+    );
+    return [...defaults, ...custom].sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "zh-CN"),
+    );
+  };
   return {
+    async listCourseCategories(_actor: AuthenticatedUser) {
+      return success(await loadCourseCategories());
+    },
+    async saveCourseCategory(raw: Record<string, unknown>, _actor: AuthenticatedUser) {
+      const id = String(raw.id || "").trim() || `academy-category-${randomUUID()}`;
+      const name = String(raw.name || "").trim();
+      if (!name) return invalid("课程分类名称不能为空");
+      const categories = await loadCourseCategories();
+      if (categories.some((item) => item.id !== id && item.name === name)) return invalid("课程分类名称已存在", 409);
+      const existing = categories.find((item) => item.id === id);
+      const timestamp = now();
+      return success(await repository.upsertCourseCategory({
+        id,
+        name,
+        description: String(raw.description || "").trim(),
+        sortOrder: Math.max(1, Number(raw.sortOrder) || existing?.sortOrder || categories.length + 1),
+        isActive: raw.isActive !== false,
+        createdAt: existing?.createdAt || timestamp,
+        updatedAt: timestamp,
+      }));
+    },
     async getDashboard(actor: AuthenticatedUser) {
       return success(await repository.getDashboard(await resolveScope(actor)));
     },
@@ -419,6 +486,8 @@ export function createAcademyService(
       const category = String(raw.category || "").trim();
       const duration = Number(raw.defaultDurationMinutes);
       if (!title || !category) return invalid("课程名称和分类不能为空");
+      const categories = await loadCourseCategories();
+      if (!categories.some((item) => item.name === category && item.isActive)) return invalid("课程分类不存在或已停用");
       if (!Number.isInteger(duration) || duration <= 0 || duration > 1440)
         return invalid("课程时长必须是1到1440分钟的整数");
       const timestamp = now();
@@ -494,6 +563,65 @@ export function createAcademyService(
         updatedAt: timestamp,
       });
       return success(created);
+    },
+    async updateCourse(id: string, raw: Record<string, unknown>, actor: AuthenticatedUser) {
+      const course = await repository.findCourseById(id, await resolveScope(actor));
+      if (!course) return invalid("课程不存在", 404);
+      const title = String(raw.title || "").trim();
+      const category = String(raw.category || "").trim();
+      const duration = Number(raw.defaultDurationMinutes);
+      if (!title || !category) return invalid("课程名称和分类不能为空");
+      const categories = await loadCourseCategories();
+      if (!categories.some((item) => item.name === category && item.isActive)) return invalid("课程分类不存在或已停用");
+      if (!Number.isInteger(duration) || duration <= 0 || duration > 1440) return invalid("课程时长必须是1到1440分钟的整数");
+      const ownerId = String(raw.ownerUserId || course.ownerUserId).trim();
+      const owner = ownerId === actor.id ? { id: actor.id, name: actor.name } : await repository.findActiveUserById(ownerId);
+      if (!owner) return invalid("课程负责人不存在或已停用");
+      const lecturerUserId = String(raw.lecturerUserId || "").trim();
+      const lecturer = lecturerUserId ? await repository.findActiveUserById(lecturerUserId) : null;
+      if (lecturerUserId && !lecturer) return invalid("主讲人不存在或已停用");
+      const conversionProductId = String(raw.conversionProductId || "").trim();
+      const conversionProduct = conversionProductId ? await repository.findActiveProductById(conversionProductId) : null;
+      if (conversionProductId && !conversionProduct) return invalid("转化产品不存在或已停用");
+      const timestamp = now();
+      const update = {
+        title,
+        category,
+        summary: String(raw.summary || "").trim(),
+        targetAudience: String(raw.targetAudience || "").trim() || null,
+        customerProblem: String(raw.customerProblem || "").trim() || null,
+        coreViewpoint: String(raw.coreViewpoint || "").trim() || null,
+        conversionProductId: conversionProduct?.id || null,
+        conversionProductName: conversionProduct?.name || null,
+        defaultDurationMinutes: duration,
+        objectives: Array.isArray(raw.objectives) ? raw.objectives.map(String).map((item) => item.trim()).filter(Boolean) : [],
+        ownerUserId: owner.id,
+        ownerUserName: owner.name,
+        lecturerUserId: lecturer?.id || null,
+        lecturerUserName: lecturer?.name || null,
+        updatedAt: timestamp,
+      };
+      const updated = await repository.updateCourse(id, update);
+      if (!updated) return invalid("课程已变化，请刷新后重试", 409);
+      await repository.createCourseVersion({
+        id: `academy-course-version-${randomUUID()}`,
+        courseId: id,
+        versionNumber: await repository.getNextCourseVersionNumber(id),
+        title: updated.title,
+        summary: updated.summary,
+        targetAudience: updated.targetAudience,
+        customerProblem: updated.customerProblem,
+        coreViewpoint: updated.coreViewpoint,
+        conversionProductId: updated.conversionProductId,
+        conversionProductName: updated.conversionProductName,
+        objectives: updated.objectives,
+        status: updated.status === "ACTIVE" ? "ACTIVE" : "DRAFT",
+        createdById: actor.id,
+        createdByName: actor.name,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+      return success(updated);
     },
     async changeCourseStatus(
       id: string,

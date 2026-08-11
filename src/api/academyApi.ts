@@ -2,6 +2,7 @@ import { backendRequest } from './backendClient';
 import type { ApiResponse } from './types';
 import type {
   AcademyCourse,
+  AcademyCourseCategory,
   AcademyCourseAsset,
   AcademyCourseStatus,
   AcademyDashboard,
@@ -16,6 +17,7 @@ import type {
   CreateAcademySessionInput,
   SaveAcademyEngagementInput,
   SaveAcademyCourseAssetInput,
+  SaveAcademyCourseCategoryInput,
   SaveAcademyReviewInput,
 } from '../types/academy';
 
@@ -34,8 +36,17 @@ export const academyApi = {
   listCourses(input: { page: number; pageSize: number; search?: string; status?: string }): Promise<ApiResponse<AcademyPage<AcademyCourse>>> {
     return backendRequest(`/academy/courses?${query(input)}`);
   },
+  listCourseCategories(): Promise<ApiResponse<AcademyCourseCategory[]>> {
+    return backendRequest('/academy/course-categories');
+  },
+  saveCourseCategory(input: SaveAcademyCourseCategoryInput): Promise<ApiResponse<AcademyCourseCategory>> {
+    return backendRequest('/academy/course-categories', { method: 'PUT', body: JSON.stringify(input) });
+  },
   createCourse(input: CreateAcademyCourseInput): Promise<ApiResponse<AcademyCourse>> {
     return backendRequest('/academy/courses', { method: 'POST', body: JSON.stringify(input) });
+  },
+  updateCourse(id: string, input: CreateAcademyCourseInput): Promise<ApiResponse<AcademyCourse>> {
+    return backendRequest(`/academy/courses/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) });
   },
   changeCourseStatus(id: string, status: AcademyCourseStatus): Promise<ApiResponse<AcademyCourse>> {
     return backendRequest(`/academy/courses/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status }) });

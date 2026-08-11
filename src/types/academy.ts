@@ -48,6 +48,16 @@ export interface AcademyCourse {
   updatedAt: string;
 }
 
+export interface AcademyCourseCategory {
+  id: string;
+  name: string;
+  description: string;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AcademyCourseAsset {
   id: string;
   courseId: string;
@@ -161,6 +171,7 @@ export type CreateAcademyCourseInput = Pick<
   | "defaultDurationMinutes"
   | "objectives"
 >;
+export type SaveAcademyCourseCategoryInput = Pick<AcademyCourseCategory, "name" | "description" | "sortOrder" | "isActive"> & { id?: string };
 export type CreateAcademySessionInput = Pick<
   AcademySession,
   "courseId" | "title" | "startsAt" | "endsAt" | "venue" | "capacity"
