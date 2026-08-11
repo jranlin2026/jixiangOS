@@ -768,7 +768,7 @@ function createGuardBoundaryFixture(options: {
   const currentFlag = fixtureDocument.querySelector('[data-testid="current-order-flag"]') as HTMLElement;
   let greenClicks = 0;
   let saveClicks = 0;
-  fixtureDocument.querySelector('[data-testid="edit-order-remark"],[data-test-blank-order-remark-entry]')?.addEventListener('click', () => {
+  fixtureDocument.querySelector('[data-testid="edit-order-remark"],[data-test-blank-order-remark-entry],[data-test-real-order-remark-entry]')?.addEventListener('click', () => {
     dialog.hidden = false;
     input.value = summary.textContent || '';
   });
@@ -1073,6 +1073,28 @@ assert.deepEqual(blankRemarkNonButtonEntryResult, {
   remarkStatus: 'SUCCEEDED',
   greenFlagStatus: 'SUCCEEDED',
 }, '飞鸽以普通 div/span 渲染卡片顶部“备”入口时也应能首次新增备注');
+
+const realSvgRemarkEntryFixture = createGuardBoundaryFixture({
+  existingRemark: '',
+  remarkEntryMarkup: `
+    <div data-test-real-order-remark-entry data-btm="d43763">
+      <span data-btm="d43763" class="i-icon i-icon-look-note">
+        <svg role="presentation"><rect></rect><path></path></svg>
+      </span>
+    </div>
+  `,
+});
+const realSvgRemarkEntryResult = await realSvgRemarkEntryFixture.adapter.completeOsOrder({
+  expectedOrderNo: '6925095897028853458',
+  expectedCustomerDisplayName: '悠然一刻',
+  remarkLines: backendRemarkLines,
+});
+assert.deepEqual(realSvgRemarkEntryResult, {
+  ok: true,
+  remarkText: backendRemarkLines.join('\n'),
+  remarkStatus: 'SUCCEEDED',
+  greenFlagStatus: 'SUCCEEDED',
+}, '飞鸽真实订单卡以无文字 i-icon-look-note SVG 渲染备注入口时也应能新增备注');
 
 const malformedLinesFixture = createGuardBoundaryFixture();
 const malformedLinesResult = await malformedLinesFixture.adapter.completeOsOrder({

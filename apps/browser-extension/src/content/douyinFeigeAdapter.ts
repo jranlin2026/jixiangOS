@@ -32,7 +32,7 @@ const selectors = {
     '[role="button"][aria-expanded="true"]',
   ],
   orderRemarkSummary: ['[data-testid="order-remark-summary"]', '[class*="remark-content"]'],
-  orderRemarkEdit: ['[data-testid="edit-order-remark"]'],
+  orderRemarkEdit: ['[data-testid="edit-order-remark"]', '.i-icon-look-note'],
   orderRemarkDialog: ['[role="dialog"][aria-label*="备注"]', '[role="dialog"]'],
   greenFlag: ['[data-flag-color="red"]', '[aria-label*="红色旗帜"]', '[title*="红色旗帜"]'],
   currentOrderFlag: ['[data-testid="current-order-flag"]', '[data-current-flag]'],
