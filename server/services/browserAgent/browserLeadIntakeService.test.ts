@@ -267,6 +267,7 @@ assert.equal(createLeadCalls.length, 1);
 assert.deepEqual(createLeadCalls[0].input, {
   externalIntakeKey: 'browser-sync-1',
   name: '张先生',
+  douyinNickname: '张先生',
   phone: '13800138000',
   phones: [{ number: '13800138000', isPrimary: true, label: '主手机号' }],
   wechat: 'wx_original_88',

@@ -444,6 +444,7 @@ export function createBrowserLeadIntakeService(deps: {
       const leadInput = {
         externalIntakeKey: reserved.id,
         name: normalized.contactName,
+        douyinNickname: normalized.contactName,
         phone: normalized.contactPhone || '',
         phones: normalized.contactPhone
           ? [{ number: normalized.contactPhone, isPrimary: true as const, label: '主手机号' as const }]
