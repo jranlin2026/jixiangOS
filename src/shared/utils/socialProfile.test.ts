@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   formatSocialProfileSummary,
+  normalizeOptionalSocialProfileFields,
   normalizeOptionalSocialProfileValue,
 } from './socialProfile';
 
@@ -23,5 +24,6 @@ assert.equal(
   '微信：wx_001 · 抖音：dy_001',
 );
 assert.equal(formatSocialProfileSummary({}), '暂未填写社交账号');
+assert.deepEqual(normalizeOptionalSocialProfileFields({ douyinId: ' dy_001 ' }), { douyinId: 'dy_001' });
 
 console.log('social profile tests passed');

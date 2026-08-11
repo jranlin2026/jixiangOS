@@ -30,6 +30,7 @@ export function normalizeOptionalSocialProfileValue(value: unknown, label: strin
 export function normalizeOptionalSocialProfileFields<T extends Partial<SocialProfileFields>>(value: T): T {
   const normalized = { ...value };
   for (const key of SOCIAL_PROFILE_FIELD_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
     (normalized as Partial<SocialProfileFields>)[key] = normalizeOptionalSocialProfileValue(
       value[key],
       SOCIAL_PROFILE_FIELD_LABELS[key],

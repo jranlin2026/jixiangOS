@@ -232,6 +232,9 @@ const result = await service.create({
   name: '新客户',
   company: '新客户公司',
   phone: '13800000000',
+  wechatNickname: ' 微信新客户 ',
+  douyinId: 'douyin-new-customer',
+  douyinNickname: '抖音新客户',
   customerLevel: 'L1',
   owner: '销售',
   ownerId: actor.id,
@@ -243,6 +246,9 @@ assert.equal(result.code, 0);
 assert.equal(created.length, 1);
 assert.equal(created[0].data.domain, STORAGE_KEYS.CUSTOMERS);
 assert.equal(created[0].data.data.name, '新客户');
+assert.equal(result.data?.wechatNickname, '微信新客户');
+assert.equal(result.data?.douyinId, 'douyin-new-customer');
+assert.equal(result.data?.douyinNickname, '抖音新客户');
 assert.equal(auditEvents[0]?.operation, 'create_customer');
 assert.equal(result.data?.originalSalesTransferBy, actor.name, '客户首次获得销售归属时应自动记录首个销售负责人');
 assert.match(auditEvents[0]?.inputHash || '', /^[a-f0-9]{64}$/);
@@ -482,6 +488,20 @@ const overlongName = await service.create({
 
 assert.equal(overlongName.code, 400);
 assert.equal(overlongName.message, '客户姓名不能超过100个字符');
+
+const invalidSocialProfile = await service.create({
+  name: '社交资料过长',
+  company: '',
+  phone: '13700000002',
+  douyinId: 'x'.repeat(101),
+  customerLevel: 'L1',
+  owner: '销售',
+  ownerId: actor.id,
+  sourceType: '公司资源',
+}, actor);
+
+assert.equal(invalidSocialProfile.code, 400);
+assert.equal(invalidSocialProfile.message, '抖音号不能超过100个字符');
 
 const [firstDuplicate, secondDuplicate] = await Promise.all([
   service.create({

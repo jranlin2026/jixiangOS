@@ -48,6 +48,7 @@ import {
   upsertCustomerContactIdentities,
   type ContactIdentityCrypto,
 } from './contactIdentityService';
+import { normalizeOptionalSocialProfileFields } from '../../src/shared/utils/socialProfile';
 
 type CustomerListPrisma = Pick<PrismaClient,
   'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerAuditEvent'
@@ -348,6 +349,16 @@ export function createCustomerListService(
       const phone = phones[0]?.number || '';
       const wechat = cleanText(input.wechat);
       if (!phone && !wechat) return failure<Customer>('客户手机号或微信至少填写一项', 400);
+      let socialProfile: Pick<Customer, 'wechatNickname' | 'douyinId' | 'douyinNickname'>;
+      try {
+        socialProfile = normalizeOptionalSocialProfileFields({
+          wechatNickname: input.wechatNickname,
+          douyinId: input.douyinId,
+          douyinNickname: input.douyinNickname,
+        });
+      } catch (error) {
+        return failure<Customer>(error instanceof Error ? error.message : '社交账号资料无效', 400);
+      }
       const sourceType = normalizeResourceOwnership(input.sourceType);
       const importedLastFollowUpRecord = execution.importDestination
         ? cleanText(execution.importedLastFollowUpRecord)
@@ -417,6 +428,7 @@ export function createCustomerListService(
         phone,
         phones,
         wechat: wechat || undefined,
+        ...socialProfile,
         sourceType,
         owner: importToPublicPool ? '公海' : targetOwner!.name,
         ownerId: importToPublicPool ? undefined : targetOwner!.id,

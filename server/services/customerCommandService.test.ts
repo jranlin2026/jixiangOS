@@ -1301,6 +1301,9 @@ const serviceOptions = {
   const result = await service.updateCustomer(value.id, {
     name: '更新后客户',
     phone: '13900000000',
+    wechatNickname: ' 微信更新后 ',
+    douyinId: 'douyin-updated',
+    douyinNickname: '抖音更新后',
     tags: ['伪造标签'],
   }, customerEditor);
 
@@ -1312,11 +1315,57 @@ const serviceOptions = {
   assert.deepEqual(result.data?.manualTagIds, ['legacy-id']);
   const next = fake.getState();
   assert.equal(next.leads[0].data.name, '更新后客户');
+  assert.equal(next.leads[0].data.wechatNickname, '微信更新后');
+  assert.equal(next.leads[0].data.douyinId, 'douyin-updated');
+  assert.equal(next.leads[0].data.douyinNickname, '抖音更新后');
   assert.deepEqual(next.leads[0].data.tags, ['历史标签']);
   assert.equal(fake.businessRecordUpdateCalls, 0, '客户写入必须统一走 compare-and-save 边界');
   assert.equal(fake.businessRecordCompareAndSaveCalls, 1);
   assert.equal(next.customerAuditEvents?.[0]?.operation, 'update_profile');
   assert.match(next.customerAuditEvents?.[0]?.inputHash || '', /^[a-f0-9]{64}$/);
+}
+
+// 客户回写只能落到唯一的原始线索，多个稳定关联无法判定时不做扇出更新。
+{
+  const value = customer('cust-origin-lead-sync');
+  value.activityRecords = [{
+    id: 'act-origin-lead', type: 'create', title: '线索转客户', operator: salesA.name,
+    createdAt: FIXED_NOW.toISOString(), relatedType: 'lead', relatedId: 'lead-origin-b',
+  }];
+  const first = lead('lead-origin-a', salesA.name, value.id);
+  const origin = lead('lead-origin-b', salesA.name, value.id);
+  const warnings: unknown[] = [];
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [first, origin] });
+  const service = createCustomerCommandService(fake.prisma, { ...serviceOptions, onProfileSyncWarning: (warning) => warnings.push(warning) });
+  const result = await service.updateCustomer(value.id, { douyinNickname: '唯一原始线索同步' }, customerEditor);
+
+  assert.equal(result.code, 0);
+  assert.equal(fake.getState().leads[0].data.douyinNickname, undefined);
+  assert.equal(fake.getState().leads[1].data.douyinNickname, '唯一原始线索同步');
+  assert.deepEqual(warnings, []);
+}
+
+{
+  const value = customer('cust-ambiguous-lead-sync');
+  const warnings: any[] = [];
+  const fake = createFakePrisma({
+    businessRecords: [businessCustomer(value)],
+    leads: [
+      lead('lead-ambiguous-a', salesA.name, value.id),
+      lead('lead-ambiguous-b', salesA.name, value.id),
+    ],
+  });
+  const service = createCustomerCommandService(fake.prisma, { ...serviceOptions, onProfileSyncWarning: (warning) => warnings.push(warning) });
+  const result = await service.updateCustomer(value.id, { wechatNickname: '只更新客户' }, customerEditor);
+
+  assert.equal(result.code, 0);
+  assert.equal(fake.getState().leads[0].data.wechatNickname, undefined);
+  assert.equal(fake.getState().leads[1].data.wechatNickname, undefined);
+  assert.deepEqual(warnings, [{
+    code: 'AMBIGUOUS_ORIGIN_LEAD',
+    customerId: value.id,
+    linkedLeadIds: ['lead-ambiguous-a', 'lead-ambiguous-b'],
+  }]);
 }
 
 // A legacy profile write and its audit event share the same transaction. An
@@ -2157,6 +2206,9 @@ for (const targetType of ['customer', 'lead'] as const) {
     name: '新线索',
     company: '新公司',
     phone: '13900000009',
+    wechatNickname: ' 新线索微信昵称 ',
+    douyinId: 'douyin-new-lead',
+    douyinNickname: '新线索抖音昵称',
     source: '官网',
     status: '新线索',
     owner: '待分配',
@@ -2168,7 +2220,37 @@ for (const targetType of ['customer', 'lead'] as const) {
   assert.match(result.data?.id || '', /^lead-/);
   assert.equal(result.data?.inputBy, salesA.name);
   assert.equal(result.data?.owner, '待分配');
+  assert.equal(result.data?.wechatNickname, '新线索微信昵称');
+  assert.equal(result.data?.douyinId, 'douyin-new-lead');
+  assert.equal(result.data?.douyinNickname, '新线索抖音昵称');
   assert.equal(fake.getState().leads.length, 1);
+
+  const sameSocialProfile = await service.createLead({
+    name: '相同社交资料线索',
+    company: '另一家公司',
+    phone: '13900000010',
+    douyinId: 'douyin-new-lead',
+    source: '官网',
+    status: '新线索',
+    owner: '待分配',
+    inputBy: '伪造录入人',
+    sourceType: '公司资源',
+  }, leadEditor);
+  assert.equal(sameSocialProfile.code, 0, '微信昵称、抖音号和抖音昵称不参与查重');
+
+  const invalidSocialProfile = await service.createLead({
+    name: '非法社交资料线索',
+    company: '',
+    phone: '13900000011',
+    douyinNickname: 'x'.repeat(101),
+    source: '官网',
+    status: '新线索',
+    owner: '待分配',
+    inputBy: '伪造录入人',
+    sourceType: '公司资源',
+  }, leadEditor);
+  assert.equal(invalidSocialProfile.code, 400);
+  assert.equal(invalidSocialProfile.message, '抖音昵称不能超过100个字符');
 }
 
 // RED: 服务端新建线索必须保留轮询分配、规则游标和入库记录语义。
@@ -2682,7 +2764,11 @@ for (const targetType of ['customer', 'lead'] as const) {
 // RED: 线索转客户要原子创建 BusinessRecord 并回写 LeadRecord，重试不得重复创建。
 {
   const queryLog: string[] = [];
-  const fake = createFakePrisma({ businessRecords: [], leads: [lead('lead-convert')] }, { queryLog });
+  const sourceLead = lead('lead-convert');
+  sourceLead.data.wechatNickname = '转化微信昵称';
+  sourceLead.data.douyinId = 'douyin-convert';
+  sourceLead.data.douyinNickname = '转化抖音昵称';
+  const fake = createFakePrisma({ businessRecords: [], leads: [sourceLead] }, { queryLog });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.convertLeadToCustomer('lead-convert', salesA);
 
@@ -2692,6 +2778,9 @@ for (const targetType of ['customer', 'lead'] as const) {
   assert.equal(next.businessRecords.length, 1);
   assert.equal(next.businessRecords[0].domain, STORAGE_KEYS.CUSTOMERS);
   assert.equal(next.businessRecords[0].owner, salesA.name);
+  assert.equal(next.businessRecords[0].data.wechatNickname, '转化微信昵称');
+  assert.equal(next.businessRecords[0].data.douyinId, 'douyin-convert');
+  assert.equal(next.businessRecords[0].data.douyinNickname, '转化抖音昵称');
   assert.equal(next.leads[0].data.customerId, next.businessRecords[0].recordId);
   const conversionIdentity = next.contactIdentities?.find((identity) => (
     identity.canonicalCustomerId === next.businessRecords[0].recordId

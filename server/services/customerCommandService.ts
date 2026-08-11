@@ -81,6 +81,7 @@ import {
   type ContactIdentityCrypto,
 } from './contactIdentityService';
 import type { NotificationWorkflow } from './notificationWorkflow';
+import { normalizeOptionalSocialProfileFields } from '../../src/shared/utils/socialProfile';
 
 type CustomerCommandPrisma = Pick<PrismaClient, '$transaction' | 'leadRecord'>;
 type CustomerContact = Pick<Lead, 'phone' | 'phones' | 'wechat'>;
@@ -190,6 +191,11 @@ type CommandOptions = {
   createId?: () => string;
   contactIdentityCrypto?: ContactIdentityCrypto;
   notificationWorkflow?: NotificationWorkflow;
+  onProfileSyncWarning?: (warning: {
+    code: 'AMBIGUOUS_ORIGIN_LEAD';
+    customerId: string;
+    linkedLeadIds: string[];
+  }) => void;
 };
 
 type CommandContext = {
@@ -614,6 +620,20 @@ async function lockedLeadRowsByStableCustomerId(tx: CustomerCommandTx, customerI
   `);
 }
 
+function selectOriginLeadRow(customer: Customer, rows: LockedLeadRecord[]): LockedLeadRecord | null {
+  const activeRows = rows.filter((row) => !readJson<Lead>(row.data).deletedAt);
+  const originLeadId = cleanText(
+    customer.activityRecords?.find((record) => record.relatedType === 'lead' && record.relatedId)?.relatedId,
+  );
+  if (originLeadId) {
+    return activeRows.find((row) => {
+      const lead = readJson<Lead>(row.data);
+      return row.id === originLeadId || lead.id === originLeadId;
+    }) || null;
+  }
+  return activeRows.length === 1 ? activeRows[0] : null;
+}
+
 async function persistCustomer(
   tx: CustomerCommandTx,
   snapshot: CustomerRecordSnapshot,
@@ -713,7 +733,10 @@ const CUSTOMER_EDIT_FIELDS: Array<{ field: keyof Customer; label: string }> = [
   { field: 'company', label: '公司' },
   { field: 'phone', label: '电话' },
   { field: 'phones', label: '备用手机号' },
-  { field: 'wechat', label: '微信' },
+  { field: 'wechat', label: '微信号' },
+  { field: 'wechatNickname', label: '微信昵称' },
+  { field: 'douyinId', label: '抖音号' },
+  { field: 'douyinNickname', label: '抖音昵称' },
   { field: 'customerLevel', label: '客户等级' },
   { field: 'lifecycleStatusCode', label: '客户进展' },
   { field: 'leadContributorId', label: '线索贡献人' },
@@ -804,6 +827,9 @@ function syncLeadFromCustomer(lead: Lead, customer: Customer, atIso: string, ope
     phone: customer.phone,
     phones: customer.phones,
     wechat: customer.wechat,
+    wechatNickname: customer.wechatNickname,
+    douyinId: customer.douyinId,
+    douyinNickname: customer.douyinNickname,
     industry: customer.industry,
     city: customer.city,
     owner: customer.owner,
@@ -860,7 +886,10 @@ const LEAD_EDIT_FIELDS: Array<{ field: keyof Lead; label: string }> = [
   { field: 'company', label: '公司' },
   { field: 'phone', label: '手机号' },
   { field: 'phones', label: '备用手机号' },
-  { field: 'wechat', label: '微信' },
+  { field: 'wechat', label: '微信号' },
+  { field: 'wechatNickname', label: '微信昵称' },
+  { field: 'douyinId', label: '抖音号' },
+  { field: 'douyinNickname', label: '抖音昵称' },
   { field: 'source', label: '线索来源' },
   { field: 'sourceName', label: '来源明细' },
   { field: 'sourceType', label: '资源归属' },
@@ -1700,6 +1729,11 @@ export function createCustomerCommandService(
         if (Object.prototype.hasOwnProperty.call(patch, 'wechat')) {
           patch.wechat = normalizedWechat(patch.wechat) || undefined;
         }
+        try {
+          patch = normalizeOptionalSocialProfileFields(patch);
+        } catch (error) {
+          return failure<Customer>(error instanceof Error ? error.message : '社交账号资料无效', 400);
+        }
         if (Object.prototype.hasOwnProperty.call(patch, 'sourceType')) {
           patch.sourceType = normalizeResourceOwnership(patch.sourceType);
         }
@@ -1757,8 +1791,27 @@ export function createCustomerCommandService(
           },
         });
         await persistCustomer(tx, snapshot, updated, at);
-        const leadRows = await linkedLeadRows(tx, customer);
-        for (const leadRow of leadRows) {
+        const stableLeadRows = await lockedLeadRowsByStableCustomerId(tx, customer.id);
+        const originLeadRow = selectOriginLeadRow(customer, stableLeadRows);
+        if (!originLeadRow) {
+          const activeLinkedLeadIds = stableLeadRows
+            .map((row) => ({ row, lead: readJson<Lead>(row.data) }))
+            .filter(({ lead }) => !lead.deletedAt)
+            .map(({ row, lead }) => lead.id || row.id)
+            .sort();
+          if (activeLinkedLeadIds.length > 1) {
+            try {
+              options.onProfileSyncWarning?.({
+                code: 'AMBIGUOUS_ORIGIN_LEAD',
+                customerId: customer.id,
+                linkedLeadIds: activeLinkedLeadIds,
+              });
+            } catch {
+              // Reporting must never make a valid customer profile update fail.
+            }
+          }
+        }
+        for (const leadRow of originLeadRow ? [originLeadRow] : []) {
           const lead = readJson<Lead>(leadRow.data);
           const nextLead = syncLeadFromCustomer(lead, updated, atIso, operator);
           if (nextLead !== lead) {
@@ -1854,6 +1907,16 @@ export function createCustomerCommandService(
         const context = await commandContext(tx, currentUser, 'leads');
         if (!context.actor) return failure<Lead>('当前用户不存在或已离职', 403);
         const cleanInput = stripLeadTags(input);
+        let socialProfile: Pick<Lead, 'wechatNickname' | 'douyinId' | 'douyinNickname'>;
+        try {
+          socialProfile = normalizeOptionalSocialProfileFields({
+            wechatNickname: input.wechatNickname,
+            douyinId: input.douyinId,
+            douyinNickname: input.douyinNickname,
+          });
+        } catch (error) {
+          return failure<Lead>(error instanceof Error ? error.message : '社交账号资料无效', 400);
+        }
         const flowConfig = normalizeLeadFlowConfig(await lockStorageValue(
           tx,
           STORAGE_KEYS.LEAD_FLOW_CONFIG,
@@ -1881,6 +1944,7 @@ export function createCustomerCommandService(
           company: cleanText(input.company) || undefined,
           phone: phone || undefined,
           wechat,
+          ...socialProfile,
           source: [source, cleanText(input.sourceName)].filter(Boolean).join('-') || undefined,
           inputBy,
           createdAt: atIso,
@@ -1989,6 +2053,7 @@ export function createCustomerCommandService(
           phone,
           phones,
           wechat,
+          ...socialProfile,
           sourceType,
           status: input.status || '新线索',
           owner,
@@ -2050,6 +2115,9 @@ export function createCustomerCommandService(
             phones: lead.phones,
             email: lead.email,
             wechat: lead.wechat,
+            wechatNickname: lead.wechatNickname,
+            douyinId: lead.douyinId,
+            douyinNickname: lead.douyinNickname,
             industry: lead.industry,
             city: lead.city,
             owner: assignedTo,
@@ -2246,6 +2314,11 @@ export function createCustomerCommandService(
           patch.phones = canonicalPhones;
         }
         if (Object.prototype.hasOwnProperty.call(patch, 'wechat')) patch.wechat = normalizedWechat(patch.wechat) || undefined;
+        try {
+          patch = normalizeOptionalSocialProfileFields(patch);
+        } catch (error) {
+          return failure<Lead>(error instanceof Error ? error.message : '社交账号资料无效', 400);
+        }
         if (Object.prototype.hasOwnProperty.call(patch, 'sourceType')) {
           patch.sourceType = normalizeResourceOwnership(patch.sourceType);
         }
@@ -2847,6 +2920,9 @@ export function createCustomerCommandService(
           phones: canonicalizeContactPhones(lead.phone, lead.phones),
           email: lead.email,
           wechat: normalizedWechat(lead.wechat) || undefined,
+          wechatNickname: lead.wechatNickname,
+          douyinId: lead.douyinId,
+          douyinNickname: lead.douyinNickname,
           industry: lead.industry,
           city: lead.city,
           owner: conversionOwner,
