@@ -108,7 +108,7 @@ export const getArrangementNextAction = (
     const ready = Boolean(detail) && beforeTasks.every((task) => task.status === "DONE");
     return ready
       ? { label: "确认开课", nextStatus: "READY" as AcademySessionStatus, tab: 0 }
-      : { label: "完善SOP流程", tab: 0 };
+      : { label: "推进课程任务", tab: 0 };
   }
   if (session.status === "READY")
     return { label: "进入课程执行", nextStatus: "IN_PROGRESS" as AcademySessionStatus, tab: 0 };
@@ -131,6 +131,8 @@ type PlansProps = {
   canCreate: boolean;
   canManage: boolean;
   canReview: boolean;
+  canConfigureFlows: boolean;
+  onFlowSettings: () => void;
   requestedSessionId?: string;
   onRequestConsumed: () => void;
   onNeedDetail: (id: string) => void;
@@ -153,6 +155,8 @@ export const Plans: React.FC<PlansProps> = ({
   canCreate,
   canManage,
   canReview,
+  canConfigureFlows,
+  onFlowSettings,
   requestedSessionId,
   onRequestConsumed,
   onNeedDetail,
@@ -269,9 +273,12 @@ export const Plans: React.FC<PlansProps> = ({
           <Typography fontSize={18} fontWeight={950}>课程安排</Typography>
           <Typography fontSize={12.5} color="text.secondary">安排未来课程，查看已完结课程的客户结果与复盘</Typography>
         </Box>
-        {canCreate && <Stack direction="row" spacing={1}>
+        {(canCreate || canConfigureFlows) && <Stack direction="row" spacing={1}>
+          {canConfigureFlows && <Button variant="outlined" startIcon={<DashboardOutlinedIcon />} onClick={onFlowSettings}>课程流程设置</Button>}
+          {canCreate && <>
           <Button variant="outlined" onClick={onCreateHistorical}>补录历史课程</Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => onCreate()}>新建课程安排</Button>
+          </>}
         </Stack>}
       </Stack>
 
@@ -310,15 +317,15 @@ export const Plans: React.FC<PlansProps> = ({
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0, 1fr))" }, gap: 1.2 }}>
         {[
-          { key: "UPCOMING", label: "待开课安排", helper: "设置时间、讲师和课程负责人", count: sessions.filter((item) => ["PLANNED", "READY"].includes(item.status)).length },
-          { key: "IN_PROGRESS", label: "进行中课程", helper: "进入工作台推进课程和SOP", count: sessions.filter((item) => item.status === "IN_PROGRESS").length },
+          { key: "UPCOMING", label: "待开课安排", helper: "设置时间、讲师和项目负责人", count: sessions.filter((item) => ["PLANNED", "READY"].includes(item.status)).length },
+          { key: "IN_PROGRESS", label: "进行中课程", helper: "进入工作台推进课程任务", count: sessions.filter((item) => item.status === "IN_PROGRESS").length },
           { key: "COMPLETED", label: "已完结课程", helper: "查看客户结果、经营数据和复盘", count: sessions.filter((item) => item.status === "COMPLETED").length },
         ].map((item) => <Paper component="button" type="button" aria-pressed={bucket === item.key} key={item.key} variant="outlined" onClick={() => setBucket(item.key as "UPCOMING" | "IN_PROGRESS" | "COMPLETED")} sx={{ ...panelSx, p: 1.6, textAlign: "left", cursor: "pointer", borderColor: bucket === item.key ? colors.blue : colors.line, bgcolor: bucket === item.key ? colors.blueSoft : "#fff" }}><Stack direction="row" justifyContent="space-between"><Box><Typography fontWeight={950}>{item.label}</Typography><Typography fontSize={12.5} color="text.secondary">{item.helper}</Typography></Box><Typography fontSize={24} fontWeight={950} color={bucket === item.key ? colors.blue : colors.ink}>{item.count}</Typography></Stack></Paper>)}
       </Box>
 
       <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
         <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" alignItems={{ lg: "center" }} spacing={1} sx={{ p: 1.5, borderBottom: `1px solid ${colors.line}` }}>
-          <Box><Typography fontWeight={900}>{bucket === "UPCOMING" ? "待开课安排" : bucket === "IN_PROGRESS" ? "进行中课程" : "已完结课程"}</Typography><Typography fontSize={12.5} color="text.secondary">{bucket === "UPCOMING" ? "直接编辑安排、确认待开课或取消；超时课程会提醒确认" : bucket === "IN_PROGRESS" ? "进入我的工作台推进SOP，课程结束后由负责人确认完结" : "查看客户结果、课程数据和复盘"}</Typography></Box>
+          <Box><Typography fontWeight={900}>{bucket === "UPCOMING" ? "待开课安排" : bucket === "IN_PROGRESS" ? "进行中课程" : "已完结课程"}</Typography><Typography fontSize={12.5} color="text.secondary">{bucket === "UPCOMING" ? "直接编辑安排、确认待开课或取消；超时课程会提醒确认" : bucket === "IN_PROGRESS" ? "进入我的工作台推进课程任务，课程结束后由负责人确认完结" : "查看客户结果、课程数据和复盘"}</Typography></Box>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
             <TextField size="small" placeholder="搜索课程、安排、地点或负责人" value={search} onChange={(event) => setSearch(event.target.value)} InputProps={{ startAdornment: <SearchIcon sx={{ mr: 0.7, color: "#98A2B3", fontSize: 20 }} /> }} />
           </Stack>
@@ -346,7 +353,7 @@ export const Plans: React.FC<PlansProps> = ({
                     {completed ? <Stack direction="row" spacing={0.5} alignItems="center"><Chip size="small" label={detail?.review ? "已复盘" : "待复盘"} color={detail?.review ? "success" : "warning"} /><Tooltip title="查看课程结果"><IconButton size="small" aria-label={`查看课程结果 ${item.title}`} onClick={(event) => { event.stopPropagation(); openDetail(item); }}><AssessmentOutlinedIcon fontSize="small" /></IconButton></Tooltip></Stack> : <Stack direction="row" spacing={0.5} alignItems="center">
                       {canCreate && ["PLANNED", "READY"].includes(item.status) && <Tooltip title="编辑课程安排"><IconButton size="small" aria-label={`编辑课程安排 ${item.title}`} onClick={() => onEdit(item)}><EditOutlinedIcon fontSize="small" /></IconButton></Tooltip>}
                       {item.status === "PLANNED" && nextAction.nextStatus && canManage && <Button size="small" variant="contained" startIcon={<EventAvailableOutlinedIcon />} onClick={() => onChangeStatus(item, nextAction.nextStatus!)}>{nextAction.label}</Button>}
-                      {item.status === "PLANNED" && !nextAction.nextStatus && <Button size="small" startIcon={<DashboardOutlinedIcon />} onClick={() => onOpenWorkbench(item.id)}>完善SOP</Button>}
+                      {item.status === "PLANNED" && !nextAction.nextStatus && <Button size="small" startIcon={<DashboardOutlinedIcon />} onClick={() => onOpenWorkbench(item.id)}>推进课程任务</Button>}
                       {item.status === "READY" && canManage && <Button size="small" variant="contained" startIcon={<PlayCircleOutlineIcon />} onClick={() => onChangeStatus(item, "IN_PROGRESS")}>开始课程</Button>}
                       {item.status === "IN_PROGRESS" && <Button size="small" startIcon={<DashboardOutlinedIcon />} onClick={() => onOpenWorkbench(item.id)}>工作台</Button>}
                       {item.status === "IN_PROGRESS" && canManage && <Button size="small" variant="contained" color="success" startIcon={<StopCircleOutlinedIcon />} onClick={() => onChangeStatus(item, "COMPLETED")}>结束课程</Button>}
@@ -376,7 +383,7 @@ export const Plans: React.FC<PlansProps> = ({
             {selectedDetail && <Stack spacing={1.5}>
               <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
                 <Typography fontWeight={950}>{selected.status === "COMPLETED" ? "课程结果概览" : "课程安排信息"}</Typography>
-                <Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.3 }}>{selected.status === "COMPLETED" ? "课程已完结，下方查看客户结果和复盘" : "进行中课程的SOP进度与任务操作统一到“我的工作台”完成"}</Typography>
+                <Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.3 }}>{selected.status === "COMPLETED" ? "课程已完结，下方查看客户结果和复盘" : "进行中课程的执行进度与任务操作统一到“我的工作台”完成"}</Typography>
                 <Box sx={{ mt: 1.4, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1 }}>
                   {[["开课时间", formatDateTime(selected.startsAt)], ["授课方式", deliveryModeLabel[selected.deliveryMode] || selected.deliveryMode], ["主讲人", selected.lecturerUserName || "待确定"], ["项目负责人", selected.facilitatorUserName || "待分配"]].map(([label, value]) => <Box key={label} sx={{ p: 1.2, bgcolor: colors.soft, borderRadius: 1 }}><Typography fontSize={11.5} color="text.secondary">{label}</Typography><Typography fontSize={13.5} fontWeight={850} sx={{ mt: 0.3 }}>{value}</Typography></Box>)}
                 </Box>

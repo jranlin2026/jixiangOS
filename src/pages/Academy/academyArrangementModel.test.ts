@@ -39,7 +39,7 @@ const detail = {
 
 assert.equal(
   getArrangementNextAction(session, detail).label,
-  "完善SOP流程",
+  "推进课程任务",
   "必做准备未完成时应引导完善准备",
 );
 

@@ -59,11 +59,11 @@ export function createAcademyRouter(deps: {
     const result = await deps.service.listSopTemplates(req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
-  router.put('/sop-templates', deps.requireCourseWrite, async (req: AuthenticatedRequest, res) => {
+  router.put('/sop-templates', deps.requireArrangementWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.saveSopTemplate(req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
-  router.delete('/sop-templates/:templateId', deps.requireCourseWrite, async (req: AuthenticatedRequest, res) => {
+  router.delete('/sop-templates/:templateId', deps.requireArrangementWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.deleteSopTemplate(String(req.params.templateId), req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });

@@ -199,16 +199,27 @@ assert.deepEqual(
   {
     AND: [
       {
-        OR: [
-          { ownerUserId: { in: ["user-owner", "user-team"] } },
-          { lecturerUserId: { in: ["user-owner", "user-team"] } },
-        ],
+        ownerUserId: { in: ["user-owner", "user-team"] },
       },
       {},
       {},
     ],
   },
-  "商学院课程列表必须按角色数据范围过滤",
+  "课程库必须只按课程维护人范围过滤，旧主讲人不能继续获得课程访问权",
+);
+
+await repository.listSessions(
+  { page: 1, pageSize: 10 },
+  { unrestricted: false, visibleUserIds: ["user-maintainer"] },
+);
+const scopedSessionCalls = calls.filter(
+  (call) => call.model === "session" && call.method === "findMany",
+);
+const scopedSessionQuery = scopedSessionCalls[scopedSessionCalls.length - 1]?.args;
+assert.doesNotMatch(
+  JSON.stringify(scopedSessionQuery.where),
+  /course.*ownerUserId/,
+  "课程维护人不能因为维护课程而自动获得该课程所有安排的访问权",
 );
 
 const created = await repository.createSession(

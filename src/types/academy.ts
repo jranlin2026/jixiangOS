@@ -163,6 +163,11 @@ export interface AcademyPublicCalendarItem {
     dueAt?: string;
     status: AcademyTaskStatus;
     isMine: boolean;
+    note?: string;
+    submissionNote?: string;
+    submittedAt?: string;
+    reviewedAt?: string;
+    completedAt?: string;
   };
   tasks: Array<{
     taskId?: string;
@@ -176,6 +181,11 @@ export interface AcademyPublicCalendarItem {
     dueAt?: string;
     status: AcademyTaskStatus;
     isMine: boolean;
+    note?: string;
+    submissionNote?: string;
+    submittedAt?: string;
+    reviewedAt?: string;
+    completedAt?: string;
   }>;
 }
 
@@ -305,7 +315,7 @@ export type CreateAcademySessionInput = Pick<
   | "contentOwnerUserId"
   | "materialOwnerUserId"
   | "reviewOwnerUserId"
-> & { isHistoricalBackfill?: boolean };
+> & { isHistoricalBackfill?: boolean; sopTemplateId?: string };
 export type SaveAcademyEngagementInput = Omit<
   AcademyEngagement,
   | "id"

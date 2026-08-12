@@ -153,10 +153,8 @@ const emptyCourse: CreateAcademyCourseInput = {
   coreViewpoint: "",
   conversionProductId: "",
   ownerUserId: "",
-  lecturerUserId: "",
   defaultDurationMinutes: 120,
   objectives: [],
-  sopTemplateId: "",
 };
 
 const emptySopStep = (index: number): AcademySopTemplateStep => ({
@@ -198,6 +196,7 @@ const emptySession: CreateAcademySessionInput = {
   contentOwnerUserId: "",
   materialOwnerUserId: "",
   reviewOwnerUserId: "",
+  sopTemplateId: "",
 };
 const emptyEngagement: SaveAcademyEngagementInput = {
   sessionId: "",
@@ -421,9 +420,9 @@ const Academy: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
 
   const selectedSessionCourse = courses.find((course) => course.id === sessionForm.courseId);
-  const selectedSessionTemplate = sopTemplates.find((template) => template.id === selectedSessionCourse?.sopTemplateId)
-    || sopTemplates.find((template) => template.isDefault && template.status === "ACTIVE");
-  const selectedSessionRoles = new Set(selectedSessionTemplate?.steps.map((step) => step.assigneeRole) || []);
+  const selectedSessionTemplate = sopTemplates.find((template) => template.id === sessionForm.sopTemplateId);
+  const selectedSessionSnapshotTasks = sessionEditingId ? details[sessionEditingId]?.tasks || [] : [];
+  const selectedSessionRoles = new Set(selectedSessionTemplate?.steps.map((step) => step.assigneeRole) || selectedSessionSnapshotTasks.map((task) => task.assigneeRole).filter(Boolean) as AcademySopTemplateStep["assigneeRole"][]);
   const sessionOwnerFields: Array<[keyof CreateAcademySessionInput, string, AcademySopTemplateStep["assigneeRole"] | "ALWAYS"]> = [
     ["projectOwnerUserId", "项目负责人 *", "ALWAYS"],
     ["contentOwnerUserId", "课程内容负责人 *", "CONTENT_OWNER"],
@@ -584,7 +583,7 @@ const Academy: React.FC = () => {
     }
     if (sopResponse) {
       if (sopResponse.code === 0) setSopTemplates(sopResponse.data);
-      else loadErrors.push(`SOP模板：${sopResponse.message}`);
+      else loadErrors.push(`课程流程：${sopResponse.message}`);
     }
     if (sessionResponse) {
       if (sessionResponse.code !== 0) {
@@ -798,7 +797,7 @@ const Academy: React.FC = () => {
   };
   const openCourseCreate = () => {
     setCourseEditingId("");
-    setCourseForm({ ...emptyCourse, ownerUserId: currentUser?.id || "", sopTemplateId: sopTemplates.find((item) => item.isDefault && item.status === "ACTIVE")?.id || "" });
+    setCourseForm({ ...emptyCourse, ownerUserId: currentUser?.id || "" });
     setCourseOpen(true);
   };
   const openCourseEdit = (course: AcademyCourse) => {
@@ -812,10 +811,8 @@ const Academy: React.FC = () => {
       coreViewpoint: course.coreViewpoint || "",
       conversionProductId: course.conversionProductId || "",
       ownerUserId: course.ownerUserId,
-      lecturerUserId: course.lecturerUserId || "",
       defaultDurationMinutes: course.defaultDurationMinutes,
       objectives: course.objectives || [],
-      sopTemplateId: course.sopTemplateId || "",
     });
     setCourseOpen(true);
   };
@@ -850,7 +847,7 @@ const Academy: React.FC = () => {
   };
   const closeSopSettings = async (toList = false) => {
     if (sopEditing && JSON.stringify(sopEditing) !== sopEditingBaseline) {
-      const discard = await confirm("当前SOP模板还有未保存内容，确定放弃吗？", "放弃模板修改");
+      const discard = await confirm("当前课程流程还有未保存内容，确定放弃吗？", "放弃流程修改");
       if (!discard) return;
     }
     setSopEditing(null);
@@ -869,7 +866,7 @@ const Academy: React.FC = () => {
       steps: sopEditing.steps.map((step, index) => ({ ...step, sortOrder: index + 1 })),
     });
     setSaving(false);
-    if (response.code !== 0) return alert(response.message, "SOP模板保存失败");
+    if (response.code !== 0) return alert(response.message, "课程流程保存失败");
     setSopEditing(null);
     setSopEditingBaseline("");
     await loadBase();
@@ -877,22 +874,22 @@ const Academy: React.FC = () => {
   const changeSopTemplateStatus = async (template: AcademySopTemplate) => {
     const nextStatus = template.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
     if (nextStatus === "INACTIVE") {
-      const approved = await confirm(`确定停用“${template.name}”吗？停用后新建课程不能再选择它。`, "停用SOP模板");
+      const approved = await confirm(`确定停用“${template.name}”吗？停用后新建课程安排不能再选择它。`, "停用课程流程");
       if (!approved) return;
     }
     setSaving(true);
     const response = await academyApi.saveSopTemplate({ ...template, status: nextStatus });
     setSaving(false);
-    if (response.code !== 0) return alert(response.message, nextStatus === "ACTIVE" ? "SOP模板启用失败" : "SOP模板停用失败");
+    if (response.code !== 0) return alert(response.message, nextStatus === "ACTIVE" ? "课程流程启用失败" : "课程流程停用失败");
     await loadBase();
   };
   const deleteSopTemplate = async (template: AcademySopTemplate) => {
-    const approved = await confirm(`确定删除“${template.name}”吗？删除后无法恢复。`, "删除SOP模板");
+    const approved = await confirm(`确定删除“${template.name}”吗？删除后无法恢复。`, "删除课程流程");
     if (!approved) return;
     setSaving(true);
     const response = await academyApi.deleteSopTemplate(template.id);
     setSaving(false);
-    if (response.code !== 0) return alert(response.message, "SOP模板删除失败");
+    if (response.code !== 0) return alert(response.message, "课程流程删除失败");
     const remaining = Math.max(0, sopTemplates.length - 1);
     const lastPage = Math.max(0, Math.ceil(remaining / sopTemplatePageSize) - 1);
     setSopTemplatePage((page) => Math.min(page, lastPage));
@@ -977,12 +974,13 @@ const Academy: React.FC = () => {
       title: course ? `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}` : "",
       startsAt: toLocalInput(startsAt),
       endsAt: toLocalInput(endsAt),
-      facilitatorUserId: currentUser?.id || course?.ownerUserId || "",
-      projectOwnerUserId: currentUser?.id || course?.ownerUserId || "",
-      contentOwnerUserId: course?.ownerUserId || currentUser?.id || "",
+      facilitatorUserId: "",
+      projectOwnerUserId: "",
+      contentOwnerUserId: "",
       materialOwnerUserId: "",
-      lecturerUserId: course?.lecturerUserId || "",
-      reviewOwnerUserId: currentUser?.id || course?.ownerUserId || "",
+      lecturerUserId: "",
+      reviewOwnerUserId: "",
+      sopTemplateId: sopTemplates.find((item) => item.isDefault && item.status === "ACTIVE")?.id || "",
     });
     setSessionEditingId("");
     setSessionHistoricalMode(false);
@@ -995,7 +993,7 @@ const Academy: React.FC = () => {
     const toLocalInput = (value: Date) => new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
     setSessionEditingId("");
     setSessionHistoricalMode(true);
-    setSessionForm({ ...emptySession, startsAt: toLocalInput(startsAt), endsAt: toLocalInput(endsAt), facilitatorUserId: currentUser?.id || "", projectOwnerUserId: currentUser?.id || "", contentOwnerUserId: currentUser?.id || "", reviewOwnerUserId: currentUser?.id || "" });
+    setSessionForm({ ...emptySession, startsAt: toLocalInput(startsAt), endsAt: toLocalInput(endsAt), sopTemplateId: sopTemplates.find((item) => item.isDefault && item.status === "ACTIVE")?.id || "" });
     setSessionOpen(true);
   };
   const openSessionEdit = async (session: AcademySession) => {
@@ -1039,6 +1037,7 @@ const Academy: React.FC = () => {
       materialOwnerUserId: ownerFor("MATERIAL_OWNER"),
       reviewOwnerUserId: ownerFor("REVIEW_OWNER"),
       collaboratorUserIds: session.collaboratorUserIds || [],
+      sopTemplateId: tasks[0]?.sopTemplateId || "",
     });
     setSessionOpen(true);
   };
@@ -1377,7 +1376,7 @@ const Academy: React.FC = () => {
       <ModulePage>
         <ModuleHeader
           title="极享商学院"
-          description="全员查看课程安排，参与人在同一处完成课程SOP。"
+          description="全员查看课程安排，参与人在同一处完成课程任务。"
         />
         <ModuleTabs
           value={view}
@@ -1900,7 +1899,7 @@ const Academy: React.FC = () => {
     <ModulePage>
       <ModuleHeader
         title="极享商学院"
-        description="全员查看课程安排，参与人在同一处完成课程SOP。"
+        description="全员查看课程安排，参与人在同一处完成课程任务。"
       />
       <ModuleTabs
         value={view}
@@ -1953,6 +1952,8 @@ const Academy: React.FC = () => {
             canCreate={canPlan || canSession}
             canManage={canSession}
             canReview={canReview}
+            canConfigureFlows={canPlan || canSession}
+            onFlowSettings={openSopTemplateList}
             requestedSessionId={planOpenSessionId}
             onRequestConsumed={() => setPlanOpenSessionId("")}
             onNeedDetail={loadDetail}
@@ -1976,7 +1977,6 @@ const Academy: React.FC = () => {
             canManage={canCourse}
             onCreate={openCourseCreate}
             onSettings={() => setCourseSettingsOpen(true)}
-            onSopSettings={openSopTemplateList}
             onView={(course) => {
               setSelectedCourseId(course.id);
               if (!courseAssets[course.id]) void loadCourseAssets(course.id);
@@ -2062,6 +2062,7 @@ const Academy: React.FC = () => {
           {workbenchTask.status === "PENDING" && <Button variant="contained" disabled={saving} onClick={() => void updateWorkbenchTask(workbenchTask, "IN_PROGRESS")}>开始处理</Button>}
           {["IN_PROGRESS", "REJECTED", "BLOCKED"].includes(workbenchTask.status) && <><TextField multiline minRows={3} label={workbenchTask.completionMode === "CONFIRM" ? "完成说明（选填）" : "完成说明 *"} helperText={taskEvidenceUploading ? "交付文件正在上传并关联，请稍候" : taskRequiresEvidence(workbenchTask) && !taskEvidenceAttachments.length ? "该步骤配置为必须上传附件" : workbenchTask.completionMode === "CHECKLIST" ? "确认完成标准后填写检查结果" : "可粘贴网盘或在线文档链接"} value={workbenchTaskNote} onChange={(event) => setWorkbenchTaskNote(event.target.value)} /><Button variant="contained" disabled={saving || taskEvidenceLoading || taskEvidenceUploading || (workbenchTask.completionMode !== "CONFIRM" && !workbenchTaskNote.trim()) || (taskRequiresEvidence(workbenchTask) && !taskEvidenceAttachments.length)} onClick={() => void updateWorkbenchTask(workbenchTask, "SUBMITTED")}>{workbenchTask.requiresReview ? "提交验收" : "确认完成"}</Button></>}
           {workbenchTask.status === "SUBMITTED" && <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Typography color="text.secondary">已提交，等待项目负责人确认。</Typography><Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>本次完成说明</Typography><Typography sx={{ mt: 0.4, whiteSpace: "pre-wrap" }}>{workbenchTask.submissionNote || "-"}</Typography></Paper>}
+          {workbenchTask.status === "DONE" && <Paper variant="outlined" sx={{ ...panelSx, p: 2, bgcolor: palette.greenSoft, borderColor: "#B7E5CF" }}><Stack direction="row" spacing={1} alignItems="center"><TaskAltIcon color="success" /><Box><Typography fontWeight={950} color="success.main">该步骤已完成</Typography><Typography fontSize={12.5} color="text.secondary">完成时间：{formatDate(workbenchTask.completedAt || workbenchTask.reviewedAt || workbenchTask.submittedAt)}</Typography></Box></Stack>{(workbenchTask.submissionNote || workbenchTask.note) && <><Divider sx={{ my: 1.5 }} /><Typography fontSize={12} color="text.secondary">完成结果</Typography><Typography sx={{ mt: 0.5, whiteSpace: "pre-wrap" }}>{workbenchTask.submissionNote || workbenchTask.note}</Typography></>}</Paper>}
         </Stack>}
       </Drawer>
 
@@ -2082,23 +2083,16 @@ const Academy: React.FC = () => {
             <DialogContent dividers>
               <Stack spacing={2.2}>
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="1 基础信息" helper="定义课程身份与日常运营负责人，课程编码保存后由系统自动生成。" />
+                  <SectionTitle title="1 基础信息" helper="沉淀可复用课程内容；主讲人和本次负责人在课程安排中设置。" />
                   <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
                     <TextField label="课程名称 *" value={courseForm.title} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, title: event.target.value }); }} />
                     <TextField select label="课程分类 *" value={courseForm.category} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, category: event.target.value }); }}>
                       {courseCategories.filter((item) => item.isActive || item.name === courseForm.category).map((item) => <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>)}
                     </TextField>
-                    <TextField select label="课程负责人 *" value={courseForm.ownerUserId} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, ownerUserId: event.target.value }); }}>
-                      {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}
-                    </TextField>
-                    <TextField select label="主讲人" value={courseForm.lecturerUserId || ""} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, lecturerUserId: event.target.value }); }}>
-                      <MenuItem value="">待确定</MenuItem>
+                    <TextField select label="课程维护人 *" helperText="负责维护课程内容，不代表每次课程安排的负责人" value={courseForm.ownerUserId} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, ownerUserId: event.target.value }); }}>
                       {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}
                     </TextField>
                     <TextField label="默认时长（分钟）*" type="number" value={courseForm.defaultDurationMinutes} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, defaultDurationMinutes: Number(event.target.value) }); }} />
-                    <TextField select required label="执行SOP模板 *" value={courseForm.sopTemplateId || ""} helperText="课程保存后固定绑定此模板；创建安排时生成独立任务快照。" onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, sopTemplateId: event.target.value }); }}>
-                      {sopTemplates.filter((item) => item.status === "ACTIVE").map((item) => <MenuItem key={item.id} value={item.id}>{item.name} · {item.steps.length}步</MenuItem>)}
-                    </TextField>
                   </Box>
                 </Paper>
 
@@ -2161,7 +2155,7 @@ const Academy: React.FC = () => {
               <Button
                 variant="contained"
                 disabled={
-                  saving || !courseForm.title.trim() || !courseForm.category || !courseForm.ownerUserId || !courseForm.sopTemplateId || !courseForm.defaultDurationMinutes
+                  saving || !courseForm.title.trim() || !courseForm.category || !courseForm.ownerUserId || !courseForm.defaultDurationMinutes
                 }
                 onClick={() => void saveCourse()}
               >
@@ -2171,19 +2165,19 @@ const Academy: React.FC = () => {
           </>
         )}
       </ProtectedFormDialog>
-      <Drawer anchor="right" open={sopSettingsOpen} onClose={() => void closeSopSettings()} PaperProps={{ role: "dialog", "aria-modal": true, "aria-label": "SOP模板设置", sx: { width: { xs: "100%", md: 980 }, maxWidth: "100vw", bgcolor: palette.soft } }}>
+      <Drawer anchor="right" open={sopSettingsOpen} onClose={() => void closeSopSettings()} PaperProps={{ role: "dialog", "aria-modal": true, "aria-label": "课程流程设置", sx: { width: { xs: "100%", md: 980 }, maxWidth: "100vw", bgcolor: palette.soft } }}>
         <Stack sx={{ minHeight: "100%" }}>
-          <Paper square elevation={0} sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${palette.line}` }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Box><Typography fontSize={20} fontWeight={950}>SOP模板设置</Typography><Typography fontSize={12.5} color="text.secondary">配置步骤、负责人角色、截止规则和完成方式</Typography></Box><IconButton aria-label="关闭SOP模板设置" onClick={() => void closeSopSettings()}><CloseIcon /></IconButton></Stack></Paper>
+          <Paper square elevation={0} sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${palette.line}` }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Box><Typography fontSize={20} fontWeight={950}>课程流程设置</Typography><Typography fontSize={12.5} color="text.secondary">配置每次课程安排可以选择的执行步骤、负责人角色和完成方式</Typography></Box><IconButton aria-label="关闭课程流程设置" onClick={() => void closeSopSettings()}><CloseIcon /></IconButton></Stack></Paper>
           <Box sx={{ p: 2, flex: 1 }}>
             {!sopEditing ? <Stack spacing={1.5}>
               <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1}>
-                <Box><Typography fontWeight={950}>模板列表</Typography><Typography fontSize={12.5} color="text.secondary">统一维护课程流程模板；课程创建后会固定绑定所选模板。</Typography></Box>
-                <Button variant="contained" startIcon={<AddIcon />} onClick={() => openSopSettings()}>新建SOP模板</Button>
+                <Box><Typography fontWeight={950}>流程列表</Typography><Typography fontSize={12.5} color="text.secondary">统一维护可选课程流程；新建课程安排时选择并生成本次任务。</Typography></Box>
+                <Button variant="contained" startIcon={<AddIcon />} onClick={() => openSopSettings()}>新建课程流程</Button>
               </Stack>
               <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
                 <TableContainer>
-                  <SystemDataTable tableId="academy-sop-template-list" aria-label="SOP模板列表">
-                    <TableHead><TableRow><TableCell>模板名称</TableCell><TableCell>步骤</TableCell><TableCell>默认模板</TableCell><TableCell>状态</TableCell><TableCell>最近更新</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
+                  <SystemDataTable tableId="academy-sop-template-list" aria-label="课程流程列表">
+                    <TableHead><TableRow><TableCell>流程名称</TableCell><TableCell>步骤</TableCell><TableCell>默认流程</TableCell><TableCell>状态</TableCell><TableCell>最近更新</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
                     <TableBody>
                       {sopTemplates.slice(sopTemplatePage * sopTemplatePageSize, (sopTemplatePage + 1) * sopTemplatePageSize).map((template) => (
                         <TableRow key={template.id} hover>
@@ -2193,25 +2187,25 @@ const Academy: React.FC = () => {
                           <TableCell><Chip size="small" color={template.status === "ACTIVE" ? "success" : "default"} label={template.status === "ACTIVE" ? "已启用" : "已停用"} /></TableCell>
                           <TableCell>{formatDate(template.updatedAt)}</TableCell>
                           <TableCell align="right"><Stack direction="row" spacing={0.25} justifyContent="flex-end">
-                            <Tooltip title="编辑模板" arrow><IconButton size="small" aria-label={`编辑模板 ${template.name}`} onClick={() => openSopSettings(template)}><EditOutlinedIcon fontSize="small" /></IconButton></Tooltip>
-                            <Tooltip title={template.isDefault && template.status === "ACTIVE" ? "默认模板不能停用" : template.status === "ACTIVE" ? "停用模板" : "启用模板"} arrow><span><IconButton size="small" color={template.status === "ACTIVE" ? "warning" : "success"} disabled={saving || (template.isDefault && template.status === "ACTIVE")} aria-label={`${template.status === "ACTIVE" ? "停用" : "启用"}模板 ${template.name}`} onClick={() => void changeSopTemplateStatus(template)}>{template.status === "ACTIVE" ? <ToggleOnOutlinedIcon fontSize="small" /> : <ToggleOffOutlinedIcon fontSize="small" />}</IconButton></span></Tooltip>
-                            <Tooltip title={template.isDefault ? "默认模板不能删除" : "删除模板"} arrow><span><IconButton size="small" color="error" disabled={saving || template.isDefault} aria-label={`删除模板 ${template.name}`} onClick={() => void deleteSopTemplate(template)}><DeleteOutlineIcon fontSize="small" /></IconButton></span></Tooltip>
+                            <Tooltip title="编辑流程" arrow><IconButton size="small" aria-label={`编辑流程 ${template.name}`} onClick={() => openSopSettings(template)}><EditOutlinedIcon fontSize="small" /></IconButton></Tooltip>
+                            <Tooltip title={template.isDefault && template.status === "ACTIVE" ? "默认流程不能停用" : template.status === "ACTIVE" ? "停用流程" : "启用流程"} arrow><span><IconButton size="small" color={template.status === "ACTIVE" ? "warning" : "success"} disabled={saving || (template.isDefault && template.status === "ACTIVE")} aria-label={`${template.status === "ACTIVE" ? "停用" : "启用"}流程 ${template.name}`} onClick={() => void changeSopTemplateStatus(template)}>{template.status === "ACTIVE" ? <ToggleOnOutlinedIcon fontSize="small" /> : <ToggleOffOutlinedIcon fontSize="small" />}</IconButton></span></Tooltip>
+                            <Tooltip title={template.isDefault ? "默认流程不能删除" : "删除流程"} arrow><span><IconButton size="small" color="error" disabled={saving || template.isDefault} aria-label={`删除流程 ${template.name}`} onClick={() => void deleteSopTemplate(template)}><DeleteOutlineIcon fontSize="small" /></IconButton></span></Tooltip>
                           </Stack></TableCell>
                         </TableRow>
                       ))}
-                      {!sopTemplates.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 7 }}><Typography fontWeight={900}>暂无SOP模板</Typography><Typography fontSize={12.5} color="text.secondary">点击右上角“新建SOP模板”开始配置。</Typography></TableCell></TableRow>}
+                      {!sopTemplates.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 7 }}><Typography fontWeight={900}>暂无课程流程</Typography><Typography fontSize={12.5} color="text.secondary">点击右上角“新建课程流程”开始配置。</Typography></TableCell></TableRow>}
                     </TableBody>
                   </SystemDataTable>
                 </TableContainer>
                 <TablePagination count={sopTemplates.length} page={sopTemplatePage} rowsPerPage={sopTemplatePageSize} onPageChange={(_, nextPage) => setSopTemplatePage(nextPage)} onRowsPerPageChange={(event) => { setSopTemplatePageSize(Number(event.target.value)); setSopTemplatePage(0); }} sx={{ borderTop: `1px solid ${palette.line}` }} />
               </Paper>
             </Stack> : <Stack spacing={1.5}>
-              <Paper variant="outlined" sx={{ ...panelSx, p: 1.6 }}><Stack spacing={1.2}><TextField label="模板名称 *" value={sopEditing.name} onChange={(event) => setSopEditing({ ...sopEditing, name: event.target.value })} /><TextField label="模板说明" multiline minRows={2} value={sopEditing.description} onChange={(event) => setSopEditing({ ...sopEditing, description: event.target.value })} /><Stack direction="row" spacing={1}><TextField select label="状态" fullWidth value={sopEditing.status} onChange={(event) => setSopEditing({ ...sopEditing, status: event.target.value as AcademySopTemplate["status"] })}><MenuItem value="ACTIVE">启用</MenuItem><MenuItem value="INACTIVE">停用</MenuItem></TextField><TextField select label="默认模板" fullWidth value={sopEditing.isDefault ? "YES" : "NO"} onChange={(event) => setSopEditing({ ...sopEditing, isDefault: event.target.value === "YES" })}><MenuItem value="YES">是</MenuItem><MenuItem value="NO">否</MenuItem></TextField></Stack></Stack></Paper>
+              <Paper variant="outlined" sx={{ ...panelSx, p: 1.6 }}><Stack spacing={1.2}><TextField label="流程名称 *" value={sopEditing.name} onChange={(event) => setSopEditing({ ...sopEditing, name: event.target.value })} /><TextField label="流程说明" multiline minRows={2} value={sopEditing.description} onChange={(event) => setSopEditing({ ...sopEditing, description: event.target.value })} /><Stack direction="row" spacing={1}><TextField select label="状态" fullWidth value={sopEditing.status} onChange={(event) => setSopEditing({ ...sopEditing, status: event.target.value as AcademySopTemplate["status"] })}><MenuItem value="ACTIVE">启用</MenuItem><MenuItem value="INACTIVE">停用</MenuItem></TextField><TextField select label="默认流程" fullWidth value={sopEditing.isDefault ? "YES" : "NO"} onChange={(event) => setSopEditing({ ...sopEditing, isDefault: event.target.value === "YES" })}><MenuItem value="YES">是</MenuItem><MenuItem value="NO">否</MenuItem></TextField></Stack></Stack></Paper>
               {sopEditing.steps.map((step, index) => <Paper key={`${step.stepKey}-${index}`} variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Typography fontWeight={950}>第 {index + 1} 步</Typography><Stack direction="row" spacing={0.5}><Button size="small" disabled={index === 0} onClick={() => moveSopStep(index, -1)}>上移</Button><Button size="small" disabled={index === sopEditing.steps.length - 1} onClick={() => moveSopStep(index, 1)}>下移</Button><Button color="error" size="small" disabled={sopEditing.steps.length === 1} onClick={() => setSopEditing({ ...sopEditing, steps: sopEditing.steps.filter((_, itemIndex) => itemIndex !== index) })}>删除</Button></Stack></Stack><Box sx={{ mt: 1.2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 1.2 }}><TextField label="步骤名称 *" value={step.title} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, title: event.target.value, stepKey: step.id ? step.stepKey : `STEP_${index + 1}_${event.target.value.trim().replace(/\s+/g, "_").slice(0, 16) || index + 1}` }; setSopEditing({ ...sopEditing, steps }); }} /><TextField select label="负责人角色" value={step.assigneeRole} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, assigneeRole: event.target.value as AcademySopTemplateStep["assigneeRole"] }; setSopEditing({ ...sopEditing, steps }); }}>{[["PROJECT_OWNER", "项目负责人"], ["CONTENT_OWNER", "内容负责人"], ["MATERIAL_OWNER", "素材负责人"], ["LECTURER", "主讲人"], ["REVIEW_OWNER", "复盘负责人"]].map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField><TextField select label="流程阶段" value={step.category} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, category: event.target.value as AcademySopTemplateStep["category"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="BEFORE">课前准备</MenuItem><MenuItem value="DURING">课程执行</MenuItem><MenuItem value="AFTER">课后跟进</MenuItem></TextField><TextField select label="时间基准" value={step.dueAnchor} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, dueAnchor: event.target.value as AcademySopTemplateStep["dueAnchor"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="STARTS_AT">相对开课时间</MenuItem><MenuItem value="ENDS_AT">相对结束时间</MenuItem></TextField><TextField label="时间偏移（分钟）" type="number" helperText="负数表示提前；留空表示不设截止时间" value={step.dueOffsetMinutes ?? ""} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, dueOffsetMinutes: event.target.value === "" ? null : Number(event.target.value) }; setSopEditing({ ...sopEditing, steps }); }} /><TextField select label="完成方式" value={step.completionMode} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, completionMode: event.target.value as AcademySopTemplateStep["completionMode"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="CONFIRM">直接确认</MenuItem><MenuItem value="NOTE">填写说明</MenuItem><MenuItem value="ATTACHMENT">上传附件</MenuItem><MenuItem value="CHECKLIST">检查确认</MenuItem></TextField><TextField select label="是否必做" value={step.isRequired ? "YES" : "NO"} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, isRequired: event.target.value === "YES" }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="YES">必做</MenuItem><MenuItem value="NO">选做</MenuItem></TextField><TextField select label="是否需要验收" value={step.requiresReview ? "YES" : "NO"} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, requiresReview: event.target.value === "YES" }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="NO">提交后直接完成</MenuItem><MenuItem value="YES">项目负责人验收</MenuItem></TextField><TextField label="完成标准" multiline minRows={2} value={step.acceptanceCriteria || ""} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, acceptanceCriteria: event.target.value }; setSopEditing({ ...sopEditing, steps }); }} sx={{ gridColumn: { md: "1 / -1" } }} /></Box></Paper>)}
               <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setSopEditing({ ...sopEditing, steps: [...sopEditing.steps, emptySopStep(sopEditing.steps.length)] })}>添加步骤</Button>
             </Stack>}
           </Box>
-          {sopEditing && <Paper square elevation={0} sx={{ p: 1.5, borderTop: `1px solid ${palette.line}` }}><Stack direction="row" justifyContent="flex-end" spacing={1}><Button onClick={() => void closeSopSettings(true)}>返回列表</Button><Button variant="contained" disabled={saving || !sopEditing.name.trim() || sopEditing.steps.some((step) => !step.title.trim())} onClick={() => void saveSopTemplate()}>{saving ? "保存中…" : "保存模板"}</Button></Stack></Paper>}
+          {sopEditing && <Paper square elevation={0} sx={{ p: 1.5, borderTop: `1px solid ${palette.line}` }}><Stack direction="row" justifyContent="flex-end" spacing={1}><Button onClick={() => void closeSopSettings(true)}>返回列表</Button><Button variant="contained" disabled={saving || !sopEditing.name.trim() || sopEditing.steps.some((step) => !step.title.trim())} onClick={() => void saveSopTemplate()}>{saving ? "保存中…" : "保存流程"}</Button></Stack></Paper>}
         </Stack>
       </Drawer>
       <ProtectedFormDialog
@@ -2275,7 +2269,7 @@ const Academy: React.FC = () => {
             </DialogCloseTitle>
             <DialogContent dividers sx={{ bgcolor: palette.soft }}>
               <Stack spacing={2}>
-                {sessionHistoricalMode && <Alert severity="info">历史补录允许选择过去时间，用于补齐既有课程记录；保存后仍按SOP流程核对并推进状态。</Alert>}
+                {sessionHistoricalMode && <Alert severity="info">历史补录允许选择过去时间，用于补齐既有课程记录；保存后仍按课程执行流程核对并推进状态。</Alert>}
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
                   <SectionTitle title="1 课程和时间" helper="选择课程，确定本次授课时间与方式。" />
                   <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
@@ -2285,7 +2279,7 @@ const Academy: React.FC = () => {
                       const startsAt = sessionForm.startsAt ? new Date(sessionForm.startsAt) : new Date();
                       const endsAt = new Date(startsAt.getTime() + (course?.defaultDurationMinutes || 120) * 60_000);
                       const localEnd = new Date(endsAt.getTime() - endsAt.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-                      setSessionForm({ ...sessionForm, courseId: event.target.value, title: course ? `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}` : "", endsAt: localEnd, lecturerUserId: course?.lecturerUserId || "" });
+                      setSessionForm({ ...sessionForm, courseId: event.target.value, title: course ? `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}` : "", endsAt: localEnd });
                     }}>
                       {courses.filter((item) => item.status === "ACTIVE").map((item) => <MenuItem key={item.id} value={item.id}>{item.code} · {item.title}</MenuItem>)}
                     </TextField>
@@ -2311,7 +2305,11 @@ const Academy: React.FC = () => {
                 </Paper>
 
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="2 本次负责人" helper="根据课程绑定的SOP模板，把模板角色分配给本次具体员工。" />
+                  <SectionTitle title="2 执行流程与负责人" helper="选择本次课程执行流程，再把流程角色分配给具体员工。" />
+                  <TextField sx={{ mt: 2 }} fullWidth select disabled={Boolean(sessionEditingId)} label="课程执行流程 *" value={sessionForm.sopTemplateId || ""} helperText={sessionEditingId ? "已生成任务的安排不能更换流程" : "选择后可预览本次会生成的步骤"} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, sopTemplateId: event.target.value }); }}>
+                    {sopTemplates.filter((item) => item.status === "ACTIVE").map((item) => <MenuItem key={item.id} value={item.id}>{item.name} · {item.steps.length} 步</MenuItem>)}
+                  </TextField>
+                  {selectedSessionTemplate && <Paper variant="outlined" sx={{ mt: 1.5, p: 1.5, bgcolor: palette.soft }}><Stack spacing={0.7}><Typography fontSize={13} fontWeight={900}>本次将生成 {selectedSessionTemplate.steps.length} 个执行步骤</Typography>{selectedSessionTemplate.steps.map((step, index) => <Stack key={step.id || step.stepKey} direction="row" spacing={1} alignItems="center"><Chip size="small" label={index + 1} /><Typography fontSize={13} fontWeight={800}>{step.title}</Typography><Typography fontSize={12} color="text.secondary">· {step.completionMode === "ATTACHMENT" ? "上传附件" : step.completionMode === "NOTE" ? "填写说明" : step.completionMode === "CHECKLIST" ? "检查确认" : "直接确认"}</Typography></Stack>)}</Stack></Paper>}
                   <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
                     {visibleSessionOwnerFields.map(([key, label]) => <TextField key={key} select label={label} value={String(sessionForm[key] || "")} onChange={(event) => { markDirty(); const value = event.target.value; setSessionForm({ ...sessionForm, [key]: value, ...(key === "projectOwnerUserId" ? { facilitatorUserId: value } : {}) }); }}>{academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}</TextField>)}
                     <TextField select label="允许销售邀约" value={sessionForm.isInvitable ? "YES" : "NO"} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, isInvitable: event.target.value === "YES" }); }}><MenuItem value="YES">允许</MenuItem><MenuItem value="NO">不允许</MenuItem></TextField>
@@ -2319,8 +2317,8 @@ const Academy: React.FC = () => {
                 </Paper>
 
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2, bgcolor: palette.blueSoft }}>
-                  <Typography fontWeight={900}>保存后将按模板生成任务快照</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{sopTemplates.find((item) => item.id === courses.find((course) => course.id === sessionForm.courseId)?.sopTemplateId)?.name || sopTemplates.find((item) => item.isDefault)?.name || "系统默认模板"}；模板以后调整，不影响本次已经生成的任务。</Typography>
+                  <Typography fontWeight={900}>保存后生成本次课程任务</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{selectedSessionTemplate?.name || "尚未选择课程流程"}；共 {selectedSessionTemplate?.steps.length || 0} 步。以后调整流程设置，不影响本次已生成任务。</Typography>
                 </Paper>
               </Stack>
             </DialogContent>
@@ -2328,7 +2326,7 @@ const Academy: React.FC = () => {
               <Button onClick={() => void requestClose()}>取消</Button>
               <Button
                 variant="contained"
-                disabled={saving || !sessionForm.courseId || !sessionForm.startsAt || !sessionForm.endsAt || missingSessionOwner || (sessionForm.deliveryMode === "ONLINE" ? !sessionForm.meetingUrl?.trim() : !sessionForm.venue.trim())}
+                disabled={saving || !sessionForm.courseId || !sessionForm.sopTemplateId || !sessionForm.startsAt || !sessionForm.endsAt || missingSessionOwner || (sessionForm.deliveryMode === "ONLINE" ? !sessionForm.meetingUrl?.trim() : !sessionForm.venue.trim())}
                 onClick={() => void saveSession()}
               >
                 {sessionEditingId ? "保存课程安排" : "保存课程安排并生成任务"}
@@ -2688,6 +2686,11 @@ const Overview: React.FC<{
       sortOrder: task.stepNumber,
       completionMode: task.completionMode || "CONFIRM",
       requiresReview: task.requiresReview === true,
+      note: task.note,
+      submissionNote: task.submissionNote,
+      submittedAt: task.submittedAt,
+      reviewedAt: task.reviewedAt,
+      completedAt: task.completedAt,
       session: { id: selectedCourse.id, title: selectedCourse.title, startsAt: selectedCourse.startsAt, endsAt: selectedCourse.endsAt, status: selectedCourse.status },
     });
   };
@@ -3328,8 +3331,7 @@ export const CourseDetailWorkspace: React.FC<{
   const overviewRows = [
     { label: "课程分类", value: course.category },
     { label: "转化产品", value: course.conversionProductName || "未关联" },
-    { label: "课程负责人", value: course.ownerUserName },
-    { label: "主讲人", value: course.lecturerUserName || "待确定" },
+    { label: "课程维护人", value: course.ownerUserName },
     { label: "默认时长", value: `${course.defaultDurationMinutes} 分钟` },
     { label: "最近更新", value: new Date(course.updatedAt).toLocaleDateString("zh-CN") },
   ];
@@ -3651,7 +3653,6 @@ export const CourseWorkspace: React.FC<{
   canManage: boolean;
   onCreate: () => void;
   onSettings: () => void;
-  onSopSettings: () => void;
   onView: (course: AcademyCourse) => void;
   onEdit: (course: AcademyCourse) => void;
   onUploadAsset: (course: AcademyCourse, assetType: AcademyAssetType) => void;
@@ -3672,7 +3673,6 @@ export const CourseWorkspace: React.FC<{
   canManage,
   onCreate,
   onSettings,
-  onSopSettings,
   onView,
   onEdit,
   onUploadAsset,
@@ -3687,7 +3687,7 @@ export const CourseWorkspace: React.FC<{
   const [coursePage, setCoursePage] = useState(0);
   const [coursePageSize, setCoursePageSize] = useState(10);
   const filtered = useMemo(() => items.filter((item) => {
-    const matchesSearch = !filters.search || `${item.code}${item.title}${item.ownerUserName}${item.lecturerUserName || ""}${item.conversionProductName || ""}`.toLowerCase().includes(filters.search.toLowerCase());
+    const matchesSearch = !filters.search || `${item.code}${item.title}${item.ownerUserName}${item.conversionProductName || ""}`.toLowerCase().includes(filters.search.toLowerCase());
     return matchesSearch && (!filters.category || item.category === filters.category) && (!filters.status || item.status === filters.status);
   }), [filters, items]);
   useEffect(() => {
@@ -3729,7 +3729,7 @@ export const CourseWorkspace: React.FC<{
           <Typography fontSize={18} fontWeight={950}>课程库</Typography>
           <Typography fontSize={12.5} color="text.secondary">维护可重复使用的课程内容与资产</Typography>
         </Box>
-        {canManage && <Stack direction="row" spacing={1}><Button variant="outlined" startIcon={<SettingsOutlinedIcon />} onClick={onSopSettings}>SOP模板设置</Button><Button variant="contained" startIcon={<AddIcon />} onClick={onCreate}>新建课程</Button></Stack>}
+        {canManage && <Stack direction="row" spacing={1}><Button variant="contained" startIcon={<AddIcon />} onClick={onCreate}>新建课程</Button></Stack>}
       </Stack>
       <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
         <Stack
@@ -3743,7 +3743,7 @@ export const CourseWorkspace: React.FC<{
         >
           <TextField
             size="small"
-            placeholder="搜索课程名称、编码、负责人或产品"
+            placeholder="搜索课程名称、编码、维护人或产品"
             value={draftFilters.search}
             onChange={(event) => setDraftFilters({ ...draftFilters, search: event.target.value })}
             onKeyDown={(event) => { if (event.key === "Enter") applyFilters(); }}
@@ -3809,8 +3809,7 @@ export const CourseWorkspace: React.FC<{
                 <TableCell sx={{ minWidth: 120 }}>课程分类</TableCell>
                 <TableCell sx={{ minWidth: 200 }}>目标客户</TableCell>
                 <TableCell sx={{ minWidth: 180 }}>转化产品</TableCell>
-                <TableCell sx={{ minWidth: 120 }}>负责人</TableCell>
-                <TableCell sx={{ minWidth: 120 }}>主讲人</TableCell>
+                <TableCell sx={{ minWidth: 120 }}>课程维护人</TableCell>
                 <TableCell sx={{ minWidth: 100 }}>状态</TableCell>
                 <TableCell sx={{ minWidth: 140 }}>最近更新</TableCell>
                 <TableCell sx={{ minWidth: 80 }}>场次</TableCell>
@@ -3837,7 +3836,6 @@ export const CourseWorkspace: React.FC<{
                   <TableCell>{item.targetAudience || "未填写"}</TableCell>
                   <TableCell>{item.conversionProductName || "未关联"}</TableCell>
                   <TableCell>{item.ownerUserName}</TableCell>
-                  <TableCell>{item.lecturerUserName || "待确定"}</TableCell>
                   <TableCell>
                     <Chip
                       size="small"
@@ -3903,7 +3901,7 @@ export const CourseWorkspace: React.FC<{
               ))}
               {!pageItems.length && (
                 <TableRow>
-                  <TableCell colSpan={11} align="center" sx={{ py: 6 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
                     {items.length ? "当前筛选无结果" : "暂无课程数据"}
                   </TableCell>
                 </TableRow>

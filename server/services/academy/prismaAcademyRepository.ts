@@ -71,10 +71,7 @@ const courseScopeWhere = (scope: AcademyAccessScope) =>
   scope.unrestricted
     ? {}
     : {
-        OR: [
-          { ownerUserId: { in: scope.visibleUserIds } },
-          { lecturerUserId: { in: scope.visibleUserIds } },
-        ],
+        ownerUserId: { in: scope.visibleUserIds },
       };
 
 const sessionScopeWhere = (scope: AcademyAccessScope) =>
@@ -85,7 +82,6 @@ const sessionScopeWhere = (scope: AcademyAccessScope) =>
           { createdById: { in: scope.visibleUserIds } },
           { facilitatorUserId: { in: scope.visibleUserIds } },
           { lecturerUserId: { in: scope.visibleUserIds } },
-          { course: { ownerUserId: { in: scope.visibleUserIds } } },
           { tasks: { some: { assigneeUserId: { in: scope.visibleUserIds } } } },
           ...scope.visibleUserIds.map((userId) => ({
             collaboratorUserIds: { array_contains: [userId] },

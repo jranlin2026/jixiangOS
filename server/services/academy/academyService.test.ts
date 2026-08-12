@@ -343,7 +343,6 @@ const courseResult = await service.createCourse(
     coreViewpoint: "先改流程，再谈工具",
     conversionProductId: "product-ai",
     ownerUserId: actor.id,
-    lecturerUserId: "user-lecturer",
     defaultDurationMinutes: 120,
     objectives: ["识别企业AI升级机会"],
   },
@@ -354,7 +353,7 @@ assert.equal(courseResult.data?.status, "DRAFT");
 assert.match(courseResult.data?.code || "", /^AC-202608-[A-Z0-9]{6}$/);
 assert.notEqual(courseResult.data?.code, "CLIENT-SHOULD-NOT-CONTROL-CODE");
 assert.equal(courseResult.data?.ownerUserName, actor.name);
-assert.equal(courseResult.data?.lecturerUserName, "课程讲师");
+assert.equal(courseResult.data?.lecturerUserName, null, "课程库不应保存主讲人，主讲人由每次课程安排决定");
 assert.equal(courseResult.data?.conversionProductName, "AI企业升级计划");
 assert.equal(courseResult.data?.targetAudience, "传统企业经营者");
 assert.equal(courseResult.data?.customerProblem, "团队不会把AI落到业务流程");
@@ -434,6 +433,7 @@ assert.equal((await outsiderService.changeCourseStatus(outsiderCourse.data!.id, 
 const outsiderSession = await outsiderService.createSession(
   {
     courseId: outsiderCourse.data!.id,
+    sopTemplateId: defaultSop.data!.id,
     title: "其他部门课程安排",
     startsAt: "2026-08-12T09:00:00.000Z",
     endsAt: "2026-08-12T10:00:00.000Z",
@@ -442,6 +442,9 @@ const outsiderSession = await outsiderService.createSession(
     audience: "ALL_EMPLOYEES",
     isInvitable: true,
     facilitatorUserId: outsider.id,
+    contentOwnerUserId: outsider.id,
+    materialOwnerUserId: outsider.id,
+    reviewOwnerUserId: outsider.id,
     lecturerUserId: outsider.id,
   },
   outsider,
@@ -508,10 +511,21 @@ assert.equal(
   400,
   "结束时间早于开始时间时必须拒绝创建场次",
 );
+const missingFlowSession = await service.createSession({
+  courseId: courseResult.data!.id,
+  title: "未选流程",
+  startsAt: "2026-08-18T09:00:00.000Z",
+  endsAt: "2026-08-18T11:00:00.000Z",
+  venue: "极享直播间",
+  capacity: 20,
+  projectOwnerUserId: actor.id,
+}, actor);
+assert.equal(missingFlowSession.code, 400, "新建课程安排必须显式选择本次课程执行流程");
 
 const minimalSession = await service.createSession(
   {
     courseId: courseResult.data!.id,
+    sopTemplateId: defaultSop.data!.id,
     title: "默认全员可邀约课程安排",
     startsAt: "2026-08-18T09:00:00.000Z",
     endsAt: "2026-08-18T11:00:00.000Z",
@@ -520,6 +534,7 @@ const minimalSession = await service.createSession(
     projectOwnerUserId: actor.id,
     contentOwnerUserId: actor.id,
     materialOwnerUserId: actor.id,
+    lecturerUserId: actor.id,
     reviewOwnerUserId: actor.id,
   },
   actor,
@@ -532,6 +547,7 @@ assert.equal((await service.saveEngagement({ sessionId: minimalSession.data!.id,
 const sessionResult = await service.createSession(
   {
     courseId: courseResult.data!.id,
+    sopTemplateId: defaultSop.data!.id,
     title: "8月公开课第一场",
     startsAt: "2026-08-10T09:00:00.000Z",
     endsAt: "2026-08-10T11:00:00.000Z",
@@ -596,11 +612,12 @@ const compactTemplate = await service.saveSopTemplate({
   ],
 }, actor);
 assert.equal(compactTemplate.code, 0);
-assert.equal((await service.updateCourse(courseResult.data!.id, { ...courseResult.data, sopTemplateId: compactTemplate.data!.id }, actor)).code, 0);
 const cannotDisableLinkedTemplate = await service.saveSopTemplate({ ...compactTemplate.data!, status: "INACTIVE" }, actor);
-assert.equal(cannotDisableLinkedTemplate.code, 409, "已绑定课程的模板不得直接停用");
+assert.equal(cannotDisableLinkedTemplate.code, 0, "课程流程不再绑定课程库，未用于新安排时可以停用");
+assert.equal((await service.saveSopTemplate({ ...compactTemplate.data!, status: "ACTIVE" }, actor)).code, 0);
 const compactSession = await service.createSession({
   courseId: courseResult.data!.id,
+  sopTemplateId: compactTemplate.data!.id,
   title: "两步配置课程安排",
   startsAt: "2026-08-20T09:00:00.000Z",
   endsAt: "2026-08-20T11:00:00.000Z",
@@ -615,6 +632,25 @@ assert.equal(compactSession.data?.tasks[0]?.completionMode, "CONFIRM");
 assert.equal(compactSession.data?.tasks[0]?.sopTemplateId, compactTemplate.data!.id);
 assert.equal(compactSession.data?.tasks[0]?.assigneeRole, "PROJECT_OWNER");
 assert.equal(compactSession.data?.tasks[1]?.dueAt?.toISOString(), "2026-08-20T11:30:00.000Z");
+const oneStepTemplate = await service.saveSopTemplate({
+  name: "单步确认流程",
+  steps: [
+    { stepKey: "ONE_CONFIRM", title: "确认本次课程", category: "BEFORE", assigneeRole: "PROJECT_OWNER", dueAnchor: "STARTS_AT", dueOffsetMinutes: -30, completionMode: "CONFIRM", requiresReview: false, isRequired: true },
+  ],
+}, actor);
+assert.equal(oneStepTemplate.code, 0);
+const oneStepSession = await service.createSession({
+  courseId: courseResult.data!.id,
+  sopTemplateId: oneStepTemplate.data!.id,
+  title: "单步流程测试课程安排",
+  startsAt: "2026-08-21T09:00:00.000Z",
+  endsAt: "2026-08-21T11:00:00.000Z",
+  venue: "极享直播间",
+  capacity: 20,
+  projectOwnerUserId: actor.id,
+}, actor);
+assert.equal(oneStepSession.code, 0);
+assert.deepEqual(oneStepSession.data?.tasks.map((task: any) => task.title), ["确认本次课程"], "选择单步流程时只能生成一个任务，不得回退到固定九步");
 const updatedCompactSession = await service.updateSession(compactSession.data!.id, {
   title: "调整后的课程安排",
   startsAt: "2026-08-20T10:00:00.000Z",
@@ -636,7 +672,7 @@ const partialVisibilityUpdate = await service.updateSession(compactSession.data!
   projectOwnerUserId: actor.id,
 }, actor);
 assert.equal(partialVisibilityUpdate.data?.isInvitable, false, "部分编辑不得把原本禁止邀约的课程自动开放邀约");
-assert.equal((await service.updateCourse(courseResult.data!.id, { ...courseResult.data, status: "ACTIVE", sopTemplateId: "" }, actor)).code, 0);
+assert.equal((await service.updateCourse(courseResult.data!.id, { ...courseResult.data, status: "ACTIVE" }, actor)).code, 0);
 
 const taskAuthorizationSession = await repository.createSession({
   ...sessionResult.data!,
@@ -1105,7 +1141,11 @@ assert.equal(ownPublicCourse.progress.total, 9, "全员工作台应显示课程S
 assert.equal(ownPublicCourse.tasks.length, 9, "全员工作台应显示每一步状态和负责人");
 assert.ok(ownPublicCourse.tasks.some((task: any) => task.isMine && task.taskId), "本人负责节点应提供安全任务入口");
 assert.ok(ownPublicCourse.tasks.filter((task: any) => !task.isMine).every((task: any) => !task.taskId), "不得向其他员工暴露任务操作ID");
-assert.ok(ownPublicCourse.tasks.every((task: any) => !("submissionNote" in task) && !("attachments" in task)), "全员进度不得泄露交付说明或附件");
+assert.ok(
+  ownPublicCourse.tasks.filter((task: any) => !task.isMine).every((task: any) => !("submissionNote" in task) && !("note" in task) && !("attachments" in task)),
+  "全员进度不得泄露其他负责人的交付说明或附件",
+);
+assert.ok(ownPublicCourse.tasks.every((task: any) => !("attachments" in task)), "全员周历不得直接返回任务附件");
 assert.deepEqual(
   Object.keys(publicCalendar.data[0]).sort(),
   ["courseTitle", "currentStep", "deliveryMode", "endsAt", "id", "lecturerUserName", "progress", "startsAt", "status", "tasks", "title"].sort(),

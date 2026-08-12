@@ -511,7 +511,7 @@ export function createAcademyService(
         const done = sorted.filter((task) => ["DONE", "SKIPPED"].includes(task.status)).length;
         const publicTasks = sorted.map((task, index) => ({
           ...(task.assigneeUserId === actor.id ? { taskId: task.id } : {}),
-          ...(task.assigneeUserId === actor.id ? { templateKey: task.templateKey, acceptanceCriteria: task.acceptanceCriteria || undefined, completionMode: task.completionMode || "NOTE", requiresReview: task.requiresReview === true } : {}),
+          ...(task.assigneeUserId === actor.id ? { templateKey: task.templateKey, acceptanceCriteria: task.acceptanceCriteria || undefined, completionMode: task.completionMode || "NOTE", requiresReview: task.requiresReview === true, note: task.note || undefined, submissionNote: task.submissionNote || undefined, completedAt: task.completedAt?.toISOString(), reviewedAt: task.reviewedAt?.toISOString(), submittedAt: task.submittedAt?.toISOString() } : {}),
           stepNumber: Number(task.sortOrder || 0) || index + 1,
           title: task.title.replace(/^T(?:[+-][^\s]+|日)?\s*/, ""),
           assigneeUserName: task.assigneeUserName || undefined,
@@ -576,22 +576,18 @@ export function createAcademyService(
       const id = String(raw.id || "").trim() || `academy-sop-${randomUUID()}`;
       const name = String(raw.name || "").trim();
       const rawSteps = Array.isArray(raw.steps) ? raw.steps as Array<Record<string, unknown>> : [];
-      if (!name) return invalid("SOP模板名称不能为空");
-      if (id.length > 64) return invalid("SOP模板标识不能超过64个字符");
-      if (name.length > 160) return invalid("SOP模板名称不能超过160个字符");
-      if (!rawSteps.length) return invalid("SOP模板至少需要一个步骤");
-      if (rawSteps.length > 30) return invalid("一套SOP模板最多配置30个步骤");
+      if (!name) return invalid("课程流程名称不能为空");
+      if (id.length > 64) return invalid("课程流程标识不能超过64个字符");
+      if (name.length > 160) return invalid("课程流程名称不能超过160个字符");
+      if (!rawSteps.length) return invalid("课程流程至少需要一个步骤");
+      if (rawSteps.length > 30) return invalid("一套课程流程最多配置30个步骤");
       const duplicateKeys = rawSteps.map((item) => String(item.stepKey || "").trim()).filter(Boolean);
-      if (new Set(duplicateKeys).size !== rawSteps.length) return invalid("SOP步骤标识不能为空且不能重复");
-      if (!repository.saveSopTemplate) return invalid("SOP模板配置暂不可用", 503);
+      if (new Set(duplicateKeys).size !== rawSteps.length) return invalid("流程步骤标识不能为空且不能重复");
+      if (!repository.saveSopTemplate) return invalid("课程流程配置暂不可用", 503);
       const existing = await repository.findSopTemplateById?.(id) || null;
       const nextStatus = raw.status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
-      if (raw.isDefault === true && nextStatus !== "ACTIVE") return invalid("默认SOP模板必须保持启用");
-      if (existing?.isDefault && raw.isDefault !== true) return invalid("请先将另一套启用模板设为默认模板", 409);
-      if (existing?.status === "ACTIVE" && nextStatus === "INACTIVE") {
-        const linked = await repository.listCourses({ page: 1, pageSize: 1, sopTemplateId: id }, { unrestricted: true, visibleUserIds: [] });
-        if (linked.total) return invalid(`该模板已绑定${linked.total}门课程，请先为课程更换模板`, 409);
-      }
+      if (raw.isDefault === true && nextStatus !== "ACTIVE") return invalid("默认课程流程必须保持启用");
+      if (existing?.isDefault && raw.isDefault !== true) return invalid("请先将另一套启用流程设为默认流程", 409);
       const timestamp = now();
       const steps: AcademySopTemplateStepRecord[] = [];
       for (let index = 0; index < rawSteps.length; index += 1) {
@@ -644,16 +640,11 @@ export function createAcademyService(
     },
     async deleteSopTemplate(id: string, _actor: AuthenticatedUser) {
       const templateId = String(id || "").trim();
-      if (!templateId) return invalid("SOP模板标识不能为空");
+      if (!templateId) return invalid("课程流程标识不能为空");
       const existing = await repository.findSopTemplateById?.(templateId) || null;
-      if (!existing) return invalid("SOP模板不存在", 404);
-      if (existing.isDefault) return invalid("默认SOP模板不能删除，请先将其他模板设为默认模板", 409);
-      const linked = await repository.listCourses(
-        { page: 1, pageSize: 1, sopTemplateId: templateId },
-        { unrestricted: true, visibleUserIds: [] },
-      );
-      if (linked.total) return invalid(`该模板已绑定${linked.total}门课程，不能删除`, 409);
-      if (!repository.deleteSopTemplate) return invalid("SOP模板删除暂不可用", 503);
+      if (!existing) return invalid("课程流程不存在", 404);
+      if (existing.isDefault) return invalid("默认课程流程不能删除，请先将其他流程设为默认", 409);
+      if (!repository.deleteSopTemplate) return invalid("课程流程删除暂不可用", 503);
       await repository.deleteSopTemplate(templateId);
       return success({ id: templateId });
     },
@@ -784,23 +775,12 @@ export function createAcademyService(
       const owner = requestedOwnerId === actor.id
         ? { id: actor.id, name: actor.name }
         : await repository.findActiveUserById(requestedOwnerId);
-      if (!owner) return invalid("课程负责人不存在或已停用");
-      const lecturerUserId = String(raw.lecturerUserId || "").trim();
-      const lecturer = lecturerUserId
-        ? await repository.findActiveUserById(lecturerUserId)
-        : null;
-      if (lecturerUserId && !lecturer) return invalid("主讲人不存在或已停用");
+      if (!owner) return invalid("课程维护人不存在或已停用");
       const conversionProductId = String(raw.conversionProductId || "").trim();
       const conversionProduct = conversionProductId
         ? await repository.findActiveProductById(conversionProductId)
         : null;
       if (conversionProductId && !conversionProduct) return invalid("转化产品不存在或已停用");
-      const requestedSopTemplateId = String(raw.sopTemplateId || "").trim();
-      const sopTemplate = requestedSopTemplateId
-        ? await repository.findSopTemplateById?.(requestedSopTemplateId)
-        : await repository.findDefaultSopTemplate?.();
-      if (!sopTemplate || sopTemplate.status !== "ACTIVE") return invalid(requestedSopTemplateId ? "所选SOP模板不存在或已停用" : "请先启用并设置一套默认SOP模板");
-
       const course: AcademyCourseRecord = {
         id: `academy-course-${randomUUID()}`,
         code,
@@ -822,9 +802,9 @@ export function createAcademyService(
         status: "DRAFT",
         ownerUserId: owner.id,
         ownerUserName: owner.name,
-        lecturerUserId: lecturer?.id || null,
-        lecturerUserName: lecturer?.name || null,
-        sopTemplateId: sopTemplate.id,
+        lecturerUserId: null,
+        lecturerUserName: null,
+        sopTemplateId: null,
         createdAt: timestamp,
         updatedAt: timestamp,
       };
@@ -861,20 +841,10 @@ export function createAcademyService(
       if (!Number.isInteger(duration) || duration <= 0 || duration > 1440) return invalid("课程时长必须是1到1440分钟的整数");
       const ownerId = String(raw.ownerUserId || course.ownerUserId).trim();
       const owner = ownerId === actor.id ? { id: actor.id, name: actor.name } : await repository.findActiveUserById(ownerId);
-      if (!owner) return invalid("课程负责人不存在或已停用");
-      const lecturerUserId = String(raw.lecturerUserId || "").trim();
-      const lecturer = lecturerUserId ? await repository.findActiveUserById(lecturerUserId) : null;
-      if (lecturerUserId && !lecturer) return invalid("主讲人不存在或已停用");
+      if (!owner) return invalid("课程维护人不存在或已停用");
       const conversionProductId = String(raw.conversionProductId || "").trim();
       const conversionProduct = conversionProductId ? await repository.findActiveProductById(conversionProductId) : null;
       if (conversionProductId && !conversionProduct) return invalid("转化产品不存在或已停用");
-      const requestedSopTemplateId = String(raw.sopTemplateId || "").trim();
-      const sopTemplate = requestedSopTemplateId
-        ? await repository.findSopTemplateById?.(requestedSopTemplateId)
-        : course.sopTemplateId
-          ? await repository.findSopTemplateById?.(course.sopTemplateId)
-          : await repository.findDefaultSopTemplate?.();
-      if (!sopTemplate || sopTemplate.status !== "ACTIVE") return invalid(requestedSopTemplateId ? "所选SOP模板不存在或已停用" : "请先为课程绑定一套启用的SOP模板");
       const timestamp = now();
       const update = {
         title,
@@ -886,12 +856,12 @@ export function createAcademyService(
         conversionProductId: conversionProduct?.id || null,
         conversionProductName: conversionProduct?.name || null,
         defaultDurationMinutes: duration,
-        sopTemplateId: sopTemplate.id,
+        sopTemplateId: null,
         objectives: Array.isArray(raw.objectives) ? raw.objectives.map(String).map((item) => item.trim()).filter(Boolean) : [],
         ownerUserId: owner.id,
         ownerUserName: owner.name,
-        lecturerUserId: lecturer?.id || null,
-        lecturerUserName: lecturer?.name || null,
+        lecturerUserId: null,
+        lecturerUserName: null,
         updatedAt: timestamp,
       };
       const updated = await repository.updateCourse(id, update);
@@ -1079,20 +1049,20 @@ export function createAcademyService(
         await repository.findLatestCourseVersionId(courseId);
       if (!courseVersionId)
         return invalid("课程尚无可用版本，不能创建场次", 409);
-      const template = course.sopTemplateId
-        ? await repository.findSopTemplateById?.(course.sopTemplateId)
-        : null;
+      const requestedTemplateId = String(raw.sopTemplateId || "").trim();
+      if (!requestedTemplateId) return invalid("请选择本次课程执行流程");
+      const template = await repository.findSopTemplateById?.(requestedTemplateId);
       if (!template || template.status !== "ACTIVE" || !template.steps.length)
-        return invalid("课程尚未配置可用的SOP模板", 409);
+        return invalid("请选择一套已启用的课程执行流程", 409);
       const requiredRoles = new Set(template.steps.map((item) => item.assigneeRole));
       const projectOwnerUserId = String(raw.projectOwnerUserId || raw.facilitatorUserId || "").trim();
       const projectOwner = projectOwnerUserId
         ? await repository.findActiveUserById(projectOwnerUserId)
         : null;
       if (!projectOwner) return invalid("请选择有效的项目负责人");
-      const contentOwnerUserId = String(raw.contentOwnerUserId || projectOwnerUserId).trim();
-      const materialOwnerUserId = String(raw.materialOwnerUserId || projectOwnerUserId).trim();
-      const reviewOwnerUserId = String(raw.reviewOwnerUserId || projectOwnerUserId).trim();
+      const contentOwnerUserId = String(raw.contentOwnerUserId || "").trim();
+      const materialOwnerUserId = String(raw.materialOwnerUserId || "").trim();
+      const reviewOwnerUserId = String(raw.reviewOwnerUserId || "").trim();
       const [contentOwner, materialOwner, reviewOwner] = await Promise.all([
         contentOwnerUserId ? repository.findActiveUserById(contentOwnerUserId) : Promise.resolve(null),
         materialOwnerUserId ? repository.findActiveUserById(materialOwnerUserId) : Promise.resolve(null),
@@ -1101,7 +1071,7 @@ export function createAcademyService(
       if (requiredRoles.has("CONTENT_OWNER") && !contentOwner) return invalid("请选择有效的课程内容负责人");
       if (requiredRoles.has("MATERIAL_OWNER") && !materialOwner) return invalid("请选择有效的素材负责人");
       if (requiredRoles.has("REVIEW_OWNER") && !reviewOwner) return invalid("请选择有效的复盘负责人");
-      const lecturerUserId = String(raw.lecturerUserId || course.lecturerUserId || (requiredRoles.has("LECTURER") ? projectOwnerUserId : "")).trim();
+      const lecturerUserId = String(raw.lecturerUserId || "").trim();
       const lecturer = lecturerUserId
         ? await repository.findActiveUserById(lecturerUserId)
         : null;

@@ -6,8 +6,9 @@ const plansSource = readFileSync(new URL('../pages/Academy/AcademyPlans.tsx', im
 const source = [academySource, plansSource].join('\n');
 
 assert.doesNotMatch(source, /label="课程编码 \*"/, '新建课程不应要求用户手填课程编码');
-assert.match(source, /label="课程负责人 \*"/, '新建课程应明确课程负责人');
-assert.match(source, /label="主讲人"/, '新建课程应支持选择主讲人');
+assert.match(source, /label="课程维护人 \*"/, '课程库只保留课程维护人');
+assert.doesNotMatch(academySource, /label="课程负责人 \*"/, '课程库不应配置本次课程负责人');
+assert.doesNotMatch(academySource, /label="主讲人"[\s\S]{0,400}courseForm\.lecturerUserId/, '课程库不应配置主讲人');
 assert.match(source, /label="目标客户"/, '新建课程应记录目标客户');
 assert.match(source, /label="客户核心问题"/, '新建课程应记录客户核心问题');
 assert.match(source, /label="核心观点"/, '新建课程应记录核心观点');
@@ -30,6 +31,7 @@ assert.match(source, /label="授课方式 \*"/, '课程安排应明确授课方�
 assert.match(source, /"项目负责人 \*"/, '课程安排应指定项目负责人');
 assert.match(source, /"课程内容负责人 \*"/, '课程安排应指定内容负责人');
 assert.match(source, /"素材负责人 \*"/, '课程安排应指定素材负责人');
+assert.match(source, /label="课程执行流程 \*"/, '课程安排应明确选择本次执行流程');
 assert.match(source, /tableId="academy-course-arrangements"/, '课程安排列表应复用系统统一表格');
 assert.match(source, /anchor="right"/, '课程安排详情应使用右侧抽屉，不跳转页面');
 assert.match(source, /requestedSessionId/, '外部工作台进入课程安排时应能直接打开目标抽屉');
