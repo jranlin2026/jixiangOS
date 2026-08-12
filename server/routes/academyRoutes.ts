@@ -15,7 +15,12 @@ const pageQuery = (query: Record<string, unknown>) => ({
 
 export function createAcademyRouter(deps: {
   service: AcademyService;
-  requireRead: express.RequestHandler;
+  requireAuthenticated: express.RequestHandler;
+  requireDashboardRead: express.RequestHandler;
+  requireCourseListRead: express.RequestHandler;
+  requireCourseManageRead: express.RequestHandler;
+  requireSessionRead: express.RequestHandler;
+  requireSessionDetailRead: express.RequestHandler;
   requireCourseWrite: express.RequestHandler;
   requireArrangementWrite: express.RequestHandler;
   requireSessionWrite: express.RequestHandler;
@@ -25,15 +30,27 @@ export function createAcademyRouter(deps: {
 }) {
   const router = express.Router();
 
-  router.get('/dashboard', deps.requireRead, async (req: AuthenticatedRequest, res) => {
+  router.get('/public-calendar', deps.requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.listPublicCalendar({
+      start: String(req.query.start || '').trim(),
+      end: String(req.query.end || '').trim(),
+    }, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+  router.get('/my-tasks', deps.requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.listMyTasks(pageQuery(req.query as any), req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+
+  router.get('/dashboard', deps.requireDashboardRead, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.getDashboard(req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
-  router.get('/courses', deps.requireRead, async (req: AuthenticatedRequest, res) => {
+  router.get('/courses', deps.requireCourseListRead, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.listCourses(pageQuery(req.query as any), req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
-  router.get('/course-categories', deps.requireRead, async (req: AuthenticatedRequest, res) => {
+  router.get('/course-categories', deps.requireCourseManageRead, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.listCourseCategories(req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
@@ -53,7 +70,7 @@ export function createAcademyRouter(deps: {
     const result = await deps.service.changeCourseStatus(String(req.params.courseId), String(req.body?.status || '') as any, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
-  router.get('/courses/:courseId/assets', deps.requireRead, async (req: AuthenticatedRequest, res) => {
+  router.get('/courses/:courseId/assets', deps.requireCourseManageRead, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.listCourseAssets(String(req.params.courseId), req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
@@ -61,12 +78,16 @@ export function createAcademyRouter(deps: {
     const result = await deps.service.saveCourseAsset(String(req.params.courseId), req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
-  router.get('/sessions', deps.requireRead, async (req: AuthenticatedRequest, res) => {
+  router.get('/sessions', deps.requireSessionRead, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.listSessions(pageQuery(req.query as any), req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
-  router.get('/sessions/:sessionId', deps.requireRead, async (req: AuthenticatedRequest, res) => {
+  router.get('/sessions/:sessionId', deps.requireSessionDetailRead, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.getSessionDetail(String(req.params.sessionId), req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+  router.get('/sessions/:sessionId/next-step', deps.requireSessionRead, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.getSessionNextStep(String(req.params.sessionId), req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
   router.post('/sessions', deps.requireArrangementWrite, async (req: AuthenticatedRequest, res) => {
@@ -81,8 +102,24 @@ export function createAcademyRouter(deps: {
     const result = await deps.service.updateTask(String(req.params.taskId), req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
+  router.get('/tasks/:taskId/attachments', deps.requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.listTaskAttachments(String(req.params.taskId), req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+  router.put('/tasks/:taskId/attachments', deps.requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.replaceTaskAttachments(String(req.params.taskId), req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
   router.put('/engagements', deps.requireEngagementWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.saveEngagement(req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+  router.put('/engagements/batch', deps.requireEngagementWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.saveEngagementBatch(req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+  router.post('/engagements/:engagementId/follow-up', deps.requireEngagementWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.quickFollowUp(String(req.params.engagementId), req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
   router.patch('/engagements/:engagementId/execution', deps.requireSessionWrite, async (req: AuthenticatedRequest, res) => {

@@ -30,6 +30,7 @@ export interface BusinessAttachmentPickerProps {
   headerAction?: React.ReactNode;
   onUploaded?: (attachment: BusinessAttachment) => Promise<boolean>;
   onRemove?: (attachment: BusinessAttachment) => Promise<boolean>;
+  onUploadingChange?: (uploading: boolean) => void;
 }
 
 const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
@@ -47,6 +48,7 @@ const DOCUMENT_MIME_TYPES = [
   'text/plain',
   'video/mp4',
 ];
+const ACADEMY_TASK_MIME_TYPES = DOCUMENT_MIME_TYPES.filter((mimeType) => mimeType !== 'video/mp4');
 
 function downloadBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
@@ -71,6 +73,7 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
   headerAction,
   onUploaded,
   onRemove,
+  onUploadingChange,
 }) => {
   const [message, setMessage] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -81,8 +84,19 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
   valueRef.current = value;
   previewUrlsRef.current = previewUrls;
 
-  const accept = useMemo(() => (imagesOnly ? ['image/'] : DOCUMENT_MIME_TYPES), [imagesOnly]);
-  const inputAccept = imagesOnly ? 'image/*' : 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.mp4';
+  useEffect(() => {
+    onUploadingChange?.(uploading);
+  }, [onUploadingChange, uploading]);
+
+  const accept = useMemo(() => (
+    imagesOnly ? ['image/'] : category === 'academy-task-evidence' ? ACADEMY_TASK_MIME_TYPES : DOCUMENT_MIME_TYPES
+  ), [category, imagesOnly]);
+  const inputAccept = imagesOnly
+    ? 'image/*'
+    : category === 'academy-task-evidence'
+      ? 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt'
+      : 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.mp4';
+  const countUnit = imagesOnly ? '张' : '个文件';
 
   useEffect(() => {
     let cancelled = false;
@@ -125,7 +139,7 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
       rejectWholeBatchOnOverflow,
     });
     if (rejectWholeBatchOnOverflow && uniqueIncoming.length > remaining) {
-      setMessage(`最多上传 ${maxCount} 张，当前已有 ${valueRef.current.length} 张，本次未加入`);
+      setMessage(`最多上传 ${maxCount} ${countUnit}，当前已有 ${valueRef.current.length} ${countUnit}，本次未加入`);
       return;
     }
     setMessage([
@@ -137,24 +151,31 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
     setUploading(true);
     let next = [...valueRef.current];
     const failures: string[] = [];
-    for (const file of selection.accepted) {
-      const response = await businessAttachmentApi.upload(file, { draftKey, category });
-      if (response.code === 0 && response.data) {
-        if (onUploaded && !(await onUploaded(response.data))) {
-          await businessAttachmentApi.remove(response.data.id);
-          failures.push(`${file.name}：附件关联失败`);
-          continue;
+    try {
+      for (const file of selection.accepted) {
+        try {
+          const response = await businessAttachmentApi.upload(file, { draftKey, category });
+          if (response.code === 0 && response.data) {
+            if (onUploaded && !(await onUploaded(response.data))) {
+              await businessAttachmentApi.remove(response.data.id);
+              failures.push(`${file.name}：附件关联失败`);
+              continue;
+            }
+            next = [...next, response.data];
+            if (file.type.startsWith('image/')) {
+              setPreviewUrls((current) => ({ ...current, [response.data.id]: URL.createObjectURL(file) }));
+            }
+            onChange(next);
+          } else {
+            failures.push(`${file.name}：${response.message || '上传失败'}`);
+          }
+        } catch {
+          failures.push(`${file.name}：上传或关联失败`);
         }
-        next = [...next, response.data];
-        if (file.type.startsWith('image/')) {
-          setPreviewUrls((current) => ({ ...current, [response.data.id]: URL.createObjectURL(file) }));
-        }
-        onChange(next);
-      } else {
-        failures.push(`${file.name}：${response.message || '上传失败'}`);
       }
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
     if (failures.length) setMessage(failures.join('；'));
   };
 
@@ -217,22 +238,26 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
         <Box>
           <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{title}</Typography>
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.25 }}>
-            {description} {Number.isFinite(maxCount) ? `最多 ${maxCount} 张。` : ''}
+            {description} {Number.isFinite(maxCount) ? `最多 ${maxCount} ${countUnit}。` : ''}
           </Typography>
-          <Typography variant="caption" sx={{ color: '#2563eb', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-            <ContentPasteIcon sx={{ fontSize: 15 }} /> 点击此区域后可直接粘贴截图
-          </Typography>
+          {!disabled && (
+            <Typography variant="caption" sx={{ color: '#2563eb', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+              <ContentPasteIcon sx={{ fontSize: 15 }} /> 点击此区域后可直接粘贴截图
+            </Typography>
+          )}
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={uploading ? <CircularProgress size={16} /> : <UploadFileIcon />}
-            onClick={() => inputRef.current?.click()}
-            disabled={disabled || uploading || value.length >= maxCount}
-          >
-            {uploading ? '上传中' : '选择文件'}
-          </Button>
+          {!disabled && (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={uploading ? <CircularProgress size={16} /> : <UploadFileIcon />}
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading || value.length >= maxCount}
+            >
+              {uploading ? '上传中' : '选择文件'}
+            </Button>
+          )}
           {headerAction}
         </Box>
         <input

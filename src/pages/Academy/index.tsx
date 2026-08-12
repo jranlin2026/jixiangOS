@@ -58,6 +58,8 @@ import type {
   AcademyCourseAsset,
   AcademyDashboard,
   AcademyEngagement,
+  AcademyMyTask,
+  AcademyPublicCalendarItem,
   AcademySession,
   AcademySessionDetail,
   AcademySessionTask,
@@ -86,6 +88,7 @@ import {
   ModuleTabs,
 } from "../../shared/components/ModuleShell";
 import { Plans } from "./AcademyPlans";
+import { getAcademyPrivateLoadPlan, taskRequiresEvidence } from "./academyMvpModel";
 import {
   clampPageIndex,
   getCourseStatusAction,
@@ -131,9 +134,9 @@ const viewPath: Record<AcademyView, string> = {
 };
 const navItems: Array<{ value: AcademyView; label: string }> = [
   { value: "overview", label: "我的工作台" },
-  { value: "courses", label: "课程资产" },
-  { value: "plans", label: "课程运营" },
-  { value: "learners", label: "邀约与转化" },
+  { value: "courses", label: "课程库" },
+  { value: "plans", label: "课程安排" },
+  { value: "learners", label: "邀约跟进" },
 ];
 
 const emptyCourse: CreateAcademyCourseInput = {
@@ -169,6 +172,10 @@ const emptySession: CreateAcademySessionInput = {
   facilitatorUserId: "",
   lecturerUserId: "",
   collaboratorUserIds: [],
+  projectOwnerUserId: "",
+  contentOwnerUserId: "",
+  materialOwnerUserId: "",
+  reviewOwnerUserId: "",
 };
 const emptyEngagement: SaveAcademyEngagementInput = {
   sessionId: "",
@@ -309,6 +316,11 @@ const Academy: React.FC = () => {
   });
   const [courses, setCourses] = useState<AcademyCourse[]>([]);
   const [sessions, setSessions] = useState<AcademySession[]>([]);
+  const [publicCalendar, setPublicCalendar] = useState<AcademyPublicCalendarItem[]>([]);
+  const [myTasks, setMyTasks] = useState<AcademyMyTask[]>([]);
+  const [myTaskTotal, setMyTaskTotal] = useState(0);
+  const [myTaskPage, setMyTaskPage] = useState(0);
+  const [myTaskPageSize, setMyTaskPageSize] = useState(10);
   const [details, setDetails] = useState<Record<string, AcademySessionDetail>>(
     {},
   );
@@ -337,6 +349,10 @@ const Academy: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
+  const [selectedInviteCustomers, setSelectedInviteCustomers] = useState<Customer[]>([]);
+  const [customerResultTotal, setCustomerResultTotal] = useState(0);
+  const [customerPage, setCustomerPage] = useState(0);
+  const [customerPageSize, setCustomerPageSize] = useState(20);
   const [courseAssets, setCourseAssets] = useState<Record<string, AcademyCourseAsset[]>>({});
   const [courseAssetsLoadingIds, setCourseAssetsLoadingIds] = useState<Set<string>>(new Set());
   const [courseAssetLoadErrors, setCourseAssetLoadErrors] = useState<Record<string, string>>({});
@@ -352,6 +368,13 @@ const Academy: React.FC = () => {
     status: AcademySessionTask["status"];
   } | null>(null);
   const [taskActionNote, setTaskActionNote] = useState("");
+  const [workbenchTask, setWorkbenchTask] = useState<AcademyMyTask | null>(null);
+  const [workbenchTaskNote, setWorkbenchTaskNote] = useState("");
+  const [taskEvidenceAttachments, setTaskEvidenceAttachments] = useState<BusinessAttachment[]>([]);
+  const [taskEvidenceLoading, setTaskEvidenceLoading] = useState(false);
+  const [taskEvidenceUploading, setTaskEvidenceUploading] = useState(false);
+  const activeTaskEvidenceIdRef = useRef("");
+  const taskEvidenceAttachmentsRef = useRef<BusinessAttachment[]>([]);
   const [orderLink, setOrderLink] = useState<{
     engagement: AcademyEngagement;
     orders: Order[];
@@ -401,14 +424,12 @@ const Academy: React.FC = () => {
     "write",
   );
   const visibleNavItems = navItems.filter((item) => {
-    if (item.value === "overview")
-      return hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_VIEW);
+    if (item.value === "overview") return true;
     if (item.value === "plans")
       return (
         hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE) ||
         hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE) ||
-        hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE) ||
-        sessions.some((session) => session.canOpenDetail)
+        hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE)
       );
     if (item.value === "courses")
       return hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE);
@@ -420,6 +441,10 @@ const Academy: React.FC = () => {
     return false;
   });
   const selectedDetail = details[selectedSessionId];
+  const taskActionCanEditEvidence = Boolean(
+    taskAction?.status === "SUBMITTED" &&
+    taskAction.task.assigneeUserId === currentUser?.id,
+  );
 
   useEffect(() => {
     if (location.pathname.endsWith("/sessions"))
@@ -459,61 +484,84 @@ const Academy: React.FC = () => {
 
   const loadBase = useCallback(async () => {
     setLoading(true);
-    const [dashboardResponse, courseResponse, sessionResponse, categoryResponse] =
-      await Promise.all([
-        academyApi.getDashboard(),
-        academyApi.listCourses({ page: 1, pageSize: 100 }),
-        academyApi.listSessions({ page: 1, pageSize: 100 }),
-        academyApi.listCourseCategories(),
-      ]);
-    if (dashboardResponse.code !== 0) {
-      setLoading(false);
-      return alert(dashboardResponse.message, "商学院数据加载失败");
+    const calendarStart = new Date();
+    const calendarWeekday = calendarStart.getDay() || 7;
+    calendarStart.setDate(calendarStart.getDate() - calendarWeekday + 1);
+    calendarStart.setHours(0, 0, 0, 0);
+    const calendarEnd = new Date(calendarStart);
+    calendarEnd.setDate(calendarStart.getDate() + 7);
+    const [publicCalendarResponse, myTaskResponse] = await Promise.all([
+      academyApi.getPublicCalendar({ start: calendarStart.toISOString(), end: calendarEnd.toISOString() }),
+      academyApi.listMyTasks({ page: myTaskPage + 1, pageSize: myTaskPageSize, status: "OPEN" }),
+    ]);
+    if (publicCalendarResponse.code === 0) setPublicCalendar(publicCalendarResponse.data);
+    if (myTaskResponse.code === 0) {
+      setMyTasks(myTaskResponse.data.items);
+      setMyTaskTotal(myTaskResponse.data.total);
     }
-    if (courseResponse.code !== 0) {
+    const privateLoadPlan = getAcademyPrivateLoadPlan({
+      plan: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE),
+      course: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE),
+      session: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE),
+      engagement: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE),
+      review: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE),
+    });
+    if (!privateLoadPlan.dashboard) {
       setLoading(false);
-      return alert(courseResponse.message, "课程库加载失败");
+      return;
     }
-    if (sessionResponse.code !== 0) {
-      setLoading(false);
-      return alert(sessionResponse.message, "课程安排加载失败");
+    const [dashboardResponse, courseResponse, sessionResponse, categoryResponse] = await Promise.all([
+      privateLoadPlan.dashboard ? academyApi.getDashboard() : Promise.resolve(null),
+      privateLoadPlan.courses ? academyApi.listCourses({ page: 1, pageSize: 100 }) : Promise.resolve(null),
+      privateLoadPlan.sessions ? academyApi.listSessions({ page: 1, pageSize: 100 }) : Promise.resolve(null),
+      privateLoadPlan.categories ? academyApi.listCourseCategories() : Promise.resolve(null),
+    ]);
+    const loadErrors: string[] = [];
+    if (dashboardResponse) {
+      if (dashboardResponse.code === 0) setDashboard(dashboardResponse.data);
+      else loadErrors.push(`工作台：${dashboardResponse.message}`);
     }
-    if (categoryResponse.code !== 0) {
-      setLoading(false);
-      return alert(categoryResponse.message, "课程分类加载失败");
+    if (courseResponse) {
+      if (courseResponse.code === 0) {
+        setCourses(courseResponse.data.items);
+        if (!selectedCourseId && courseResponse.data.items[0])
+          setSelectedCourseId(courseResponse.data.items[0].id);
+      } else loadErrors.push(`课程列表：${courseResponse.message}`);
     }
-    const remainingSessionPages = Math.max(
-      0,
-      Math.ceil(sessionResponse.data.total / 100) - 1,
-    );
-    const remainingSessionResponses = remainingSessionPages
-      ? await Promise.all(
-          Array.from({ length: remainingSessionPages }, (_, index) =>
-            academyApi.listSessions({ page: index + 2, pageSize: 100 }),
-          ),
-        )
-      : [];
-    const failedSessionPage = remainingSessionResponses.find((response) => response.code !== 0);
-    if (failedSessionPage && failedSessionPage.code !== 0) {
-      setLoading(false);
-      return alert(failedSessionPage.message, "课程安排加载失败");
+    if (categoryResponse) {
+      if (categoryResponse.code === 0) setCourseCategories(categoryResponse.data);
+      else loadErrors.push(`课程分类：${categoryResponse.message}`);
     }
-    const allSessions = [
-      ...sessionResponse.data.items,
-      ...remainingSessionResponses.flatMap((response) =>
-        response.code === 0 ? response.data.items : [],
-      ),
-    ];
-    setDashboard(dashboardResponse.data);
-    setCourses(courseResponse.data.items);
-    setSessions(allSessions);
-    setCourseCategories(categoryResponse.data);
-    if (!selectedCourseId && courseResponse.data.items[0])
-      setSelectedCourseId(courseResponse.data.items[0].id);
-    if (!selectedSessionId && allSessions[0])
-      setSelectedSessionId(allSessions[0].id);
+    if (sessionResponse) {
+      if (sessionResponse.code !== 0) {
+        loadErrors.push(`课程安排：${sessionResponse.message}`);
+      } else {
+        const remainingSessionPages = Math.max(0, Math.ceil(sessionResponse.data.total / 100) - 1);
+        const remainingSessionResponses = remainingSessionPages
+          ? await Promise.all(
+              Array.from({ length: remainingSessionPages }, (_, index) =>
+                academyApi.listSessions({ page: index + 2, pageSize: 100 }),
+              ),
+            )
+          : [];
+        const failedSessionPage = remainingSessionResponses.find((response) => response.code !== 0);
+        if (failedSessionPage && failedSessionPage.code !== 0) {
+          loadErrors.push(`课程安排：${failedSessionPage.message}`);
+        } else {
+          const allSessions = [
+            ...sessionResponse.data.items,
+            ...remainingSessionResponses.flatMap((response) =>
+              response.code === 0 ? response.data.items : [],
+            ),
+          ];
+          setSessions(allSessions);
+          if (!selectedSessionId && allSessions[0]) setSelectedSessionId(allSessions[0].id);
+        }
+      }
+    }
     setLoading(false);
-  }, [alert, selectedCourseId, selectedSessionId]);
+    if (loadErrors.length) await alert(loadErrors.join("\n"), "部分商学院数据加载失败");
+  }, [alert, canCourse, canEngagement, canPlan, canReview, canSession, currentUser, myTaskPage, myTaskPageSize, selectedCourseId, selectedSessionId]);
 
   useEffect(() => {
     void loadBase();
@@ -585,27 +633,24 @@ const Academy: React.FC = () => {
   );
 
   useEffect(() => {
-    if (view === "overview") {
-      sessions.forEach((session) => {
-        if ((canSession || canPlan || canReview || session.canOpenDetail) && !details[session.id] && !sessionDetailErrors[session.id]) void loadDetail(session.id);
-      });
-      return;
-    }
     if (
       (view === "learners" || view === "reviews") &&
       selectedSessionId &&
       !details[selectedSessionId]
     )
       void loadDetail(selectedSessionId);
-  }, [canPlan, canReview, canSession, details, loadDetail, selectedSessionId, sessionDetailErrors, sessions, view]);
+  }, [details, loadDetail, selectedSessionId, view]);
   useEffect(() => {
     if (!engagementOpen || engagementMode !== "sales" || !canEngagement) return;
     let active = true;
     setCustomerSearchLoading(true);
     const timer = window.setTimeout(() => {
-      void customerApi.fetchCustomers({ page: 1, pageSize: 20, search: customerSearch.trim() || undefined })
+      void customerApi.fetchCustomers({ page: customerPage + 1, pageSize: customerPageSize, search: customerSearch.trim() || undefined })
         .then((response) => {
-          if (active && response.code === 0) setCustomers(response.data.items);
+          if (active && response.code === 0) {
+            setCustomers(response.data.items);
+            setCustomerResultTotal(response.data.pagination.total);
+          }
         })
         .finally(() => {
           if (active) setCustomerSearchLoading(false);
@@ -615,7 +660,8 @@ const Academy: React.FC = () => {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [canEngagement, customerSearch, engagementMode, engagementOpen]);
+  }, [canEngagement, customerPage, customerPageSize, customerSearch, engagementMode, engagementOpen]);
+  useEffect(() => { setCustomerPage(0); }, [customerSearch]);
   useEffect(() => {
     if (!selectedDetail) return;
     const review = selectedDetail.review;
@@ -642,21 +688,6 @@ const Academy: React.FC = () => {
     page * pageSize,
     page * pageSize + pageSize,
   );
-  const weekSessions = useMemo(() => {
-    const today = new Date();
-    const monday = new Date(today);
-    const weekday = monday.getDay() || 7;
-    monday.setDate(monday.getDate() - weekday + 1);
-    monday.setHours(0, 0, 0, 0);
-    const nextMonday = new Date(monday);
-    nextMonday.setDate(nextMonday.getDate() + 7);
-    return [...sessions]
-      .filter((item) => {
-        const startsAt = new Date(item.startsAt);
-        return startsAt >= monday && startsAt < nextMonday;
-      })
-      .sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt));
-  }, [sessions]);
   const invitableSessions = useMemo(
     () => sessions.filter((item) => item.audience === "ALL_EMPLOYEES" && item.isInvitable && ["PLANNED", "READY"].includes(item.status)),
     [sessions],
@@ -774,7 +805,11 @@ const Academy: React.FC = () => {
       startsAt: toLocalInput(startsAt),
       endsAt: toLocalInput(endsAt),
       facilitatorUserId: currentUser?.id || course?.ownerUserId || "",
+      projectOwnerUserId: currentUser?.id || course?.ownerUserId || "",
+      contentOwnerUserId: course?.ownerUserId || currentUser?.id || "",
+      materialOwnerUserId: "",
       lecturerUserId: course?.lecturerUserId || "",
+      reviewOwnerUserId: currentUser?.id || course?.ownerUserId || "",
     });
     setSessionOpen(true);
   };
@@ -822,16 +857,147 @@ const Academy: React.FC = () => {
     status: AcademySessionTask["status"],
     note = "",
   ) => {
-    const response = await academyApi.updateTask(task.id, {
-      status,
-      ...(status === "SUBMITTED" ? { submissionNote: note } : {}),
-      ...(status === "DONE" || status === "REJECTED" ? { reviewNote: note } : {}),
-    });
-    if (response.code !== 0) return alert(response.message, "任务状态更新失败");
-    setTaskAction(null);
-    setTaskActionNote("");
-    if (detail) await loadDetail(detail.id, true);
-    else if (selectedSessionId) await loadDetail(selectedSessionId);
+    if (saving) return;
+    if (status === "SUBMITTED") {
+      if (taskEvidenceLoading || taskEvidenceUploading) return;
+      if (taskRequiresEvidence(task.templateKey) && !taskEvidenceAttachmentsRef.current.length) {
+        await alert("该节点需至少上传1个交付文件后才能提交。", "缺少交付文件");
+        return;
+      }
+    }
+    setSaving(true);
+    try {
+      const response = await academyApi.updateTask(task.id, {
+        status,
+        ...(status === "SUBMITTED" ? { submissionNote: note } : {}),
+        ...(status === "DONE" || status === "REJECTED" ? { reviewNote: note } : {}),
+      });
+      if (response.code !== 0) return alert(response.message, "任务状态更新失败");
+      setTaskAction(null);
+      setTaskActionNote("");
+      activeTaskEvidenceIdRef.current = "";
+      taskEvidenceAttachmentsRef.current = [];
+      setTaskEvidenceAttachments([]);
+      setTaskEvidenceUploading(false);
+      if (detail) await loadDetail(detail.id, true);
+      else if (selectedSessionId) await loadDetail(selectedSessionId);
+    } catch {
+      await alert("请检查网络连接后重试。", "任务状态更新失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const updateWorkbenchTask = async (
+    task: AcademyMyTask,
+    status: AcademySessionTask["status"],
+  ) => {
+    if (saving) return;
+    if (status === "SUBMITTED") {
+      if (taskEvidenceLoading || taskEvidenceUploading) return;
+      if (taskRequiresEvidence(task.templateKey) && !taskEvidenceAttachmentsRef.current.length) {
+        await alert("该节点需至少上传1个交付文件后才能提交。", "缺少交付文件");
+        return;
+      }
+    }
+    setSaving(true);
+    try {
+      const response = await academyApi.updateTask(task.id, {
+        status,
+        ...(status === "SUBMITTED" ? { submissionNote: workbenchTaskNote.trim() } : {}),
+      });
+      if (response.code !== 0) return alert(response.message, "任务更新失败");
+      const nextTask = { ...task, ...response.data, session: task.session };
+      setWorkbenchTask(nextTask);
+      setMyTasks((current) => current.map((item) => item.id === task.id ? nextTask : item));
+      setWorkbenchTaskNote("");
+    } catch {
+      await alert("请检查网络连接后重试。", "任务更新失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const loadTaskEvidence = useCallback(async (taskId: string) => {
+    activeTaskEvidenceIdRef.current = taskId;
+    taskEvidenceAttachmentsRef.current = [];
+    setTaskEvidenceAttachments([]);
+    setTaskEvidenceUploading(false);
+    setTaskEvidenceLoading(true);
+    try {
+      const response = await academyApi.listTaskAttachments(taskId);
+      if (activeTaskEvidenceIdRef.current !== taskId) return;
+      if (response.code !== 0) {
+        taskEvidenceAttachmentsRef.current = [];
+        setTaskEvidenceAttachments([]);
+        await alert(response.message, "交付文件加载失败");
+        return;
+      }
+      taskEvidenceAttachmentsRef.current = response.data;
+      setTaskEvidenceAttachments(response.data);
+    } catch {
+      if (activeTaskEvidenceIdRef.current !== taskId) return;
+      taskEvidenceAttachmentsRef.current = [];
+      setTaskEvidenceAttachments([]);
+      await alert("请检查网络连接后重试。", "交付文件加载失败");
+    } finally {
+      if (activeTaskEvidenceIdRef.current === taskId) setTaskEvidenceLoading(false);
+    }
+  }, [alert]);
+  const replaceTaskEvidenceState = (taskId: string, attachments: BusinessAttachment[]) => {
+    if (activeTaskEvidenceIdRef.current !== taskId) return;
+    taskEvidenceAttachmentsRef.current = attachments;
+    setTaskEvidenceAttachments(attachments);
+  };
+  const syncTaskEvidence = (taskId: string, attachments: BusinessAttachment[]) => {
+    setWorkbenchTask((current) => current?.id === taskId ? { ...current, attachments } : current);
+    setMyTasks((current) => current.map((task) => task.id === taskId ? { ...task, attachments } : task));
+    setDetails((current) => Object.fromEntries(Object.entries(current).map(([sessionId, sessionDetail]) => [
+      sessionId,
+      {
+        ...sessionDetail,
+        tasks: sessionDetail.tasks.map((task) => task.id === taskId ? { ...task, attachments } : task),
+      },
+    ])));
+  };
+  const bindTaskEvidence = async (taskId: string, attachment: BusinessAttachment) => {
+    if (activeTaskEvidenceIdRef.current !== taskId) return false;
+    try {
+      const byId = new Map(taskEvidenceAttachmentsRef.current.map((item) => [item.id, item]));
+      byId.set(attachment.id, attachment);
+      const response = await academyApi.addTaskAttachment(taskId, Array.from(byId.keys()));
+      if (activeTaskEvidenceIdRef.current !== taskId) return false;
+      if (response.code !== 0) {
+        await alert(response.message, "交付文件关联失败");
+        return false;
+      }
+      replaceTaskEvidenceState(taskId, response.data);
+      syncTaskEvidence(taskId, response.data);
+      return true;
+    } catch {
+      if (activeTaskEvidenceIdRef.current === taskId)
+        await alert("请检查网络连接后重试。", "交付文件关联失败");
+      return false;
+    }
+  };
+  const unbindTaskEvidence = async (taskId: string, attachment: BusinessAttachment) => {
+    if (activeTaskEvidenceIdRef.current !== taskId) return false;
+    try {
+      const remainingIds = taskEvidenceAttachmentsRef.current
+        .filter((item) => item.id !== attachment.id)
+        .map((item) => item.id);
+      const response = await academyApi.removeTaskAttachment(taskId, remainingIds);
+      if (activeTaskEvidenceIdRef.current !== taskId) return false;
+      if (response.code !== 0) {
+        await alert(response.message, "交付文件删除失败");
+        return false;
+      }
+      replaceTaskEvidenceState(taskId, response.data);
+      syncTaskEvidence(taskId, response.data);
+      return true;
+    } catch {
+      if (activeTaskEvidenceIdRef.current === taskId)
+        await alert("请检查网络连接后重试。", "交付文件删除失败");
+      return false;
+    }
   };
   const openTaskAction = (task: AcademySessionTask, status: AcademySessionTask["status"]) => {
     if (status === "IN_PROGRESS") {
@@ -840,6 +1006,7 @@ const Academy: React.FC = () => {
     }
     setTaskAction({ task, status });
     setTaskActionNote("");
+    void loadTaskEvidence(task.id);
   };
   const openAssetUpload = (course: AcademyCourse, nextType: AcademyAssetType) => {
     const existing = courseAssets[course.id]?.find((item) => item.assetType === nextType);
@@ -891,13 +1058,40 @@ const Academy: React.FC = () => {
           interactionLevel: engagementForm.interactionLevel,
           courseAssessment: engagementForm.courseAssessment,
         })
-      : await academyApi.saveEngagement(engagementForm);
+      : engagementMode === "sales" && engagementEditingId
+        ? await academyApi.quickFollowUp(engagementEditingId, {
+            content: engagementForm.notes || "",
+            courseAssessment: engagementForm.courseAssessment,
+            nextFollowUpAt: engagementForm.nextFollowUpAt,
+          })
+        : await academyApi.saveEngagement(engagementForm);
+    if (response.code !== 0) { setSaving(false); return alert(response.message, "学员记录保存失败"); }
     setSaving(false);
-    if (response.code !== 0) return alert(response.message, "学员记录保存失败");
     setEngagementOpen(false);
     setEngagementEditingId("");
     setEngagementForm(emptyEngagement);
     await loadDetail(selectedSessionId);
+  };
+  const saveBatchInvites = async () => {
+    if (!selectedInviteCustomers.length || !selectedSessionId || saving) return;
+    setSaving(true);
+    const response = await academyApi.saveEngagementBatch({
+      sessionId: selectedSessionId,
+      customerIds: selectedInviteCustomers.map((customer) => customer.id),
+      invitationStatus: engagementForm.invitationStatus,
+    });
+    setSaving(false);
+    if (response.code !== 0) return alert(response.message, "批量邀约失败");
+    const successCount = response.data.created.length;
+    const failedCount = response.data.rejected.length;
+    const customerNames = new Map(selectedInviteCustomers.map((customer) => [customer.id, customer.name]));
+    const rejectedSummary = response.data.rejected.slice(0, 10)
+      .map((item) => `${customerNames.get(item.customerId) || item.customerId}：${item.message}`)
+      .join("\n");
+    setSelectedInviteCustomers([]);
+    setEngagementOpen(false);
+    await loadDetail(selectedSessionId);
+    await alert(`已加入 ${successCount} 位客户${failedCount ? `，${failedCount} 位未加入。\n${rejectedSummary}${failedCount > 10 ? `\n其余 ${failedCount - 10} 位请按客户权限或状态检查。` : ""}` : "。"}`, "客户邀约完成");
   };
   const saveReview = async () => {
     setSaving(true);
@@ -938,7 +1132,7 @@ const Academy: React.FC = () => {
       <ModulePage>
         <ModuleHeader
           title="极享商学院"
-          description="连接课程资产、课程运营、邀约转化与个人待办。"
+          description="全员查看课程安排，参与人在同一处完成课程SOP。"
         />
         <ModuleTabs
           value={view}
@@ -1164,10 +1358,10 @@ const Academy: React.FC = () => {
                                       : palette.blue,
                               }}
                             />
-                            {canSession && task.status === "PENDING" && (
+                            {task.assigneeUserId === currentUser?.id && task.status === "PENDING" && (
                               <Button size="small" onClick={() => openTaskAction(task, "IN_PROGRESS")}>开始</Button>
                             )}
-                            {canSession && task.status === "IN_PROGRESS" && (
+                            {task.assigneeUserId === currentUser?.id && task.status === "IN_PROGRESS" && (
                               <Button size="small" onClick={() => openTaskAction(task, "SUBMITTED")}>提交验收</Button>
                             )}
                             {canSession && task.status === "SUBMITTED" && (
@@ -1176,7 +1370,7 @@ const Academy: React.FC = () => {
                                 <Button size="small" color="error" onClick={() => openTaskAction(task, "REJECTED")}>驳回</Button>
                               </>
                             )}
-                            {canSession && (task.status === "REJECTED" || task.status === "BLOCKED") && (
+                            {task.assigneeUserId === currentUser?.id && (task.status === "REJECTED" || task.status === "BLOCKED") && (
                               <Button size="small" onClick={() => openTaskAction(task, "IN_PROGRESS")}>重新处理</Button>
                             )}
                           </Stack>
@@ -1360,7 +1554,14 @@ const Academy: React.FC = () => {
         </Stack>
         <ProtectedFormDialog
           open={Boolean(taskAction)}
-          onClose={() => setTaskAction(null)}
+          onClose={() => {
+            setTaskAction(null);
+            activeTaskEvidenceIdRef.current = "";
+            taskEvidenceAttachmentsRef.current = [];
+            setTaskEvidenceAttachments([]);
+            setTaskEvidenceLoading(false);
+            setTaskEvidenceUploading(false);
+          }}
           submitting={saving}
           markButtonClicksDirty={false}
           fullWidth
@@ -1380,6 +1581,36 @@ const Academy: React.FC = () => {
                 <Typography fontWeight={800} sx={{ mb: 1.5 }}>
                   {taskAction?.task.title}
                 </Typography>
+                {taskAction && (
+                  <Box sx={{ mb: 2 }}>
+                    {taskAction.status !== "SUBMITTED" && (
+                      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5, mb: 1.5 }}>
+                        <Typography fontSize={12} color="text.secondary">负责人完成说明</Typography>
+                        <Typography sx={{ mt: 0.5, whiteSpace: "pre-wrap" }}>
+                          {taskAction.task.submissionNote || "未填写完成说明"}
+                        </Typography>
+                      </Paper>
+                    )}
+                    <BusinessAttachmentPicker
+                      title="交付证据"
+                      description={taskAction.status === "SUBMITTED" ? "支持PPT、文档和图片，单个文件不超过20MB；完成说明可填写网盘或在线文档链接。" : "验收时可查看和下载负责人提交的文件。"}
+                      value={taskEvidenceAttachments}
+                      onChange={(attachments) => replaceTaskEvidenceState(taskAction.task.id, attachments)}
+                      category="academy-task-evidence"
+                      draftKey={`academy-task:${taskAction.task.id}`}
+                      maxCount={10}
+                      imagesOnly={false}
+                      disabled={
+                        taskEvidenceLoading ||
+                        taskEvidenceUploading ||
+                        !taskActionCanEditEvidence
+                      }
+                      onUploadingChange={setTaskEvidenceUploading}
+                      onUploaded={async (attachment) => bindTaskEvidence(taskAction.task.id, attachment)}
+                      onRemove={async (attachment) => unbindTaskEvidence(taskAction.task.id, attachment)}
+                    />
+                  </Box>
+                )}
                 <TextField
                   fullWidth
                   multiline
@@ -1399,8 +1630,13 @@ const Academy: React.FC = () => {
                   variant="contained"
                   color={taskAction?.status === "REJECTED" ? "error" : "primary"}
                   disabled={
+                    saving ||
+                    taskEvidenceLoading ||
+                    taskEvidenceUploading ||
                     !taskAction ||
-                    ((taskAction.status === "SUBMITTED" || taskAction.status === "REJECTED") && !taskActionNote.trim())
+                    ((taskAction.status === "SUBMITTED" || taskAction.status === "REJECTED") && !taskActionNote.trim()) ||
+                    (taskAction.status === "SUBMITTED" && !taskActionCanEditEvidence) ||
+                    (taskAction.status === "SUBMITTED" && taskRequiresEvidence(taskAction.task.templateKey) && !taskEvidenceAttachments.length)
                   }
                   onClick={() => taskAction && void updateTask(taskAction.task, taskAction.status, taskActionNote)}
                 >
@@ -1419,7 +1655,7 @@ const Academy: React.FC = () => {
     <ModulePage>
       <ModuleHeader
         title="极享商学院"
-        description="连接课程资产、课程运营、邀约转化与个人待办。"
+        description="全员查看课程安排，参与人在同一处完成课程SOP。"
       />
       <ModuleTabs
         value={view}
@@ -1437,19 +1673,18 @@ const Academy: React.FC = () => {
         {view === "overview" && (
           <Overview
             dashboard={dashboard}
-            sessions={weekSessions}
-            details={details}
-            currentUserId={currentUser?.id || ""}
-            showBusinessMetrics={canEngagement || canReview}
-            canOpenOperations={canPlan || canSession || canReview || sessions.some((session) => session.canOpenDetail)}
-            onOpen={(id) => {
-              setSelectedSessionId(id);
-              setPlanOpenSessionId(id);
-              navigate(viewPath.plans);
-              void loadDetail(id);
+            sessions={publicCalendar}
+            tasks={myTasks}
+            taskTotal={myTaskTotal}
+            taskPage={myTaskPage}
+            taskPageSize={myTaskPageSize}
+            onTaskPageChange={setMyTaskPage}
+            onTaskPageSizeChange={(size) => { setMyTaskPageSize(size); setMyTaskPage(0); }}
+            onOpenTask={(task) => {
+              setWorkbenchTask(task);
+              setWorkbenchTaskNote("");
+              void loadTaskEvidence(task.id);
             }}
-            onViewPlans={() => navigate(viewPath.plans)}
-            onViewSessions={() => navigate(viewPath.plans)}
           />
         )}
         {view === "plans" && (
@@ -1461,7 +1696,8 @@ const Academy: React.FC = () => {
             canCreate={canPlan || canSession}
             canManageTasks={canSession}
             currentUserId={currentUser?.id || ""}
-            canManageLearners={canEngagement}
+            canManageExecution={canSession}
+            canManageSales={canEngagement}
             canReview={canReview}
             requestedSessionId={planOpenSessionId}
             onRequestConsumed={() => setPlanOpenSessionId("")}
@@ -1476,6 +1712,8 @@ const Academy: React.FC = () => {
               setSelectedSessionId(sessionId);
               setEngagementEditingId("");
               setEngagementForm({ ...emptyEngagement, sessionId });
+              setSelectedInviteCustomers([]);
+              setCustomerPage(0);
               setEngagementOpen(true);
             }}
             onEditLearner={(engagement) => {
@@ -1495,6 +1733,26 @@ const Academy: React.FC = () => {
                 followUpStatus: engagement.followUpStatus,
                 nextFollowUpAt: engagement.nextFollowUpAt,
                 notes: engagement.notes,
+              });
+              setEngagementOpen(true);
+            }}
+            onFollowUpLearner={(engagement) => {
+              setEngagementMode("sales");
+              setSelectedSessionId(engagement.sessionId);
+              setEngagementEditingId(engagement.id);
+              setEngagementForm({
+                sessionId: engagement.sessionId,
+                participantKey: engagement.participantKey,
+                participantName: engagement.participantName,
+                customerId: engagement.customerId,
+                leadId: engagement.leadId,
+                invitationStatus: engagement.invitationStatus,
+                attendanceStatus: engagement.attendanceStatus,
+                interactionLevel: engagement.interactionLevel,
+                courseAssessment: engagement.courseAssessment,
+                followUpStatus: engagement.followUpStatus,
+                nextFollowUpAt: engagement.nextFollowUpAt,
+                notes: "",
               });
               setEngagementOpen(true);
             }}
@@ -1548,6 +1806,8 @@ const Academy: React.FC = () => {
                 ...emptyEngagement,
                 sessionId: selectedSessionId,
               });
+              setSelectedInviteCustomers([]);
+              setCustomerPage(0);
               setEngagementOpen(true);
             }}
             onLinkOrder={(engagement) => void openOrderLink(engagement)}
@@ -1570,11 +1830,33 @@ const Academy: React.FC = () => {
               });
               setEngagementOpen(true);
             }}
-            onGoCustomers={() => navigate(ROUTES.CUSTOMERS)}
-            onGoOrders={() => navigate(ROUTES.ORDERS)}
           />
         )}
       </Stack>
+
+      <Drawer anchor="right" open={Boolean(workbenchTask)} onClose={() => { setWorkbenchTask(null); activeTaskEvidenceIdRef.current = ""; taskEvidenceAttachmentsRef.current = []; setTaskEvidenceAttachments([]); setTaskEvidenceLoading(false); setTaskEvidenceUploading(false); }} PaperProps={{ role: "dialog", "aria-label": "我的商学院任务", sx: { width: { xs: "100%", sm: 520 }, maxWidth: "100vw", p: 2 } }}>
+        {workbenchTask && <Stack spacing={2}>
+          <Stack direction="row" justifyContent="space-between" alignItems="flex-start"><Box><Typography fontSize={20} fontWeight={950}>{workbenchTask.title}</Typography><Typography fontSize={12.5} color="text.secondary">{workbenchTask.session.title} · {formatDate(workbenchTask.session.startsAt)}</Typography></Box><IconButton aria-label="关闭我的任务" onClick={() => { setWorkbenchTask(null); activeTaskEvidenceIdRef.current = ""; taskEvidenceAttachmentsRef.current = []; setTaskEvidenceAttachments([]); setTaskEvidenceLoading(false); setTaskEvidenceUploading(false); }}><CloseIcon /></IconButton></Stack>
+          <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}><Typography fontSize={12} color="text.secondary">完成标准</Typography><Typography sx={{ mt: 0.5 }}>{workbenchTask.acceptanceCriteria || "完成后提交负责人确认"}</Typography><Divider sx={{ my: 1.5 }} /><Typography fontSize={12} color="text.secondary">截止时间</Typography><Typography sx={{ mt: 0.5 }}>{formatDate(workbenchTask.dueAt)}</Typography></Paper>
+          <BusinessAttachmentPicker
+            title="任务交付文件"
+            description="支持PPT、文档和图片，单个文件不超过20MB；完成说明可填写网盘或在线文档链接。"
+            value={taskEvidenceAttachments}
+            onChange={(attachments) => replaceTaskEvidenceState(workbenchTask.id, attachments)}
+            category="academy-task-evidence"
+            draftKey={`academy-task:${workbenchTask.id}`}
+            maxCount={10}
+            imagesOnly={false}
+            disabled={taskEvidenceLoading || taskEvidenceUploading || !["IN_PROGRESS", "REJECTED", "BLOCKED"].includes(workbenchTask.status)}
+            onUploadingChange={setTaskEvidenceUploading}
+            onUploaded={async (attachment) => bindTaskEvidence(workbenchTask.id, attachment)}
+            onRemove={async (attachment) => unbindTaskEvidence(workbenchTask.id, attachment)}
+          />
+          {workbenchTask.status === "PENDING" && <Button variant="contained" disabled={saving} onClick={() => void updateWorkbenchTask(workbenchTask, "IN_PROGRESS")}>开始处理</Button>}
+          {["IN_PROGRESS", "REJECTED", "BLOCKED"].includes(workbenchTask.status) && <><TextField multiline minRows={3} label="完成说明 *" helperText={taskEvidenceUploading ? "交付文件正在上传并关联，请稍候" : taskRequiresEvidence(workbenchTask.templateKey) && !taskEvidenceAttachments.length ? "该节点需至少上传1个交付文件后才能提交" : "可粘贴网盘或在线文档链接"} value={workbenchTaskNote} onChange={(event) => setWorkbenchTaskNote(event.target.value)} /><Button variant="contained" disabled={saving || taskEvidenceLoading || taskEvidenceUploading || !workbenchTaskNote.trim() || (taskRequiresEvidence(workbenchTask.templateKey) && !taskEvidenceAttachments.length)} onClick={() => void updateWorkbenchTask(workbenchTask, "SUBMITTED")}>提交验收</Button></>}
+          {workbenchTask.status === "SUBMITTED" && <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Typography color="text.secondary">已提交，等待项目负责人确认。</Typography><Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>本次完成说明</Typography><Typography sx={{ mt: 0.4, whiteSpace: "pre-wrap" }}>{workbenchTask.submissionNote || "-"}</Typography></Paper>}
+        </Stack>}
+      </Drawer>
 
       <ProtectedFormDialog
         open={courseOpen}
@@ -1741,7 +2023,7 @@ const Academy: React.FC = () => {
             <DialogContent dividers sx={{ bgcolor: palette.soft }}>
               <Stack spacing={2}>
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="1 课程信息" helper="选择课程资产，安排名称可按当期主题调整。" />
+                  <SectionTitle title="1 课程和时间" helper="选择课程，确定本次授课时间与方式。" />
                   <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
                     <TextField select label="课程 *" value={sessionForm.courseId} onChange={(event) => {
                       markDirty();
@@ -1752,17 +2034,7 @@ const Academy: React.FC = () => {
                       {courses.filter((item) => item.status === "ACTIVE").map((item) => <MenuItem key={item.id} value={item.id}>{item.code} · {item.title}</MenuItem>)}
                     </TextField>
                     <TextField label="安排名称" helperText="未填写时系统会按课程名称和日期自动生成" value={sessionForm.title} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, title: event.target.value }); }} />
-                    <TextField select label="课程运营负责人 *" value={sessionForm.facilitatorUserId} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, facilitatorUserId: event.target.value }); }}>
-                      {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}
-                    </TextField>
-                    <TextField select label="主讲人 *" value={sessionForm.lecturerUserId || ""} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, lecturerUserId: event.target.value }); }}>
-                      {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}
-                    </TextField>
                   </Box>
-                </Paper>
-
-                <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="2 时间与授课" helper="授课方式决定需要填写场地还是会议链接。" />
                   <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
                     <TextField type="datetime-local" label="开始时间 *" InputLabelProps={{ shrink: true }} value={sessionForm.startsAt} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, startsAt: event.target.value }); }} />
                     <TextField type="datetime-local" label="结束时间 *" InputLabelProps={{ shrink: true }} value={sessionForm.endsAt} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, endsAt: event.target.value }); }} />
@@ -1772,38 +2044,20 @@ const Academy: React.FC = () => {
                     {sessionForm.deliveryMode === "ONLINE"
                       ? <TextField label="线上会议链接 *" value={sessionForm.meetingUrl || ""} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, meetingUrl: event.target.value }); }} />
                       : <TextField label={sessionForm.deliveryMode === "LIVE" ? "直播间 / 直播账号 *" : "授课场地 *"} value={sessionForm.venue} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, venue: event.target.value }); }} />}
-                    <TextField select label="协作人员" value={sessionForm.collaboratorUserIds || []} SelectProps={{ multiple: true, renderValue: (selected) => (selected as string[]).map((id) => academyUsers.find((user) => user.id === id)?.name).filter(Boolean).join("、") }} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, collaboratorUserIds: typeof event.target.value === "string" ? event.target.value.split(",") : event.target.value as string[] }); }} sx={{ gridColumn: { md: "1 / -1" } }}>
-                      {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}><Checkbox checked={(sessionForm.collaboratorUserIds || []).includes(user.id)} />{user.name}（{user.positionName || user.role}）</MenuItem>)}
-                    </TextField>
                   </Box>
                 </Paper>
 
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="3 经营目标" helper="用于周计划和经营复盘；暂不作为创建门禁。" />
-                  <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4, 1fr)" }, gap: 2 }}>
-                    {[["capacity", "计划容量"], ["inviteTarget", "计划邀约人数"], ["registrationTarget", "计划报名人数"], ["attendanceTarget", "计划到课人数"], ["consultationTarget", "计划咨询人数"], ["dealTarget", "计划成交人数"], ["targetRevenue", "目标成交金额（元）"]].map(([key, label]) => (
-                      <TextField key={key} type="number" label={label} value={Number(sessionForm[key as keyof CreateAcademySessionInput] || 0)} inputProps={{ min: 0 }} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, [key]: Number(event.target.value) }); }} />
-                    ))}
-                  </Box>
-                </Paper>
-
-                <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="4 可见与邀约范围" helper="内部安排只对课程责任人可见；全员安排会出现在员工工作台。" />
+                  <SectionTitle title="2 本次负责人" helper="直接指定具体员工，保存后九个SOP节点自动进入他们的工作台。" />
                   <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
-                    <TextField select label="可见范围 *" value={sessionForm.audience} onChange={(event) => { markDirty(); const audience = event.target.value as CreateAcademySessionInput["audience"]; setSessionForm({ ...sessionForm, audience, isInvitable: audience === "ALL_EMPLOYEES" ? sessionForm.isInvitable : false }); }}>
-                      <MenuItem value="ALL_EMPLOYEES">全体员工可见</MenuItem>
-                      <MenuItem value="RESPONSIBLE_ONLY">仅课程责任人可见</MenuItem>
-                    </TextField>
-                    <TextField select label="销售是否可邀约 *" value={sessionForm.isInvitable ? "YES" : "NO"} disabled={sessionForm.audience !== "ALL_EMPLOYEES"} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, isInvitable: event.target.value === "YES" }); }}>
-                      <MenuItem value="YES">允许销售邀约本人可见客户</MenuItem>
-                      <MenuItem value="NO">不允许销售邀约</MenuItem>
-                    </TextField>
+                    {[["projectOwnerUserId", "项目负责人 *"], ["contentOwnerUserId", "课程内容负责人 *"], ["materialOwnerUserId", "素材负责人 *"], ["lecturerUserId", "主讲人 *"], ["reviewOwnerUserId", "复盘负责人 *"]].map(([key, label]) => <TextField key={key} select label={label} value={String(sessionForm[key as keyof CreateAcademySessionInput] || "")} onChange={(event) => { markDirty(); const value = event.target.value; setSessionForm({ ...sessionForm, [key]: value, ...(key === "projectOwnerUserId" ? { facilitatorUserId: value } : {}) }); }}>{academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}</TextField>)}
+                    <TextField select label="允许销售邀约" value={sessionForm.isInvitable ? "YES" : "NO"} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, isInvitable: event.target.value === "YES" }); }}><MenuItem value="YES">允许</MenuItem><MenuItem value="NO">不允许</MenuItem></TextField>
                   </Box>
                 </Paper>
 
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2, bgcolor: palette.blueSoft }}>
                   <Typography fontWeight={900}>保存后将自动生成执行清单</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>包含课前准备、现场执行和课后跟进任务，可在课程安排详情中逐项推进与验收。</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>固定生成课程确定、研发、包装、邀约、开课、分层、跟进和复盘流程。</Typography>
                 </Paper>
               </Stack>
             </DialogContent>
@@ -1811,7 +2065,7 @@ const Academy: React.FC = () => {
               <Button onClick={() => void requestClose()}>取消</Button>
               <Button
                 variant="contained"
-                disabled={saving || !sessionForm.courseId || !sessionForm.startsAt || !sessionForm.endsAt || !sessionForm.facilitatorUserId || !sessionForm.lecturerUserId || (sessionForm.deliveryMode === "ONLINE" ? !sessionForm.meetingUrl?.trim() : !sessionForm.venue.trim())}
+                disabled={saving || !sessionForm.courseId || !sessionForm.startsAt || !sessionForm.endsAt || !sessionForm.projectOwnerUserId || !sessionForm.contentOwnerUserId || !sessionForm.materialOwnerUserId || !sessionForm.lecturerUserId || !sessionForm.reviewOwnerUserId || (sessionForm.deliveryMode === "ONLINE" ? !sessionForm.meetingUrl?.trim() : !sessionForm.venue.trim())}
                 onClick={() => void saveSession()}
               >
                 保存课程安排并生成任务
@@ -1889,6 +2143,7 @@ const Academy: React.FC = () => {
                       <TextField label="CRM客户" value={engagementForm.participantName} disabled />
                     ) : (
                       <Autocomplete
+                        multiple
                         options={customers}
                         loading={customerSearchLoading}
                         filterOptions={(options) => options}
@@ -1897,26 +2152,54 @@ const Academy: React.FC = () => {
                         onInputChange={(_, value, reason) => {
                           if (reason === "input" || reason === "clear") setCustomerSearch(value);
                         }}
-                        onChange={(_, customer) => {
+                        value={selectedInviteCustomers}
+                        onChange={(_, selected) => {
                           markDirty();
-                          setEngagementForm(customer
-                            ? { ...engagementForm, customerId: customer.id, participantKey: `customer:${customer.id}`, participantName: customer.name }
-                            : { ...engagementForm, customerId: undefined, participantKey: "", participantName: "" });
+                          setSelectedInviteCustomers(selected);
                         }}
-                        renderInput={(params) => <TextField {...params} label="CRM客户 *" placeholder="搜索姓名、公司或手机号" />}
+                        renderInput={(params) => <TextField {...params} label="从我的客户添加 *" placeholder="搜索姓名、公司或手机号" helperText={`已选 ${selectedInviteCustomers.length} 人`} />}
                         noOptionsText={customerSearch ? "未找到本人可见客户" : "请输入客户信息搜索"}
                       />
                     )}
-                    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
-                      <TextField select label="邀约状态" value={engagementForm.invitationStatus} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, invitationStatus: event.target.value }); }}>
+                    {!engagementEditingId && (
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          disabled={!customers.length}
+                          onClick={() => {
+                            markDirty();
+                            setSelectedInviteCustomers((current) => {
+                              const selectedById = new Map(current.map((customer) => [customer.id, customer]));
+                              customers.forEach((customer) => selectedById.set(customer.id, customer));
+                              return Array.from(selectedById.values());
+                            });
+                          }}
+                        >
+                          全选当前页
+                        </Button>
+                        <Typography fontSize={12.5} color="text.secondary">
+                          共 {customerResultTotal} 位可见客户，跨页选择将保留
+                        </Typography>
+                      </Stack>
+                    )}
+                    {!engagementEditingId && <Paper variant="outlined" sx={{ ...panelSx }}><TablePagination count={customerResultTotal} page={customerPage} rowsPerPage={customerPageSize} onPageChange={(_, next) => setCustomerPage(next)} onRowsPerPageChange={(event) => { setCustomerPageSize(Number(event.target.value)); setCustomerPage(0); }} /></Paper>}
+                    {!engagementEditingId ? (
+                      <TextField select label="初始邀约状态" value={engagementForm.invitationStatus} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, invitationStatus: event.target.value }); }}>
                         <MenuItem value="PENDING">待邀约</MenuItem><MenuItem value="INVITED">已邀约</MenuItem><MenuItem value="CONFIRMED">已确认</MenuItem><MenuItem value="DECLINED">已拒绝</MenuItem>
                       </TextField>
-                      <TextField select label="跟进状态" value={engagementForm.followUpStatus} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, followUpStatus: event.target.value }); }}>
-                        <MenuItem value="PENDING">待跟进</MenuItem><MenuItem value="IN_PROGRESS">跟进中</MenuItem><MenuItem value="DONE">已完成</MenuItem>
-                      </TextField>
-                    </Box>
-                    <TextField type="datetime-local" label="下次跟进时间" InputLabelProps={{ shrink: true }} value={engagementForm.nextFollowUpAt?.slice(0, 16) || ""} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, nextFollowUpAt: event.target.value }); }} />
-                    <TextField multiline minRows={2} label="销售跟进备注" value={engagementForm.notes || ""} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, notes: event.target.value }); }} />
+                    ) : (
+                      <>
+                        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
+                          <TextField select disabled label="邀约状态（只读）" value={engagementForm.invitationStatus}>
+                            <MenuItem value="PENDING">待邀约</MenuItem><MenuItem value="INVITED">已邀约</MenuItem><MenuItem value="CONFIRMED">已确认</MenuItem><MenuItem value="DECLINED">已拒绝</MenuItem>
+                          </TextField>
+                          <TextField select label="ABC分层" value={engagementForm.courseAssessment || ""} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, courseAssessment: event.target.value }); }}><MenuItem value="">待分层</MenuItem><MenuItem value="A">A类重点跟进</MenuItem><MenuItem value="B">B类建立计划</MenuItem><MenuItem value="C">C类持续培育</MenuItem></TextField>
+                        </Box>
+                        <TextField type="datetime-local" label="下次跟进时间" InputLabelProps={{ shrink: true }} value={engagementForm.nextFollowUpAt?.slice(0, 16) || ""} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, nextFollowUpAt: event.target.value }); }} />
+                        <TextField multiline minRows={2} required label="跟进内容 *" value={engagementForm.notes || ""} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, notes: event.target.value }); }} />
+                      </>
+                    )}
                   </>
                 )}
               </Stack>
@@ -1925,10 +2208,10 @@ const Academy: React.FC = () => {
               <Button onClick={() => void requestClose()}>取消</Button>
               <Button
                 variant="contained"
-                disabled={saving || (engagementMode === "sales" && !engagementForm.customerId)}
-                onClick={() => void saveEngagement()}
+                disabled={saving || (engagementMode === "sales" && !engagementEditingId && !selectedInviteCustomers.length) || (engagementMode === "sales" && Boolean(engagementEditingId) && (!engagementForm.customerId || !engagementForm.notes?.trim()))}
+                onClick={() => void (engagementMode === "sales" && !engagementEditingId ? saveBatchInvites() : saveEngagement())}
               >
-                {engagementMode === "execution" ? "保存学员执行" : engagementEditingId ? "保存销售跟进" : "加入邀约名单"}
+                {engagementMode === "execution" ? "保存学员执行" : engagementEditingId ? "保存并同步CRM跟进" : `加入名单（${selectedInviteCustomers.length}）`}
               </Button>
             </DialogActions>
           </>
@@ -2078,40 +2361,15 @@ const Academy: React.FC = () => {
 
 const Overview: React.FC<{
   dashboard: AcademyDashboard;
-  sessions: AcademySession[];
-  details: Record<string, AcademySessionDetail>;
-  currentUserId: string;
-  showBusinessMetrics: boolean;
-  canOpenOperations: boolean;
-  onOpen: (id: string) => void;
-  onViewPlans: () => void;
-  onViewSessions: () => void;
-}> = ({ dashboard, sessions, details, currentUserId, showBusinessMetrics, canOpenOperations, onOpen, onViewPlans, onViewSessions }) => {
-  const engagementList = Object.values(details).flatMap(
-    (item) => item.engagements,
-  );
-  const funnel = [
-    { label: "邀约（人）", value: engagementList.length },
-    {
-      label: "确认（人）",
-      value: engagementList.filter(
-        (item) => item.invitationStatus === "CONFIRMED",
-      ).length,
-    },
-    {
-      label: "到课（人）",
-      value: engagementList.filter(
-        (item) => item.attendanceStatus === "ATTENDED",
-      ).length,
-    },
-    {
-      label: "咨询（人）",
-      value: engagementList.filter((item) =>
-        ["A", "B"].includes(item.courseAssessment || ""),
-      ).length,
-    },
-    { label: "成交金额（元）", value: 0 },
-  ];
+  sessions: AcademyPublicCalendarItem[];
+  tasks: AcademyMyTask[];
+  taskTotal: number;
+  taskPage: number;
+  taskPageSize: number;
+  onTaskPageChange: (page: number) => void;
+  onTaskPageSizeChange: (pageSize: number) => void;
+  onOpenTask: (task: AcademyMyTask) => void;
+}> = ({ sessions, tasks, taskTotal, taskPage, taskPageSize, onTaskPageChange, onTaskPageSizeChange, onOpenTask }) => {
   const monday = new Date();
   const weekday = monday.getDay() || 7;
   monday.setDate(monday.getDate() - weekday + 1);
@@ -2125,15 +2383,7 @@ const Overview: React.FC<{
     });
     return { date, sessions: daySessions };
   });
-  const allTasks = Object.values(details).flatMap((item) =>
-    item.tasks.map((task) => ({ ...task, sessionTitle: item.title })),
-  );
-  const riskTasks = allTasks
-    .filter((task) => task.assigneeUserId === currentUserId && (task.status === "BLOCKED" || task.status === "PENDING"))
-    .slice(0, 3);
-  const todoTasks = allTasks
-    .filter((task) => task.assigneeUserId === currentUserId && task.status !== "DONE")
-    .slice(0, 6);
+  const todoTasks = tasks;
   return (
     <>
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
@@ -2158,29 +2408,11 @@ const Overview: React.FC<{
               {monday.toLocaleDateString("zh-CN")} ～{" "}
               {weekDays[6].date.toLocaleDateString("zh-CN")}
             </Typography>
-            <IconButton
-              size="small"
-              sx={{ border: `1px solid ${palette.line}`, borderRadius: 1 }}
-            >
-              <ChevronLeftIcon fontSize="small" />
-            </IconButton>
-            <Button size="small" variant="outlined" sx={{ minWidth: 60 }}>
-              本周
-            </Button>
-            <IconButton
-              size="small"
-              sx={{ border: `1px solid ${palette.line}`, borderRadius: 1 }}
-            >
-              <ChevronRightIcon fontSize="small" />
-            </IconButton>
+            <Chip size="small" variant="outlined" label="本周" />
           </Stack>
-          {canOpenOperations && (
-            <Button size="small" variant="outlined" onClick={onViewSessions}>
-              查看全部课程安排
-            </Button>
-          )}
+          <Chip size="small" label="全员可见 · 只读" sx={{ bgcolor: palette.blueSoft, color: palette.blue }} />
         </Stack>
-        <Box
+        <Box title="全员课程周历"
           sx={{
             mt: 1.3,
             display: "grid",
@@ -2239,9 +2471,7 @@ const Overview: React.FC<{
                     >
                       {session.title}
                     </Typography>
-                    <Typography fontSize={12.5} color="text.secondary">
-                      负责人：{session.facilitatorUserName || "待分配"}
-                    </Typography>
+                    <Typography fontSize={12.5} color="text.secondary">主讲人：{session.lecturerUserName || "待确定"}</Typography>
                     <Chip
                       size="small"
                       label={statusLabel[session.status] || session.status}
@@ -2253,11 +2483,6 @@ const Overview: React.FC<{
                         fontWeight: 800,
                       }}
                     />
-                    {canOpenOperations && session.canOpenDetail !== false && (
-                      <Button size="small" variant="contained" onClick={() => onOpen(session.id)} sx={{ mt: 0.5 }}>
-                        进入课程运营
-                      </Button>
-                    )}
                   </Stack>
                 ))
               ) : (
@@ -2274,155 +2499,10 @@ const Overview: React.FC<{
         </Box>
       </Paper>
 
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: {
-            xs: "1fr",
-            lg: "minmax(0, 1fr) minmax(0, 1.1fr)",
-          },
-          gap: 1.5,
-        }}
-      >
-        <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
-          <SectionTitle
-            title="准备度风险预警"
-            helper={`${riskTasks.length} 项需关注`}
-          />
-          <TableContainer sx={{ mt: 1 }}>
-            <SystemDataTable
-              tableId="academy-overview-risk-alerts"
-              sx={{
-                width: "100%",
-                minWidth: "0 !important",
-                tableLayout: "fixed",
-                "& .MuiTableCell-root": {
-                  px: 0.75,
-                  py: 0.85,
-                  fontSize: 12,
-                  boxSizing: "border-box",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                },
-              }}
-            >
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ width: "30%" }}>风险事项</TableCell>
-                  <TableCell sx={{ width: "25%" }}>关联课程安排</TableCell>
-                  <TableCell sx={{ width: "15%" }}>风险</TableCell>
-                  <TableCell sx={{ width: "17%" }}>负责人</TableCell>
-                  <TableCell sx={{ width: "13%" }}>状态</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {riskTasks.map((task, index) => (
-                  <TableRow key={task.id}>
-                    <TableCell>{task.title}</TableCell>
-                    <TableCell>{task.sessionTitle}</TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        label={index ? "中" : "高"}
-                        sx={{
-                          height: 21,
-                          bgcolor: index ? palette.amberSoft : palette.redSoft,
-                          color: index ? palette.amber : palette.red,
-                        }}
-                      />
-                    </TableCell>
-                    <TableCell>{task.assigneeUserName || "待分配"}</TableCell>
-                    <TableCell
-                      sx={{
-                        color:
-                          task.status === "BLOCKED"
-                            ? palette.red
-                            : palette.blue,
-                      }}
-                    >
-                      {statusLabel[task.status]}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!riskTasks.length && (
-                  <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                      暂无风险项
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </SystemDataTable>
-          </TableContainer>
-        <Button size="small" sx={{ mt: 0.7 }} onClick={onViewPlans}>
-          查看全部风险 <ChevronRightIcon fontSize="small" />
-        </Button>
-        </Paper>
-        {showBusinessMetrics && <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
-          <SectionTitle
-            title="本周转化漏斗概览"
-            helper="按当前有权查看的场次统计"
-            action={
-              <Button size="small">
-                查看转化分析 <ChevronRightIcon fontSize="small" />
-              </Button>
-            }
-          />
-          <Box
-            sx={{
-              mt: 1.3,
-              display: "grid",
-              gridTemplateColumns: {
-                xs: "repeat(2, 1fr)",
-                md: "repeat(5, 1fr)",
-              },
-              border: `1px solid ${palette.line}`,
-              borderRadius: 1.2,
-              overflow: "hidden",
-            }}
-          >
-            {funnel.map((item, index) => (
-              <Box
-                key={item.label}
-                sx={{
-                  px: 1.5,
-                  py: 1.8,
-                  borderRight:
-                    index < funnel.length - 1 ? `1px solid ${palette.line}` : 0,
-                  bgcolor: index === funnel.length - 1 ? "#F8FBFF" : "#fff",
-                }}
-              >
-                <Typography color="text.secondary" fontSize={12}>
-                  {item.label}
-                </Typography>
-                <Typography fontSize={22} fontWeight={950} sx={{ mt: 0.5 }}>
-                  {index === funnel.length - 1
-                    ? `¥${Number(item.value).toLocaleString()}`
-                    : item.value}
-                </Typography>
-                <Typography
-                  fontSize={11.5}
-                  color={palette.green}
-                  sx={{ mt: 0.3 }}
-                >
-                  较上周 +0%
-                </Typography>
-              </Box>
-            ))}
-          </Box>
-          <Typography fontSize={13} fontWeight={800} sx={{ mt: 1.2 }}>
-            整体转化率{" "}
-            {funnel[0].value
-              ? `${((funnel[3].value / funnel[0].value) * 100).toFixed(1)}%`
-              : "0.0%"}
-          </Typography>
-        </Paper>}
-      </Box>
-
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
         <SectionTitle
           title="我的待办"
-          helper={`${todoTasks.length} 项待推进`}
+          helper={`${taskTotal} 项待推进`}
         />
         <TableContainer sx={{ mt: 1 }}>
           <SystemDataTable tableId="academy-overview-execution-tasks">
@@ -2438,9 +2518,9 @@ const Overview: React.FC<{
             </TableHead>
             <TableBody>
               {todoTasks.map((task) => (
-                <TableRow key={task.id} hover>
+                <TableRow key={task.id} hover onClick={() => onOpenTask(task)} sx={{ cursor: "pointer" }}>
                   <TableCell sx={{ fontWeight: 700 }}>{task.title}</TableCell>
-                  <TableCell>{task.sessionTitle}</TableCell>
+                  <TableCell>{task.session.title}</TableCell>
                   <TableCell>
                     {task.category === "BEFORE"
                       ? "课前准备"
@@ -2479,6 +2559,7 @@ const Overview: React.FC<{
             </TableBody>
           </SystemDataTable>
         </TableContainer>
+        <TablePagination count={taskTotal} page={taskPage} rowsPerPage={taskPageSize} onPageChange={(_, next) => onTaskPageChange(next)} onRowsPerPageChange={(event) => onTaskPageSizeChange(Number(event.target.value))} />
       </Paper>
     </>
   );
@@ -3884,8 +3965,6 @@ const HandoffWorkspace: React.FC<{
   canManage: boolean;
   onLinkOrder: (engagement: AcademyEngagement) => void;
   onEdit: (engagement: AcademyEngagement) => void;
-  onGoCustomers: () => void;
-  onGoOrders: () => void;
 }> = ({
   sessions,
   selectedSessionId,
@@ -3894,8 +3973,6 @@ const HandoffWorkspace: React.FC<{
   canManage,
   onLinkOrder,
   onEdit,
-  onGoCustomers,
-  onGoOrders,
 }) => {
   const items = detail?.engagements || [];
   const qualified = items.filter((item) =>
@@ -3936,12 +4013,6 @@ const HandoffWorkspace: React.FC<{
               </MenuItem>
             ))}
           </TextField>
-          <Button variant="outlined" onClick={onGoCustomers}>
-            打开客户管理
-          </Button>
-          <Button variant="contained" onClick={onGoOrders}>
-            打开订单管理
-          </Button>
         </Stack>
       </Paper>
 
@@ -3988,7 +4059,6 @@ const HandoffWorkspace: React.FC<{
                 <TableCell>跟进状态</TableCell>
                 <TableCell>建议动作</TableCell>
                 <TableCell>正式订单</TableCell>
-                <TableCell>业务去向</TableCell>
                 <TableCell>操作</TableCell>
               </TableRow>
             </TableHead>
@@ -4047,18 +4117,12 @@ const HandoffWorkspace: React.FC<{
                       "待关联"
                     )}
                   </TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={0.5}>
-                      <Button size="small" onClick={onGoCustomers}>客户</Button>
-                      <Button size="small" onClick={onGoOrders}>订单</Button>
-                    </Stack>
-                  </TableCell>
                   <TableCell>{canManage && <Button size="small" onClick={() => onEdit(item)}>更新跟进</Button>}</TableCell>
                 </TableRow>
               ))}
               {!items.length && (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 7 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 7 }}>
                     当前课程安排暂无学员转化数据
                   </TableCell>
                 </TableRow>
@@ -4080,15 +4144,13 @@ const LearnerConversionWorkspace: React.FC<{
   onAdd: () => void;
   onLinkOrder: (engagement: AcademyEngagement) => void;
   onEdit: (engagement: AcademyEngagement) => void;
-  onGoCustomers: () => void;
-  onGoOrders: () => void;
 }> = (props) => {
   return (
     <Stack spacing={1.5}>
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
         <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1}>
           <Box>
-          <Typography fontSize={16} fontWeight={950}>邀约与转化</Typography>
+          <Typography fontSize={16} fontWeight={950}>邀约跟进</Typography>
           <Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.4 }}>
             销售只从本人有权查看的 CRM 客户中邀约，统一维护跟进计划和正式订单关联。
           </Typography>
@@ -4104,8 +4166,6 @@ const LearnerConversionWorkspace: React.FC<{
         canManage={props.canManage}
         onLinkOrder={props.onLinkOrder}
         onEdit={props.onEdit}
-        onGoCustomers={props.onGoCustomers}
-        onGoOrders={props.onGoOrders}
       />
     </Stack>
   );

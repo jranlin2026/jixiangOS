@@ -39,7 +39,7 @@ const detail = {
 
 assert.equal(
   getArrangementNextAction(session, detail).label,
-  "完善课前任务",
+  "完善SOP流程",
   "必做准备未完成时应引导完善准备",
 );
 
@@ -49,19 +49,19 @@ const readyDetail = {
 };
 assert.deepEqual(
   getArrangementNextAction(session, readyDetail),
-  { label: "确认开课", nextStatus: "READY", tab: 1 },
+  { label: "确认开课", nextStatus: "READY", tab: 0 },
   "必做准备完成后应允许确认开课",
 );
 
 assert.equal(
   getArrangementNextAction({ ...session, status: "READY" }, readyDetail).label,
-  "进入现场执行",
-  "待开课安排应进入现场执行",
+  "进入课程执行",
+  "待开课安排应进入课程执行",
 );
 
 assert.equal(
   getArrangementNextAction({ ...session, status: "COMPLETED" }, { ...readyDetail, status: "COMPLETED" }).label,
-  "填写课程结果",
+  "填写复盘结果",
   "课程完成且未复盘时应引导填写复盘",
 );
 
@@ -84,7 +84,7 @@ assert.equal(
       },
     },
   ).label,
-  "查看课程结果",
+  "查看复盘结果",
   "完成复盘后应展示课程结果",
 );
 assert.equal(
@@ -94,8 +94,8 @@ assert.equal(
       id: "review-2", sessionId: session.id, summary: "完成", issues: "", improvements: "", metrics: {}, actionItems: [], createdByName: "管理员", updatedAt: "2026-08-12T12:30:00.000Z",
     } },
   ).tab,
-  3,
-  "课程结果应定位到四页签抽屉的最后一页",
+  2,
+  "复盘结果应定位到三页签抽屉的最后一页",
 );
 
 console.log("academy arrangement model tests passed");

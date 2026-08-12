@@ -3,6 +3,9 @@ import { createPrismaAcademyRepository } from "./prismaAcademyRepository";
 
 const calls: Array<{ model: string; method: string; args: any }> = [];
 const now = new Date("2026-08-08T09:00:00.000Z");
+let businessRecordFindManyRows: any[] | null = null;
+let businessRecordFindManyQueue: any[][] = [];
+let businessRecordFindUniqueRow: any = null;
 const client: any = {
   academyCourse: {
     findMany: async (args: any) => (
@@ -36,11 +39,19 @@ const client: any = {
   businessRecord: {
     findMany: async (args: any) => (
       calls.push({ model: "businessRecord", method: "findMany", args }),
-      []
+      businessRecordFindManyQueue.length ? businessRecordFindManyQueue.shift()! : businessRecordFindManyRows ?? []
     ),
     upsert: async (args: any) => (
       calls.push({ model: "businessRecord", method: "upsert", args }),
       { data: args.create.data, createdAt: now, updatedAt: now }
+    ),
+    findUnique: async (args: any) => (
+      calls.push({ model: "businessRecord", method: "findUnique", args }),
+      businessRecordFindUniqueRow
+    ),
+    update: async (args: any) => (
+      calls.push({ model: "businessRecord", method: "update", args }),
+      args.data
     ),
   },
   academySession: {
@@ -53,13 +64,21 @@ const client: any = {
       0
     ),
     findUnique: async () => null,
+    findFirst: async () => null,
     updateMany: async (args: any) => (
       calls.push({ model: "session", method: "updateMany", args }),
       { count: 1 }
     ),
   },
   academySessionTask: {
-    findMany: async () => [],
+    findMany: async (args: any) => (
+      calls.push({ model: "task", method: "findMany", args }),
+      []
+    ),
+    count: async (args: any) => (
+      calls.push({ model: "task", method: "count", args }),
+      0
+    ),
     findUnique: async ({ where }: any) => ({ id: where.id, status: "PENDING" }),
     update: async ({ data }: any) => data,
   },
@@ -194,6 +213,39 @@ const created = await repository.createSession(
 );
 assert.equal(created.tasks.length, 1, "场次和初始清单必须在同一事务中创建");
 
+await repository.listPublicCalendar({
+  start: new Date("2026-08-10T00:00:00.000Z"),
+  end: new Date("2026-08-17T00:00:00.000Z"),
+});
+const publicCalendarCalls = calls.filter(
+  (call) => call.model === "session" && call.method === "findMany",
+);
+const publicCalendarCall = publicCalendarCalls[publicCalendarCalls.length - 1]?.args;
+assert.deepEqual(publicCalendarCall.select, {
+  id: true,
+  title: true,
+  startsAt: true,
+  endsAt: true,
+  deliveryMode: true,
+  status: true,
+  lecturerUserName: true,
+  course: { select: { title: true } },
+}, "全员周历查询必须使用最小安全字段投影");
+assert.equal(publicCalendarCall.where.status.not, "CANCELLED");
+
+await repository.listMyTasks("user-assignee", { page: 2, pageSize: 10, status: "OPEN" });
+const myTaskCall = calls.find((call) => call.model === "task" && call.method === "findMany")?.args;
+assert.deepEqual(myTaskCall.where, { assigneeUserId: "user-assignee", status: { notIn: ["DONE", "SKIPPED"] } });
+assert.equal(myTaskCall.skip, 10);
+assert.equal(myTaskCall.take, 10);
+assert.deepEqual(myTaskCall.select.session.select, {
+  id: true,
+  title: true,
+  startsAt: true,
+  endsAt: true,
+  status: true,
+}, "本人任务投影只能带上打开待办所必需的课程安排上下文");
+
 await repository.updateSessionStatus("session-1", "PLANNED", "READY");
 const statusCall = calls.find(
   (call) => call.model === "session" && call.method === "updateMany",
@@ -232,5 +284,67 @@ assert.deepEqual(assetSaveCall?.args.where.domain_recordId, {
   domain: "academy_course_assets",
   recordId: "course-1:PPT",
 });
+
+const attachmentQueryStart = calls.length;
+businessRecordFindManyQueue = [[
+  { recordId: "task-1", data: { attachmentIds: ["evidence-2", "evidence-1", "missing"] } },
+], [
+  {
+    recordId: "evidence-1",
+    data: {
+      id: "evidence-1", name: "大纲.pptx", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      size: 100, category: "academy-task-evidence", uploadedById: "u1", uploadedByName: "员工", uploadedAt: now.toISOString(),
+      storageName: "do-not-leak.pptx", draftKey: "academy-task:task-1",
+    },
+  },
+  {
+    recordId: "evidence-2",
+    data: {
+      id: "evidence-2", name: "海报.png", mimeType: "image/png", size: 200, category: "academy-task-evidence",
+      uploadedById: "u1", uploadedByName: "员工", uploadedAt: now.toISOString(), storageName: "do-not-leak.png", draftKey: "academy-task:task-1",
+    },
+  },
+  { recordId: "wrong-category", data: { id: "wrong-category", category: "academy-course-asset" } },
+]];
+const batchAttachments = await repository.listTaskAttachmentsByTaskIds(["task-1", "task-2"]);
+assert.deepEqual(batchAttachments.get("task-1")?.map((item) => item.id), ["evidence-2", "evidence-1"], "批量回显必须保持任务中的附件顺序并忽略缺失记录");
+assert.deepEqual(batchAttachments.get("task-2"), []);
+assert.equal("storageName" in batchAttachments.get("task-1")![0], false, "回显不得泄漏存储文件名");
+assert.equal("draftKey" in batchAttachments.get("task-1")![0], false, "回显不得泄漏草稿关联键");
+const attachmentCalls = calls.slice(attachmentQueryStart).filter((call) => call.model === "businessRecord" && call.method === "findMany");
+assert.equal(attachmentCalls.length, 2, "批量合并任务附件只能执行两次BusinessRecord查询");
+assert.deepEqual(attachmentCalls[0].args.where, { domain: "academy_task_attachments", recordId: { in: ["task-1", "task-2"] } });
+assert.deepEqual(attachmentCalls[1].args.where.domain, "jixiang_os_business_attachments");
+
+businessRecordFindManyRows = [];
+await repository.replaceTaskAttachments("task-1", ["evidence-1", "evidence-2"], {
+  id: "u1", name: "员工", permissions: [], isActive: true,
+} as any);
+businessRecordFindManyRows = null;
+const taskAttachmentSaveCalls = calls.filter((call) => call.model === "businessRecord" && call.method === "upsert");
+const taskAttachmentSave = taskAttachmentSaveCalls[taskAttachmentSaveCalls.length - 1]!;
+assert.deepEqual(taskAttachmentSave.args.where.domain_recordId, { domain: "academy_task_attachments", recordId: "task-1" });
+assert.deepEqual(taskAttachmentSave.args.create.data.attachmentIds, ["evidence-1", "evidence-2"]);
+
+businessRecordFindUniqueRow = { data: { taskId: "task-1", attachmentIds: ["evidence-1", "evidence-2"] } };
+await repository.removeTaskAttachmentReference("task-1", "evidence-1");
+businessRecordFindUniqueRow = null;
+const taskAttachmentUpdateCalls = calls.filter((call) => call.model === "businessRecord" && call.method === "update");
+const taskAttachmentUpdate = taskAttachmentUpdateCalls[taskAttachmentUpdateCalls.length - 1]!;
+assert.deepEqual(taskAttachmentUpdate.args.data.data.attachmentIds, ["evidence-2"], "物理删除后必须同步移除任务关联");
+
+businessRecordFindManyQueue = [[
+  { data: { attachmentIds: ["evidence-1", "evidence-2"] } },
+  { data: { attachmentIds: ["evidence-2", "evidence-3"] } },
+]];
+const linkedQueryStart = calls.length;
+assert.deepEqual(
+  [...await repository.listLinkedTaskAttachmentIds(["task-1", "task-2"])].sort(),
+  ["evidence-1", "evidence-2", "evidence-3"],
+  "过期草稿清理应一次批量读取任务附件关联",
+);
+const linkedQueries = calls.slice(linkedQueryStart).filter((call) => call.model === "businessRecord" && call.method === "findMany");
+assert.equal(linkedQueries.length, 1);
+assert.deepEqual(linkedQueries[0].args.where, { domain: "academy_task_attachments", recordId: { in: ["task-1", "task-2"] } });
 
 console.log("prisma academy repository tests passed");

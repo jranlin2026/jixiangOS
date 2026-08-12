@@ -28,17 +28,18 @@ assert.match(source, /新建课程安排/, '课程排期统一使用“课程安
 assert.doesNotMatch(source, /新建课程计划/, '页面不应继续混用“课程计划”');
 assert.doesNotMatch(source, /新建课程场次/, '创建入口不应继续混用“课程场次”');
 assert.match(source, /label="授课方式 \*"/, '课程安排应明确授课方式');
-assert.match(source, /label="课程运营负责人 \*"/, '课程安排应明确运营负责人');
-assert.match(source, /计划邀约人数/, '课程安排应支持经营目标');
+assert.match(source, /"项目负责人 \*"/, '课程安排应指定项目负责人');
+assert.match(source, /"课程内容负责人 \*"/, '课程安排应指定内容负责人');
+assert.match(source, /"素材负责人 \*"/, '课程安排应指定素材负责人');
 assert.match(source, /tableId="academy-course-arrangements"/, '课程安排列表应复用系统统一表格');
 assert.match(source, /anchor="right"/, '课程安排详情应使用右侧抽屉，不跳转页面');
 assert.match(source, /requestedSessionId/, '外部工作台进入课程安排时应能直接打开目标抽屉');
 assert.match(source, /onEditLearner/, '课程安排抽屉应支持更新已有学员进度');
 assert.match(source, /detailErrors[\s\S]*课程安排详情加载失败[\s\S]*重新加载/, '课程安排详情失败时应显示抽屉内错误和重试入口');
-['安排概览', '课程任务', '学员执行', '课程结果'].forEach((label) => {
+['SOP流程', '客户推进', '复盘结果'].forEach((label) => {
   assert.ok(source.includes(label), `课程安排抽屉缺少${label}页签`);
 });
-assert.match(source, /完善课前任务|确认开课|进入现场执行|填写课程结果|查看课程结果/, '课程安排应根据状态展示明确的下一步操作');
+assert.match(source, /完善SOP流程|确认开课|进入课程执行|填写复盘结果|查看复盘结果/, '课程安排应根据状态展示明确的下一步操作');
 assert.doesNotMatch(source, /进入场次执行/, '课程安排不应继续使用含义重复的“进入场次执行”');
 
 console.log('academy course form static tests passed');

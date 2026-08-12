@@ -42,6 +42,11 @@ import type {
   AcademySessionTask,
   SaveAcademyReviewInput,
 } from "../../types/academy";
+import {
+  getAcademyTaskStep,
+  getSessionNextStep,
+  sortAcademyTasks,
+} from "./academyMvpModel";
 
 const colors = {
   blue: "#0868F7",
@@ -121,17 +126,17 @@ export const getArrangementNextAction = (
     const beforeTasks = detail?.tasks.filter((task) => task.category === "BEFORE" && task.isRequired) || [];
     const ready = beforeTasks.length > 0 && beforeTasks.every((task) => task.status === "DONE");
     return ready
-      ? { label: "确认开课", nextStatus: "READY" as AcademySessionStatus, tab: 1 }
-      : { label: "完善课前任务", tab: 1 };
+      ? { label: "确认开课", nextStatus: "READY" as AcademySessionStatus, tab: 0 }
+      : { label: "完善SOP流程", tab: 0 };
   }
   if (session.status === "READY")
-    return { label: "进入现场执行", nextStatus: "IN_PROGRESS" as AcademySessionStatus, tab: 1 };
+    return { label: "进入课程执行", nextStatus: "IN_PROGRESS" as AcademySessionStatus, tab: 0 };
   if (session.status === "IN_PROGRESS")
-    return { label: "完成课程并填写结果", nextStatus: "COMPLETED" as AcademySessionStatus, tab: 3 };
+    return { label: "完成课程并填写结果", nextStatus: "COMPLETED" as AcademySessionStatus, tab: 2 };
   if (session.status === "COMPLETED")
     return detail?.review
-      ? { label: "查看课程结果", tab: 3 }
-      : { label: "填写课程结果", tab: 3 };
+      ? { label: "查看复盘结果", tab: 2 }
+      : { label: "填写复盘结果", tab: 2 };
   return { label: "查看取消记录", tab: 0 };
 };
 
@@ -143,7 +148,8 @@ type PlansProps = {
   canCreate: boolean;
   canManageTasks: boolean;
   currentUserId: string;
-  canManageLearners: boolean;
+  canManageExecution: boolean;
+  canManageSales: boolean;
   canReview: boolean;
   requestedSessionId?: string;
   onRequestConsumed: () => void;
@@ -153,6 +159,7 @@ type PlansProps = {
   onTaskAction: (task: AcademySessionTask, status: AcademySessionTask["status"]) => void;
   onAddLearner: (sessionId: string) => void;
   onEditLearner: (engagement: AcademyEngagement) => void;
+  onFollowUpLearner: (engagement: AcademyEngagement) => void;
   onLinkOrder: (engagement: AcademyEngagement) => void;
   onChangeStatus: (session: AcademySession, status: AcademySessionStatus) => void;
   reviewForm: SaveAcademyReviewInput;
@@ -169,7 +176,8 @@ export const Plans: React.FC<PlansProps> = ({
   canCreate,
   canManageTasks,
   currentUserId,
-  canManageLearners,
+  canManageExecution,
+  canManageSales,
   canReview,
   requestedSessionId,
   onRequestConsumed,
@@ -179,6 +187,7 @@ export const Plans: React.FC<PlansProps> = ({
   onTaskAction,
   onAddLearner,
   onEditLearner,
+  onFollowUpLearner,
   onLinkOrder,
   onChangeStatus,
   reviewForm,
@@ -193,6 +202,10 @@ export const Plans: React.FC<PlansProps> = ({
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [detailTab, setDetailTab] = useState(0);
+  const [customerPage, setCustomerPage] = useState(0);
+  const [customerPageSize, setCustomerPageSize] = useState(10);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
 
   const { monday, sunday, weekSessions, weekDays } = useMemo(() => {
     const mondayDate = new Date();
@@ -253,19 +266,13 @@ export const Plans: React.FC<PlansProps> = ({
       if (!details[item.id] && !detailErrors[item.id]) onNeedDetail(item.id);
     });
   }, [detailErrors, details, onNeedDetail, page, pageSize, search, sessions, status]);
-  const allTasks = weekSessions.flatMap((item) => details[item.id]?.tasks || []);
-  const doneTasks = allTasks.filter((task) => task.status === "DONE").length;
   const riskCount = weekSessions.filter(
     (item) => details[item.id] && riskFor(details[item.id]).label !== "正常",
   ).length;
-  const targetRevenue = weekSessions.reduce((sum, item) => sum + Number(item.targetRevenue || 0), 0);
-  const targetInvite = weekSessions.reduce((sum, item) => sum + Number(item.inviteTarget || 0), 0);
   const metrics = [
-    ["本周安排", `${weekSessions.length} 场`],
-    ["计划邀约", `${targetInvite} 人`],
-    ["目标成交", `¥${targetRevenue.toLocaleString("zh-CN")}`],
-    ["准备进度", `${doneTasks}/${allTasks.length}`],
-    ["风险安排", `${riskCount} 场`],
+    ["本周课程", `${weekSessions.length} 场`],
+    ["风险课程", `${riskCount} 场`],
+    ["待复盘", `${weekSessions.filter((item) => item.status === "COMPLETED" && !details[item.id]?.review).length} 场`],
   ];
 
   const selected = sessions.find((item) => item.id === selectedId) || null;
@@ -274,6 +281,7 @@ export const Plans: React.FC<PlansProps> = ({
   const selectedProgress = progressFor(selectedDetail);
   const selectedRisk = riskFor(selectedDetail);
   const selectedAction = selected ? getArrangementNextAction(selected, selectedDetail) : null;
+  const selectedNextStep = selectedDetail ? getSessionNextStep(selectedDetail) : null;
   const activeReviewForm: SaveAcademyReviewInput = reviewForm.sessionId === selectedId
     ? reviewForm
     : {
@@ -309,10 +317,19 @@ export const Plans: React.FC<PlansProps> = ({
         hot: selectedDetail.engagements.filter((item) => item.courseAssessment === "A").length,
       }
     : { invited: 0, confirmed: 0, attended: 0, hot: 0 };
+  const customerRows = (selectedDetail?.engagements || []).filter((item) =>
+    item.participantName.toLowerCase().includes(customerSearch.toLowerCase()),
+  );
+  const pagedCustomerRows = customerRows.slice(
+    customerPage * customerPageSize,
+    customerPage * customerPageSize + customerPageSize,
+  );
+  useEffect(() => { setCustomerPage(0); }, [customerSearch]);
 
   return (
     <Stack spacing={1.5}>
-      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5, overflow: "hidden" }}>
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.3 }}><Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}><Stack direction="row" spacing={0.5}><Button size="small" variant={viewMode === "calendar" ? "contained" : "outlined"} onClick={() => setViewMode("calendar")}>周历</Button><Button size="small" variant={viewMode === "list" ? "contained" : "outlined"} onClick={() => setViewMode("list")}>列表</Button></Stack>{canCreate && <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => onCreate()}>新建课程安排</Button>}</Stack></Paper>
+      {viewMode === "calendar" && <Paper variant="outlined" sx={{ ...panelSx, p: 1.5, overflow: "hidden" }}>
         <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} spacing={1}>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
             <Typography sx={{ fontWeight: 900, fontSize: 16, color: colors.ink }}>本周课程安排</Typography>
@@ -321,7 +338,6 @@ export const Plans: React.FC<PlansProps> = ({
             <Button size="small" variant="outlined" onClick={() => setWeekOffset(0)}>本周</Button>
             <IconButton size="small" aria-label="下一周" onClick={() => setWeekOffset((value) => value + 1)} sx={{ border: `1px solid ${colors.line}`, borderRadius: 1 }}><ChevronRightIcon fontSize="small" /></IconButton>
           </Stack>
-          {canCreate && <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => onCreate()}>新建课程安排</Button>}
         </Stack>
         <Box sx={{ mt: 1.3, overflowX: "auto" }}>
           <Box sx={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(160px, 1fr))", minWidth: 1120, border: `1px solid ${colors.line}`, borderRadius: 1.2, overflow: "hidden" }}>
@@ -339,13 +355,13 @@ export const Plans: React.FC<PlansProps> = ({
             })}
           </Box>
         </Box>
-      </Paper>
+      </Paper>}
 
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(5, 1fr)" }, gap: 1.2 }}>
-        {metrics.map(([label, value], index) => <Paper key={label} variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Typography fontSize={12.5} color="text.secondary">{label}</Typography><Typography sx={{ mt: 0.6, fontWeight: 900, fontSize: 20, color: index === 4 && riskCount ? colors.red : colors.ink }}>{value}</Typography></Paper>)}
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(3, 1fr)" }, gap: 1.2 }}>
+        {metrics.map(([label, value], index) => <Paper key={label} variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Typography fontSize={12.5} color="text.secondary">{label}</Typography><Typography sx={{ mt: 0.6, fontWeight: 900, fontSize: 20, color: index === 1 && riskCount ? colors.red : colors.ink }}>{value}</Typography></Paper>)}
       </Box>
 
-      <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
+      {viewMode === "list" && <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
         <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" alignItems={{ lg: "center" }} spacing={1} sx={{ p: 1.5, borderBottom: `1px solid ${colors.line}` }}>
           <Box><Typography fontWeight={900}>全部课程安排</Typography><Typography fontSize={12.5} color="text.secondary">统一查看进度、风险、经营目标和下一步动作</Typography></Box>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
@@ -369,7 +385,7 @@ export const Plans: React.FC<PlansProps> = ({
           </SystemDataTable>
         </TableContainer>
         <TablePagination count={filtered.length} page={page} rowsPerPage={pageSize} onPageChange={(_, next) => setPage(next)} onRowsPerPageChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} />
-      </Paper>
+      </Paper>}
 
       <Drawer anchor="right" open={Boolean(selected)} onClose={() => setSelectedId("")} PaperProps={{ role: "dialog", "aria-modal": true, "aria-label": "课程安排详情", sx: { width: { xs: "100%", md: 820, xl: 920 }, maxWidth: "100vw", bgcolor: colors.soft } }}>
         {selected && <Stack sx={{ minHeight: "100%" }}>
@@ -383,25 +399,19 @@ export const Plans: React.FC<PlansProps> = ({
               {selectedAction && <Button variant="contained" disabled={saving || Boolean(selectedAction.nextStatus && !canManageTasks)} startIcon={selected.status === "READY" ? <PlayCircleOutlineIcon /> : selected.status === "COMPLETED" ? <InsightsOutlinedIcon /> : <TaskAltOutlinedIcon />} onClick={runPrimaryAction}>{selectedAction.label}</Button>}
             </Stack>
           </Paper>
-          <Tabs value={detailTab} onChange={(_, value: number) => setDetailTab(value)} variant="scrollable" allowScrollButtonsMobile sx={{ bgcolor: "#fff", borderBottom: `1px solid ${colors.line}`, px: 1 }}><Tab label="安排概览" /><Tab label="课程任务" /><Tab label={`学员执行（${engagementMetrics.invited}）`} /><Tab label="课程结果" /></Tabs>
+          <Tabs value={detailTab} onChange={(_, value: number) => setDetailTab(value)} variant="scrollable" allowScrollButtonsMobile sx={{ bgcolor: "#fff", borderBottom: `1px solid ${colors.line}`, px: 1 }}><Tab label="SOP流程" /><Tab label={`客户推进（${engagementMetrics.invited}）`} /><Tab label="复盘结果" /></Tabs>
           <Box sx={{ p: { xs: 1.25, md: 2 }, flex: 1 }}>
             {!selectedDetail && !selectedDetailError && <Stack alignItems="center" spacing={1} sx={{ py: 8 }}><CircularProgress size={28} /><Typography color="text.secondary">正在加载课程安排详情…</Typography></Stack>}
             {!selectedDetail && selectedDetailError && <Stack alignItems="center" spacing={1.2} sx={{ py: 8 }}><Typography fontWeight={900}>课程安排详情加载失败</Typography><Typography fontSize={12.5} color="text.secondary">{selectedDetailError}</Typography><Button variant="outlined" onClick={() => onReloadDetail(selected.id)}>重新加载</Button></Stack>}
             {selectedDetail && detailTab === 0 && <Stack spacing={1.5}>
-              <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}><Typography fontWeight={950}>安排概览</Typography><Box sx={{ mt: 1.5, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>{[["课程", selected.course?.title || "-"], ["时间", `${formatDateTime(selected.startsAt)} ～ ${formatDateTime(selected.endsAt)}`], ["授课方式", deliveryModeLabel[selected.deliveryMode] || selected.deliveryMode], ["地点 / 链接", selected.deliveryMode === "ONLINE" ? selected.meetingUrl || "待填写" : selected.venue || "待填写"], ["运营负责人", selected.facilitatorUserName || "待分配"], ["主讲人", selected.lecturerUserName || "待确定"], ["协作人员", selected.collaboratorNames?.join("、") || "无"], ["经营目标", `邀约 ${selected.inviteTarget || 0} / 到课 ${selected.attendanceTarget || 0} / 成交 ${selected.dealTarget || 0}`]].map(([label, value]) => <Box key={label}><Typography fontSize={12} color="text.secondary">{label}</Typography><Typography fontSize={13.5} fontWeight={800} sx={{ mt: 0.4 }}>{value}</Typography></Box>)}</Box></Paper>
-              <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}><Typography fontWeight={950}>经营目标</Typography><Box sx={{ mt: 1.2, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1 }}>{[["计划邀约", selected.inviteTarget || 0], ["计划到课", selected.attendanceTarget || 0], ["计划成交", selected.dealTarget || 0]].map(([label, value]) => <Box key={label} sx={{ p: 1.2, bgcolor: colors.soft, borderRadius: 1 }}><Typography fontSize={11.5} color="text.secondary">{label}</Typography><Typography fontSize={20} fontWeight={950}>{value}</Typography></Box>)}</Box><Typography fontSize={13} color="text.secondary" sx={{ mt: 1.2 }}>目标成交金额 ¥{Number(selected.targetRevenue || 0).toLocaleString("zh-CN")}</Typography></Paper>
+              <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Box><Typography fontWeight={950}>SOP流程</Typography><Typography fontSize={12.5} color="text.secondary">T-5 到 T+3 的单场课程执行表</Typography></Box><Typography fontSize={22} fontWeight={950} color={colors.blue}>{selectedProgress.percent}%</Typography></Stack><LinearProgress variant="determinate" value={selectedProgress.percent} sx={{ mt: 1.4, height: 8, borderRadius: 4 }} />{selectedNextStep && <Box sx={{ mt: 1.5, p: 1.3, borderRadius: 1, bgcolor: colors.blueSoft }}><Typography fontSize={12} color="text.secondary">当前下一步</Typography><Typography fontWeight={900}>{selectedNextStep.step.timeLabel} {selectedNextStep.step.label} · {selectedNextStep.task.assigneeUserName || "待分配"}</Typography></Box>}</Paper>
+              <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}><TableContainer><SystemDataTable tableId="academy-arrangement-sop-flow" sx={{ minWidth: 760 }}><TableHead><TableRow><TableCell>时间</TableCell><TableCell>流程节点</TableCell><TableCell>负责人</TableCell><TableCell>完成标准</TableCell><TableCell>截止时间</TableCell><TableCell>状态</TableCell><TableCell>操作</TableCell></TableRow></TableHead><TableBody>{sortAcademyTasks(selectedDetail.tasks).map((task) => { const step = getAcademyTaskStep(task.templateKey); const isAssignee = task.assigneeUserId === currentUserId; return <TableRow key={task.id}><TableCell><Typography fontWeight={950} color={colors.blue}>{step.timeLabel}</Typography></TableCell><TableCell sx={{ fontWeight: 850 }}>{step.label}</TableCell><TableCell>{task.assigneeUserName || "待分配"}</TableCell><TableCell>{task.acceptanceCriteria || "完成后由负责人确认"}</TableCell><TableCell>{formatDateTime(task.dueAt)}</TableCell><TableCell><Chip size="small" label={statusLabel[task.status] || task.status} /></TableCell><TableCell><Stack direction="row" spacing={0.5}>{task.status === "PENDING" && isAssignee && <Button size="small" onClick={() => onTaskAction(task, "IN_PROGRESS")}>开始</Button>}{task.status === "IN_PROGRESS" && task.assigneeUserId === currentUserId && <Button size="small" onClick={() => onTaskAction(task, "SUBMITTED")}>提交验收</Button>}{task.status === "SUBMITTED" && canManageTasks && <><Button size="small" color="success" onClick={() => onTaskAction(task, "DONE")}>通过</Button><Button size="small" color="error" onClick={() => onTaskAction(task, "REJECTED")}>驳回</Button></>}</Stack></TableCell></TableRow>; })}</TableBody></SystemDataTable></TableContainer></Paper>
             </Stack>}
             {selectedDetail && detailTab === 1 && <Stack spacing={1.5}>
-              <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Box><Typography fontWeight={950}>课程任务</Typography><Typography fontSize={12.5} color="text.secondary">按课前、课中、课后推进；必做课前任务未完成时不能确认开课</Typography></Box><Typography fontSize={22} fontWeight={950} color={colors.blue}>{selectedProgress.percent}%</Typography></Stack><LinearProgress variant="determinate" value={selectedProgress.percent} sx={{ mt: 1.4, height: 8, borderRadius: 4 }} /></Paper>
-              {(["BEFORE", "DURING", "AFTER"] as const).map((category) => <Paper key={category} variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}><Box sx={{ px: 1.5, py: 1.2, bgcolor: colors.blueSoft, borderBottom: `1px solid ${colors.line}` }}><Typography fontWeight={900}>{category === "BEFORE" ? "课前准备" : category === "DURING" ? "课堂执行" : "课后处理"}</Typography></Box><Stack divider={<Divider />}>
-              {selectedDetail.tasks.filter((task) => task.category === category).map((task) => <Stack key={task.id} direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1} sx={{ p: 1.5 }}><Box minWidth={0}><Stack direction="row" spacing={0.7} alignItems="center"><Typography fontSize={13.5} fontWeight={850}>{task.title}{task.isRequired ? " *" : ""}</Typography><Chip size="small" label={statusLabel[task.status] || task.status} sx={{ height: 22 }} /></Stack><Typography fontSize={11.5} color="text.secondary" sx={{ mt: 0.5 }}>{task.assigneeUserName || "待分配"} · 截止 {formatDateTime(task.dueAt)}</Typography><Typography fontSize={12} color="text.secondary" sx={{ mt: 0.4 }}>{task.acceptanceCriteria}</Typography></Box>{(canManageTasks || task.assigneeUserId === currentUserId) && <Stack direction="row" spacing={0.5} alignItems="center">{task.status === "PENDING" && <Button size="small" onClick={() => onTaskAction(task, "IN_PROGRESS")}>开始</Button>}{task.status === "IN_PROGRESS" && <Button size="small" onClick={() => onTaskAction(task, "SUBMITTED")}>提交验收</Button>}{task.status === "SUBMITTED" && canManageTasks && <><Button size="small" color="success" onClick={() => onTaskAction(task, "DONE")}>通过</Button><Button size="small" color="error" onClick={() => onTaskAction(task, "REJECTED")}>驳回</Button></>}{(task.status === "REJECTED" || task.status === "BLOCKED") && <Button size="small" onClick={() => onTaskAction(task, "IN_PROGRESS")}>重新处理</Button>}</Stack>}</Stack>)}
-              </Stack></Paper>)}
+              <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1 }}>{[["确认", engagementMetrics.confirmed], ["到课", engagementMetrics.attended], ["完成评估", selectedDetail.engagements.filter((item) => Boolean(item.courseAssessment)).length]].map(([label, value]) => <Paper key={label} variant="outlined" sx={{ ...panelSx, p: 1.3 }}><Typography fontSize={12} color="text.secondary">{label}</Typography><Typography fontSize={22} fontWeight={950}>{value}</Typography></Paper>)}</Box>
+              <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}><Box sx={{ p: 1.4, borderBottom: `1px solid ${colors.line}` }}><Stack direction={{ xs: "column", sm: "row" }} spacing={1} justifyContent="space-between"><Box><Typography fontWeight={950}>客户推进表</Typography><Typography fontSize={12.5} color="text.secondary">邀约、到课、ABC分层、跟进和订单在同一页完成</Typography></Box><Stack direction="row" spacing={1}><TextField size="small" placeholder="搜索客户" value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} />{canManageSales && <Button size="small" variant="contained" onClick={() => onAddLearner(selected.id)}>从我的客户添加</Button>}</Stack></Stack></Box><TableContainer><SystemDataTable tableId="academy-arrangement-customer-progress" sx={{ minWidth: 1040 }}><TableHead><TableRow><TableCell>客户</TableCell><TableCell>销售负责人</TableCell><TableCell>邀约</TableCell><TableCell>到课</TableCell><TableCell>ABC</TableCell><TableCell>跟进</TableCell><TableCell>下次跟进</TableCell><TableCell>订单</TableCell><TableCell>操作</TableCell></TableRow></TableHead><TableBody>{pagedCustomerRows.map((item) => <TableRow key={item.id}><TableCell sx={{ fontWeight: 800 }}>{item.participantName}</TableCell><TableCell>{item.ownerUserName || "待分配"}</TableCell><TableCell>{statusLabel[item.invitationStatus] || item.invitationStatus}</TableCell><TableCell>{statusLabel[item.attendanceStatus] || item.attendanceStatus}</TableCell><TableCell><Chip size="small" label={item.courseAssessment || "待分层"} /></TableCell><TableCell>{statusLabel[item.followUpStatus] || item.followUpStatus}</TableCell><TableCell>{formatDateTime(item.nextFollowUpAt)}</TableCell><TableCell>{item.orderNo || "待关联"}</TableCell><TableCell><Stack direction="row" spacing={0.5}>{canManageExecution && <Button size="small" onClick={() => onEditLearner(item)}>记录到课</Button>}{canManageSales && <Button size="small" onClick={() => onFollowUpLearner(item)}>快速跟进</Button>}{canManageSales && !item.orderNo && <Button size="small" onClick={() => onLinkOrder(item)}>关联订单</Button>}</Stack></TableCell></TableRow>)}{!customerRows.length && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 5 }}>暂无客户，请从本人CRM可见客户中添加</TableCell></TableRow>}</TableBody></SystemDataTable></TableContainer><TablePagination count={customerRows.length} page={customerPage} rowsPerPage={customerPageSize} onPageChange={(_, next) => setCustomerPage(next)} onRowsPerPageChange={(event) => { setCustomerPageSize(Number(event.target.value)); setCustomerPage(0); }} /></Paper>
             </Stack>}
             {selectedDetail && detailTab === 2 && <Stack spacing={1.5}>
-              <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1 }}>{[["确认", engagementMetrics.confirmed], ["到课", engagementMetrics.attended], ["完成评估", selectedDetail.engagements.filter((item) => Boolean(item.courseAssessment)).length]].map(([label, value]) => <Paper key={label} variant="outlined" sx={{ ...panelSx, p: 1.3 }}><Typography fontSize={12} color="text.secondary">{label}</Typography><Typography fontSize={22} fontWeight={950}>{value}</Typography></Paper>)}</Box>
-              <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}><Box sx={{ p: 1.4, borderBottom: `1px solid ${colors.line}` }}><Typography fontWeight={950}>学员执行</Typography><Typography fontSize={12.5} color="text.secondary">这里只维护到课、课堂互动和课程评估；销售邀约、跟进及订单统一在“邀约与转化”处理</Typography></Box><TableContainer><SystemDataTable tableId="academy-arrangement-learners" sx={{ minWidth: 760 }}><TableHead><TableRow><TableCell>学员</TableCell><TableCell>确认状态</TableCell><TableCell>到课</TableCell><TableCell>课堂互动</TableCell><TableCell>课程评估</TableCell><TableCell>操作</TableCell></TableRow></TableHead><TableBody>{selectedDetail.engagements.map((item) => <TableRow key={item.id}><TableCell sx={{ fontWeight: 800 }}>{item.participantName}</TableCell><TableCell>{statusLabel[item.invitationStatus] || item.invitationStatus}</TableCell><TableCell>{statusLabel[item.attendanceStatus] || item.attendanceStatus}</TableCell><TableCell>{item.interactionLevel || "待记录"}</TableCell><TableCell><Chip size="small" label={item.courseAssessment || "待评估"} /></TableCell><TableCell>{canManageTasks && <Button size="small" onClick={() => onEditLearner(item)}>记录课堂执行</Button>}</TableCell></TableRow>)}{!selectedDetail.engagements.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5 }}>当前安排暂无学员</TableCell></TableRow>}</TableBody></SystemDataTable></TableContainer></Paper>
-            </Stack>}
-            {selectedDetail && detailTab === 3 && <Stack spacing={1.5}>
               <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}><Typography fontWeight={950}>课程结果·目标与实际</Typography><Box sx={{ mt: 1.3, display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", sm: "repeat(4, 1fr)" }, gap: 1 }}>{[["邀约", selected.inviteTarget || 0, engagementMetrics.invited], ["确认", selected.registrationTarget || 0, engagementMetrics.confirmed], ["到课", selected.attendanceTarget || 0, engagementMetrics.attended], ["A类客户", selected.consultationTarget || 0, engagementMetrics.hot]].map(([label, target, actual]) => <Box key={label} sx={{ p: 1.2, bgcolor: colors.soft, borderRadius: 1 }}><Typography fontSize={12} color="text.secondary">{label}</Typography><Typography fontSize={18} fontWeight={950}>{actual} <Typography component="span" fontSize={11.5} color="text.secondary">/ 目标 {target}</Typography></Typography></Box>)}</Box></Paper>
               <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}><Typography fontWeight={950}>课程结论与改进</Typography><Stack spacing={1.2} sx={{ mt: 1.3 }}><TextField label="做得好的" multiline minRows={2} disabled={!canReview} value={activeReviewForm.summary} onChange={(event) => onReviewFormChange({ ...activeReviewForm, summary: event.target.value })} /><TextField label="未达标原因" multiline minRows={2} disabled={!canReview} value={activeReviewForm.issues} onChange={(event) => onReviewFormChange({ ...activeReviewForm, issues: event.target.value })} /><TextField label="下一场改进动作" multiline minRows={2} disabled={!canReview} value={activeReviewForm.improvements} onChange={(event) => onReviewFormChange({ ...activeReviewForm, improvements: event.target.value })} />{canReview && <Button variant="contained" startIcon={<EventAvailableOutlinedIcon />} disabled={saving || reviewForm.sessionId !== selected.id} onClick={onSaveReview}>{saving ? "保存中…" : "保存课程结果"}</Button>}</Stack></Paper>
             </Stack>}

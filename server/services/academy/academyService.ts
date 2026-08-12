@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AuthenticatedUser } from "../../../src/types/auth";
+import type { Customer } from "../../../src/types/customer";
 import type { BusinessAttachment } from "../../../src/types/businessAttachment";
 import { hasPermission, PERMISSION_KEYS } from "../../../src/shared/utils/permissions";
 import { failure, success } from "../../api/response";
@@ -120,8 +121,13 @@ export type AcademySessionTaskRecord = {
   completedAt?: Date | null;
   completedById?: string | null;
   completedByName?: string | null;
+  attachments?: BusinessAttachment[];
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type AcademyMyTaskRecord = AcademySessionTaskRecord & {
+  session: Pick<AcademySessionRecord, "id" | "title" | "startsAt" | "endsAt" | "status">;
 };
 
 export type AcademyEngagementRecord = {
@@ -183,6 +189,11 @@ export type AcademyOrderReference = {
   customerId: string;
 };
 
+export type AcademyPublicCalendarRecord = Pick<
+  AcademySessionRecord,
+  "id" | "title" | "startsAt" | "endsAt" | "deliveryMode" | "status" | "lecturerUserName"
+> & { courseTitle: string };
+
 export interface AcademyRepository {
   listCourseCategories(): Promise<AcademyCourseCategoryRecord[]>;
   upsertCourseCategory(category: AcademyCourseCategoryRecord): Promise<AcademyCourseCategoryRecord>;
@@ -210,6 +221,7 @@ export interface AcademyRepository {
     input: { page: number; pageSize: number; search?: string; status?: string; includeAudience?: string },
     scope: AcademyAccessScope,
   ): Promise<{ items: AcademySessionRecord[]; total: number }>;
+  listPublicCalendar(input: { start: Date; end: Date }): Promise<AcademyPublicCalendarRecord[]>;
   findSessionById(id: string, scope?: AcademyAccessScope): Promise<AcademySessionRecord | null>;
   getSessionDetail(
     id: string,
@@ -232,11 +244,21 @@ export interface AcademyRepository {
     status: AcademySessionStatus,
   ): Promise<AcademySessionRecord | null>;
   listSessionTasks(sessionId: string): Promise<AcademySessionTaskRecord[]>;
+  listMyTasks(
+    userId: string,
+    input: { page: number; pageSize: number; status?: string },
+  ): Promise<{ items: AcademyMyTaskRecord[]; total: number }>;
   findTaskById(id: string, scope?: AcademyAccessScope): Promise<AcademySessionTaskRecord | null>;
   updateTaskStatus(
     id: string,
     update: Partial<AcademySessionTaskRecord>,
   ): Promise<AcademySessionTaskRecord | null>;
+  listTaskAttachments(taskId: string): Promise<BusinessAttachment[]>;
+  listTaskAttachmentsByTaskIds(taskIds: string[]): Promise<Map<string, BusinessAttachment[]>>;
+  replaceTaskAttachments(taskId: string, attachmentIds: string[], actor: AuthenticatedUser): Promise<BusinessAttachment[]>;
+  removeTaskAttachmentReference(taskId: string, attachmentId: string): Promise<void>;
+  isTaskAttachmentLinked(taskId: string, attachmentId: string): Promise<boolean>;
+  listLinkedTaskAttachmentIds(taskIds: string[]): Promise<Set<string>>;
   upsertEngagement(
     engagement: AcademyEngagementRecord,
   ): Promise<AcademyEngagementRecord>;
@@ -258,76 +280,85 @@ export interface AcademyRepository {
 
 const CHECKLIST = [
   {
-    templateKey: "PLANNING",
-    title: "课程目标、客户问题与经营指标确认",
-    category: "BEFORE",
-    isRequired: true,
-    dueOffsetMinutes: -7 * 24 * 60,
-    acceptanceCriteria: "课程目标、目标客户问题和本场经营指标均已确认。",
-  },
-  {
-    templateKey: "CONTENT",
-    title: "大纲、核心观点、案例与转化环节锁版",
+    templateKey: "COURSE_CONFIRMATION",
+    title: "T-5 课程确定",
     category: "BEFORE",
     isRequired: true,
     dueOffsetMinutes: -5 * 24 * 60,
-    acceptanceCriteria: "大纲、核心观点、案例和转化环节已锁定版本。",
+    assigneeRole: "PROJECT_OWNER",
+    acceptanceCriteria: "课程主题、目标客户、课程目标、成交产品、主讲人和课程执行负责人已确认。",
   },
   {
-    templateKey: "ASSETS",
-    title: "课件、海报、邀约话术与宣传素材确认",
+    templateKey: "COURSE_DEVELOPMENT",
+    title: "T-4 课程研发",
+    category: "BEFORE",
+    isRequired: true,
+    dueOffsetMinutes: -4 * 24 * 60,
+    assigneeRole: "CONTENT_OWNER",
+    acceptanceCriteria: "大纲、PPT结构、案例、互动设计、核心观点说明和成交路径已完成。",
+  },
+  {
+    templateKey: "COURSE_PACKAGING",
+    title: "T-3 课程包装",
     category: "BEFORE",
     isRequired: true,
     dueOffsetMinutes: -3 * 24 * 60,
-    acceptanceCriteria: "课件、海报、邀约话术及宣传素材齐全且可使用。",
+    assigneeRole: "MATERIAL_OWNER",
+    acceptanceCriteria: "海报、朋友圈素材、销售邀约图、预热内容、直播画面与封面已准备。",
   },
   {
-    templateKey: "INVITATION",
-    title: "邀约名单与到课确认",
+    templateKey: "CUSTOMER_INVITATION",
+    title: "T-2 客户邀约",
+    category: "BEFORE",
+    isRequired: true,
+    dueOffsetMinutes: -2 * 24 * 60,
+    assigneeRole: "PROJECT_OWNER",
+    acceptanceCriteria: "邀约名单中每位客户都有邀约状态和下一步。",
+  },
+  {
+    templateKey: "PRECLASS_GATE",
+    title: "T-1 开课关卡",
     category: "BEFORE",
     isRequired: true,
     dueOffsetMinutes: -24 * 60,
-    acceptanceCriteria: "邀约名单已建立，并完成到课确认和负责人分配。",
+    assigneeRole: "PROJECT_OWNER",
+    acceptanceCriteria: "最终PPT、讲稿、直播链接、画面、设备、网络、素材、客户名单和重点客户已确认，并给出Go/No-Go结论。",
   },
   {
-    templateKey: "PRECHECK",
-    title: "场地、直播、设备、网络与备用方案检查",
-    category: "BEFORE",
-    isRequired: true,
-    dueOffsetMinutes: -2 * 60,
-    acceptanceCriteria: "场地、直播、设备、网络和备用方案检查通过。",
-  },
-  {
-    templateKey: "DELIVERY",
-    title: "授课与现场问题记录",
+    templateKey: "COURSE_DELIVERY",
+    title: "T日 课程执行",
     category: "DURING",
     isRequired: true,
     dueOffsetMinutes: 0,
-    acceptanceCriteria: "完成授课并记录现场问题、互动和关键客户反馈。",
+    assigneeRole: "LECTURER",
+    acceptanceCriteria: "完成授课，保障直播，并记录客户行为、问题和关键反馈。",
   },
   {
-    templateKey: "SEGMENTATION",
-    title: "课后30分钟内完成A/B/C客户分层",
+    templateKey: "CUSTOMER_SEGMENTATION",
+    title: "T+0.5小时 客户分层",
     category: "AFTER",
     isRequired: true,
     dueOffsetMinutes: 30,
-    acceptanceCriteria: "课后30分钟内完成全部到课客户A/B/C分层。",
+    assigneeRole: "PROJECT_OWNER",
+    acceptanceCriteria: "30分钟内完成A/B/C分类，并为每位重点客户设定下一步和时间。",
   },
   {
-    templateKey: "FOLLOW_UP",
-    title: "课后分层与销售跟进",
+    templateKey: "DEAL_FOLLOW_UP",
+    title: "T+1 成交跟进",
     category: "AFTER",
     isRequired: true,
     dueOffsetMinutes: 24 * 60,
-    acceptanceCriteria: "重点客户已分配销售并形成下一步跟进计划。",
+    assigneeRole: "PROJECT_OWNER",
+    acceptanceCriteria: "客户已成交或已明确下一步跟进；成交客户已发起交接。",
   },
   {
-    templateKey: "REVIEW",
-    title: "课程数据复盘与改进",
+    templateKey: "COURSE_REVIEW",
+    title: "T+3 复盘优化",
     category: "AFTER",
     isRequired: true,
-    dueOffsetMinutes: 2 * 24 * 60,
-    acceptanceCriteria: "完成课程数据、问题、改进项和责任人复盘。",
+    dueOffsetMinutes: 3 * 24 * 60,
+    assigneeRole: "REVIEW_OWNER",
+    acceptanceCriteria: "报名、到课、互动、咨询、成交和客户反馈已复盘，改进项已指定负责人和完成时间。",
   },
 ] as const;
 
@@ -368,6 +399,9 @@ const ASSET_TYPES = new Set<AcademyAssetType>([
   "REPLAY",
 ]);
 const DELIVERY_MODES = new Set<AcademyDeliveryMode>(["OFFLINE", "LIVE", "ONLINE"]);
+const INVITATION_STATUSES = new Set(["PENDING", "INVITED", "REGISTERED", "CONFIRMED", "DECLINED"]);
+const FOLLOW_UP_STATUSES = new Set(["PENDING", "IN_PROGRESS", "DONE"]);
+const TASKS_REQUIRING_EVIDENCE = new Set(["COURSE_DEVELOPMENT", "COURSE_PACKAGING", "CONTENT", "ASSETS"]);
 const asNonNegativeInteger = (value: unknown) => {
   const number = Number(value || 0);
   return Number.isInteger(number) && number >= 0 ? number : null;
@@ -402,6 +436,13 @@ export function createAcademyService(
     resolveCustomer?: (id: string, actor: AuthenticatedUser) => Promise<AcademyParticipantReference | null>;
     resolveLead?: (id: string, actor: AuthenticatedUser) => Promise<AcademyParticipantReference | null>;
     resolveOrder?: (id: string, actor: AuthenticatedUser) => Promise<AcademyOrderReference | null>;
+    addCustomerFollowUp?: (
+      customerId: string,
+      input: { content: string; type: "跟进记录" },
+      actor: AuthenticatedUser,
+    ) => Promise<{ code: number; message: string; data?: Customer | null }>;
+    findBusinessAttachment?: (id: string) => Promise<(BusinessAttachment & { draftKey: string }) | null>;
+    purgeBusinessAttachment?: (id: string) => Promise<boolean>;
   } = {},
 ) {
   const now = deps.now || (() => new Date());
@@ -428,7 +469,96 @@ export function createAcademyService(
       (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "zh-CN"),
     );
   };
+  const attachTaskEvidence = async <T extends AcademySessionTaskRecord>(tasks: T[]): Promise<Array<T & { attachments: BusinessAttachment[] }>> => {
+    const byTaskId = await repository.listTaskAttachmentsByTaskIds(tasks.map((task) => task.id));
+    return tasks.map((task) => ({ ...task, attachments: byTaskId.get(task.id) || [] }));
+  };
   return {
+    async authorizeCourseAsset(input: {
+      courseId: string;
+      actor: AuthenticatedUser;
+      action: "read" | "write";
+    }) {
+      if (!hasPermission(input.actor, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, input.action)) return false;
+      return Boolean(await repository.findCourseById(input.courseId, await resolveScope(input.actor)));
+    },
+    async authorizeTaskEvidence(input: {
+      taskId: string;
+      actor: AuthenticatedUser;
+      action: "read" | "write";
+      attachment?: BusinessAttachment;
+    }) {
+      const task = await repository.findTaskById(input.taskId);
+      if (!task) return false;
+      const attachments = await repository.listTaskAttachments(input.taskId);
+      const isLinked = input.attachment ? attachments.some((item) => item.id === input.attachment!.id) : false;
+      if (input.action === "write") {
+        if (input.attachment && !isLinked) return input.attachment.uploadedById === input.actor.id;
+        if (task.assigneeUserId !== input.actor.id || !["PENDING", "IN_PROGRESS", "REJECTED", "BLOCKED"].includes(task.status)) return false;
+        if (input.attachment) return input.attachment.uploadedById === input.actor.id;
+        return true;
+      }
+      if (task.assigneeUserId === input.actor.id) return isLinked;
+      if (!hasPermission(input.actor, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, "read")) return false;
+      const scoped = await repository.findTaskById(input.taskId, await resolveScope(input.actor));
+      return Boolean(scoped) && isLinked;
+    },
+    async removeTaskAttachmentReference(taskId: string, attachmentId: string) {
+      await repository.removeTaskAttachmentReference(taskId, attachmentId);
+    },
+    async isTaskAttachmentLinked(taskId: string, attachmentId: string) {
+      return (await repository.listTaskAttachments(taskId)).some((item) => item.id === attachmentId);
+    },
+    async listLinkedTaskAttachmentIds(taskIds: string[]) {
+      return repository.listLinkedTaskAttachmentIds(taskIds);
+    },
+    async listPublicCalendar(raw: { start?: string; end?: string }, _actor: AuthenticatedUser) {
+      const current = now();
+      const day = current.getUTCDay() || 7;
+      const defaultStart = new Date(current);
+      defaultStart.setUTCDate(current.getUTCDate() - day + 1);
+      defaultStart.setUTCHours(0, 0, 0, 0);
+      const defaultEnd = new Date(defaultStart);
+      defaultEnd.setUTCDate(defaultStart.getUTCDate() + 7);
+      const start = raw.start ? new Date(raw.start) : defaultStart;
+      const end = raw.end ? new Date(raw.end) : defaultEnd;
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start)
+        return invalid("请选择有效的周历时间范围");
+      if (end.getTime() - start.getTime() > 93 * 24 * 60 * 60 * 1000)
+        return invalid("周历查询范围不能超过93天");
+      return success(await repository.listPublicCalendar({ start, end }));
+    },
+    async listMyTasks(
+      raw: { page?: number; pageSize?: number; status?: string },
+      actor: AuthenticatedUser,
+    ) {
+      const page = Math.max(1, Number(raw.page) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(raw.pageSize) || 10));
+      const requestedStatus = String(raw.status || "OPEN").trim().toUpperCase();
+      const result = await repository.listMyTasks(actor.id, {
+        page,
+        pageSize,
+        status: requestedStatus === "ALL" ? undefined : requestedStatus,
+      });
+      return success({ ...result, items: await attachTaskEvidence(result.items), page, pageSize });
+    },
+    async getSessionNextStep(id: string, actor: AuthenticatedUser) {
+      const session = await repository.findSessionById(id, await resolveScope(actor));
+      if (!session) return invalid("课程安排不存在", 404);
+      const openTasks = (await repository.listSessionTasks(id))
+        .filter((task) => !["DONE", "SKIPPED"].includes(task.status));
+      const timestamp = now().getTime();
+      const overdue = openTasks
+        .filter((task) => task.dueAt && task.dueAt.getTime() < timestamp)
+        .sort((a, b) => a.dueAt!.getTime() - b.dueAt!.getTime());
+      const nearest = [...openTasks].sort((a, b) => {
+        if (!a.dueAt) return 1;
+        if (!b.dueAt) return -1;
+        return a.dueAt.getTime() - b.dueAt.getTime();
+      });
+      const task = overdue[0] || nearest[0] || null;
+      return success({ task, reason: overdue.length ? "OVERDUE" : task ? "NEAREST_DUE" : "COMPLETE" });
+    },
     async listCourseCategories(_actor: AuthenticatedUser) {
       return success(await loadCourseCategories());
     },
@@ -493,20 +623,31 @@ export function createAcademyService(
       if (!course) return invalid("课程不存在", 404);
       const assetType = String(raw.assetType || "") as AcademyAssetType;
       if (!ASSET_TYPES.has(assetType)) return invalid("课程资产类型无效");
-      const attachments = Array.isArray(raw.attachments)
-        ? raw.attachments.filter(
-            (item): item is BusinessAttachment =>
-              Boolean(item) &&
-              typeof item === "object" &&
-              String((item as BusinessAttachment).id || "").trim() !== "" &&
-              (item as BusinessAttachment).category === "academy-course-asset",
-          )
+      const requestedIds = Array.isArray(raw.attachments)
+        ? [...new Set(raw.attachments.map((item) => String((item as { id?: unknown })?.id || "").trim()).filter(Boolean))]
         : [];
-      if (!attachments.length) return invalid("请至少上传一个课程资产文件");
+      if (!requestedIds.length) return invalid("请至少上传一个课程资产文件");
+      if (requestedIds.length > 20) return invalid("每类课程资产最多关联20个文件");
+      if (!deps.findBusinessAttachment) return invalid("附件服务暂不可用", 409);
+      const existingAssets = await repository.listCourseAssets(courseId);
+      const existingAttachmentIds = new Set(existingAssets.flatMap((item) => item.attachments.map((attachment) => attachment.id)));
+      const attachments: BusinessAttachment[] = [];
+      const expectedDraftKey = `academy-course-${courseId}-${assetType}`;
+      for (const attachmentId of requestedIds) {
+        const attachment = await deps.findBusinessAttachment(attachmentId);
+        if (
+          !attachment
+          || attachment.category !== "academy-course-asset"
+          || attachment.draftKey !== expectedDraftKey
+          || (!existingAttachmentIds.has(attachmentId) && attachment.uploadedById !== actor.id)
+        ) return invalid("课程资产附件不存在或无权关联", 404);
+        const { draftKey: _draftKey, ...publicAttachment } = attachment;
+        attachments.push(publicAttachment);
+      }
       const courseVersionId = await repository.findLatestCourseVersionId(courseId);
       if (!courseVersionId) return invalid("课程尚无可用版本", 409);
       const timestamp = now();
-      const existing = (await repository.listCourseAssets(courseId)).find(
+      const existing = existingAssets.find(
         (item) => item.assetType === assetType,
       );
       return success(
@@ -792,6 +933,7 @@ export function createAcademyService(
           : [];
       return success({
         ...detail,
+        tasks: await attachTaskEvidence(detail.tasks),
         engagements,
         review: hasPermission(actor, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE) ? detail.review : null,
       });
@@ -824,11 +966,22 @@ export function createAcademyService(
         await repository.findLatestCourseVersionId(courseId);
       if (!courseVersionId)
         return invalid("课程尚无可用版本，不能创建场次", 409);
-      const facilitatorUserId = String(raw.facilitatorUserId || "").trim();
-      const facilitator = facilitatorUserId
-        ? await repository.findActiveUserById(facilitatorUserId)
+      const projectOwnerUserId = String(raw.projectOwnerUserId || raw.facilitatorUserId || "").trim();
+      const projectOwner = projectOwnerUserId
+        ? await repository.findActiveUserById(projectOwnerUserId)
         : null;
-      if (!facilitator) return invalid("请选择有效的课程运营负责人");
+      if (!projectOwner) return invalid("请选择有效的项目负责人");
+      const contentOwnerUserId = String(raw.contentOwnerUserId || projectOwnerUserId).trim();
+      const materialOwnerUserId = String(raw.materialOwnerUserId || projectOwnerUserId).trim();
+      const reviewOwnerUserId = String(raw.reviewOwnerUserId || projectOwnerUserId).trim();
+      const [contentOwner, materialOwner, reviewOwner] = await Promise.all([
+        repository.findActiveUserById(contentOwnerUserId),
+        repository.findActiveUserById(materialOwnerUserId),
+        repository.findActiveUserById(reviewOwnerUserId),
+      ]);
+      if (!contentOwner) return invalid("请选择有效的课程内容负责人");
+      if (!materialOwner) return invalid("请选择有效的素材负责人");
+      if (!reviewOwner) return invalid("请选择有效的复盘负责人");
       const lecturerUserId = String(raw.lecturerUserId || course.lecturerUserId || "").trim();
       const lecturer = lecturerUserId
         ? await repository.findActiveUserById(lecturerUserId)
@@ -859,7 +1012,7 @@ export function createAcademyService(
       if (!Number.isFinite(targetRevenue) || targetRevenue < 0)
         return invalid("目标成交金额必须大于等于0");
       const timestamp = now();
-      const audience = raw.audience === "ALL_EMPLOYEES" ? "ALL_EMPLOYEES" : "RESPONSIBLE_ONLY";
+      const audience = raw.audience === "RESPONSIBLE_ONLY" ? "RESPONSIBLE_ONLY" : "ALL_EMPLOYEES";
       const session: AcademySessionRecord = {
         id: `academy-session-${randomUUID()}`,
         courseId,
@@ -879,9 +1032,9 @@ export function createAcademyService(
         targetRevenue,
         status: "PLANNED",
         audience,
-        isInvitable: audience === "ALL_EMPLOYEES" && raw.isInvitable === true,
-        facilitatorUserId: facilitator.id,
-        facilitatorUserName: facilitator.name,
+        isInvitable: audience === "ALL_EMPLOYEES" && raw.isInvitable !== false,
+        facilitatorUserId: projectOwner.id,
+        facilitatorUserName: projectOwner.name,
         lecturerUserId: lecturer?.id || null,
         lecturerUserName: lecturer?.name || null,
         collaboratorUserIds,
@@ -891,15 +1044,23 @@ export function createAcademyService(
         createdAt: timestamp,
         updatedAt: timestamp,
       };
+      const assigneeForRole = {
+        PROJECT_OWNER: projectOwner,
+        CONTENT_OWNER: contentOwner,
+        MATERIAL_OWNER: materialOwner,
+        LECTURER: lecturer || projectOwner,
+        REVIEW_OWNER: reviewOwner,
+      };
       const checklist: AcademySessionTaskRecord[] = CHECKLIST.map((item) => {
-        const { dueOffsetMinutes, ...taskTemplate } = item;
+        const { dueOffsetMinutes, assigneeRole, ...taskTemplate } = item;
+        const assignee = assigneeForRole[assigneeRole];
         return {
           ...taskTemplate,
           id: `academy-task-${randomUUID()}`,
           sessionId: session.id,
           status: "PENDING",
-          assigneeUserId: session.facilitatorUserId || actor.id,
-          assigneeUserName: session.facilitatorUserName || actor.name,
+          assigneeUserId: assignee.id,
+          assigneeUserName: assignee.name,
           collaboratorNames: [],
           dueAt: new Date(
             (item.category === "BEFORE" ? startsAt : endsAt).getTime() +
@@ -952,17 +1113,27 @@ export function createAcademyService(
     ) {
       if (!Object.prototype.hasOwnProperty.call(TASK_STATUS_TRANSITIONS, raw.status))
         return invalid("无效的执行项状态");
-      const current = await repository.findTaskById(id, await resolveScope(actor));
-      if (!current) return invalid("执行项不存在", 404);
       const canManageAllTasks = hasPermission(actor, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, "write");
-      if (!canManageAllTasks && current.assigneeUserId !== actor.id)
-        return invalid("执行项不存在", 404);
-      if (!canManageAllTasks && !["IN_PROGRESS", "SUBMITTED"].includes(raw.status))
-        return invalid("你只能推进并提交分配给自己的任务", 403);
+      const current = await repository.findTaskById(id, canManageAllTasks ? await resolveScope(actor) : undefined);
+      if (!current) return invalid("执行项不存在", 404);
       if (!TASK_STATUS_TRANSITIONS[current.status].includes(raw.status))
         return invalid("当前执行项状态不允许执行该操作", 409);
+      const isAssignee = current.assigneeUserId === actor.id;
+      if (!isAssignee && !canManageAllTasks)
+        return invalid("执行项不存在", 404);
+      const assigneeAction = isAssignee && ["IN_PROGRESS", "SUBMITTED"].includes(raw.status);
+      const managerReviewAction = canManageAllTasks
+        && current.status === "SUBMITTED"
+        && ["DONE", "REJECTED"].includes(raw.status);
+      if (!assigneeAction && !managerReviewAction)
+        return invalid(isAssignee ? "任务负责人只能开始、重新处理并提交本人任务" : "课程运营管理员只能验收已提交的任务", 403);
       if (raw.status === "SUBMITTED" && !String(raw.submissionNote || raw.note || "").trim())
         return invalid("提交验收时必须填写完成说明");
+      if (
+        raw.status === "SUBMITTED"
+        && TASKS_REQUIRING_EVIDENCE.has(current.templateKey)
+        && !(await repository.listTaskAttachments(id)).length
+      ) return invalid("该任务至少需要上传一个交付附件", 409);
       if (raw.status === "REJECTED" && !String(raw.reviewNote || raw.note || "").trim())
         return invalid("驳回验收时必须填写原因");
       const timestamp = now();
@@ -999,6 +1170,54 @@ export function createAcademyService(
       });
       return updated ? success(updated) : invalid("执行项不存在", 404);
     },
+    async listTaskAttachments(id: string, actor: AuthenticatedUser) {
+      const current = await repository.findTaskById(id);
+      if (!current) return invalid("执行项不存在", 404);
+      const canManage = hasPermission(actor, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, "read");
+      const scopedTask = canManage ? await repository.findTaskById(id, await resolveScope(actor)) : null;
+      const canRead = current.assigneeUserId === actor.id || Boolean(scopedTask);
+      if (!canRead) return invalid("执行项不存在", 404);
+      return success(await repository.listTaskAttachments(id));
+    },
+    async replaceTaskAttachments(id: string, raw: Record<string, unknown>, actor: AuthenticatedUser) {
+      const current = await repository.findTaskById(id);
+      if (!current || current.assigneeUserId !== actor.id) return invalid("执行项不存在", 404);
+      if (!["PENDING", "IN_PROGRESS", "REJECTED", "BLOCKED"].includes(current.status)) {
+        return invalid("当前任务状态不允许修改交付附件", 409);
+      }
+      const attachmentIds = Array.isArray(raw.attachmentIds)
+        ? [...new Set(raw.attachmentIds.map(String).map((item) => item.trim()).filter(Boolean))]
+        : [];
+      if (attachmentIds.length > 10) return invalid("每个任务最多关联10个交付附件");
+      if (!deps.findBusinessAttachment) return invalid("附件服务暂不可用", 503);
+      const previous = await repository.listTaskAttachments(id);
+      const previousById = new Map(previous.map((item) => [item.id, item]));
+      const verified: BusinessAttachment[] = [];
+      for (const attachmentId of attachmentIds) {
+        const existing = previousById.get(attachmentId);
+        if (existing && existing.uploadedById !== actor.id) {
+          verified.push(existing);
+          continue;
+        }
+        const attachment = await deps.findBusinessAttachment(attachmentId);
+        if (
+          !attachment
+          || attachment.category !== "academy-task-evidence"
+          || attachment.draftKey !== `academy-task:${id}`
+          || attachment.uploadedById !== actor.id
+        ) return invalid("附件不存在或不属于当前任务", 404);
+        const { draftKey: _draftKey, ...publicAttachment } = attachment;
+        verified.push(publicAttachment);
+      }
+      const removed = previous.filter((item) => !attachmentIds.includes(item.id));
+      if (removed.some((item) => item.uploadedById !== actor.id)) {
+        return invalid("不得删除原负责人已提交的附件", 403);
+      }
+      if (removed.length && !deps.purgeBusinessAttachment) return invalid("附件服务暂不可用", 503);
+      await repository.replaceTaskAttachments(id, verified.map((item) => item.id), actor);
+      for (const attachment of removed) await deps.purgeBusinessAttachment?.(attachment.id);
+      return success(verified);
+    },
     async saveEngagement(
       raw: Record<string, unknown>,
       actor: AuthenticatedUser,
@@ -1023,6 +1242,10 @@ export function createAcademyService(
         : null;
       if (nextFollowUpAt && Number.isNaN(nextFollowUpAt.getTime()))
         return invalid("下次跟进时间格式无效");
+      const invitationStatus = String(raw.invitationStatus || "PENDING").trim();
+      const followUpStatus = String(raw.followUpStatus || "PENDING").trim();
+      if (!INVITATION_STATUSES.has(invitationStatus)) return invalid("请选择有效的邀约状态");
+      if (!FOLLOW_UP_STATUSES.has(followUpStatus)) return invalid("请选择有效的跟进状态");
       const timestamp = now();
       const existing = await repository.findEngagementByKey(sessionId, participantKey);
       if (!existing && (!["PLANNED", "READY"].includes(session.status) || session.audience !== "ALL_EMPLOYEES" || !session.isInvitable))
@@ -1035,11 +1258,11 @@ export function createAcademyService(
           customerId: customerId || null,
           leadId: leadId || null,
           participantName: participant.name,
-          invitationStatus: String(raw.invitationStatus || "PENDING"),
+          invitationStatus,
           attendanceStatus: existing?.attendanceStatus || "UNKNOWN",
           interactionLevel: existing?.interactionLevel || null,
           courseAssessment: existing?.courseAssessment || null,
-          followUpStatus: String(raw.followUpStatus || "PENDING"),
+          followUpStatus,
           nextFollowUpAt,
           orderId: existing?.orderId || null,
           orderNo: existing?.orderNo || null,
@@ -1054,6 +1277,56 @@ export function createAcademyService(
           updatedAt: timestamp,
         }),
       );
+    },
+    async saveEngagementBatch(raw: Record<string, unknown>, actor: AuthenticatedUser) {
+      const sessionId = String(raw.sessionId || "").trim();
+      const customerIds = Array.isArray(raw.customerIds)
+        ? [...new Set(raw.customerIds.map(String).map((item) => item.trim()).filter(Boolean))]
+        : [];
+      if (!sessionId || !customerIds.length) return invalid("请选择课程安排和客户");
+      if (customerIds.length > 100) return invalid("单次最多邀约100位客户");
+      const created: AcademyEngagementRecord[] = [];
+      const rejected: Array<{ customerId: string; message: string }> = [];
+      for (const customerId of customerIds) {
+        const result = await this.saveEngagement({
+          sessionId,
+          customerId,
+          invitationStatus: String(raw.invitationStatus || "INVITED"),
+        }, actor);
+        if (result.code === 0 && result.data) created.push(result.data);
+        else rejected.push({ customerId, message: result.message });
+      }
+      return success({ created, rejected });
+    },
+    async quickFollowUp(
+      id: string,
+      raw: Record<string, unknown>,
+      actor: AuthenticatedUser,
+    ) {
+      const current = await repository.findEngagementById(id, await resolveScope(actor));
+      if (!current || !current.customerId) return invalid("学员跟进记录不存在", 404);
+      const content = String(raw.content || "").trim();
+      if (!content) return invalid("请填写跟进内容");
+      if (!deps.addCustomerFollowUp) return invalid("客户跟进服务暂不可用", 503);
+      const customer = await deps.resolveCustomer?.(current.customerId, actor);
+      if (!customer || customer.isPublicPool) return invalid("客户不存在或已不在你的数据范围内", 404);
+      const nextFollowUpAt = raw.nextFollowUpAt ? new Date(String(raw.nextFollowUpAt)) : current.nextFollowUpAt || null;
+      if (nextFollowUpAt && Number.isNaN(nextFollowUpAt.getTime())) return invalid("下次跟进时间格式无效");
+      const courseAssessment = String(raw.courseAssessment || current.courseAssessment || "").trim() || null;
+      if (courseAssessment && !new Set(["A", "B", "C"]).has(courseAssessment)) return invalid("请选择有效的客户分层");
+      const crmResult = await deps.addCustomerFollowUp(current.customerId, {
+        content: `商学院｜${content}`,
+        type: "跟进记录",
+      }, actor);
+      if (crmResult.code !== 0) return failure<never>(crmResult.message, crmResult.code);
+      return success(await repository.upsertEngagement({
+        ...current,
+        courseAssessment,
+        nextFollowUpAt,
+        followUpStatus: "IN_PROGRESS",
+        notes: "最新跟进已同步CRM",
+        updatedAt: now(),
+      }));
     },
     async updateEngagementExecution(
       id: string,

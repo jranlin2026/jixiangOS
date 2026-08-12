@@ -69,6 +69,7 @@ interface NavItem {
   permissionKey: string;
   permissionKeys?: string[];
   children?: NavChildItem[];
+  publicForAuthenticated?: boolean;
 }
 
 interface NavChildItem {
@@ -184,6 +185,7 @@ const navItems: NavItem[] = [
     icon: <SchoolIcon />,
     path: ROUTES.ACADEMY,
     permissionKey: PERMISSION_KEYS.ACADEMY,
+    publicForAuthenticated: true,
     permissionKeys: [
       PERMISSION_KEYS.ACADEMY_VIEW,
       PERMISSION_KEYS.ACADEMY_PLAN_MANAGE,
@@ -297,6 +299,8 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
       && child.permissionKeys.some((permissionKey) => hasPermission(currentUser, permissionKey))
     )),
   })).filter((item) => (
+    item.publicForAuthenticated
+    ||
     (item.permissionKeys || [item.permissionKey]).some((permissionKey) => hasPermission(currentUser, permissionKey))
     || Boolean(item.children?.length)
   )), [currentUser]);

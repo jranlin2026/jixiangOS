@@ -1,5 +1,6 @@
 import { backendRequest } from './backendClient';
 import type { ApiResponse } from './types';
+import type { BusinessAttachment } from '../types/businessAttachment';
 import type {
   AcademyCourse,
   AcademyCourseCategory,
@@ -8,6 +9,8 @@ import type {
   AcademyDashboard,
   AcademyEngagement,
   AcademyPage,
+  AcademyMyTask,
+  AcademyPublicCalendarItem,
   AcademySession,
   AcademySessionDetail,
   AcademySessionStatus,
@@ -30,6 +33,12 @@ const query = (input: Record<string, unknown>) => {
 };
 
 export const academyApi = {
+  getPublicCalendar(input: { start?: string; end?: string } = {}): Promise<ApiResponse<AcademyPublicCalendarItem[]>> {
+    return backendRequest(`/academy/public-calendar?${query(input)}`);
+  },
+  listMyTasks(input: { page: number; pageSize: number; status?: string }): Promise<ApiResponse<AcademyPage<AcademyMyTask>>> {
+    return backendRequest(`/academy/my-tasks?${query(input)}`);
+  },
   getDashboard(): Promise<ApiResponse<AcademyDashboard>> {
     return backendRequest('/academy/dashboard');
   },
@@ -75,8 +84,29 @@ export const academyApi = {
   updateTask(id: string, input: { status: AcademyTaskStatus; note?: string; submissionNote?: string; reviewNote?: string }): Promise<ApiResponse<AcademySessionTask>> {
     return backendRequest(`/academy/tasks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) });
   },
+  listTaskAttachments(id: string): Promise<ApiResponse<BusinessAttachment[]>> {
+    return backendRequest(`/academy/tasks/${encodeURIComponent(id)}/attachments`);
+  },
+  addTaskAttachment(id: string, attachmentIds: string[]): Promise<ApiResponse<BusinessAttachment[]>> {
+    return backendRequest(`/academy/tasks/${encodeURIComponent(id)}/attachments`, {
+      method: 'PUT',
+      body: JSON.stringify({ attachmentIds }),
+    });
+  },
+  removeTaskAttachment(id: string, attachmentIds: string[]): Promise<ApiResponse<BusinessAttachment[]>> {
+    return backendRequest(`/academy/tasks/${encodeURIComponent(id)}/attachments`, {
+      method: 'PUT',
+      body: JSON.stringify({ attachmentIds }),
+    });
+  },
   saveEngagement(input: SaveAcademyEngagementInput): Promise<ApiResponse<AcademyEngagement>> {
     return backendRequest('/academy/engagements', { method: 'PUT', body: JSON.stringify(input) });
+  },
+  saveEngagementBatch(input: { sessionId: string; customerIds: string[]; invitationStatus?: string }): Promise<ApiResponse<{ created: AcademyEngagement[]; rejected: Array<{ customerId: string; message: string }> }>> {
+    return backendRequest('/academy/engagements/batch', { method: 'PUT', body: JSON.stringify(input) });
+  },
+  quickFollowUp(id: string, input: { content: string; courseAssessment?: string; nextFollowUpAt?: string }): Promise<ApiResponse<AcademyEngagement>> {
+    return backendRequest(`/academy/engagements/${encodeURIComponent(id)}/follow-up`, { method: 'POST', body: JSON.stringify(input) });
   },
   updateEngagementExecution(id: string, input: { attendanceStatus: string; interactionLevel?: string; courseAssessment?: string }): Promise<ApiResponse<AcademyEngagement>> {
     return backendRequest(`/academy/engagements/${encodeURIComponent(id)}/execution`, {

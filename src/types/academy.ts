@@ -99,8 +99,27 @@ export interface AcademySession {
   lecturerUserName?: string;
   collaboratorUserIds?: string[];
   collaboratorNames?: string[];
+  projectOwnerUserId?: string;
+  projectOwnerUserName?: string;
+  contentOwnerUserId?: string;
+  contentOwnerUserName?: string;
+  materialOwnerUserId?: string;
+  materialOwnerUserName?: string;
+  reviewOwnerUserId?: string;
+  reviewOwnerUserName?: string;
   course?: Pick<AcademyCourse, "code" | "title" | "category">;
   _count?: { engagements: number; tasks: number };
+}
+
+export interface AcademyPublicCalendarItem {
+  id: string;
+  title: string;
+  courseTitle: string;
+  startsAt: string;
+  endsAt: string;
+  deliveryMode: AcademyDeliveryMode;
+  status: AcademySessionStatus;
+  lecturerUserName?: string;
 }
 
 export interface AcademySessionTask {
@@ -123,8 +142,13 @@ export interface AcademySessionTask {
   reviewNote?: string;
   reviewedAt?: string;
   reviewedByName?: string;
+  attachments?: BusinessAttachment[];
   completedByName?: string;
   completedAt?: string;
+}
+
+export interface AcademyMyTask extends AcademySessionTask {
+  session: Pick<AcademySession, "id" | "title" | "startsAt" | "endsAt" | "status">;
 }
 
 export interface AcademyEngagement {
@@ -210,6 +234,10 @@ export type CreateAcademySessionInput = Pick<
   | "facilitatorUserId"
   | "lecturerUserId"
   | "collaboratorUserIds"
+  | "projectOwnerUserId"
+  | "contentOwnerUserId"
+  | "materialOwnerUserId"
+  | "reviewOwnerUserId"
 >;
 export type SaveAcademyEngagementInput = Omit<
   AcademyEngagement,

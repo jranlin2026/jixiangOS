@@ -10,11 +10,28 @@ import type {
   AcademySessionTaskRecord,
 } from "./academyService";
 import { STORAGE_KEYS } from "../../../src/shared/utils/constants";
+import { BUSINESS_ATTACHMENT_DOMAIN } from "../businessAttachmentService";
 
 const ACADEMY_COURSE_ASSET_DOMAIN = "academy_course_assets";
 const ACADEMY_COURSE_CATEGORY_DOMAIN = "academy_course_categories";
+const ACADEMY_TASK_ATTACHMENT_DOMAIN = "academy_task_attachments";
 const ACADEMY_ALL_EMPLOYEES_MARKER = "__academy_all_employees__";
 const ACADEMY_INVITABLE_MARKER = "__academy_invitable__";
+
+const publicTaskAttachment = (row: any) => {
+  const data = row?.data && typeof row.data === "object" ? row.data as any : {};
+  if (data.category !== "academy-task-evidence") return null;
+  return {
+    id: String(data.id || row.recordId || ""),
+    name: String(data.name || row.title || ""),
+    mimeType: String(data.mimeType || "application/octet-stream"),
+    size: Number(data.size || 0),
+    category: "academy-task-evidence" as const,
+    uploadedById: String(data.uploadedById || ""),
+    uploadedByName: String(data.uploadedByName || ""),
+    uploadedAt: String(data.uploadedAt || row.createdAt?.toISOString?.() || ""),
+  };
+};
 
 const mapCourse = (record: any): AcademyCourseRecord => ({
   ...record,
@@ -305,6 +322,36 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
       ]);
       return { items: items.map(mapSession), total };
     },
+    async listPublicCalendar({ start, end }) {
+      const rows = await prisma.academySession.findMany({
+        where: {
+          status: { not: "CANCELLED" },
+          startsAt: { lt: end },
+          endsAt: { gt: start },
+        },
+        select: {
+          id: true,
+          title: true,
+          startsAt: true,
+          endsAt: true,
+          deliveryMode: true,
+          status: true,
+          lecturerUserName: true,
+          course: { select: { title: true } },
+        },
+        orderBy: [{ startsAt: "asc" }, { title: "asc" }],
+      });
+      return rows.map((row: any) => ({
+        id: row.id,
+        title: row.title,
+        courseTitle: row.course?.title || row.title,
+        startsAt: row.startsAt,
+        endsAt: row.endsAt,
+        deliveryMode: row.deliveryMode,
+        status: row.status,
+        lecturerUserName: row.lecturerUserName,
+      }));
+    },
     async findSessionById(id, scope) {
       const record = scope
         ? await prisma.academySession.findFirst({ where: { id, ...sessionScopeWhere(scope) } })
@@ -361,6 +408,56 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         orderBy: { createdAt: "asc" },
       });
     },
+    async listMyTasks(userId, { page, pageSize, status }) {
+      const where = {
+        assigneeUserId: userId,
+        ...(status === "OPEN"
+          ? { status: { notIn: ["DONE", "SKIPPED"] } }
+          : status ? { status } : {}),
+      };
+      const select = {
+        id: true,
+        sessionId: true,
+        templateKey: true,
+        title: true,
+        category: true,
+        isRequired: true,
+        status: true,
+        note: true,
+        assigneeUserId: true,
+        assigneeUserName: true,
+        collaboratorNames: true,
+        dueAt: true,
+        acceptanceCriteria: true,
+        submissionNote: true,
+        submittedAt: true,
+        submittedById: true,
+        submittedByName: true,
+        reviewNote: true,
+        reviewedAt: true,
+        reviewedById: true,
+        reviewedByName: true,
+        completedAt: true,
+        completedById: true,
+        completedByName: true,
+        createdAt: true,
+        updatedAt: true,
+        session: {
+          select: { id: true, title: true, startsAt: true, endsAt: true, status: true },
+        },
+      };
+      const [items, total] = await prisma.$transaction([
+        prisma.academySessionTask.findMany({
+          where,
+          select,
+          orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        prisma.academySessionTask.count({ where }),
+      ]);
+      return { items, total };
+    },
     async findTaskById(id, scope) {
       return scope
         ? prisma.academySessionTask.findFirst({
@@ -378,6 +475,110 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         if (error?.code === "P2025") return null;
         throw error;
       }
+    },
+    async listTaskAttachments(taskId) {
+      const result = await prisma.businessRecord.findMany({
+        where: { domain: ACADEMY_TASK_ATTACHMENT_DOMAIN, recordId: taskId },
+        select: { recordId: true, data: true },
+      });
+      if (!result.length) return [];
+      const data = result[0].data as any;
+      const attachmentIds = Array.isArray(data?.attachmentIds) ? data.attachmentIds.map(String) : [];
+      if (!attachmentIds.length) return [];
+      const rows = await prisma.businessRecord.findMany({
+        where: { domain: BUSINESS_ATTACHMENT_DOMAIN, recordId: { in: attachmentIds } },
+      });
+      const byId = new Map(rows.map((row: any) => [row.recordId, publicTaskAttachment(row)]));
+      return attachmentIds.map((id: string) => byId.get(id)).filter(Boolean);
+    },
+    async listTaskAttachmentsByTaskIds(taskIds) {
+      const uniqueTaskIds = [...new Set(taskIds.filter(Boolean))];
+      const result = new Map(uniqueTaskIds.map((taskId) => [taskId, [] as any[]]));
+      if (!uniqueTaskIds.length) return result;
+      const links = await prisma.businessRecord.findMany({
+        where: { domain: ACADEMY_TASK_ATTACHMENT_DOMAIN, recordId: { in: uniqueTaskIds } },
+        select: { recordId: true, data: true },
+      });
+      const attachmentIds = [...new Set(links.flatMap((row: any) => {
+        const data = row.data as any;
+        return Array.isArray(data?.attachmentIds) ? data.attachmentIds.map(String) : [];
+      }))];
+      if (!attachmentIds.length) return result;
+      const attachmentRows = await prisma.businessRecord.findMany({
+        where: { domain: BUSINESS_ATTACHMENT_DOMAIN, recordId: { in: attachmentIds } },
+      });
+      const byId = new Map(attachmentRows.map((row: any) => [row.recordId, publicTaskAttachment(row)]));
+      links.forEach((row: any) => {
+        const data = row.data as any;
+        const items = (Array.isArray(data?.attachmentIds) ? data.attachmentIds : [])
+          .map((id: unknown) => byId.get(String(id)))
+          .filter(Boolean);
+        result.set(row.recordId, items);
+      });
+      return result;
+    },
+    async replaceTaskAttachments(taskId, attachmentIds, actor) {
+      const updatedAt = new Date();
+      await prisma.businessRecord.upsert({
+        where: { domain_recordId: { domain: ACADEMY_TASK_ATTACHMENT_DOMAIN, recordId: taskId } },
+        create: {
+          id: `${ACADEMY_TASK_ATTACHMENT_DOMAIN}:${taskId}`,
+          domain: ACADEMY_TASK_ATTACHMENT_DOMAIN,
+          recordId: taskId,
+          title: "商学院任务交付附件",
+          owner: actor.name,
+          eventAt: updatedAt,
+          data: { taskId, attachmentIds, updatedById: actor.id, updatedByName: actor.name, updatedAt: updatedAt.toISOString() },
+        },
+        update: {
+          owner: actor.name,
+          eventAt: updatedAt,
+          data: { taskId, attachmentIds, updatedById: actor.id, updatedByName: actor.name, updatedAt: updatedAt.toISOString() },
+        },
+      });
+      const links = await prisma.businessRecord.findMany({
+        where: { domain: ACADEMY_TASK_ATTACHMENT_DOMAIN, recordId: taskId },
+        select: { recordId: true, data: true },
+      });
+      if (!links.length || !attachmentIds.length) return [];
+      const attachmentRows = await prisma.businessRecord.findMany({
+        where: { domain: BUSINESS_ATTACHMENT_DOMAIN, recordId: { in: attachmentIds } },
+      });
+      const byId = new Map<string, ReturnType<typeof publicTaskAttachment>>(attachmentRows.map((row: any) => [String(row.recordId), publicTaskAttachment(row)]));
+      return attachmentIds.map((id) => byId.get(id)).filter((item): item is NonNullable<typeof item> => Boolean(item));
+    },
+    async removeTaskAttachmentReference(taskId, attachmentId) {
+      const row = await prisma.businessRecord.findUnique({
+        where: { domain_recordId: { domain: ACADEMY_TASK_ATTACHMENT_DOMAIN, recordId: taskId } },
+        select: { data: true },
+      });
+      const data = row?.data as any;
+      const current = Array.isArray(data?.attachmentIds) ? data.attachmentIds.map(String) : [];
+      const attachmentIds = current.filter((id: string) => id !== attachmentId);
+      if (attachmentIds.length === current.length) return;
+      await prisma.businessRecord.update({
+        where: { domain_recordId: { domain: ACADEMY_TASK_ATTACHMENT_DOMAIN, recordId: taskId } },
+        data: { data: { ...data, attachmentIds, updatedAt: new Date().toISOString() } },
+      });
+    },
+    async isTaskAttachmentLinked(taskId, attachmentId) {
+      const row = await prisma.businessRecord.findUnique({
+        where: { domain_recordId: { domain: ACADEMY_TASK_ATTACHMENT_DOMAIN, recordId: taskId } },
+        select: { data: true },
+      });
+      const data = row?.data as any;
+      return Array.isArray(data?.attachmentIds) && data.attachmentIds.map(String).includes(attachmentId);
+    },
+    async listLinkedTaskAttachmentIds(taskIds) {
+      if (!taskIds.length) return new Set<string>();
+      const rows = await prisma.businessRecord.findMany({
+        where: { domain: ACADEMY_TASK_ATTACHMENT_DOMAIN, recordId: { in: taskIds } },
+        select: { data: true },
+      });
+      return new Set<string>(rows.flatMap((row: any) => {
+        const data = row.data as any;
+        return Array.isArray(data?.attachmentIds) ? data.attachmentIds.map(String) : [];
+      }));
     },
     async upsertEngagement(engagement: AcademyEngagementRecord) {
       const {

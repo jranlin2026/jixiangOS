@@ -276,9 +276,15 @@ const settingsService = createSettingsService(prisma);
 const positionGovernanceService = createPositionGovernanceService(prisma);
 const orderTypeConfigCommandService = createOrderTypeConfigCommandService(prisma);
 const storageService = createStorageService(prisma);
+let academyService: ReturnType<typeof createAcademyService>;
 const businessAttachmentService = createBusinessAttachmentService({
   repository: createPrismaBusinessAttachmentRepository(prisma),
   rootDir: businessAttachmentRoot,
+  authorizeAcademyCourseAsset: (input) => academyService.authorizeCourseAsset(input),
+  authorizeAcademyTaskEvidence: (input) => academyService.authorizeTaskEvidence(input),
+  onAcademyTaskEvidenceRemoved: (taskId, attachmentId) => academyService.removeTaskAttachmentReference(taskId, attachmentId),
+  isAcademyTaskEvidenceLinked: (taskId, attachmentId) => academyService.isTaskAttachmentLinked(taskId, attachmentId),
+  listLinkedAcademyTaskEvidenceIds: (taskIds) => academyService.listLinkedTaskAttachmentIds(taskIds),
 });
 const assetListService = createAssetListService(storageService, assetStorageContext);
 const deliveryAssignmentService = createDeliveryAssignmentService(prisma);
@@ -334,7 +340,7 @@ const knowledgeService = createKnowledgeService({
   fileStore: knowledgeFileStore,
   searchProvider: createKeywordKnowledgeSearchProvider(),
 });
-const academyService = createAcademyService(createPrismaAcademyRepository(prisma as any), {
+academyService = createAcademyService(createPrismaAcademyRepository(prisma as any), {
   resolveScope: async (actor) => {
     const [users, roles, departments] = await Promise.all([
       prisma.user.findMany(),
@@ -376,6 +382,9 @@ const academyService = createAcademyService(createPrismaAcademyRepository(prisma
     const order = result.code === 0 ? result.data : null;
     return order ? { id: order.id, orderNo: order.orderNo, customerId: order.customerId } : null;
   },
+  addCustomerFollowUp: (customerId, input, actor) => customerListService.addFollowUp(customerId, input, actor),
+  findBusinessAttachment: (id) => businessAttachmentService.inspect(id),
+  purgeBusinessAttachment: (id) => businessAttachmentService.purge(id),
 });
 const positionStandardService = createPositionStandardService({
   repository: createPrismaPositionStandardRepository(prisma as any),
@@ -501,11 +510,39 @@ const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KE
 const requireEnablementRead = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE);
 const requireEnablementReview = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_REVIEW, 'write');
 const requireEnablementPublish = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_PUBLISH, 'write');
-const requireAcademyRead = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_VIEW);
+const requireAcademyDashboardRead = createRequireAnyPermission(authService, [
+  PERMISSION_KEYS.ACADEMY_PLAN_MANAGE,
+  PERMISSION_KEYS.ACADEMY_COURSE_MANAGE,
+  PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
+  PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE,
+  PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE,
+]);
+const requireAcademyCourseRead = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE);
+const requireAcademyCourseListRead = createRequireAnyPermission(authService, [
+  PERMISSION_KEYS.ACADEMY_COURSE_MANAGE,
+  PERMISSION_KEYS.ACADEMY_PLAN_MANAGE,
+  PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
+]);
+const requireAcademySessionRead = createRequireAnyPermission(authService, [
+  PERMISSION_KEYS.ACADEMY_PLAN_MANAGE,
+  PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
+  PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE,
+  PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE,
+]);
+const requireAcademySessionDetailRead = createRequireAnyPermission(authService, [
+  PERMISSION_KEYS.ACADEMY_PLAN_MANAGE,
+  PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
+  PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE,
+  PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE,
+]);
 const requireAcademyCourseWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, 'write');
 const requireAcademyArrangementWrite = createRequireAnyPermission(authService, [PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE], 'write');
 const requireAcademySessionWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, 'write');
-const requireAcademyTaskWrite = requireAcademyRead;
+// A specifically assigned employee may execute only their own Academy task
+// even when their role does not grant access to Academy management pages.
+// The service enforces assignee-only transitions; review and broad task
+// management still require ACADEMY_SESSION_MANAGE.
+const requireAcademyTaskWrite = requireAuthenticated;
 const requireAcademyEngagementWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE, 'write');
 const requireAcademyReviewWrite = createRequireAuth(authService, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE, 'write');
 const assignableUsersPermissions = [
@@ -529,6 +566,7 @@ const assignableUsersPermissions = [
   { permissionKey: PERMISSION_KEYS.ASSETS_PHONES, action: 'write' },
   { permissionKey: PERMISSION_KEYS.ASSETS_ACCOUNTS, action: 'write' },
   { permissionKey: PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.ACADEMY_PLAN_MANAGE, action: 'write' },
   { permissionKey: PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, action: 'write' },
 ];
 const runtimeStorageKeys = [
@@ -596,7 +634,12 @@ app.use('/api/enablement/knowledge', createEnablementKnowledgeRouter({
 }));
 app.use('/api/academy', createAcademyRouter({
   service: academyService,
-  requireRead: requireAcademyRead,
+  requireAuthenticated,
+  requireDashboardRead: requireAcademyDashboardRead,
+  requireCourseListRead: requireAcademyCourseListRead,
+  requireCourseManageRead: requireAcademyCourseRead,
+  requireSessionRead: requireAcademySessionRead,
+  requireSessionDetailRead: requireAcademySessionDetailRead,
   requireCourseWrite: requireAcademyCourseWrite,
   requireArrangementWrite: requireAcademyArrangementWrite,
   requireSessionWrite: requireAcademySessionWrite,
@@ -1761,7 +1804,10 @@ app.post(
 app.post(
   '/api/business-attachments',
   requireStorageAccess,
-  express.raw({ type: '*/*', limit: '20mb' }),
+  // The route accepts the largest supported category; category-specific
+  // limits (task evidence 20 MB, course assets 200 MB, images 10 MB) are
+  // enforced by businessAttachmentService before anything is persisted.
+  express.raw({ type: '*/*', limit: '200mb' }),
   async (req: AuthenticatedRequest, res) => {
     const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
     const result = await businessAttachmentService.upload({
@@ -2368,6 +2414,11 @@ async function startServer() {
   customerBatchWorker.start();
   businessImportWorker.start();
   notificationWorker.start();
+  void businessAttachmentService.cleanupExpiredAcademyTaskEvidence().catch(() => undefined);
+  const taskEvidenceCleanupTimer = setInterval(() => {
+    void businessAttachmentService.cleanupExpiredAcademyTaskEvidence().catch(() => undefined);
+  }, 60 * 60 * 1000);
+  taskEvidenceCleanupTimer.unref();
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return;
@@ -2375,6 +2426,7 @@ async function startServer() {
     await customerBatchWorker.stop();
     await businessImportWorker.stop();
     await notificationWorker.stop();
+    clearInterval(taskEvidenceCleanupTimer);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await prisma.$disconnect();
   };

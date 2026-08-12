@@ -23,6 +23,12 @@ const ACADEMY_MIME_TYPES = new Set([
   'text/plain',
   'video/mp4',
 ]);
+const ACADEMY_TASK_MIME_TYPES = new Set([
+  ...DELIVERY_MIME_TYPES,
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain',
+]);
 const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const DELIVERY_MAX_BYTES = 20 * 1024 * 1024;
 const ACADEMY_MAX_BYTES = 200 * 1024 * 1024;
@@ -34,7 +40,11 @@ const CATEGORIES = new Set<BusinessAttachmentCategory>([
   'recovery-chat-evidence',
   'delivery-task-file',
   'academy-course-asset',
+  'academy-task-evidence',
 ]);
+
+const ACADEMY_TASK_DRAFT_PREFIX = 'academy-task:';
+const ACADEMY_COURSE_DRAFT_PATTERN = /^academy-course-([A-Za-z0-9_-]{1,80})-(PPT|SCRIPT|CASE|POSTER|INVITATION|REPLAY)$/;
 
 export interface BusinessAttachmentRecord extends BusinessAttachment {
   storageName: string;
@@ -45,6 +55,7 @@ export interface BusinessAttachmentRepository {
   create(record: BusinessAttachmentRecord): Promise<void>;
   find(id: string): Promise<BusinessAttachmentRecord | null>;
   remove(id: string): Promise<void>;
+  listExpiredAcademyTaskEvidence(before: Date): Promise<BusinessAttachmentRecord[]>;
 }
 
 export interface BusinessAttachmentUpload {
@@ -77,7 +88,7 @@ function safeDisplayName(value: string): string {
 function permissionsFor(category: BusinessAttachmentCategory): { read: string[]; write: string[] } {
   if (category === 'academy-course-asset') {
     return {
-      read: [PERMISSION_KEYS.ACADEMY_VIEW, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE],
+      read: [PERMISSION_KEYS.ACADEMY_COURSE_MANAGE],
       write: [PERMISSION_KEYS.ACADEMY_COURSE_MANAGE],
     };
   }
@@ -109,6 +120,23 @@ function permissionsFor(category: BusinessAttachmentCategory): { read: string[];
   };
 }
 
+function academyTaskIdFromDraftKey(draftKey: string): string | null {
+  if (!draftKey.startsWith(ACADEMY_TASK_DRAFT_PREFIX)) return null;
+  const taskId = draftKey.slice(ACADEMY_TASK_DRAFT_PREFIX.length);
+  return /^[A-Za-z0-9_-]{1,80}$/.test(taskId) ? taskId : null;
+}
+
+function academyCourseIdFromDraftKey(draftKey: string): string | null {
+  return draftKey.match(ACADEMY_COURSE_DRAFT_PATTERN)?.[1] || null;
+}
+
+function resolveStoragePath(rootDir: string, storageName: string): string | null {
+  if (!storageName || storageName !== path.basename(storageName) || storageName.includes('\0')) return null;
+  const root = path.resolve(rootDir);
+  const candidate = path.resolve(root, storageName);
+  return candidate.startsWith(`${root}${path.sep}`) ? candidate : null;
+}
+
 function imageContentMatchesMime(mimeType: string, buffer: Buffer): boolean {
   if (mimeType === 'image/jpeg') return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
   if (mimeType === 'image/png') return buffer.length >= 8 && Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).equals(buffer.subarray(0, 8));
@@ -127,13 +155,14 @@ function validateUpload(upload: BusinessAttachmentUpload): string | null {
   if (!upload.file.buffer.length || upload.file.size <= 0) return '附件内容不能为空';
   const delivery = upload.category === 'delivery-task-file';
   const academy = upload.category === 'academy-course-asset';
-  const types = academy ? ACADEMY_MIME_TYPES : delivery ? DELIVERY_MIME_TYPES : IMAGE_MIME_TYPES;
-  if (!types.has(upload.file.mimeType)) return delivery || academy ? '文件类型不支持' : '凭证只支持图片';
+  const academyTask = upload.category === 'academy-task-evidence';
+  const types = academy ? ACADEMY_MIME_TYPES : academyTask ? ACADEMY_TASK_MIME_TYPES : delivery ? DELIVERY_MIME_TYPES : IMAGE_MIME_TYPES;
+  if (!types.has(upload.file.mimeType)) return delivery || academy || academyTask ? '文件类型不支持' : '凭证只支持图片';
   if (IMAGE_MIME_TYPES.has(upload.file.mimeType) && !imageContentMatchesMime(upload.file.mimeType, upload.file.buffer)) {
     return '图片内容与文件类型不匹配';
   }
-  const maxBytes = academy ? ACADEMY_MAX_BYTES : delivery ? DELIVERY_MAX_BYTES : IMAGE_MAX_BYTES;
-  if (upload.file.size > maxBytes) return `文件不能超过 ${academy ? 200 : delivery ? 20 : 10} MB`;
+  const maxBytes = academy ? ACADEMY_MAX_BYTES : delivery || academyTask ? DELIVERY_MAX_BYTES : IMAGE_MAX_BYTES;
+  if (upload.file.size > maxBytes) return `文件不能超过 ${academy ? 200 : delivery || academyTask ? 20 : 10} MB`;
   return null;
 }
 
@@ -165,6 +194,20 @@ export function createPrismaBusinessAttachmentRepository(
         where: { domain_recordId: { domain: BUSINESS_ATTACHMENT_DOMAIN, recordId: id } },
       });
     },
+    async listExpiredAcademyTaskEvidence(before) {
+      const rows = await prisma.businessRecord.findMany({
+        where: {
+          domain: BUSINESS_ATTACHMENT_DOMAIN,
+          eventAt: { lt: before },
+          data: { path: '$.category', equals: 'academy-task-evidence' },
+        },
+        orderBy: { eventAt: 'asc' },
+        take: 500,
+      });
+      return rows
+        .map((row) => row.data as unknown as BusinessAttachmentRecord)
+        .filter((record) => record?.category === 'academy-task-evidence');
+    },
   };
 }
 
@@ -173,6 +216,21 @@ export function createBusinessAttachmentService(options: {
   rootDir: string;
   now?: () => Date;
   id?: () => string;
+  authorizeAcademyTaskEvidence?: (input: {
+    taskId: string;
+    actor: AuthenticatedUser;
+    action: 'read' | 'write';
+    attachment?: BusinessAttachmentRecord;
+  }) => Promise<boolean>;
+  authorizeAcademyCourseAsset?: (input: {
+    courseId: string;
+    actor: AuthenticatedUser;
+    action: 'read' | 'write';
+    attachment?: BusinessAttachmentRecord;
+  }) => Promise<boolean>;
+  onAcademyTaskEvidenceRemoved?: (taskId: string, attachmentId: string) => Promise<void>;
+  isAcademyTaskEvidenceLinked?: (taskId: string, attachmentId: string) => Promise<boolean>;
+  listLinkedAcademyTaskEvidenceIds?: (taskIds: string[]) => Promise<Set<string>>;
 }) {
   const now = options.now || (() => new Date());
   const nextId = options.id || randomUUID;
@@ -181,8 +239,20 @@ export function createBusinessAttachmentService(options: {
     async upload(upload: BusinessAttachmentUpload, actor: AuthenticatedUser) {
       const error = validateUpload(upload);
       if (error) return failure<BusinessAttachment>(error, 400);
-      const access = permissionsFor(upload.category);
-      if (!allowed(actor, access.write, 'write')) return failure<BusinessAttachment>('无权上传该业务附件', 403);
+      if (upload.category === 'academy-task-evidence') {
+        const taskId = academyTaskIdFromDraftKey(upload.draftKey.trim());
+        if (!taskId || !options.authorizeAcademyTaskEvidence || !await options.authorizeAcademyTaskEvidence({ taskId, actor, action: 'write' })) {
+          return failure<BusinessAttachment>('无权上传该任务附件', 403);
+        }
+      } else if (upload.category === 'academy-course-asset') {
+        const courseId = academyCourseIdFromDraftKey(upload.draftKey.trim());
+        if (!courseId || !options.authorizeAcademyCourseAsset || !await options.authorizeAcademyCourseAsset({ courseId, actor, action: 'write' })) {
+          return failure<BusinessAttachment>('无权上传该课程资产', 403);
+        }
+      } else {
+        const access = permissionsFor(upload.category);
+        if (!allowed(actor, access.write, 'write')) return failure<BusinessAttachment>('无权上传该业务附件', 403);
+      }
 
       const id = nextId();
       const name = safeDisplayName(upload.file.originalName);
@@ -215,23 +285,91 @@ export function createBusinessAttachmentService(options: {
     async open(id: string, actor: AuthenticatedUser) {
       const record = await options.repository.find(id);
       if (!record) return failure<BusinessAttachmentOpen>('附件不存在', 404);
-      const access = permissionsFor(record.category);
-      if (record.uploadedById !== actor.id && !allowed(actor, access.read, 'read')) {
-        return failure<BusinessAttachmentOpen>('无权查看该附件', 403);
+      if (record.category === 'academy-task-evidence') {
+        const taskId = academyTaskIdFromDraftKey(record.draftKey);
+        if (!taskId || !options.authorizeAcademyTaskEvidence || !await options.authorizeAcademyTaskEvidence({ taskId, actor, action: 'read', attachment: record })) {
+          return failure<BusinessAttachmentOpen>('无权查看该附件', 403);
+        }
+      } else if (record.category === 'academy-course-asset') {
+        const courseId = academyCourseIdFromDraftKey(record.draftKey);
+        if (!courseId || !options.authorizeAcademyCourseAsset || !await options.authorizeAcademyCourseAsset({ courseId, actor, action: 'read', attachment: record })) {
+          return failure<BusinessAttachmentOpen>('无权查看该附件', 403);
+        }
+      } else {
+        const access = permissionsFor(record.category);
+        const uploaderMayRead = record.uploadedById === actor.id;
+        if (!uploaderMayRead && !allowed(actor, access.read, 'read')) {
+          return failure<BusinessAttachmentOpen>('无权查看该附件', 403);
+        }
       }
-      return success({ attachment: publicAttachment(record), absolutePath: path.join(options.rootDir, record.storageName) });
+      const absolutePath = resolveStoragePath(options.rootDir, record.storageName);
+      if (!absolutePath) return failure<BusinessAttachmentOpen>('附件存储记录无效', 400);
+      return success({ attachment: publicAttachment(record), absolutePath });
     },
 
     async remove(id: string, actor: AuthenticatedUser) {
       const record = await options.repository.find(id);
       if (!record) return failure<boolean>('附件不存在', 404);
-      const access = permissionsFor(record.category);
-      if (record.uploadedById !== actor.id && !allowed(actor, access.write, 'write')) {
-        return failure<boolean>('无权删除该附件', 403);
+      let taskId: string | null = null;
+      if (record.category === 'academy-task-evidence') {
+        taskId = academyTaskIdFromDraftKey(record.draftKey);
+        if (!taskId || !options.authorizeAcademyTaskEvidence || !await options.authorizeAcademyTaskEvidence({ taskId, actor, action: 'write', attachment: record })) {
+          return failure<boolean>('无权删除该附件', 403);
+        }
+      } else if (record.category === 'academy-course-asset') {
+        const courseId = academyCourseIdFromDraftKey(record.draftKey);
+        if (!courseId || !options.authorizeAcademyCourseAsset || !await options.authorizeAcademyCourseAsset({ courseId, actor, action: 'write', attachment: record })) {
+          return failure<boolean>('无权删除该附件', 403);
+        }
+      } else {
+        const access = permissionsFor(record.category);
+        const uploaderMayRemove = record.uploadedById === actor.id;
+        if (!uploaderMayRemove && !allowed(actor, access.write, 'write')) {
+          return failure<boolean>('无权删除该附件', 403);
+        }
       }
-      await rm(path.join(options.rootDir, record.storageName), { force: true });
+      const absolutePath = resolveStoragePath(options.rootDir, record.storageName);
+      if (!absolutePath) return failure<boolean>('附件存储记录无效', 400);
+      await rm(absolutePath, { force: true });
       await options.repository.remove(id);
+      if (taskId) await options.onAcademyTaskEvidenceRemoved?.(taskId, id);
       return success(true);
+    },
+    async inspect(id: string) {
+      return options.repository.find(id);
+    },
+    async purge(id: string) {
+      const record = await options.repository.find(id);
+      if (!record) return false;
+      const absolutePath = resolveStoragePath(options.rootDir, record.storageName);
+      if (!absolutePath) return false;
+      await rm(absolutePath, { force: true });
+      await options.repository.remove(id);
+      return true;
+    },
+    async cleanupExpiredAcademyTaskEvidence(maxAgeMs = 24 * 60 * 60 * 1000) {
+      const cutoff = new Date(now().getTime() - maxAgeMs);
+      const expired = await options.repository.listExpiredAcademyTaskEvidence(cutoff);
+      const candidates = expired.flatMap((record) => {
+        const taskId = academyTaskIdFromDraftKey(record.draftKey);
+        return taskId ? [{ record, taskId }] : [];
+      });
+      const linkedIds = options.listLinkedAcademyTaskEvidenceIds
+        ? await options.listLinkedAcademyTaskEvidenceIds([...new Set(candidates.map(({ taskId }) => taskId))])
+        : null;
+      let removed = 0;
+      for (const { record, taskId } of candidates) {
+        const isLinked = linkedIds
+          ? linkedIds.has(record.id)
+          : await options.isAcademyTaskEvidenceLinked?.(taskId, record.id);
+        if (isLinked) continue;
+        const absolutePath = resolveStoragePath(options.rootDir, record.storageName);
+        if (!absolutePath) continue;
+        await rm(absolutePath, { force: true });
+        await options.repository.remove(record.id);
+        removed += 1;
+      }
+      return removed;
     },
   };
 }

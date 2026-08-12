@@ -169,6 +169,7 @@ for (const permissionKey of [
   'ASSETS_DEVICES',
   'ASSETS_PHONES',
   'ASSETS_ACCOUNTS',
+  'ACADEMY_PLAN_MANAGE',
 ] as const) {
   assert.match(
     assignableUsersPermissionSource,

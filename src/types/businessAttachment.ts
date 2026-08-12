@@ -6,7 +6,8 @@ export type BusinessAttachmentCategory =
   | 'recovery-payment-proof'
   | 'recovery-chat-evidence'
   | 'delivery-task-file'
-  | 'academy-course-asset';
+  | 'academy-course-asset'
+  | 'academy-task-evidence';
 
 export interface BusinessAttachment {
   id: ID;

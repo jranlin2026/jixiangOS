@@ -14,7 +14,7 @@ const systemDataTable = readFileSync(join(root, 'src/shared/components/SystemDat
 assert.match(app, /ROUTES\.ACADEMY/, '商学院必须有独立受权路由');
 assert.match(sidebar, /label: '极享商学院'[\s\S]*path: ROUTES\.ACADEMY/, '商学院必须是左侧一级菜单');
 assert.doesNotMatch(enablement, /AcademyCenter|极享商学院/, '企业标准中心不得再承载商学院业务入口');
-['我的工作台', '课程资产', '课程运营', '邀约与转化'].forEach((label) => {
+['我的工作台', '课程库', '课程安排', '邀约跟进'].forEach((label) => {
   assert.ok(academy.includes(label), `商学院缺少${label}页面入口`);
 });
 assert.doesNotMatch(academy, /\{ value: "reviews", label: "经营复盘" \}/, '单次课程结果不得继续作为独立一级页面');
@@ -26,7 +26,7 @@ assert.match(academy, /remainingSessionPages[\s\S]*academyApi\.listSessions\(\{ 
 assert.doesNotMatch(academy, /<ProtectedFormDialog[^>]*detailOpen/, '场次执行详情不得继续使用超长弹窗');
 assert.match(academy, /customerApi\s*\.\s*fetchCustomers/, '学员与转化必须从CRM客户主档选择客户');
 assert.match(academy, /academyApi\.saveEngagement/, '学员与转化必须可保存邀约记录');
-assert.match(academyPlans, /学员执行[\s\S]*到课[\s\S]*课程评估/, '课程运营抽屉只维护到课、互动和课程评估');
+assert.match(academyPlans, /SOP流程[\s\S]*客户推进[\s\S]*复盘结果/, '课程安排抽屉应收敛为三个执行页签');
 assert.match(academy, /academyApi\.saveReview/, '经营复盘必须可编辑并保存');
 assert.match(academy, /academyApi\.saveCourseAsset/, '课程资产必须保存到后端并关联课程版本');
 assert.match(academy, /BusinessAttachmentPicker/, '课程资产必须复用私有业务附件组件');

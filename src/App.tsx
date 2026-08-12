@@ -246,16 +246,7 @@ const App: React.FC = () => {
           <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AI_ASSISTANT, PERMISSION_KEYS.AI_POSITION_ASSISTANT]} />}>
             <Route path={ROUTES.AI_ASSISTANT} element={<Suspense fallback={<PageLoader />}><AIAssistant /></Suspense>} />
           </Route>
-          <Route element={<ProtectedRoute permissionKeys={[
-            PERMISSION_KEYS.ACADEMY_VIEW,
-            PERMISSION_KEYS.ACADEMY_PLAN_MANAGE,
-            PERMISSION_KEYS.ACADEMY_COURSE_MANAGE,
-            PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
-            PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE,
-            PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE,
-          ]} />}>
-            <Route path={`${ROUTES.ACADEMY}/*`} element={<Suspense fallback={<PageLoader />}><Academy /></Suspense>} />
-          </Route>
+          <Route path={`${ROUTES.ACADEMY}/*`} element={<Suspense fallback={<PageLoader />}><Academy /></Suspense>} />
           <Route element={<ProtectedRoute permissionKeys={[
             PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE,
             PERMISSION_KEYS.ENABLEMENT_REVIEW,
