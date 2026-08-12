@@ -62,6 +62,8 @@ import type {
   AcademySession,
   AcademySessionDetail,
   AcademySessionTask,
+  AcademySopTemplate,
+  AcademySopTemplateStep,
   CreateAcademyCourseInput,
   CreateAcademySessionInput,
   SaveAcademyEngagementInput,
@@ -150,7 +152,24 @@ const emptyCourse: CreateAcademyCourseInput = {
   lecturerUserId: "",
   defaultDurationMinutes: 120,
   objectives: [],
+  sopTemplateId: "",
 };
+
+const emptySopStep = (index: number): AcademySopTemplateStep => ({
+  id: "",
+  templateId: "",
+  stepKey: `STEP_${index + 1}`,
+  title: "",
+  category: "BEFORE",
+  sortOrder: index + 1,
+  assigneeRole: "PROJECT_OWNER",
+  dueAnchor: "STARTS_AT",
+  dueOffsetMinutes: null,
+  completionMode: "CONFIRM",
+  requiresReview: false,
+  acceptanceCriteria: "",
+  isRequired: true,
+});
 const emptySession: CreateAcademySessionInput = {
   courseId: "",
   title: "",
@@ -343,6 +362,10 @@ const Academy: React.FC = () => {
   const [academyUsers, setAcademyUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [courseCategories, setCourseCategories] = useState<AcademyCourseCategory[]>([]);
+  const [sopTemplates, setSopTemplates] = useState<AcademySopTemplate[]>([]);
+  const [sopSettingsOpen, setSopSettingsOpen] = useState(false);
+  const [sopEditing, setSopEditing] = useState<AcademySopTemplate | null>(null);
+  const [sopEditingBaseline, setSopEditingBaseline] = useState("");
   const [categoryForm, setCategoryForm] = useState({ id: "", name: "", description: "", sortOrder: 1, isActive: true });
   const [sessionForm, setSessionForm] = useState(emptySession);
   const [engagementForm, setEngagementForm] = useState(emptyEngagement);
@@ -387,6 +410,20 @@ const Academy: React.FC = () => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
+
+  const selectedSessionCourse = courses.find((course) => course.id === sessionForm.courseId);
+  const selectedSessionTemplate = sopTemplates.find((template) => template.id === selectedSessionCourse?.sopTemplateId)
+    || sopTemplates.find((template) => template.isDefault && template.status === "ACTIVE");
+  const selectedSessionRoles = new Set(selectedSessionTemplate?.steps.map((step) => step.assigneeRole) || []);
+  const sessionOwnerFields: Array<[keyof CreateAcademySessionInput, string, AcademySopTemplateStep["assigneeRole"] | "ALWAYS"]> = [
+    ["projectOwnerUserId", "项目负责人 *", "ALWAYS"],
+    ["contentOwnerUserId", "课程内容负责人 *", "CONTENT_OWNER"],
+    ["materialOwnerUserId", "素材负责人 *", "MATERIAL_OWNER"],
+    ["lecturerUserId", "主讲人 *", "LECTURER"],
+    ["reviewOwnerUserId", "复盘负责人 *", "REVIEW_OWNER"],
+  ];
+  const visibleSessionOwnerFields = sessionOwnerFields.filter(([, , role]) => role === "ALWAYS" || selectedSessionRoles.has(role));
+  const missingSessionOwner = visibleSessionOwnerFields.some(([key]) => !String(sessionForm[key] || "").trim());
 
   const view: AcademyView = location.pathname.endsWith("/plans")
     ? "plans"
@@ -513,11 +550,12 @@ const Academy: React.FC = () => {
       setLoading(false);
       return;
     }
-    const [dashboardResponse, courseResponse, sessionResponse, categoryResponse] = await Promise.all([
+    const [dashboardResponse, courseResponse, sessionResponse, categoryResponse, sopResponse] = await Promise.all([
       privateLoadPlan.dashboard ? academyApi.getDashboard() : Promise.resolve(null),
       privateLoadPlan.courses ? academyApi.listCourses({ page: 1, pageSize: 100 }) : Promise.resolve(null),
       privateLoadPlan.sessions ? academyApi.listSessions({ page: 1, pageSize: 100 }) : Promise.resolve(null),
       privateLoadPlan.categories ? academyApi.listCourseCategories() : Promise.resolve(null),
+      privateLoadPlan.templates ? academyApi.listSopTemplates() : Promise.resolve(null),
     ]);
     const loadErrors: string[] = [];
     if (dashboardResponse) {
@@ -534,6 +572,10 @@ const Academy: React.FC = () => {
     if (categoryResponse) {
       if (categoryResponse.code === 0) setCourseCategories(categoryResponse.data);
       else loadErrors.push(`课程分类：${categoryResponse.message}`);
+    }
+    if (sopResponse) {
+      if (sopResponse.code === 0) setSopTemplates(sopResponse.data);
+      else loadErrors.push(`SOP模板：${sopResponse.message}`);
     }
     if (sessionResponse) {
       if (sessionResponse.code !== 0) {
@@ -747,7 +789,7 @@ const Academy: React.FC = () => {
   };
   const openCourseCreate = () => {
     setCourseEditingId("");
-    setCourseForm({ ...emptyCourse, ownerUserId: currentUser?.id || "" });
+    setCourseForm({ ...emptyCourse, ownerUserId: currentUser?.id || "", sopTemplateId: sopTemplates.find((item) => item.isDefault && item.status === "ACTIVE")?.id || "" });
     setCourseOpen(true);
   };
   const openCourseEdit = (course: AcademyCourse) => {
@@ -764,6 +806,7 @@ const Academy: React.FC = () => {
       lecturerUserId: course.lecturerUserId || "",
       defaultDurationMinutes: course.defaultDurationMinutes,
       objectives: course.objectives || [],
+      sopTemplateId: course.sopTemplateId || "",
     });
     setCourseOpen(true);
   };
@@ -775,6 +818,55 @@ const Academy: React.FC = () => {
     setCategoryForm({ id: "", name: "", description: "", sortOrder: courseCategories.length + 1, isActive: true });
     setCourseSettingsOpen(false);
     await loadBase();
+  };
+  const openSopSettings = (template?: AcademySopTemplate) => {
+    const draft: AcademySopTemplate = template ? { ...template, steps: template.steps.map((step) => ({ ...step })) } : {
+      id: "",
+      name: "",
+      description: "",
+      status: "ACTIVE",
+      isDefault: !sopTemplates.length,
+      steps: [emptySopStep(0)],
+      updatedAt: "",
+    };
+    setSopEditing(draft);
+    setSopEditingBaseline(JSON.stringify(draft));
+    setSopSettingsOpen(true);
+  };
+  const closeSopSettings = async (toList = false) => {
+    if (sopEditing && JSON.stringify(sopEditing) !== sopEditingBaseline) {
+      const discard = await confirm("当前SOP模板还有未保存内容，确定放弃吗？", "放弃模板修改");
+      if (!discard) return;
+    }
+    setSopEditing(null);
+    setSopEditingBaseline("");
+    if (!toList) setSopSettingsOpen(false);
+  };
+  const saveSopTemplate = async () => {
+    if (!sopEditing) return;
+    setSaving(true);
+    const response = await academyApi.saveSopTemplate({
+      id: sopEditing.id,
+      name: sopEditing.name,
+      description: sopEditing.description,
+      status: sopEditing.status,
+      isDefault: sopEditing.isDefault,
+      steps: sopEditing.steps.map((step, index) => ({ ...step, sortOrder: index + 1 })),
+    });
+    setSaving(false);
+    if (response.code !== 0) return alert(response.message, "SOP模板保存失败");
+    setSopSettingsOpen(false);
+    setSopEditing(null);
+    setSopEditingBaseline("");
+    await loadBase();
+  };
+  const moveSopStep = (index: number, direction: -1 | 1) => {
+    if (!sopEditing) return;
+    const target = index + direction;
+    if (target < 0 || target >= sopEditing.steps.length) return;
+    const steps = [...sopEditing.steps];
+    [steps[index], steps[target]] = [steps[target], steps[index]];
+    setSopEditing({ ...sopEditing, steps: steps.map((step, itemIndex) => ({ ...step, sortOrder: itemIndex + 1 })) });
   };
   const saveSession = async () => {
     setSaving(true);
@@ -886,7 +978,7 @@ const Academy: React.FC = () => {
     if (saving) return;
     if (status === "SUBMITTED") {
       if (taskEvidenceLoading || taskEvidenceUploading) return;
-      if (taskRequiresEvidence(task.templateKey) && !taskEvidenceAttachmentsRef.current.length) {
+      if (taskRequiresEvidence(task) && !taskEvidenceAttachmentsRef.current.length) {
         await alert("该节点需至少上传1个交付文件后才能提交。", "缺少交付文件");
         return;
       }
@@ -920,7 +1012,7 @@ const Academy: React.FC = () => {
     if (saving) return;
     if (status === "SUBMITTED") {
       if (taskEvidenceLoading || taskEvidenceUploading) return;
-      if (taskRequiresEvidence(task.templateKey) && !taskEvidenceAttachmentsRef.current.length) {
+      if (taskRequiresEvidence(task) && !taskEvidenceAttachmentsRef.current.length) {
         await alert("该节点需至少上传1个交付文件后才能提交。", "缺少交付文件");
         return;
       }
@@ -1633,7 +1725,7 @@ const Academy: React.FC = () => {
                         </Typography>
                       </Paper>
                     )}
-                    <BusinessAttachmentPicker
+                    {taskAction.task.completionMode === "ATTACHMENT" && <BusinessAttachmentPicker
                       title="交付证据"
                       description={taskAction.status === "SUBMITTED" ? "支持PPT、文档和图片，单个文件不超过20MB；完成说明可填写网盘或在线文档链接。" : "验收时可查看和下载负责人提交的文件。"}
                       value={taskEvidenceAttachments}
@@ -1650,7 +1742,7 @@ const Academy: React.FC = () => {
                       onUploadingChange={setTaskEvidenceUploading}
                       onUploaded={async (attachment) => bindTaskEvidence(taskAction.task.id, attachment)}
                       onRemove={async (attachment) => unbindTaskEvidence(taskAction.task.id, attachment)}
-                    />
+                    />}
                   </Box>
                 )}
                 <TextField
@@ -1678,7 +1770,7 @@ const Academy: React.FC = () => {
                     !taskAction ||
                     ((taskAction.status === "SUBMITTED" || taskAction.status === "REJECTED") && !taskActionNote.trim()) ||
                     (taskAction.status === "SUBMITTED" && !taskActionCanEditEvidence) ||
-                    (taskAction.status === "SUBMITTED" && taskRequiresEvidence(taskAction.task.templateKey) && !taskEvidenceAttachments.length)
+                    (taskAction.status === "SUBMITTED" && taskRequiresEvidence(taskAction.task) && !taskEvidenceAttachments.length)
                   }
                   onClick={() => taskAction && void updateTask(taskAction.task, taskAction.status, taskActionNote)}
                 >
@@ -1763,6 +1855,7 @@ const Academy: React.FC = () => {
             canManage={canCourse}
             onCreate={openCourseCreate}
             onSettings={() => setCourseSettingsOpen(true)}
+            onSopSettings={() => openSopSettings()}
             onView={(course) => {
               setSelectedCourseId(course.id);
               if (!courseAssets[course.id]) void loadCourseAssets(course.id);
@@ -1831,7 +1924,7 @@ const Academy: React.FC = () => {
         {workbenchTask && <Stack spacing={2}>
           <Stack direction="row" justifyContent="space-between" alignItems="flex-start"><Box><Typography fontSize={20} fontWeight={950}>{workbenchTask.title}</Typography><Typography fontSize={12.5} color="text.secondary">{workbenchTask.session.title} · {formatDate(workbenchTask.session.startsAt)}</Typography></Box><IconButton aria-label="关闭我的任务" onClick={() => { setWorkbenchTask(null); activeTaskEvidenceIdRef.current = ""; taskEvidenceAttachmentsRef.current = []; setTaskEvidenceAttachments([]); setTaskEvidenceLoading(false); setTaskEvidenceUploading(false); }}><CloseIcon /></IconButton></Stack>
           <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}><Typography fontSize={12} color="text.secondary">完成标准</Typography><Typography sx={{ mt: 0.5 }}>{workbenchTask.acceptanceCriteria || "完成后提交负责人确认"}</Typography><Divider sx={{ my: 1.5 }} /><Typography fontSize={12} color="text.secondary">截止时间</Typography><Typography sx={{ mt: 0.5 }}>{formatDate(workbenchTask.dueAt)}</Typography></Paper>
-          <BusinessAttachmentPicker
+          {workbenchTask.completionMode === "ATTACHMENT" && <BusinessAttachmentPicker
             title="任务交付文件"
             description="支持PPT、文档和图片，单个文件不超过20MB；完成说明可填写网盘或在线文档链接。"
             value={taskEvidenceAttachments}
@@ -1844,9 +1937,9 @@ const Academy: React.FC = () => {
             onUploadingChange={setTaskEvidenceUploading}
             onUploaded={async (attachment) => bindTaskEvidence(workbenchTask.id, attachment)}
             onRemove={async (attachment) => unbindTaskEvidence(workbenchTask.id, attachment)}
-          />
+          />}
           {workbenchTask.status === "PENDING" && <Button variant="contained" disabled={saving} onClick={() => void updateWorkbenchTask(workbenchTask, "IN_PROGRESS")}>开始处理</Button>}
-          {["IN_PROGRESS", "REJECTED", "BLOCKED"].includes(workbenchTask.status) && <><TextField multiline minRows={3} label="完成说明 *" helperText={taskEvidenceUploading ? "交付文件正在上传并关联，请稍候" : taskRequiresEvidence(workbenchTask.templateKey) && !taskEvidenceAttachments.length ? "该节点需至少上传1个交付文件后才能提交" : "可粘贴网盘或在线文档链接"} value={workbenchTaskNote} onChange={(event) => setWorkbenchTaskNote(event.target.value)} /><Button variant="contained" disabled={saving || taskEvidenceLoading || taskEvidenceUploading || !workbenchTaskNote.trim() || (taskRequiresEvidence(workbenchTask.templateKey) && !taskEvidenceAttachments.length)} onClick={() => void updateWorkbenchTask(workbenchTask, "SUBMITTED")}>提交验收</Button></>}
+          {["IN_PROGRESS", "REJECTED", "BLOCKED"].includes(workbenchTask.status) && <><TextField multiline minRows={3} label={workbenchTask.completionMode === "CONFIRM" ? "完成说明（选填）" : "完成说明 *"} helperText={taskEvidenceUploading ? "交付文件正在上传并关联，请稍候" : taskRequiresEvidence(workbenchTask) && !taskEvidenceAttachments.length ? "该步骤配置为必须上传附件" : workbenchTask.completionMode === "CHECKLIST" ? "确认完成标准后填写检查结果" : "可粘贴网盘或在线文档链接"} value={workbenchTaskNote} onChange={(event) => setWorkbenchTaskNote(event.target.value)} /><Button variant="contained" disabled={saving || taskEvidenceLoading || taskEvidenceUploading || (workbenchTask.completionMode !== "CONFIRM" && !workbenchTaskNote.trim()) || (taskRequiresEvidence(workbenchTask) && !taskEvidenceAttachments.length)} onClick={() => void updateWorkbenchTask(workbenchTask, "SUBMITTED")}>{workbenchTask.requiresReview ? "提交验收" : "确认完成"}</Button></>}
           {workbenchTask.status === "SUBMITTED" && <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Typography color="text.secondary">已提交，等待项目负责人确认。</Typography><Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>本次完成说明</Typography><Typography sx={{ mt: 0.4, whiteSpace: "pre-wrap" }}>{workbenchTask.submissionNote || "-"}</Typography></Paper>}
         </Stack>}
       </Drawer>
@@ -1882,6 +1975,9 @@ const Academy: React.FC = () => {
                       {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}
                     </TextField>
                     <TextField label="默认时长（分钟）*" type="number" value={courseForm.defaultDurationMinutes} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, defaultDurationMinutes: Number(event.target.value) }); }} />
+                    <TextField select required label="执行SOP模板 *" value={courseForm.sopTemplateId || ""} helperText="课程保存后固定绑定此模板；创建安排时生成独立任务快照。" onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, sopTemplateId: event.target.value }); }}>
+                      {sopTemplates.filter((item) => item.status === "ACTIVE").map((item) => <MenuItem key={item.id} value={item.id}>{item.name} · {item.steps.length}步</MenuItem>)}
+                    </TextField>
                   </Box>
                 </Paper>
 
@@ -1944,7 +2040,7 @@ const Academy: React.FC = () => {
               <Button
                 variant="contained"
                 disabled={
-                  saving || !courseForm.title.trim() || !courseForm.category || !courseForm.ownerUserId || !courseForm.defaultDurationMinutes
+                  saving || !courseForm.title.trim() || !courseForm.category || !courseForm.ownerUserId || !courseForm.sopTemplateId || !courseForm.defaultDurationMinutes
                 }
                 onClick={() => void saveCourse()}
               >
@@ -1954,6 +2050,23 @@ const Academy: React.FC = () => {
           </>
         )}
       </ProtectedFormDialog>
+      <Drawer anchor="right" open={sopSettingsOpen} onClose={() => void closeSopSettings()} PaperProps={{ role: "dialog", "aria-modal": true, "aria-label": "SOP模板设置", sx: { width: { xs: "100%", md: 760 }, maxWidth: "100vw", bgcolor: palette.soft } }}>
+        <Stack sx={{ minHeight: "100%" }}>
+          <Paper square elevation={0} sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${palette.line}` }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Box><Typography fontSize={20} fontWeight={950}>SOP模板设置</Typography><Typography fontSize={12.5} color="text.secondary">配置步骤、负责人角色、截止规则和完成方式</Typography></Box><IconButton aria-label="关闭SOP模板设置" onClick={() => void closeSopSettings()}><CloseIcon /></IconButton></Stack></Paper>
+          <Box sx={{ p: 2, flex: 1 }}>
+            {!sopEditing ? <Stack spacing={1.2}>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={() => openSopSettings()} sx={{ alignSelf: "flex-end" }}>新建SOP模板</Button>
+              {sopTemplates.map((template) => <Paper key={template.id} variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}><Box><Stack direction="row" spacing={1} alignItems="center"><Typography fontWeight={950}>{template.name}</Typography>{template.isDefault && <Chip size="small" color="primary" label="默认" />}<Chip size="small" label={template.status === "ACTIVE" ? "启用" : "停用"} /></Stack><Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>{template.description || "暂无说明"}</Typography><Typography fontSize={12} color="text.secondary" sx={{ mt: 0.5 }}>{template.steps.length} 个步骤</Typography></Box><Button size="small" variant="outlined" onClick={() => openSopSettings(template)}>编辑模板</Button></Stack></Paper>)}
+              {!sopTemplates.length && <Paper variant="outlined" sx={{ p: 5, textAlign: "center" }}><Typography fontWeight={900}>暂无SOP模板</Typography><Typography fontSize={12.5} color="text.secondary">新建模板后，课程即可绑定并生成动态任务。</Typography></Paper>}
+            </Stack> : <Stack spacing={1.5}>
+              <Paper variant="outlined" sx={{ ...panelSx, p: 1.6 }}><Stack spacing={1.2}><TextField label="模板名称 *" value={sopEditing.name} onChange={(event) => setSopEditing({ ...sopEditing, name: event.target.value })} /><TextField label="模板说明" multiline minRows={2} value={sopEditing.description} onChange={(event) => setSopEditing({ ...sopEditing, description: event.target.value })} /><Stack direction="row" spacing={1}><TextField select label="状态" fullWidth value={sopEditing.status} onChange={(event) => setSopEditing({ ...sopEditing, status: event.target.value as AcademySopTemplate["status"] })}><MenuItem value="ACTIVE">启用</MenuItem><MenuItem value="INACTIVE">停用</MenuItem></TextField><TextField select label="默认模板" fullWidth value={sopEditing.isDefault ? "YES" : "NO"} onChange={(event) => setSopEditing({ ...sopEditing, isDefault: event.target.value === "YES" })}><MenuItem value="YES">是</MenuItem><MenuItem value="NO">否</MenuItem></TextField></Stack></Stack></Paper>
+              {sopEditing.steps.map((step, index) => <Paper key={`${step.stepKey}-${index}`} variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Typography fontWeight={950}>第 {index + 1} 步</Typography><Stack direction="row" spacing={0.5}><Button size="small" disabled={index === 0} onClick={() => moveSopStep(index, -1)}>上移</Button><Button size="small" disabled={index === sopEditing.steps.length - 1} onClick={() => moveSopStep(index, 1)}>下移</Button><Button color="error" size="small" disabled={sopEditing.steps.length === 1} onClick={() => setSopEditing({ ...sopEditing, steps: sopEditing.steps.filter((_, itemIndex) => itemIndex !== index) })}>删除</Button></Stack></Stack><Box sx={{ mt: 1.2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 1.2 }}><TextField label="步骤名称 *" value={step.title} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, title: event.target.value, stepKey: step.id ? step.stepKey : `STEP_${index + 1}_${event.target.value.trim().replace(/\s+/g, "_").slice(0, 16) || index + 1}` }; setSopEditing({ ...sopEditing, steps }); }} /><TextField select label="负责人角色" value={step.assigneeRole} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, assigneeRole: event.target.value as AcademySopTemplateStep["assigneeRole"] }; setSopEditing({ ...sopEditing, steps }); }}>{[["PROJECT_OWNER", "项目负责人"], ["CONTENT_OWNER", "内容负责人"], ["MATERIAL_OWNER", "素材负责人"], ["LECTURER", "主讲人"], ["REVIEW_OWNER", "复盘负责人"]].map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField><TextField select label="流程阶段" value={step.category} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, category: event.target.value as AcademySopTemplateStep["category"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="BEFORE">课前准备</MenuItem><MenuItem value="DURING">课程执行</MenuItem><MenuItem value="AFTER">课后跟进</MenuItem></TextField><TextField select label="时间基准" value={step.dueAnchor} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, dueAnchor: event.target.value as AcademySopTemplateStep["dueAnchor"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="STARTS_AT">相对开课时间</MenuItem><MenuItem value="ENDS_AT">相对结束时间</MenuItem></TextField><TextField label="时间偏移（分钟）" type="number" helperText="负数表示提前；留空表示不设截止时间" value={step.dueOffsetMinutes ?? ""} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, dueOffsetMinutes: event.target.value === "" ? null : Number(event.target.value) }; setSopEditing({ ...sopEditing, steps }); }} /><TextField select label="完成方式" value={step.completionMode} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, completionMode: event.target.value as AcademySopTemplateStep["completionMode"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="CONFIRM">直接确认</MenuItem><MenuItem value="NOTE">填写说明</MenuItem><MenuItem value="ATTACHMENT">上传附件</MenuItem><MenuItem value="CHECKLIST">检查确认</MenuItem></TextField><TextField select label="是否必做" value={step.isRequired ? "YES" : "NO"} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, isRequired: event.target.value === "YES" }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="YES">必做</MenuItem><MenuItem value="NO">选做</MenuItem></TextField><TextField select label="是否需要验收" value={step.requiresReview ? "YES" : "NO"} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, requiresReview: event.target.value === "YES" }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="NO">提交后直接完成</MenuItem><MenuItem value="YES">项目负责人验收</MenuItem></TextField><TextField label="完成标准" multiline minRows={2} value={step.acceptanceCriteria || ""} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, acceptanceCriteria: event.target.value }; setSopEditing({ ...sopEditing, steps }); }} sx={{ gridColumn: { md: "1 / -1" } }} /></Box></Paper>)}
+              <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setSopEditing({ ...sopEditing, steps: [...sopEditing.steps, emptySopStep(sopEditing.steps.length)] })}>添加步骤</Button>
+            </Stack>}
+          </Box>
+          {sopEditing && <Paper square elevation={0} sx={{ p: 1.5, borderTop: `1px solid ${palette.line}` }}><Stack direction="row" justifyContent="flex-end" spacing={1}><Button onClick={() => void closeSopSettings(true)}>返回列表</Button><Button variant="contained" disabled={saving || !sopEditing.name.trim() || sopEditing.steps.some((step) => !step.title.trim())} onClick={() => void saveSopTemplate()}>{saving ? "保存中…" : "保存模板"}</Button></Stack></Paper>}
+        </Stack>
+      </Drawer>
       <ProtectedFormDialog
         open={courseSettingsOpen}
         onClose={() => setCourseSettingsOpen(false)}
@@ -2041,16 +2154,16 @@ const Academy: React.FC = () => {
                 </Paper>
 
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="2 本次负责人" helper="直接指定具体员工，保存后九个SOP节点自动进入他们的工作台。" />
+                  <SectionTitle title="2 本次负责人" helper="根据课程绑定的SOP模板，把模板角色分配给本次具体员工。" />
                   <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
-                    {[["projectOwnerUserId", "项目负责人 *"], ["contentOwnerUserId", "课程内容负责人 *"], ["materialOwnerUserId", "素材负责人 *"], ["lecturerUserId", "主讲人 *"], ["reviewOwnerUserId", "复盘负责人 *"]].map(([key, label]) => <TextField key={key} select label={label} value={String(sessionForm[key as keyof CreateAcademySessionInput] || "")} onChange={(event) => { markDirty(); const value = event.target.value; setSessionForm({ ...sessionForm, [key]: value, ...(key === "projectOwnerUserId" ? { facilitatorUserId: value } : {}) }); }}>{academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}</TextField>)}
+                    {visibleSessionOwnerFields.map(([key, label]) => <TextField key={key} select label={label} value={String(sessionForm[key] || "")} onChange={(event) => { markDirty(); const value = event.target.value; setSessionForm({ ...sessionForm, [key]: value, ...(key === "projectOwnerUserId" ? { facilitatorUserId: value } : {}) }); }}>{academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}</TextField>)}
                     <TextField select label="允许销售邀约" value={sessionForm.isInvitable ? "YES" : "NO"} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, isInvitable: event.target.value === "YES" }); }}><MenuItem value="YES">允许</MenuItem><MenuItem value="NO">不允许</MenuItem></TextField>
                   </Box>
                 </Paper>
 
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2, bgcolor: palette.blueSoft }}>
-                  <Typography fontWeight={900}>保存后将自动生成执行清单</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>固定生成课程确定、研发、包装、邀约、开课、分层、跟进和复盘流程。</Typography>
+                  <Typography fontWeight={900}>保存后将按模板生成任务快照</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{sopTemplates.find((item) => item.id === courses.find((course) => course.id === sessionForm.courseId)?.sopTemplateId)?.name || sopTemplates.find((item) => item.isDefault)?.name || "系统默认模板"}；模板以后调整，不影响本次已经生成的任务。</Typography>
                 </Paper>
               </Stack>
             </DialogContent>
@@ -2058,7 +2171,7 @@ const Academy: React.FC = () => {
               <Button onClick={() => void requestClose()}>取消</Button>
               <Button
                 variant="contained"
-                disabled={saving || !sessionForm.courseId || !sessionForm.startsAt || !sessionForm.endsAt || !sessionForm.projectOwnerUserId || !sessionForm.contentOwnerUserId || !sessionForm.materialOwnerUserId || !sessionForm.lecturerUserId || !sessionForm.reviewOwnerUserId || (sessionForm.deliveryMode === "ONLINE" ? !sessionForm.meetingUrl?.trim() : !sessionForm.venue.trim())}
+                disabled={saving || !sessionForm.courseId || !sessionForm.startsAt || !sessionForm.endsAt || missingSessionOwner || (sessionForm.deliveryMode === "ONLINE" ? !sessionForm.meetingUrl?.trim() : !sessionForm.venue.trim())}
                 onClick={() => void saveSession()}
               >
                 保存课程安排并生成任务
@@ -2408,6 +2521,9 @@ const Overview: React.FC<{
       assigneeUserName: task.assigneeUserName,
       dueAt: task.dueAt,
       acceptanceCriteria: task.acceptanceCriteria,
+      sortOrder: task.stepNumber,
+      completionMode: task.completionMode || "CONFIRM",
+      requiresReview: task.requiresReview === true,
       session: { id: selectedCourse.id, title: selectedCourse.title, startsAt: selectedCourse.startsAt, endsAt: selectedCourse.endsAt, status: selectedCourse.status },
     });
   };
@@ -2545,7 +2661,7 @@ const Overview: React.FC<{
           <LinearProgress variant="determinate" value={selectedCourse.progress.percent} sx={{ mt: 1.4, height: 8, borderRadius: 4 }} />
           <Paper variant="outlined" sx={{ mt: 1.4, p: 1.3, bgcolor: palette.blueSoft, borderColor: "#C9DBFF" }}>
             <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}>
-              <Box><Typography fontSize={12} color="text.secondary">当前步骤</Typography><Typography fontWeight={950}>{selectedCourse.currentStep?.timeLabel || "已完成"} · {selectedCourse.currentStep?.title || "全部流程已结束"}</Typography></Box>
+              <Box><Typography fontSize={12} color="text.secondary">当前步骤</Typography><Typography fontWeight={950}>{selectedCourse.currentStep ? `第${selectedCourse.currentStep.stepNumber || 1}步 · ${selectedCourse.currentStep.title}` : "全部流程已结束"}</Typography></Box>
               <Box><Typography fontSize={12} color="text.secondary">当前接力人</Typography><Typography fontWeight={900}>{selectedCourse.currentStep?.assigneeUserName || "暂无待处理负责人"}</Typography></Box>
               <Box><Typography fontSize={12} color="text.secondary">截止时间</Typography><Typography fontWeight={800}>{formatDate(selectedCourse.currentStep?.dueAt)}</Typography></Box>
               {statusAction && <Button variant="contained" onClick={() => selectedManagedCourse && onChangeSessionStatus(selectedManagedCourse, statusAction.status)}>{statusAction.label}</Button>}
@@ -2556,8 +2672,8 @@ const Overview: React.FC<{
               {selectedCourse.tasks.map((task) => {
                 const done = ["DONE", "SKIPPED"].includes(task.status);
                 const risky = ["BLOCKED", "REJECTED"].includes(task.status) || Boolean(task.dueAt && new Date(task.dueAt) < new Date() && !done);
-                return <Stack component={task.isMine ? "button" : "div"} type={task.isMine ? "button" : undefined} key={`${task.timeLabel}-${task.title}`} alignItems="center" spacing={0.55} onClick={task.isMine ? () => openMyStep(task.taskId) : undefined} sx={{ position: "relative", px: 0.6, py: 0, border: 0, bgcolor: "transparent", cursor: task.isMine ? "pointer" : "default", "&:focus-visible": { outline: `2px solid ${palette.blue}`, borderRadius: 1 } }}>
-                  <Box sx={{ width: 32, height: 32, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: done ? palette.green : risky ? palette.red : task.isMine ? palette.blue : "#fff", color: done || risky || task.isMine ? "#fff" : palette.blue, border: `2px solid ${done ? palette.green : risky ? palette.red : palette.blue}`, fontSize: 11, fontWeight: 950, zIndex: 1 }}>{done ? "✓" : task.timeLabel.replace("T", "") || "T"}</Box>
+                return <Stack component={task.isMine ? "button" : "div"} type={task.isMine ? "button" : undefined} key={`${task.stepNumber}-${task.title}`} alignItems="center" spacing={0.55} onClick={task.isMine ? () => openMyStep(task.taskId) : undefined} sx={{ position: "relative", px: 0.6, py: 0, border: 0, bgcolor: "transparent", cursor: task.isMine ? "pointer" : "default", "&:focus-visible": { outline: `2px solid ${palette.blue}`, borderRadius: 1 } }}>
+                  <Box sx={{ width: 32, height: 32, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: done ? palette.green : risky ? palette.red : task.isMine ? palette.blue : "#fff", color: done || risky || task.isMine ? "#fff" : palette.blue, border: `2px solid ${done ? palette.green : risky ? palette.red : palette.blue}`, fontSize: 11, fontWeight: 950, zIndex: 1 }}>{done ? "✓" : task.stepNumber || "·"}</Box>
                   <Typography fontSize={12} fontWeight={950} textAlign="center">{task.title}</Typography>
                   <Typography fontSize={11} color="text.secondary" textAlign="center">{task.assigneeUserName || "待分配"}</Typography>
                   <Chip size="small" label={task.isMine ? "我负责" : statusLabel[task.status] || task.status} sx={{ height: 21, bgcolor: task.isMine ? palette.blueSoft : undefined, color: task.isMine ? palette.blue : undefined, fontWeight: 800 }} />
@@ -3371,6 +3487,7 @@ export const CourseWorkspace: React.FC<{
   canManage: boolean;
   onCreate: () => void;
   onSettings: () => void;
+  onSopSettings: () => void;
   onView: (course: AcademyCourse) => void;
   onEdit: (course: AcademyCourse) => void;
   onUploadAsset: (course: AcademyCourse, assetType: AcademyAssetType) => void;
@@ -3391,6 +3508,7 @@ export const CourseWorkspace: React.FC<{
   canManage,
   onCreate,
   onSettings,
+  onSopSettings,
   onView,
   onEdit,
   onUploadAsset,
@@ -3447,7 +3565,7 @@ export const CourseWorkspace: React.FC<{
           <Typography fontSize={18} fontWeight={950}>课程库</Typography>
           <Typography fontSize={12.5} color="text.secondary">维护可重复使用的课程内容与资产</Typography>
         </Box>
-        {canManage && <Button variant="contained" startIcon={<AddIcon />} onClick={onCreate}>新建课程</Button>}
+        {canManage && <Stack direction="row" spacing={1}><Button variant="outlined" startIcon={<SettingsOutlinedIcon />} onClick={onSopSettings}>SOP模板设置</Button><Button variant="contained" startIcon={<AddIcon />} onClick={onCreate}>新建课程</Button></Stack>}
       </Stack>
       <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
         <Stack

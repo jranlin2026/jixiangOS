@@ -1055,15 +1055,59 @@ model AcademyCourse {
   ownerUserName          String   @db.VarChar(100)
   lecturerUserId         String?  @db.VarChar(64)
   lecturerUserName       String?  @db.VarChar(100)
+  sopTemplateId          String?  @db.VarChar(64)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
   versions AcademyCourseVersion[]
   sessions AcademySession[]
+  sopTemplate AcademySopTemplate? @relation(fields: [sopTemplateId], references: [id], onDelete: SetNull)
 
   @@index([status, updatedAt])
   @@index([category, status])
   @@map("academy_courses")
+}
+
+model AcademySopTemplate {
+  id            String   @id @db.VarChar(64)
+  name          String   @db.VarChar(160)
+  description   String   @db.Text
+  status        String   @default("ACTIVE") @db.VarChar(24)
+  isDefault     Boolean  @default(false)
+  createdById   String   @db.VarChar(64)
+  createdByName String   @db.VarChar(100)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  steps   AcademySopTemplateStep[]
+  courses AcademyCourse[]
+
+  @@index([status, updatedAt])
+  @@map("academy_sop_templates")
+}
+
+model AcademySopTemplateStep {
+  id                 String   @id @db.VarChar(64)
+  templateId         String   @db.VarChar(64)
+  stepKey            String   @db.VarChar(40)
+  title              String   @db.VarChar(200)
+  category           String   @db.VarChar(24)
+  sortOrder          Int
+  assigneeRole       String   @db.VarChar(40)
+  dueAnchor          String   @default("STARTS_AT") @db.VarChar(24)
+  dueOffsetMinutes   Int?
+  completionMode     String   @default("CONFIRM") @db.VarChar(24)
+  requiresReview     Boolean  @default(false)
+  acceptanceCriteria String?  @db.Text
+  isRequired         Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  template AcademySopTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, stepKey])
+  @@index([templateId, sortOrder])
+  @@map("academy_sop_template_steps")
 }
 
 model AcademyCourseVersion {
@@ -1149,6 +1193,12 @@ model AcademySessionTask {
   collaboratorNames  Json?
   dueAt              DateTime?
   acceptanceCriteria String?   @db.Text
+  sopTemplateId      String?   @db.VarChar(64)
+  sopTemplateStepId  String?   @db.VarChar(64)
+  assigneeRole       String?   @db.VarChar(40)
+  sortOrder          Int       @default(0)
+  completionMode     String    @default("CONFIRM") @db.VarChar(24)
+  requiresReview     Boolean   @default(false)
   submissionNote     String?   @db.Text
   submittedAt        DateTime?
   submittedById      String?   @db.VarChar(64)

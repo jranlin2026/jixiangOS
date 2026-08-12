@@ -20,11 +20,11 @@ assert.match(academy, /activeTaskEvidenceIdRef\.current !== taskId/, "快速切�
 assert.match(academy, /if \(activeTaskEvidenceIdRef\.current !== taskId\) return false;[\s\S]{0,180}academyApi\.addTaskAttachment/, "旧任务上传完成后不得把当前任务附件错误绑定到旧任务");
 assert.match(academy, /setTaskEvidenceAttachments\(\[\]\);[\s\S]{0,100}setTaskEvidenceLoading/, "加载新任务前应先清空上一个任务的证据");
 assert.match(academy, /负责人完成说明/, "管理者验收时应同时查看完成说明和交付文件");
-assert.match(academy, /taskRequiresEvidence\(workbenchTask\.templateKey\) && !taskEvidenceAttachments\.length/, "课程研发和包装节点没有交付文件时不应允许提交验收");
+assert.match(academy, /taskRequiresEvidence\(workbenchTask\) && !taskEvidenceAttachments\.length/, "配置为附件交付的步骤没有文件时不应允许提交");
 assert.match(academy, /setTaskEvidenceUploading/, "页面应感知交付文件的上传状态，避免上传途中提交任务");
 assert.match(academy, /taskEvidenceUploading \|\|/, "任务提交按钮应在交付文件上传过程中禁用");
 assert.match(academy, /taskAction\.task\.assigneeUserId === currentUser\?\.id/, "管理者验收时不得替负责人上传或删除交付文件");
-assert.match(academy, /taskRequiresEvidence\(taskAction\.task\.templateKey\)/, "课程安排中的研发和包装任务也应执行交付文件必传门禁");
+assert.match(academy, /taskRequiresEvidence\(taskAction\.task\)/, "课程安排中配置为附件交付的步骤也应执行文件必传门禁");
 assert.match(academy, /catch \{[\s\S]{0,220}交付文件加载失败/, "任务附件网络请求异常时应提示并恢复可操作状态");
 assert.match(picker, /const countUnit = imagesOnly \? '张' : '个文件'/, "非图片附件数量应使用文件单位，不应显示为张");
 assert.match(picker, /onUploadingChange\?/, "统一附件组件应向业务表单暴露上传状态");

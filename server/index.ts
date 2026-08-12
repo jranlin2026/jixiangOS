@@ -638,6 +638,7 @@ app.use('/api/academy', createAcademyRouter({
   requireDashboardRead: requireAcademyDashboardRead,
   requireCourseListRead: requireAcademyCourseListRead,
   requireCourseManageRead: requireAcademyCourseRead,
+  requireSopTemplateRead: requireAcademyCourseListRead,
   requireSessionRead: requireAcademySessionRead,
   requireSessionDetailRead: requireAcademySessionDetailRead,
   requireCourseWrite: requireAcademyCourseWrite,

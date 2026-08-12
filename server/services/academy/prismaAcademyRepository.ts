@@ -8,6 +8,7 @@ import type {
   AcademySessionRecord,
   AcademySessionStatus,
   AcademySessionTaskRecord,
+  AcademySopTemplateRecord,
 } from "./academyService";
 import { STORAGE_KEYS } from "../../../src/shared/utils/constants";
 import { BUSINESS_ATTACHMENT_DOMAIN } from "../businessAttachmentService";
@@ -37,6 +38,15 @@ const mapCourse = (record: any): AcademyCourseRecord => ({
   ...record,
   objectives: Array.isArray(record.objectives) ? record.objectives : [],
   defaultDurationMinutes: Number(record.defaultDurationMinutes),
+});
+
+const mapSopTemplate = (record: any): AcademySopTemplateRecord => ({
+  ...record,
+  steps: (record.steps || []).map((step: any) => ({
+    ...step,
+    sortOrder: Number(step.sortOrder),
+    dueOffsetMinutes: step.dueOffsetMinutes == null ? null : Number(step.dueOffsetMinutes),
+  })).sort((left: any, right: any) => left.sortOrder - right.sortOrder),
 });
 
 const mapSession = (record: any): AcademySessionRecord => {
@@ -90,6 +100,38 @@ const sessionScopeWhere = (scope: AcademyAccessScope) =>
 
 export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
   return {
+    async listSopTemplates() {
+      const rows = await prisma.academySopTemplate.findMany({
+        include: { steps: { orderBy: { sortOrder: "asc" } } },
+        orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
+      });
+      return rows.map(mapSopTemplate);
+    },
+    async findSopTemplateById(id) {
+      const row = await prisma.academySopTemplate.findUnique({
+        where: { id },
+        include: { steps: { orderBy: { sortOrder: "asc" } } },
+      });
+      return row ? mapSopTemplate(row) : null;
+    },
+    async findDefaultSopTemplate() {
+      const row = await prisma.academySopTemplate.findFirst({
+        where: { status: "ACTIVE" },
+        include: { steps: { orderBy: { sortOrder: "asc" } } },
+        orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
+      });
+      return row ? mapSopTemplate(row) : null;
+    },
+    async saveSopTemplate(template) {
+      const { steps, ...templateData } = template;
+      await prisma.$transaction(async (tx: any) => {
+        if (template.isDefault) await tx.academySopTemplate.updateMany({ where: { isDefault: true, id: { not: template.id } }, data: { isDefault: false } });
+        await tx.academySopTemplate.upsert({ where: { id: template.id }, create: templateData, update: templateData });
+        await tx.academySopTemplateStep.deleteMany({ where: { templateId: template.id } });
+        if (steps.length) await tx.academySopTemplateStep.createMany({ data: steps });
+      }, { isolationLevel: "Serializable" });
+      return template;
+    },
     async listCourseCategories() {
       const rows = await prisma.businessRecord.findMany({
         where: { domain: ACADEMY_COURSE_CATEGORY_DOMAIN },
@@ -137,11 +179,12 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         updatedAt: new Date(saved.updatedAt || row.updatedAt),
       };
     },
-    async listCourses({ page, pageSize, search, status }, scope) {
+    async listCourses({ page, pageSize, search, status, sopTemplateId }, scope) {
       const where = {
         AND: [
           courseScopeWhere(scope),
           status ? { status } : {},
+          ...(sopTemplateId ? [{ sopTemplateId }] : []),
           search
           ? {
               OR: [
@@ -346,6 +389,9 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
               assigneeUserName: true,
               dueAt: true,
               status: true,
+              sortOrder: true,
+              completionMode: true,
+              requiresReview: true,
             },
             orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
           },
@@ -432,8 +478,14 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         id: true,
         sessionId: true,
         templateKey: true,
+        sopTemplateId: true,
+        sopTemplateStepId: true,
+        assigneeRole: true,
+        sortOrder: true,
         title: true,
         category: true,
+        completionMode: true,
+        requiresReview: true,
         isRequired: true,
         status: true,
         note: true,

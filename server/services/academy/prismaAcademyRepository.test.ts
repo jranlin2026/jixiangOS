@@ -7,6 +7,14 @@ let businessRecordFindManyRows: any[] | null = null;
 let businessRecordFindManyQueue: any[][] = [];
 let businessRecordFindUniqueRow: any = null;
 const client: any = {
+  academySopTemplate: {
+    findMany: async (args: any) => (
+      calls.push({ model: "sopTemplate", method: "findMany", args }),
+      [{ id: "sop-1", name: "标准流程", description: "", status: "ACTIVE", isDefault: true, createdById: "u-1", createdByName: "管理员", createdAt: now, updatedAt: now, steps: [{ id: "step-2", templateId: "sop-1", stepKey: "SECOND", title: "第二步", category: "AFTER", sortOrder: 2, assigneeRole: "PROJECT_OWNER", dueAnchor: "ENDS_AT", dueOffsetMinutes: 30, completionMode: "NOTE", requiresReview: false, acceptanceCriteria: "记录结果", isRequired: true, createdAt: now, updatedAt: now }, { id: "step-1", templateId: "sop-1", stepKey: "FIRST", title: "第一步", category: "BEFORE", sortOrder: 1, assigneeRole: "PROJECT_OWNER", dueAnchor: "STARTS_AT", dueOffsetMinutes: -60, completionMode: "CONFIRM", requiresReview: false, acceptanceCriteria: "确认", isRequired: true, createdAt: now, updatedAt: now }] }]
+    ),
+    findUnique: async () => null,
+    findFirst: async () => null,
+  },
   academyCourse: {
     findMany: async (args: any) => (
       calls.push({ model: "course", method: "findMany", args }),
@@ -94,6 +102,14 @@ const client: any = {
   $transaction: async (arg: any) => {
     if (Array.isArray(arg)) return Promise.all(arg);
     return arg({
+      academySopTemplate: {
+        updateMany: async (args: any) => (calls.push({ model: "sopTemplate", method: "updateMany", args }), { count: 1 }),
+        upsert: async (args: any) => (calls.push({ model: "sopTemplate", method: "upsert", args }), args.create),
+      },
+      academySopTemplateStep: {
+        deleteMany: async (args: any) => (calls.push({ model: "sopStep", method: "deleteMany", args }), { count: 0 }),
+        createMany: async (args: any) => (calls.push({ model: "sopStep", method: "createMany", args }), { count: args.data.length }),
+      },
       academySession: { create: async ({ data }: any) => data },
       academySessionTask: {
         createMany: async ({ data }: any) => ({ count: data.length }),
@@ -103,6 +119,8 @@ const client: any = {
 };
 
 const repository = createPrismaAcademyRepository(client);
+const templates = await repository.listSopTemplates!();
+assert.deepEqual(templates[0].steps.map((step) => step.stepKey), ["FIRST", "SECOND"], "模板步骤必须按配置顺序返回");
 const initialCategories = await repository.listCourseCategories();
 assert.deepEqual(initialCategories, []);
 const categoryListCall = calls.find(
@@ -238,6 +256,9 @@ assert.deepEqual(publicCalendarCall.select, {
       assigneeUserName: true,
       dueAt: true,
       status: true,
+      sortOrder: true,
+      completionMode: true,
+      requiresReview: true,
     },
     orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
   },
@@ -250,6 +271,12 @@ const myTaskCall = calls.find((call) => call.model === "task" && call.method ===
 assert.deepEqual(myTaskCall.where, { assigneeUserId: "user-assignee", status: { notIn: ["DONE", "SKIPPED"] } });
 assert.equal(myTaskCall.skip, 10);
 assert.equal(myTaskCall.take, 10);
+assert.equal(myTaskCall.select.completionMode, true);
+assert.equal(myTaskCall.select.requiresReview, true);
+assert.equal(myTaskCall.select.sortOrder, true);
+assert.equal(myTaskCall.select.sopTemplateId, true);
+assert.equal(myTaskCall.select.sopTemplateStepId, true);
+assert.equal(myTaskCall.select.assigneeRole, true);
 assert.deepEqual(myTaskCall.select.session.select, {
   id: true,
   title: true,

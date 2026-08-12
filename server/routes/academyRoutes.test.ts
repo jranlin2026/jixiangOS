@@ -55,6 +55,7 @@ app.use('/api/academy', createAcademyRouter({
   requireDashboardRead: gate('dashboard-read'),
   requireCourseListRead: gate('course-read'),
   requireCourseManageRead: gate('course-read'),
+  requireSopTemplateRead: gate('course-read'),
   requireSessionRead: gate('session-read'),
   requireSessionDetailRead: gate('session-detail-read'),
   requireCourseWrite: allow,
@@ -191,6 +192,11 @@ permissionApp.use('/api/academy', createAcademyRouter({
     PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
   ]),
   requireCourseManageRead: createRequireAuth(viewOnlyAuth, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE),
+  requireSopTemplateRead: createRequireAnyPermission(viewOnlyAuth, [
+    PERMISSION_KEYS.ACADEMY_COURSE_MANAGE,
+    PERMISSION_KEYS.ACADEMY_PLAN_MANAGE,
+    PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
+  ]),
   requireSessionRead: createRequireAnyPermission(viewOnlyAuth, [
     PERMISSION_KEYS.ACADEMY_PLAN_MANAGE,
     PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
@@ -235,6 +241,7 @@ for (const permissionKey of [PERMISSION_KEYS.ACADEMY_PLAN_MANAGE, PERMISSION_KEY
     requireDashboardRead: createRequireAnyPermission(scopedAuth, [PERMISSION_KEYS.ACADEMY_PLAN_MANAGE, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE]),
     requireCourseListRead: createRequireAnyPermission(scopedAuth, [PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE]),
     requireCourseManageRead: createRequireAuth(scopedAuth, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE),
+    requireSopTemplateRead: createRequireAnyPermission(scopedAuth, [PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE]),
     requireSessionRead: createRequireAnyPermission(scopedAuth, [PERMISSION_KEYS.ACADEMY_PLAN_MANAGE, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE]),
     requireSessionDetailRead: createRequireAnyPermission(scopedAuth, [PERMISSION_KEYS.ACADEMY_PLAN_MANAGE, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE]),
     requireCourseWrite: allow,

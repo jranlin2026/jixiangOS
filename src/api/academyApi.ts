@@ -15,6 +15,7 @@ import type {
   AcademySessionDetail,
   AcademySessionStatus,
   AcademySessionTask,
+  AcademySopTemplate,
   AcademyTaskStatus,
   CreateAcademyCourseInput,
   CreateAcademySessionInput,
@@ -47,6 +48,12 @@ export const academyApi = {
   },
   listCourseCategories(): Promise<ApiResponse<AcademyCourseCategory[]>> {
     return backendRequest('/academy/course-categories');
+  },
+  listSopTemplates(): Promise<ApiResponse<AcademySopTemplate[]>> {
+    return backendRequest('/academy/sop-templates');
+  },
+  saveSopTemplate(input: Omit<AcademySopTemplate, 'updatedAt'>): Promise<ApiResponse<AcademySopTemplate>> {
+    return backendRequest('/academy/sop-templates', { method: 'PUT', body: JSON.stringify(input) });
   },
   saveCourseCategory(input: SaveAcademyCourseCategoryInput): Promise<ApiResponse<AcademyCourseCategory>> {
     return backendRequest('/academy/course-categories', { method: 'PUT', body: JSON.stringify(input) });

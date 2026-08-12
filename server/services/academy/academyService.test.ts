@@ -23,6 +23,7 @@ function createRepository(): AcademyRepository {
   const tasks: any[] = [];
   const engagements: any[] = [];
   const reviews: any[] = [];
+  const sopTemplates: any[] = [];
   const taskAttachments = new Map<string, any[]>();
   const users = [
     { id: actor.id, name: actor.name },
@@ -43,6 +44,16 @@ function createRepository(): AcademyRepository {
   );
   const products = [{ id: "product-ai", name: "AI企业升级计划" }];
   return {
+    listSopTemplates: async () => sopTemplates,
+    findSopTemplateById: async (id) => sopTemplates.find((item) => item.id === id) || null,
+    findDefaultSopTemplate: async () => sopTemplates.find((item) => item.isDefault && item.status === "ACTIVE") || null,
+    saveSopTemplate: async (template) => {
+      const index = sopTemplates.findIndex((item) => item.id === template.id);
+      if (template.isDefault) sopTemplates.forEach((item) => { item.isDefault = false; });
+      if (index >= 0) sopTemplates[index] = template;
+      else sopTemplates.push(template);
+      return template;
+    },
     listCourseCategories: async () => categories,
     upsertCourseCategory: async (category) => {
       const index = categories.findIndex((item) => item.id === category.id);
@@ -50,9 +61,9 @@ function createRepository(): AcademyRepository {
       else categories.push(category);
       return category;
     },
-    listCourses: async ({ page, pageSize }) => ({
-      items: courses.slice((page - 1) * pageSize, page * pageSize),
-      total: courses.length,
+    listCourses: async ({ page, pageSize, sopTemplateId }) => ({
+      items: courses.filter((course) => !sopTemplateId || course.sopTemplateId === sopTemplateId).slice((page - 1) * pageSize, page * pageSize),
+      total: courses.filter((course) => !sopTemplateId || course.sopTemplateId === sopTemplateId).length,
     }),
     findCourseByCode: async (code) =>
       courses.find((course) => course.code === code) || null,
@@ -289,6 +300,24 @@ const customCategory = await service.saveCourseCategory({ name: "老板增长课
 assert.equal(customCategory.code, 0);
 assert.equal(customCategory.data?.name, "老板增长课");
 
+const defaultSop = await service.saveSopTemplate({
+  id: "academy-sop-default-live",
+  name: "单场课程标准流程",
+  isDefault: true,
+  steps: [
+    { stepKey: "COURSE_CONFIRMATION", title: "课程确定", category: "BEFORE", assigneeRole: "PROJECT_OWNER", dueAnchor: "STARTS_AT", dueOffsetMinutes: -7200, completionMode: "NOTE", requiresReview: true, acceptanceCriteria: "课程目标已确认", isRequired: true },
+    { stepKey: "COURSE_DEVELOPMENT", title: "课程研发", category: "BEFORE", assigneeRole: "CONTENT_OWNER", dueAnchor: "STARTS_AT", dueOffsetMinutes: -5760, completionMode: "ATTACHMENT", requiresReview: true, acceptanceCriteria: "课件已完成", isRequired: true },
+    { stepKey: "COURSE_PACKAGING", title: "课程包装", category: "BEFORE", assigneeRole: "MATERIAL_OWNER", dueAnchor: "STARTS_AT", dueOffsetMinutes: -4320, completionMode: "ATTACHMENT", requiresReview: true, acceptanceCriteria: "素材已完成", isRequired: true },
+    { stepKey: "CUSTOMER_INVITATION", title: "客户邀约", category: "BEFORE", assigneeRole: "PROJECT_OWNER", dueAnchor: "STARTS_AT", dueOffsetMinutes: -2880, completionMode: "CONFIRM", requiresReview: false, acceptanceCriteria: "名单已确认", isRequired: true },
+    { stepKey: "PRECLASS_GATE", title: "开课确认", category: "BEFORE", assigneeRole: "PROJECT_OWNER", dueAnchor: "STARTS_AT", dueOffsetMinutes: -120, completionMode: "CHECKLIST", requiresReview: true, acceptanceCriteria: "已确认开课", isRequired: true },
+    { stepKey: "COURSE_DELIVERY", title: "课程执行", category: "DURING", assigneeRole: "LECTURER", dueAnchor: "ENDS_AT", dueOffsetMinutes: 0, completionMode: "NOTE", requiresReview: false, acceptanceCriteria: "完成授课", isRequired: true },
+    { stepKey: "CUSTOMER_SEGMENTATION", title: "客户分层", category: "AFTER", assigneeRole: "PROJECT_OWNER", dueAnchor: "ENDS_AT", dueOffsetMinutes: 30, completionMode: "CONFIRM", requiresReview: false, acceptanceCriteria: "完成分层", isRequired: true },
+    { stepKey: "DEAL_FOLLOW_UP", title: "成交跟进", category: "AFTER", assigneeRole: "PROJECT_OWNER", dueAnchor: "ENDS_AT", dueOffsetMinutes: 1440, completionMode: "CONFIRM", requiresReview: false, acceptanceCriteria: "完成跟进", isRequired: true },
+    { stepKey: "COURSE_REVIEW", title: "复盘优化", category: "AFTER", assigneeRole: "REVIEW_OWNER", dueAnchor: "ENDS_AT", dueOffsetMinutes: 4320, completionMode: "NOTE", requiresReview: true, acceptanceCriteria: "完成复盘", isRequired: true },
+  ],
+}, actor);
+assert.equal(defaultSop.code, 0);
+
 const courseResult = await service.createCourse(
   {
     code: "CLIENT-SHOULD-NOT-CONTROL-CODE",
@@ -399,10 +428,11 @@ const outsiderSession = await outsiderService.createSession(
     audience: "ALL_EMPLOYEES",
     isInvitable: true,
     facilitatorUserId: outsider.id,
+    lecturerUserId: outsider.id,
   },
   outsider,
 );
-assert.equal(outsiderSession.code, 0);
+assert.equal(outsiderSession.code, 0, outsiderSession.message);
 assert.equal(
   (await restrictedService.changeSessionStatus(outsiderSession.data!.id, "READY", actor)).code,
   404,
@@ -527,7 +557,7 @@ assert.deepEqual(
     "DEAL_FOLLOW_UP",
     "COURSE_REVIEW",
   ],
-  "新课程安排必须生成T-5至T+3的固定九节点SOP",
+  "未绑定模板时应兼容系统初始化的默认流程",
 );
 assert.deepEqual(
   Object.fromEntries(sessionResult.data!.tasks.map((task: any) => [task.templateKey, task.assigneeUserId])),
@@ -547,6 +577,35 @@ assert.deepEqual(
 assert.equal(sessionResult.data?.tasks.find((task: any) => task.templateKey === "COURSE_CONFIRMATION")?.dueAt?.toISOString(), "2026-08-05T09:00:00.000Z");
 assert.equal(sessionResult.data?.tasks.find((task: any) => task.templateKey === "COURSE_REVIEW")?.dueAt?.toISOString(), "2026-08-13T11:00:00.000Z");
 
+const compactTemplate = await service.saveSopTemplate({
+  name: "两步确认流程",
+  steps: [
+    { stepKey: "CONFIRM_SCOPE", title: "确认课程范围", category: "BEFORE", assigneeRole: "PROJECT_OWNER", dueAnchor: "STARTS_AT", dueOffsetMinutes: -60, completionMode: "CONFIRM", requiresReview: false, isRequired: true },
+    { stepKey: "RECORD_RESULT", title: "记录课程结果", category: "AFTER", assigneeRole: "PROJECT_OWNER", dueAnchor: "ENDS_AT", dueOffsetMinutes: 30, completionMode: "NOTE", requiresReview: false, isRequired: true },
+  ],
+}, actor);
+assert.equal(compactTemplate.code, 0);
+assert.equal((await service.updateCourse(courseResult.data!.id, { ...courseResult.data, sopTemplateId: compactTemplate.data!.id }, actor)).code, 0);
+const cannotDisableLinkedTemplate = await service.saveSopTemplate({ ...compactTemplate.data!, status: "INACTIVE" }, actor);
+assert.equal(cannotDisableLinkedTemplate.code, 409, "已绑定课程的模板不得直接停用");
+const compactSession = await service.createSession({
+  courseId: courseResult.data!.id,
+  title: "两步配置课程安排",
+  startsAt: "2026-08-20T09:00:00.000Z",
+  endsAt: "2026-08-20T11:00:00.000Z",
+  venue: "极享直播间",
+  capacity: 20,
+  projectOwnerUserId: actor.id,
+}, actor);
+assert.equal(compactSession.code, 0, "未被模板使用的负责人不应强制选择");
+assert.deepEqual(compactSession.data?.tasks.map((task: any) => task.title), ["确认课程范围", "记录课程结果"]);
+assert.deepEqual(compactSession.data?.tasks.map((task: any) => task.sortOrder), [1, 2]);
+assert.equal(compactSession.data?.tasks[0]?.completionMode, "CONFIRM");
+assert.equal(compactSession.data?.tasks[0]?.sopTemplateId, compactTemplate.data!.id);
+assert.equal(compactSession.data?.tasks[0]?.assigneeRole, "PROJECT_OWNER");
+assert.equal(compactSession.data?.tasks[1]?.dueAt?.toISOString(), "2026-08-20T11:30:00.000Z");
+assert.equal((await service.updateCourse(courseResult.data!.id, { ...courseResult.data, status: "ACTIVE", sopTemplateId: "" }, actor)).code, 0);
+
 const taskAuthorizationSession = await repository.createSession({
   ...sessionResult.data!,
   id: "task-authorization-session",
@@ -555,6 +614,7 @@ const taskAuthorizationSession = await repository.createSession({
   id: "task-authorization-task",
   sessionId: "task-authorization-session",
   status: "PENDING",
+  requiresReview: true,
   assigneeUserId: "task-worker",
   assigneeUserName: "任务执行人",
 } as any]);
@@ -717,6 +777,7 @@ for (const task of sessionResult.data!.tasks.filter(
     taskActor,
   );
   assert.equal(submitted.code, 0);
+  if (submitted.data?.status === "DONE") continue;
   const completed = await service.updateTask(
     task.id,
     { status: "DONE", reviewNote: "验收通过" },

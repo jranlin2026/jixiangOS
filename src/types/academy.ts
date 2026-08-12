@@ -19,6 +19,34 @@ export type AcademyAssetType =
   | "POSTER"
   | "INVITATION"
   | "REPLAY";
+export type AcademyTaskCompletionMode = "CONFIRM" | "NOTE" | "ATTACHMENT" | "CHECKLIST";
+export type AcademyTaskAssigneeRole = "PROJECT_OWNER" | "CONTENT_OWNER" | "MATERIAL_OWNER" | "LECTURER" | "REVIEW_OWNER";
+
+export interface AcademySopTemplateStep {
+  id: string;
+  templateId: string;
+  stepKey: string;
+  title: string;
+  category: "BEFORE" | "DURING" | "AFTER";
+  sortOrder: number;
+  assigneeRole: AcademyTaskAssigneeRole;
+  dueAnchor: "STARTS_AT" | "ENDS_AT";
+  dueOffsetMinutes?: number | null;
+  completionMode: AcademyTaskCompletionMode;
+  requiresReview: boolean;
+  acceptanceCriteria?: string | null;
+  isRequired: boolean;
+}
+
+export interface AcademySopTemplate {
+  id: string;
+  name: string;
+  description: string;
+  status: "ACTIVE" | "INACTIVE";
+  isDefault: boolean;
+  steps: AcademySopTemplateStep[];
+  updatedAt: string;
+}
 
 export interface AcademyDashboard {
   activeCourses: number;
@@ -45,6 +73,7 @@ export interface AcademyCourse {
   ownerUserId: string;
   lecturerUserId?: string | null;
   lecturerUserName?: string | null;
+  sopTemplateId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -125,7 +154,9 @@ export interface AcademyPublicCalendarItem {
     taskId?: string;
     templateKey?: string;
     acceptanceCriteria?: string;
-    timeLabel: string;
+    completionMode?: AcademyTaskCompletionMode;
+    requiresReview?: boolean;
+    stepNumber: number;
     title: string;
     assigneeUserName?: string;
     dueAt?: string;
@@ -136,7 +167,9 @@ export interface AcademyPublicCalendarItem {
     taskId?: string;
     templateKey?: string;
     acceptanceCriteria?: string;
-    timeLabel: string;
+    completionMode?: AcademyTaskCompletionMode;
+    requiresReview?: boolean;
+    stepNumber: number;
     title: string;
     assigneeUserName?: string;
     dueAt?: string;
@@ -159,6 +192,12 @@ export interface AcademySessionTask {
   collaboratorNames?: string[];
   dueAt?: string;
   acceptanceCriteria?: string;
+  sopTemplateId?: string;
+  sopTemplateStepId?: string;
+  assigneeRole?: AcademyTaskAssigneeRole;
+  sortOrder?: number;
+  completionMode?: AcademyTaskCompletionMode;
+  requiresReview?: boolean;
   submissionNote?: string;
   submittedAt?: string;
   submittedByName?: string;
@@ -235,6 +274,7 @@ export type CreateAcademyCourseInput = Pick<
   | "lecturerUserId"
   | "defaultDurationMinutes"
   | "objectives"
+  | "sopTemplateId"
 >;
 export type SaveAcademyCourseCategoryInput = Pick<AcademyCourseCategory, "name" | "description" | "sortOrder" | "isActive"> & { id?: string };
 export type CreateAcademySessionInput = Pick<

@@ -19,6 +19,7 @@ export function createAcademyRouter(deps: {
   requireDashboardRead: express.RequestHandler;
   requireCourseListRead: express.RequestHandler;
   requireCourseManageRead: express.RequestHandler;
+  requireSopTemplateRead: express.RequestHandler;
   requireSessionRead: express.RequestHandler;
   requireSessionDetailRead: express.RequestHandler;
   requireCourseWrite: express.RequestHandler;
@@ -52,6 +53,14 @@ export function createAcademyRouter(deps: {
   });
   router.get('/course-categories', deps.requireCourseManageRead, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.listCourseCategories(req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+  router.get('/sop-templates', deps.requireSopTemplateRead, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.listSopTemplates(req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
+  router.put('/sop-templates', deps.requireCourseWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.saveSopTemplate(req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
   router.put('/course-categories', deps.requireCourseWrite, async (req: AuthenticatedRequest, res) => {

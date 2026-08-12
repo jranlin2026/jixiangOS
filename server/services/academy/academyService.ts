@@ -18,6 +18,39 @@ export type AcademyTaskStatus =
   | "BLOCKED"
   | "SKIPPED";
 export type AcademyAssetType = "PPT" | "SCRIPT" | "CASE" | "POSTER" | "INVITATION" | "REPLAY";
+export type AcademyTaskCompletionMode = "CONFIRM" | "NOTE" | "ATTACHMENT" | "CHECKLIST";
+export type AcademyTaskAssigneeRole = "PROJECT_OWNER" | "CONTENT_OWNER" | "MATERIAL_OWNER" | "LECTURER" | "REVIEW_OWNER";
+
+export type AcademySopTemplateStepRecord = {
+  id: string;
+  templateId: string;
+  stepKey: string;
+  title: string;
+  category: "BEFORE" | "DURING" | "AFTER";
+  sortOrder: number;
+  assigneeRole: AcademyTaskAssigneeRole;
+  dueAnchor: "STARTS_AT" | "ENDS_AT";
+  dueOffsetMinutes?: number | null;
+  completionMode: AcademyTaskCompletionMode;
+  requiresReview: boolean;
+  acceptanceCriteria?: string | null;
+  isRequired: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type AcademySopTemplateRecord = {
+  id: string;
+  name: string;
+  description: string;
+  status: "ACTIVE" | "INACTIVE";
+  isDefault: boolean;
+  createdById: string;
+  createdByName: string;
+  createdAt: Date;
+  updatedAt: Date;
+  steps: AcademySopTemplateStepRecord[];
+};
 
 export type AcademyCourseRecord = {
   id: string;
@@ -37,6 +70,7 @@ export type AcademyCourseRecord = {
   ownerUserName: string;
   lecturerUserId?: string | null;
   lecturerUserName?: string | null;
+  sopTemplateId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -110,6 +144,12 @@ export type AcademySessionTaskRecord = {
   collaboratorNames?: string[] | null;
   dueAt?: Date | null;
   acceptanceCriteria?: string | null;
+  sopTemplateId?: string | null;
+  sopTemplateStepId?: string | null;
+  assigneeRole?: AcademyTaskAssigneeRole | null;
+  sortOrder?: number;
+  completionMode?: AcademyTaskCompletionMode;
+  requiresReview?: boolean;
   submissionNote?: string | null;
   submittedAt?: Date | null;
   submittedById?: string | null;
@@ -195,10 +235,14 @@ export type AcademyPublicCalendarRecord = Pick<
 > & { courseTitle: string; tasks: AcademySessionTaskRecord[] };
 
 export interface AcademyRepository {
+  listSopTemplates?(): Promise<AcademySopTemplateRecord[]>;
+  findSopTemplateById?(id: string): Promise<AcademySopTemplateRecord | null>;
+  findDefaultSopTemplate?(): Promise<AcademySopTemplateRecord | null>;
+  saveSopTemplate?(template: AcademySopTemplateRecord): Promise<AcademySopTemplateRecord>;
   listCourseCategories(): Promise<AcademyCourseCategoryRecord[]>;
   upsertCourseCategory(category: AcademyCourseCategoryRecord): Promise<AcademyCourseCategoryRecord>;
   listCourses(
-    input: { page: number; pageSize: number; search?: string; status?: string },
+    input: { page: number; pageSize: number; search?: string; status?: string; sopTemplateId?: string },
     scope: AcademyAccessScope,
   ): Promise<{ items: AcademyCourseRecord[]; total: number }>;
   findCourseByCode(code: string): Promise<AcademyCourseRecord | null>;
@@ -278,89 +322,10 @@ export interface AcademyRepository {
   }>;
 }
 
-const CHECKLIST = [
-  {
-    templateKey: "COURSE_CONFIRMATION",
-    title: "T-5 课程确定",
-    category: "BEFORE",
-    isRequired: true,
-    dueOffsetMinutes: -5 * 24 * 60,
-    assigneeRole: "PROJECT_OWNER",
-    acceptanceCriteria: "课程主题、目标客户、课程目标、成交产品、主讲人和课程执行负责人已确认。",
-  },
-  {
-    templateKey: "COURSE_DEVELOPMENT",
-    title: "T-4 课程研发",
-    category: "BEFORE",
-    isRequired: true,
-    dueOffsetMinutes: -4 * 24 * 60,
-    assigneeRole: "CONTENT_OWNER",
-    acceptanceCriteria: "大纲、PPT结构、案例、互动设计、核心观点说明和成交路径已完成。",
-  },
-  {
-    templateKey: "COURSE_PACKAGING",
-    title: "T-3 课程包装",
-    category: "BEFORE",
-    isRequired: true,
-    dueOffsetMinutes: -3 * 24 * 60,
-    assigneeRole: "MATERIAL_OWNER",
-    acceptanceCriteria: "海报、朋友圈素材、销售邀约图、预热内容、直播画面与封面已准备。",
-  },
-  {
-    templateKey: "CUSTOMER_INVITATION",
-    title: "T-2 客户邀约",
-    category: "BEFORE",
-    isRequired: true,
-    dueOffsetMinutes: -2 * 24 * 60,
-    assigneeRole: "PROJECT_OWNER",
-    acceptanceCriteria: "邀约名单中每位客户都有邀约状态和下一步。",
-  },
-  {
-    templateKey: "PRECLASS_GATE",
-    title: "T-1 开课关卡",
-    category: "BEFORE",
-    isRequired: true,
-    dueOffsetMinutes: -24 * 60,
-    assigneeRole: "PROJECT_OWNER",
-    acceptanceCriteria: "最终PPT、讲稿、直播链接、画面、设备、网络、素材、客户名单和重点客户已确认，并给出Go/No-Go结论。",
-  },
-  {
-    templateKey: "COURSE_DELIVERY",
-    title: "T日 课程执行",
-    category: "DURING",
-    isRequired: true,
-    dueOffsetMinutes: 0,
-    assigneeRole: "LECTURER",
-    acceptanceCriteria: "完成授课，保障直播，并记录客户行为、问题和关键反馈。",
-  },
-  {
-    templateKey: "CUSTOMER_SEGMENTATION",
-    title: "T+0.5小时 客户分层",
-    category: "AFTER",
-    isRequired: true,
-    dueOffsetMinutes: 30,
-    assigneeRole: "PROJECT_OWNER",
-    acceptanceCriteria: "30分钟内完成A/B/C分类，并为每位重点客户设定下一步和时间。",
-  },
-  {
-    templateKey: "DEAL_FOLLOW_UP",
-    title: "T+1 成交跟进",
-    category: "AFTER",
-    isRequired: true,
-    dueOffsetMinutes: 24 * 60,
-    assigneeRole: "PROJECT_OWNER",
-    acceptanceCriteria: "客户已成交或已明确下一步跟进；成交客户已发起交接。",
-  },
-  {
-    templateKey: "COURSE_REVIEW",
-    title: "T+3 复盘优化",
-    category: "AFTER",
-    isRequired: true,
-    dueOffsetMinutes: 3 * 24 * 60,
-    assigneeRole: "REVIEW_OWNER",
-    acceptanceCriteria: "报名、到课、互动、咨询、成交和客户反馈已复盘，改进项已指定负责人和完成时间。",
-  },
-] as const;
+const COMPLETION_MODES = new Set<AcademyTaskCompletionMode>(["CONFIRM", "NOTE", "ATTACHMENT", "CHECKLIST"]);
+const ASSIGNEE_ROLES = new Set<AcademyTaskAssigneeRole>(["PROJECT_OWNER", "CONTENT_OWNER", "MATERIAL_OWNER", "LECTURER", "REVIEW_OWNER"]);
+const TASK_CATEGORIES = new Set(["BEFORE", "DURING", "AFTER"]);
+const DUE_ANCHORS = new Set(["STARTS_AT", "ENDS_AT"]);
 
 const STATUS_TRANSITIONS: Record<AcademySessionStatus, AcademySessionStatus[]> =
   {
@@ -526,36 +491,19 @@ export function createAcademyService(
         return invalid("请选择有效的周历时间范围");
       if (end.getTime() - start.getTime() > 93 * 24 * 60 * 60 * 1000)
         return invalid("周历查询范围不能超过93天");
-      const stepOrder = [
-        "COURSE_CONFIRMATION", "COURSE_DEVELOPMENT", "COURSE_PACKAGING",
-        "CUSTOMER_INVITATION", "PRECLASS_GATE", "COURSE_DELIVERY",
-        "CUSTOMER_SEGMENTATION", "DEAL_FOLLOW_UP", "COURSE_REVIEW",
-      ];
-      const stepLabel: Record<string, { timeLabel: string; title: string }> = {
-        COURSE_CONFIRMATION: { timeLabel: "T-5", title: "课程确定" },
-        COURSE_DEVELOPMENT: { timeLabel: "T-4", title: "课程研发" },
-        COURSE_PACKAGING: { timeLabel: "T-3", title: "课程包装" },
-        CUSTOMER_INVITATION: { timeLabel: "T-2", title: "客户邀约" },
-        PRECLASS_GATE: { timeLabel: "T-1", title: "开课关卡" },
-        COURSE_DELIVERY: { timeLabel: "T日", title: "课程执行" },
-        CUSTOMER_SEGMENTATION: { timeLabel: "T+0.5小时", title: "客户分层" },
-        DEAL_FOLLOW_UP: { timeLabel: "T+1", title: "成交跟进" },
-        COURSE_REVIEW: { timeLabel: "T+3", title: "复盘优化" },
-      };
-      const legacyKey: Record<string, string> = { PLANNING: "COURSE_CONFIRMATION", CONTENT: "COURSE_DEVELOPMENT", ASSETS: "COURSE_PACKAGING", INVITATION: "CUSTOMER_INVITATION", PRECHECK: "PRECLASS_GATE", DELIVERY: "COURSE_DELIVERY", SEGMENTATION: "CUSTOMER_SEGMENTATION", FOLLOW_UP: "DEAL_FOLLOW_UP", REVIEW: "COURSE_REVIEW" };
       const rows = await repository.listPublicCalendar({ start, end });
       return success(rows.map((session) => {
         const sorted = [...session.tasks].sort((left, right) => {
-          const leftKey = legacyKey[left.templateKey] || left.templateKey;
-          const rightKey = legacyKey[right.templateKey] || right.templateKey;
-          return stepOrder.indexOf(leftKey) - stepOrder.indexOf(rightKey);
+          const byOrder = Number(left.sortOrder || 0) - Number(right.sortOrder || 0);
+          if (byOrder) return byOrder;
+          return Number(left.dueAt || 0) - Number(right.dueAt || 0);
         });
         const done = sorted.filter((task) => ["DONE", "SKIPPED"].includes(task.status)).length;
-        const publicTasks = sorted.map((task) => ({
+        const publicTasks = sorted.map((task, index) => ({
           ...(task.assigneeUserId === actor.id ? { taskId: task.id } : {}),
-          ...(task.assigneeUserId === actor.id ? { templateKey: task.templateKey, acceptanceCriteria: task.acceptanceCriteria || undefined } : {}),
-          timeLabel: stepLabel[legacyKey[task.templateKey] || task.templateKey]?.timeLabel || "其他",
-          title: stepLabel[legacyKey[task.templateKey] || task.templateKey]?.title || task.title,
+          ...(task.assigneeUserId === actor.id ? { templateKey: task.templateKey, acceptanceCriteria: task.acceptanceCriteria || undefined, completionMode: task.completionMode || "NOTE", requiresReview: task.requiresReview === true } : {}),
+          stepNumber: Number(task.sortOrder || 0) || index + 1,
+          title: task.title.replace(/^T(?:[+-][^\s]+|日)?\s*/, ""),
           assigneeUserName: task.assigneeUserName || undefined,
           dueAt: task.dueAt?.toISOString(),
           status: task.status,
@@ -610,6 +558,79 @@ export function createAcademyService(
     },
     async listCourseCategories(_actor: AuthenticatedUser) {
       return success(await loadCourseCategories());
+    },
+    async listSopTemplates(_actor: AuthenticatedUser) {
+      return success(await repository.listSopTemplates?.() || []);
+    },
+    async saveSopTemplate(raw: Record<string, unknown>, actor: AuthenticatedUser) {
+      const id = String(raw.id || "").trim() || `academy-sop-${randomUUID()}`;
+      const name = String(raw.name || "").trim();
+      const rawSteps = Array.isArray(raw.steps) ? raw.steps as Array<Record<string, unknown>> : [];
+      if (!name) return invalid("SOP模板名称不能为空");
+      if (id.length > 64) return invalid("SOP模板标识不能超过64个字符");
+      if (name.length > 160) return invalid("SOP模板名称不能超过160个字符");
+      if (!rawSteps.length) return invalid("SOP模板至少需要一个步骤");
+      if (rawSteps.length > 30) return invalid("一套SOP模板最多配置30个步骤");
+      const duplicateKeys = rawSteps.map((item) => String(item.stepKey || "").trim()).filter(Boolean);
+      if (new Set(duplicateKeys).size !== rawSteps.length) return invalid("SOP步骤标识不能为空且不能重复");
+      if (!repository.saveSopTemplate) return invalid("SOP模板配置暂不可用", 503);
+      const existing = await repository.findSopTemplateById?.(id) || null;
+      const nextStatus = raw.status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
+      if (raw.isDefault === true && nextStatus !== "ACTIVE") return invalid("默认SOP模板必须保持启用");
+      if (existing?.isDefault && raw.isDefault !== true) return invalid("请先将另一套启用模板设为默认模板", 409);
+      if (existing?.status === "ACTIVE" && nextStatus === "INACTIVE") {
+        const linked = await repository.listCourses({ page: 1, pageSize: 1, sopTemplateId: id }, { unrestricted: true, visibleUserIds: [] });
+        if (linked.total) return invalid(`该模板已绑定${linked.total}门课程，请先为课程更换模板`, 409);
+      }
+      const timestamp = now();
+      const steps: AcademySopTemplateStepRecord[] = [];
+      for (let index = 0; index < rawSteps.length; index += 1) {
+        const item = rawSteps[index];
+        const title = String(item.title || "").trim();
+        const stepKey = String(item.stepKey || "").trim();
+        const category = String(item.category || "BEFORE") as AcademySopTemplateStepRecord["category"];
+        const assigneeRole = String(item.assigneeRole || "PROJECT_OWNER") as AcademyTaskAssigneeRole;
+        const dueAnchor = String(item.dueAnchor || "STARTS_AT") as AcademySopTemplateStepRecord["dueAnchor"];
+        const completionMode = String(item.completionMode || "CONFIRM") as AcademyTaskCompletionMode;
+        const dueOffsetMinutes = item.dueOffsetMinutes === "" || item.dueOffsetMinutes == null ? null : Number(item.dueOffsetMinutes);
+        if (!title) return invalid(`第${index + 1}个步骤名称不能为空`);
+        if (stepKey.length > 40) return invalid(`第${index + 1}个步骤标识不能超过40个字符`);
+        if (title.length > 200) return invalid(`第${index + 1}个步骤名称不能超过200个字符`);
+        if (!TASK_CATEGORIES.has(category)) return invalid(`第${index + 1}个步骤阶段无效`);
+        if (!ASSIGNEE_ROLES.has(assigneeRole)) return invalid(`第${index + 1}个步骤负责人角色无效`);
+        if (!DUE_ANCHORS.has(dueAnchor)) return invalid(`第${index + 1}个步骤时间基准无效`);
+        if (!COMPLETION_MODES.has(completionMode)) return invalid(`第${index + 1}个步骤完成方式无效`);
+        if (dueOffsetMinutes !== null && (!Number.isInteger(dueOffsetMinutes) || Math.abs(dueOffsetMinutes) > 525600)) return invalid(`第${index + 1}个步骤时间偏移无效`);
+        steps.push({
+          id: existing?.steps.find((step) => step.stepKey === stepKey)?.id || `academy-sop-step-${randomUUID()}`,
+          templateId: id,
+          stepKey,
+          title,
+          category,
+          sortOrder: index + 1,
+          assigneeRole,
+          dueAnchor,
+          dueOffsetMinutes,
+          completionMode,
+          requiresReview: item.requiresReview === true,
+          acceptanceCriteria: String(item.acceptanceCriteria || "").trim() || null,
+          isRequired: item.isRequired !== false,
+          createdAt: existing?.steps.find((step) => step.stepKey === item.stepKey)?.createdAt || timestamp,
+          updatedAt: timestamp,
+        });
+      }
+      return success(await repository.saveSopTemplate({
+        id,
+        name,
+        description: String(raw.description || "").trim(),
+        status: nextStatus,
+        isDefault: raw.isDefault === true,
+        createdById: existing?.createdById || actor.id,
+        createdByName: existing?.createdByName || actor.name,
+        createdAt: existing?.createdAt || timestamp,
+        updatedAt: timestamp,
+        steps,
+      }));
     },
     async saveCourseCategory(raw: Record<string, unknown>, _actor: AuthenticatedUser) {
       const id = String(raw.id || "").trim() || `academy-category-${randomUUID()}`;
@@ -749,6 +770,11 @@ export function createAcademyService(
         ? await repository.findActiveProductById(conversionProductId)
         : null;
       if (conversionProductId && !conversionProduct) return invalid("转化产品不存在或已停用");
+      const requestedSopTemplateId = String(raw.sopTemplateId || "").trim();
+      const sopTemplate = requestedSopTemplateId
+        ? await repository.findSopTemplateById?.(requestedSopTemplateId)
+        : await repository.findDefaultSopTemplate?.();
+      if (!sopTemplate || sopTemplate.status !== "ACTIVE") return invalid(requestedSopTemplateId ? "所选SOP模板不存在或已停用" : "请先启用并设置一套默认SOP模板");
 
       const course: AcademyCourseRecord = {
         id: `academy-course-${randomUUID()}`,
@@ -773,6 +799,7 @@ export function createAcademyService(
         ownerUserName: owner.name,
         lecturerUserId: lecturer?.id || null,
         lecturerUserName: lecturer?.name || null,
+        sopTemplateId: sopTemplate.id,
         createdAt: timestamp,
         updatedAt: timestamp,
       };
@@ -816,6 +843,13 @@ export function createAcademyService(
       const conversionProductId = String(raw.conversionProductId || "").trim();
       const conversionProduct = conversionProductId ? await repository.findActiveProductById(conversionProductId) : null;
       if (conversionProductId && !conversionProduct) return invalid("转化产品不存在或已停用");
+      const requestedSopTemplateId = String(raw.sopTemplateId || "").trim();
+      const sopTemplate = requestedSopTemplateId
+        ? await repository.findSopTemplateById?.(requestedSopTemplateId)
+        : course.sopTemplateId
+          ? await repository.findSopTemplateById?.(course.sopTemplateId)
+          : await repository.findDefaultSopTemplate?.();
+      if (!sopTemplate || sopTemplate.status !== "ACTIVE") return invalid(requestedSopTemplateId ? "所选SOP模板不存在或已停用" : "请先为课程绑定一套启用的SOP模板");
       const timestamp = now();
       const update = {
         title,
@@ -827,6 +861,7 @@ export function createAcademyService(
         conversionProductId: conversionProduct?.id || null,
         conversionProductName: conversionProduct?.name || null,
         defaultDurationMinutes: duration,
+        sopTemplateId: sopTemplate.id,
         objectives: Array.isArray(raw.objectives) ? raw.objectives.map(String).map((item) => item.trim()).filter(Boolean) : [],
         ownerUserId: owner.id,
         ownerUserName: owner.name,
@@ -1015,6 +1050,12 @@ export function createAcademyService(
         await repository.findLatestCourseVersionId(courseId);
       if (!courseVersionId)
         return invalid("课程尚无可用版本，不能创建场次", 409);
+      const template = course.sopTemplateId
+        ? await repository.findSopTemplateById?.(course.sopTemplateId)
+        : null;
+      if (!template || template.status !== "ACTIVE" || !template.steps.length)
+        return invalid("课程尚未配置可用的SOP模板", 409);
+      const requiredRoles = new Set(template.steps.map((item) => item.assigneeRole));
       const projectOwnerUserId = String(raw.projectOwnerUserId || raw.facilitatorUserId || "").trim();
       const projectOwner = projectOwnerUserId
         ? await repository.findActiveUserById(projectOwnerUserId)
@@ -1024,18 +1065,19 @@ export function createAcademyService(
       const materialOwnerUserId = String(raw.materialOwnerUserId || projectOwnerUserId).trim();
       const reviewOwnerUserId = String(raw.reviewOwnerUserId || projectOwnerUserId).trim();
       const [contentOwner, materialOwner, reviewOwner] = await Promise.all([
-        repository.findActiveUserById(contentOwnerUserId),
-        repository.findActiveUserById(materialOwnerUserId),
-        repository.findActiveUserById(reviewOwnerUserId),
+        contentOwnerUserId ? repository.findActiveUserById(contentOwnerUserId) : Promise.resolve(null),
+        materialOwnerUserId ? repository.findActiveUserById(materialOwnerUserId) : Promise.resolve(null),
+        reviewOwnerUserId ? repository.findActiveUserById(reviewOwnerUserId) : Promise.resolve(null),
       ]);
-      if (!contentOwner) return invalid("请选择有效的课程内容负责人");
-      if (!materialOwner) return invalid("请选择有效的素材负责人");
-      if (!reviewOwner) return invalid("请选择有效的复盘负责人");
-      const lecturerUserId = String(raw.lecturerUserId || course.lecturerUserId || "").trim();
+      if (requiredRoles.has("CONTENT_OWNER") && !contentOwner) return invalid("请选择有效的课程内容负责人");
+      if (requiredRoles.has("MATERIAL_OWNER") && !materialOwner) return invalid("请选择有效的素材负责人");
+      if (requiredRoles.has("REVIEW_OWNER") && !reviewOwner) return invalid("请选择有效的复盘负责人");
+      const lecturerUserId = String(raw.lecturerUserId || course.lecturerUserId || (requiredRoles.has("LECTURER") ? projectOwnerUserId : "")).trim();
       const lecturer = lecturerUserId
         ? await repository.findActiveUserById(lecturerUserId)
         : null;
       if (lecturerUserId && !lecturer) return invalid("所选主讲人不存在或已停用");
+      if (requiredRoles.has("LECTURER") && !lecturer) return invalid("请选择有效的主讲人");
       const collaboratorUserIds = Array.isArray(raw.collaboratorUserIds)
         ? [...new Set(raw.collaboratorUserIds.map(String).map((item) => item.trim()).filter(Boolean))]
         : [];
@@ -1095,26 +1137,33 @@ export function createAcademyService(
       };
       const assigneeForRole = {
         PROJECT_OWNER: projectOwner,
-        CONTENT_OWNER: contentOwner,
-        MATERIAL_OWNER: materialOwner,
+        CONTENT_OWNER: contentOwner || projectOwner,
+        MATERIAL_OWNER: materialOwner || projectOwner,
         LECTURER: lecturer || projectOwner,
-        REVIEW_OWNER: reviewOwner,
+        REVIEW_OWNER: reviewOwner || projectOwner,
       };
-      const checklist: AcademySessionTaskRecord[] = CHECKLIST.map((item) => {
-        const { dueOffsetMinutes, assigneeRole, ...taskTemplate } = item;
-        const assignee = assigneeForRole[assigneeRole];
+      const checklist: AcademySessionTaskRecord[] = template.steps.map((item) => {
+        const assignee = assigneeForRole[item.assigneeRole];
+        const anchor = item.dueAnchor === "ENDS_AT" ? endsAt : startsAt;
         return {
-          ...taskTemplate,
           id: `academy-task-${randomUUID()}`,
           sessionId: session.id,
+          templateKey: item.stepKey,
+          title: item.title,
+          category: item.category,
+          isRequired: item.isRequired,
           status: "PENDING",
           assigneeUserId: assignee.id,
           assigneeUserName: assignee.name,
           collaboratorNames: [],
-          dueAt: new Date(
-            (item.category === "BEFORE" ? startsAt : endsAt).getTime() +
-              dueOffsetMinutes * 60_000,
-          ),
+          dueAt: item.dueOffsetMinutes == null ? null : new Date(anchor.getTime() + item.dueOffsetMinutes * 60_000),
+          acceptanceCriteria: item.acceptanceCriteria || null,
+          sopTemplateId: template.id,
+          sopTemplateStepId: item.id,
+          assigneeRole: item.assigneeRole,
+          sortOrder: item.sortOrder,
+          completionMode: item.completionMode,
+          requiresReview: item.requiresReview,
           createdAt: timestamp,
           updatedAt: timestamp,
         };
@@ -1176,18 +1225,20 @@ export function createAcademyService(
         && ["DONE", "REJECTED"].includes(raw.status);
       if (!assigneeAction && !managerReviewAction)
         return invalid(isAssignee ? "任务负责人只能开始、重新处理并提交本人任务" : "课程运营管理员只能验收已提交的任务", 403);
-      if (raw.status === "SUBMITTED" && !String(raw.submissionNote || raw.note || "").trim())
-        return invalid("提交验收时必须填写完成说明");
+      const completionMode = current.completionMode || (TASKS_REQUIRING_EVIDENCE.has(current.templateKey) ? "ATTACHMENT" : "NOTE");
+      if (raw.status === "SUBMITTED" && ["NOTE", "ATTACHMENT", "CHECKLIST"].includes(completionMode) && !String(raw.submissionNote || raw.note || "").trim())
+        return invalid(completionMode === "CHECKLIST" ? "请确认检查结果并填写说明" : "请填写完成说明");
       if (
         raw.status === "SUBMITTED"
-        && TASKS_REQUIRING_EVIDENCE.has(current.templateKey)
+        && completionMode === "ATTACHMENT"
         && !(await repository.listTaskAttachments(id)).length
-      ) return invalid("该任务至少需要上传一个交付附件", 409);
+      ) return invalid("该步骤配置为必须上传附件，请上传后再提交", 409);
       if (raw.status === "REJECTED" && !String(raw.reviewNote || raw.note || "").trim())
         return invalid("驳回验收时必须填写原因");
       const timestamp = now();
+      const nextStatus = raw.status === "SUBMITTED" && !current.requiresReview ? "DONE" : raw.status;
       const updated = await repository.updateTaskStatus(id, {
-        status: raw.status,
+        status: nextStatus,
         note: raw.note?.trim() || null,
         submissionNote:
           raw.status === "SUBMITTED"
@@ -1201,20 +1252,20 @@ export function createAcademyService(
             ? String(raw.reviewNote || raw.note || "").trim() || null
             : current.reviewNote,
         reviewedAt:
-          raw.status === "DONE" || raw.status === "REJECTED"
+          nextStatus === "DONE" || raw.status === "REJECTED"
             ? timestamp
             : current.reviewedAt,
         reviewedById:
-          raw.status === "DONE" || raw.status === "REJECTED"
+          nextStatus === "DONE" || raw.status === "REJECTED"
             ? actor.id
             : current.reviewedById,
         reviewedByName:
-          raw.status === "DONE" || raw.status === "REJECTED"
+          nextStatus === "DONE" || raw.status === "REJECTED"
             ? actor.name
             : current.reviewedByName,
-        completedAt: raw.status === "DONE" ? timestamp : null,
-        completedById: raw.status === "DONE" ? actor.id : null,
-        completedByName: raw.status === "DONE" ? actor.name : null,
+        completedAt: nextStatus === "DONE" ? timestamp : null,
+        completedById: nextStatus === "DONE" ? actor.id : null,
+        completedByName: nextStatus === "DONE" ? actor.name : null,
         updatedAt: timestamp,
       });
       return updated ? success(updated) : invalid("执行项不存在", 404);

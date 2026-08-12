@@ -18,12 +18,12 @@ assert.equal(taskRequiresEvidence("CUSTOMER_INVITATION"), false, "客户邀约�
 
 assert.deepEqual(
   getAcademyPrivateLoadPlan({ plan: true, course: false, session: false, engagement: false, review: false }),
-  { dashboard: true, courses: true, sessions: true, categories: false },
-  "仅课程排期权限只应请求排期所需的课程列表和课程安排",
+  { dashboard: true, courses: true, sessions: true, categories: false, templates: true },
+  "仅课程排期权限应请求课程列表、课程安排和负责人动态分配所需模板",
 );
 assert.deepEqual(
   getAcademyPrivateLoadPlan({ plan: false, course: false, session: false, engagement: true, review: false }),
-  { dashboard: true, courses: false, sessions: true, categories: false },
+  { dashboard: true, courses: false, sessions: true, categories: false, templates: false },
   "仅邀约跟进权限不应请求课程库或分类管理数据",
 );
 
@@ -64,21 +64,7 @@ const task = (
   assigneeUserName: assigneeUserId === "user-me" ? "我" : "其他人",
 });
 
-assert.deepEqual(
-  [
-    "COURSE_CONFIRMATION",
-    "COURSE_DEVELOPMENT",
-    "COURSE_PACKAGING",
-    "CUSTOMER_INVITATION",
-    "PRECLASS_GATE",
-    "COURSE_DELIVERY",
-    "CUSTOMER_SEGMENTATION",
-    "DEAL_FOLLOW_UP",
-    "COURSE_REVIEW",
-  ].map((key) => getAcademyTaskStep(key).timeLabel),
-  ["T-5", "T-4", "T-3", "T-2", "T-1", "T日", "T+0.5小时", "T+1", "T+3"],
-  "固定SOP必须以T-5到T+3的业务时间轴展示",
-);
+assert.equal(getAcademyTaskStep("CUSTOM_STEP").timeLabel, "未排序", "未持久化顺序的旧任务只能使用通用兼容展示，不得写死业务步骤");
 
 const detail = {
   ...session,
