@@ -26,7 +26,8 @@ assert.match(academy, /remainingSessionPages[\s\S]*academyApi\.listSessions\(\{ 
 assert.doesNotMatch(academy, /<ProtectedFormDialog[^>]*detailOpen/, '场次执行详情不得继续使用超长弹窗');
 assert.match(academy, /customerApi\s*\.\s*fetchCustomers/, '学员与转化必须从CRM客户主档选择客户');
 assert.match(academy, /academyApi\.saveEngagement/, '学员与转化必须可保存邀约记录');
-assert.match(academyPlans, /SOP流程[\s\S]*客户推进[\s\S]*复盘结果/, '课程安排抽屉应收敛为三个执行页签');
+assert.doesNotMatch(academyPlans, /<Tabs|<Tab /, '课程安排抽屉不得继续拆成执行页签');
+assert.match(academyPlans, /课程执行进度[\s\S]*课程数据[\s\S]*复盘记录/, '课程安排抽屉应按进度、数据、复盘连续展示');
 assert.match(academy, /academyApi\.saveReview/, '经营复盘必须可编辑并保存');
 assert.match(academy, /academyApi\.saveCourseAsset/, '课程资产必须保存到后端并关联课程版本');
 assert.match(academy, /BusinessAttachmentPicker/, '课程资产必须复用私有业务附件组件');
@@ -35,7 +36,7 @@ assert.match(academy, /提交验收/, '场次任务必须包含提交验收流�
 assert.doesNotMatch(academy, /<Table(?:\s|>)/, '商学院不得绕过系统统一表格组件');
 assert.doesNotMatch(academy, /data-disable-column-resize/, '商学院不得禁用系统统一列宽调整');
 const academyTableIds = [...`${academy}\n${academyPlans}`.matchAll(/<SystemDataTable\s+tableId="([^"]+)"/g)].map((match) => match[1]);
-assert.ok(academyTableIds.length >= 14, '商学院业务表必须全部接入系统统一表格');
+assert.ok(academyTableIds.length >= 13, '商学院业务表必须全部接入系统统一表格');
 assert.equal(new Set(academyTableIds).size, academyTableIds.length, '每张商学院表必须使用独立的稳定标识');
 assert.match(systemDataTable, /data-system-table-id=\{tableId\}/, '系统表格必须暴露稳定列宽标识');
 assert.match(systemDataTable, /enhanceTable\(table, location\.pathname, 0\)/, '系统表格必须自主启用列宽调整，不依赖全局观察时序');

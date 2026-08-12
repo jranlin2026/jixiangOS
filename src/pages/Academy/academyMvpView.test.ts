@@ -22,15 +22,14 @@ assert.doesNotMatch(academy, /canLoadAcademyOperations[\s\S]{0,500}ACADEMY_VIEW/
 assert.match(academy, /audience: "ALL_EMPLOYEES"/, "新建课程安排应默认对全员周历可见");
 assert.match(academy, /label="允许销售邀约"/, "新建课程安排应能明确开启销售邀约");
 
-assert.match(plans, /<Tab label="SOP流程" \/>/, "单场课程抽屉应使用SOP流程页签");
-assert.match(plans, /<Tab label={`客户推进/, "单场课程抽屉应使用客户推进页签");
-assert.match(plans, /<Tab label="复盘结果" \/>/, "单场课程抽屉应使用复盘结果页签");
-assert.doesNotMatch(plans, /<Tab label="安排概览"/, "旧的安排概览页签应移除");
-assert.doesNotMatch(plans, /<Tab label="课程任务"/, "旧的课程任务页签应移除");
+assert.doesNotMatch(plans, /viewMode/, "课程安排不应再让用户在周历和列表之间选择");
+assert.doesNotMatch(plans, /<Tabs|<Tab /, "单场课程抽屉应改成一页连续阅读，不再分页签");
+assert.match(plans, /课程执行进度/, "详情顶部应先解释整场SOP执行进度");
+assert.match(plans, /课程数据/, "详情中部应集中展示课程经营数据");
+assert.match(plans, /复盘记录/, "详情底部应展示可编辑的复盘记录");
 assert.match(plans, /academy-arrangement-customer-progress[\s\S]*<TablePagination/, "客户推进表应使用统一分页");
-assert.match(plans, /canManageExecution && <Button size="small" onClick=\{\(\) => onEditLearner\(item\)\}>记录到课<\/Button>/, "课程执行人员应独立获得到课记录入口");
-assert.match(plans, /canManageSales && <Button size="small" onClick=\{\(\) => onFollowUpLearner\(item\)\}>快速跟进<\/Button>/, "销售人员应独立获得快速跟进入口");
-assert.match(plans, /canManageSales && !item\.orderNo && <Button size="small" onClick=\{\(\) => onLinkOrder\(item\)\}>关联订单<\/Button>/, "销售人员应独立获得订单关联入口");
-assert.doesNotMatch(plans, /canManageLearners/, "课程执行和销售操作不得继续共用同一权限开关");
+assert.doesNotMatch(plans, /从我的客户添加|记录到课|快速跟进|关联订单/, "课程详情只看数据，客户操作应统一留在邀约跟进页面");
+assert.doesNotMatch(plans, /提交验收|>开始<|>通过<|>驳回</, "课程详情SOP只展示进度，任务操作应统一留在我的待办");
+assert.match(plans, /编辑复盘/, "有复盘权限时应提供明确的编辑入口");
 
 console.log("academy MVP view tests passed");

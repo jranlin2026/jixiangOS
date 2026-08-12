@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const source = [
-  readFileSync(new URL('../pages/Academy/index.tsx', import.meta.url), 'utf8'),
-  readFileSync(new URL('../pages/Academy/AcademyPlans.tsx', import.meta.url), 'utf8'),
-].join('\n');
+const academySource = readFileSync(new URL('../pages/Academy/index.tsx', import.meta.url), 'utf8');
+const plansSource = readFileSync(new URL('../pages/Academy/AcademyPlans.tsx', import.meta.url), 'utf8');
+const source = [academySource, plansSource].join('\n');
 
 assert.doesNotMatch(source, /label="课程编码 \*"/, '新建课程不应要求用户手填课程编码');
 assert.match(source, /label="课程负责人 \*"/, '新建课程应明确课程负责人');
@@ -34,11 +33,12 @@ assert.match(source, /"素材负责人 \*"/, '课程安排应指定素材负责�
 assert.match(source, /tableId="academy-course-arrangements"/, '课程安排列表应复用系统统一表格');
 assert.match(source, /anchor="right"/, '课程安排详情应使用右侧抽屉，不跳转页面');
 assert.match(source, /requestedSessionId/, '外部工作台进入课程安排时应能直接打开目标抽屉');
-assert.match(source, /onEditLearner/, '课程安排抽屉应支持更新已有学员进度');
 assert.match(source, /detailErrors[\s\S]*课程安排详情加载失败[\s\S]*重新加载/, '课程安排详情失败时应显示抽屉内错误和重试入口');
-['SOP流程', '客户推进', '复盘结果'].forEach((label) => {
-  assert.ok(source.includes(label), `课程安排抽屉缺少${label}页签`);
+assert.doesNotMatch(plansSource, /<Tabs|<Tab /, '课程安排抽屉应使用一页连续结构，不再拆分页签');
+['课程执行进度', '课程数据', '复盘记录'].forEach((label) => {
+  assert.ok(plansSource.includes(label), `课程安排抽屉缺少${label}区块`);
 });
+assert.doesNotMatch(plansSource, /从我的客户添加|记录到课|快速跟进|关联订单/, '课程安排详情不应重复承载销售操作');
 assert.match(source, /完善SOP流程|确认开课|进入课程执行|填写复盘结果|查看复盘结果/, '课程安排应根据状态展示明确的下一步操作');
 assert.doesNotMatch(source, /进入场次执行/, '课程安排不应继续使用含义重复的“进入场次执行”');
 

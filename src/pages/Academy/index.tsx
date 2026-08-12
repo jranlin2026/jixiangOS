@@ -1093,12 +1093,17 @@ const Academy: React.FC = () => {
     await loadDetail(selectedSessionId);
     await alert(`已加入 ${successCount} 位客户${failedCount ? `，${failedCount} 位未加入。\n${rejectedSummary}${failedCount > 10 ? `\n其余 ${failedCount - 10} 位请按客户权限或状态检查。` : ""}` : "。"}`, "客户邀约完成");
   };
-  const saveReview = async () => {
+  const saveReview = async (value: SaveAcademyReviewInput = reviewForm) => {
     setSaving(true);
-    const response = await academyApi.saveReview(reviewForm);
+    const response = await academyApi.saveReview(value);
     setSaving(false);
-    if (response.code !== 0) return alert(response.message, "复盘保存失败");
+    if (response.code !== 0) {
+      await alert(response.message, "复盘保存失败");
+      return false;
+    }
+    setReviewForm(value);
     await loadDetail(selectedSessionId);
+    return true;
   };
 
   if (detail) {
@@ -1694,10 +1699,6 @@ const Academy: React.FC = () => {
             detailErrors={sessionDetailErrors}
             onCreate={(date) => openSessionCreate(undefined, date)}
             canCreate={canPlan || canSession}
-            canManageTasks={canSession}
-            currentUserId={currentUser?.id || ""}
-            canManageExecution={canSession}
-            canManageSales={canEngagement}
             canReview={canReview}
             requestedSessionId={planOpenSessionId}
             onRequestConsumed={() => setPlanOpenSessionId("")}
@@ -1706,61 +1707,8 @@ const Academy: React.FC = () => {
             onSelectSession={(id) => {
               setSelectedSessionId(id);
             }}
-            onTaskAction={openTaskAction}
-            onAddLearner={(sessionId) => {
-              setEngagementMode("sales");
-              setSelectedSessionId(sessionId);
-              setEngagementEditingId("");
-              setEngagementForm({ ...emptyEngagement, sessionId });
-              setSelectedInviteCustomers([]);
-              setCustomerPage(0);
-              setEngagementOpen(true);
-            }}
-            onEditLearner={(engagement) => {
-              setEngagementMode("execution");
-              setSelectedSessionId(engagement.sessionId);
-              setEngagementEditingId(engagement.id);
-              setEngagementForm({
-                sessionId: engagement.sessionId,
-                participantKey: engagement.participantKey,
-                participantName: engagement.participantName,
-                customerId: engagement.customerId,
-                leadId: engagement.leadId,
-                invitationStatus: engagement.invitationStatus,
-                attendanceStatus: engagement.attendanceStatus,
-                interactionLevel: engagement.interactionLevel,
-                courseAssessment: engagement.courseAssessment,
-                followUpStatus: engagement.followUpStatus,
-                nextFollowUpAt: engagement.nextFollowUpAt,
-                notes: engagement.notes,
-              });
-              setEngagementOpen(true);
-            }}
-            onFollowUpLearner={(engagement) => {
-              setEngagementMode("sales");
-              setSelectedSessionId(engagement.sessionId);
-              setEngagementEditingId(engagement.id);
-              setEngagementForm({
-                sessionId: engagement.sessionId,
-                participantKey: engagement.participantKey,
-                participantName: engagement.participantName,
-                customerId: engagement.customerId,
-                leadId: engagement.leadId,
-                invitationStatus: engagement.invitationStatus,
-                attendanceStatus: engagement.attendanceStatus,
-                interactionLevel: engagement.interactionLevel,
-                courseAssessment: engagement.courseAssessment,
-                followUpStatus: engagement.followUpStatus,
-                nextFollowUpAt: engagement.nextFollowUpAt,
-                notes: "",
-              });
-              setEngagementOpen(true);
-            }}
-            onLinkOrder={(engagement) => void openOrderLink(engagement)}
-            onChangeStatus={(session, status) => void changeSessionStatus(session, status)}
             reviewForm={reviewForm}
-            onReviewFormChange={setReviewForm}
-            onSaveReview={() => void saveReview()}
+            onSaveReview={saveReview}
             saving={saving}
           />
         )}
@@ -3366,6 +3314,19 @@ export const CourseWorkspace: React.FC<{
 
   return (
     <>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ sm: "center" }}
+        spacing={1}
+        sx={{ mb: 1.5 }}
+      >
+        <Box>
+          <Typography fontSize={18} fontWeight={950}>课程库</Typography>
+          <Typography fontSize={12.5} color="text.secondary">维护可重复使用的课程内容与资产</Typography>
+        </Box>
+        {canManage && <Button variant="contained" startIcon={<AddIcon />} onClick={onCreate}>新建课程</Button>}
+      </Stack>
       <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
         <Stack
           direction={{ xs: "column", md: "row" }}
@@ -3419,10 +3380,7 @@ export const CourseWorkspace: React.FC<{
           </Button>
           <Button variant="contained" onClick={applyFilters}>查询</Button>
           {canManage && (
-            <>
-              <Button variant="outlined" startIcon={<SettingsOutlinedIcon />} onClick={onSettings}>分类设置</Button>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={onCreate}>新建课程</Button>
-            </>
+            <Button variant="outlined" startIcon={<SettingsOutlinedIcon />} onClick={onSettings}>分类设置</Button>
           )}
         </Stack>
         <Typography

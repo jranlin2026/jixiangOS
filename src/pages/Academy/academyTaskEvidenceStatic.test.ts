@@ -29,7 +29,7 @@ assert.match(academy, /catch \{[\s\S]{0,220}交付文件加载失败/, "任务�
 assert.match(picker, /const countUnit = imagesOnly \? '张' : '个文件'/, "非图片附件数量应使用文件单位，不应显示为张");
 assert.match(picker, /onUploadingChange\?/, "统一附件组件应向业务表单暴露上传状态");
 assert.match(picker, /!disabled && \([\s\S]{0,500}选择文件/, "只读验收态不应出现上传入口");
-assert.match(plans, /task\.status === "IN_PROGRESS" && task\.assigneeUserId === currentUserId/, "课程安排中只有任务负责人本人可以提交验收");
+assert.doesNotMatch(plans, /提交验收|>开始<|>通过<|>驳回</, "课程安排详情应只展示SOP进度，不再承载任务操作");
 assert.match(academy, /task\.assigneeUserId === currentUser\?\.id && task\.status === "PENDING"/, "旧详情任务入口也只能由负责人本人开始");
 assert.match(academy, /task\.assigneeUserId === currentUser\?\.id && task\.status === "IN_PROGRESS"/, "旧详情任务入口也只能由负责人本人提交验收");
 assert.doesNotMatch(academy, /canSession && task\.status === "IN_PROGRESS"/, "SESSION管理员不得代替负责人提交任务");
