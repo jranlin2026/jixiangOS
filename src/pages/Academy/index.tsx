@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Box,
+  Alert,
   Button,
   Checkbox,
   Chip,
@@ -36,6 +37,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import ArchiveOutlinedIcon from "@mui/icons-material/ArchiveOutlined";
 import DownloadIcon from "@mui/icons-material/Download";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import EventAvailableOutlinedIcon from "@mui/icons-material/EventAvailableOutlined";
 import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import GroupsIcon from "@mui/icons-material/Groups";
@@ -48,6 +50,8 @@ import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
+import ToggleOffOutlinedIcon from "@mui/icons-material/ToggleOffOutlined";
+import ToggleOnOutlinedIcon from "@mui/icons-material/ToggleOnOutlined";
 import { useLocation, useNavigate } from "react-router-dom";
 import { academyApi, customerApi, orderApi, productApi, settingsApi } from "../../api";
 import type {
@@ -354,6 +358,9 @@ const Academy: React.FC = () => {
   const [courseEditingId, setCourseEditingId] = useState("");
   const [courseSettingsOpen, setCourseSettingsOpen] = useState(false);
   const [sessionOpen, setSessionOpen] = useState(false);
+  const [sessionEditingId, setSessionEditingId] = useState("");
+  const [sessionHistoricalMode, setSessionHistoricalMode] = useState(false);
+  const [workbenchRequestedSessionId, setWorkbenchRequestedSessionId] = useState("");
   const [engagementOpen, setEngagementOpen] = useState(false);
   const [engagementEditingId, setEngagementEditingId] = useState("");
   const [engagementMode, setEngagementMode] = useState<"sales" | "execution">("sales");
@@ -366,6 +373,8 @@ const Academy: React.FC = () => {
   const [sopSettingsOpen, setSopSettingsOpen] = useState(false);
   const [sopEditing, setSopEditing] = useState<AcademySopTemplate | null>(null);
   const [sopEditingBaseline, setSopEditingBaseline] = useState("");
+  const [sopTemplatePage, setSopTemplatePage] = useState(0);
+  const [sopTemplatePageSize, setSopTemplatePageSize] = useState(10);
   const [categoryForm, setCategoryForm] = useState({ id: "", name: "", description: "", sortOrder: 1, isActive: true });
   const [sessionForm, setSessionForm] = useState(emptySession);
   const [engagementForm, setEngagementForm] = useState(emptyEngagement);
@@ -819,6 +828,12 @@ const Academy: React.FC = () => {
     setCourseSettingsOpen(false);
     await loadBase();
   };
+  const openSopTemplateList = () => {
+    setSopEditing(null);
+    setSopEditingBaseline("");
+    setSopTemplatePage(0);
+    setSopSettingsOpen(true);
+  };
   const openSopSettings = (template?: AcademySopTemplate) => {
     const draft: AcademySopTemplate = template ? { ...template, steps: template.steps.map((step) => ({ ...step })) } : {
       id: "",
@@ -855,9 +870,32 @@ const Academy: React.FC = () => {
     });
     setSaving(false);
     if (response.code !== 0) return alert(response.message, "SOP模板保存失败");
-    setSopSettingsOpen(false);
     setSopEditing(null);
     setSopEditingBaseline("");
+    await loadBase();
+  };
+  const changeSopTemplateStatus = async (template: AcademySopTemplate) => {
+    const nextStatus = template.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+    if (nextStatus === "INACTIVE") {
+      const approved = await confirm(`确定停用“${template.name}”吗？停用后新建课程不能再选择它。`, "停用SOP模板");
+      if (!approved) return;
+    }
+    setSaving(true);
+    const response = await academyApi.saveSopTemplate({ ...template, status: nextStatus });
+    setSaving(false);
+    if (response.code !== 0) return alert(response.message, nextStatus === "ACTIVE" ? "SOP模板启用失败" : "SOP模板停用失败");
+    await loadBase();
+  };
+  const deleteSopTemplate = async (template: AcademySopTemplate) => {
+    const approved = await confirm(`确定删除“${template.name}”吗？删除后无法恢复。`, "删除SOP模板");
+    if (!approved) return;
+    setSaving(true);
+    const response = await academyApi.deleteSopTemplate(template.id);
+    setSaving(false);
+    if (response.code !== 0) return alert(response.message, "SOP模板删除失败");
+    const remaining = Math.max(0, sopTemplates.length - 1);
+    const lastPage = Math.max(0, Math.ceil(remaining / sopTemplatePageSize) - 1);
+    setSopTemplatePage((page) => Math.min(page, lastPage));
     await loadBase();
   };
   const moveSopStep = (index: number, direction: -1 | 1) => {
@@ -869,17 +907,26 @@ const Academy: React.FC = () => {
     setSopEditing({ ...sopEditing, steps: steps.map((step, itemIndex) => ({ ...step, sortOrder: itemIndex + 1 })) });
   };
   const saveSession = async () => {
+    if (!sessionHistoricalMode && !sessionEditingId && new Date(sessionForm.startsAt).getTime() < Date.now())
+      return alert("正常排期不能选择过去时间；历史课程请使用“补录历史课程”。", "课程时间不正确");
     setSaving(true);
-    const response = await academyApi.createSession(sessionForm);
+    const input = { ...sessionForm };
+    const response = sessionEditingId
+      ? await academyApi.updateSession(sessionEditingId, input)
+      : sessionHistoricalMode
+        ? await academyApi.createHistoricalSession(input)
+        : await academyApi.createSession(input);
     setSaving(false);
     if (response.code !== 0)
       return alert(
         /Backend request failed/i.test(response.message)
           ? "课程安排保存失败，请刷新页面后重试。"
           : response.message,
-        "课程安排创建失败",
+        sessionEditingId ? "课程安排更新失败" : "课程安排创建失败",
       );
     setSessionOpen(false);
+    setSessionEditingId("");
+    setSessionHistoricalMode(false);
     setSessionForm(emptySession);
     await loadBase();
   };
@@ -888,6 +935,14 @@ const Academy: React.FC = () => {
     status: AcademySession["status"],
   ) => {
     if (saving) return;
+    if (status === "CANCELLED") {
+      const approved = await confirm(`确定取消“${session.title}”吗？取消后不会进入工作台。`, "取消课程安排");
+      if (!approved) return;
+    }
+    if (status === "COMPLETED") {
+      const approved = await confirm(`确定“${session.title}”已经结束吗？确认后将进入已完结课程，可填写复盘。`, "结束课程");
+      if (!approved) return;
+    }
     setSaving(true);
     try {
       const response = await academyApi.changeSessionStatus(session.id, status);
@@ -907,7 +962,7 @@ const Academy: React.FC = () => {
     }
   };
   const openSessionCreate = (course?: AcademyCourse, date?: Date) => {
-    const startsAt = date ? new Date(date) : new Date();
+    const startsAt = date ? new Date(date) : new Date(Date.now() + 60 * 60_000);
     startsAt.setSeconds(0, 0);
     if (date) startsAt.setHours(19, 30, 0, 0);
     const durationMinutes = course?.defaultDurationMinutes || 120;
@@ -928,6 +983,62 @@ const Academy: React.FC = () => {
       materialOwnerUserId: "",
       lecturerUserId: course?.lecturerUserId || "",
       reviewOwnerUserId: currentUser?.id || course?.ownerUserId || "",
+    });
+    setSessionEditingId("");
+    setSessionHistoricalMode(false);
+    setSessionOpen(true);
+  };
+  const openHistoricalSessionCreate = () => {
+    const startsAt = new Date(Date.now() - 24 * 60 * 60_000);
+    startsAt.setMinutes(0, 0, 0);
+    const endsAt = new Date(startsAt.getTime() + 120 * 60_000);
+    const toLocalInput = (value: Date) => new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    setSessionEditingId("");
+    setSessionHistoricalMode(true);
+    setSessionForm({ ...emptySession, startsAt: toLocalInput(startsAt), endsAt: toLocalInput(endsAt), facilitatorUserId: currentUser?.id || "", projectOwnerUserId: currentUser?.id || "", contentOwnerUserId: currentUser?.id || "", reviewOwnerUserId: currentUser?.id || "" });
+    setSessionOpen(true);
+  };
+  const openSessionEdit = async (session: AcademySession) => {
+    const toLocalInput = (value: string) => {
+      const date = new Date(value);
+      return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    };
+    let sessionDetail = details[session.id];
+    if (!sessionDetail) {
+      const response = await academyApi.getSessionDetail(session.id);
+      if (response.code !== 0) return alert(response.message, "课程安排加载失败");
+      sessionDetail = response.data;
+      setDetails((current) => ({ ...current, [session.id]: response.data }));
+    }
+    const tasks = sessionDetail.tasks;
+    const ownerFor = (role: AcademySopTemplateStep["assigneeRole"]) => tasks.find((task) => task.assigneeRole === role)?.assigneeUserId || "";
+    setSessionEditingId(session.id);
+    setSessionHistoricalMode(new Date(session.startsAt).getTime() < Date.now());
+    setSessionForm({
+      ...emptySession,
+      courseId: session.courseId,
+      title: session.title,
+      startsAt: toLocalInput(session.startsAt),
+      endsAt: toLocalInput(session.endsAt),
+      deliveryMode: session.deliveryMode,
+      venue: session.venue || "",
+      meetingUrl: session.meetingUrl || "",
+      capacity: session.capacity,
+      inviteTarget: session.inviteTarget,
+      registrationTarget: session.registrationTarget,
+      attendanceTarget: session.attendanceTarget,
+      consultationTarget: session.consultationTarget,
+      dealTarget: session.dealTarget,
+      targetRevenue: session.targetRevenue,
+      audience: session.audience || "ALL_EMPLOYEES",
+      isInvitable: session.isInvitable !== false,
+      facilitatorUserId: session.facilitatorUserId || "",
+      projectOwnerUserId: session.facilitatorUserId || "",
+      lecturerUserId: session.lecturerUserId || ownerFor("LECTURER"),
+      contentOwnerUserId: ownerFor("CONTENT_OWNER"),
+      materialOwnerUserId: ownerFor("MATERIAL_OWNER"),
+      reviewOwnerUserId: ownerFor("REVIEW_OWNER"),
+      collaboratorUserIds: session.collaboratorUserIds || [],
     });
     setSessionOpen(true);
   };
@@ -1822,6 +1933,8 @@ const Academy: React.FC = () => {
               void loadTaskEvidence(task.id);
             }}
             onChangeSessionStatus={(session, status) => void changeSessionStatus(session, status)}
+            requestedSessionId={workbenchRequestedSessionId}
+            onRequestedSessionConsumed={() => setWorkbenchRequestedSessionId("")}
           />
         )}
         {view === "plans" && (
@@ -1830,7 +1943,15 @@ const Academy: React.FC = () => {
             details={details}
             detailErrors={sessionDetailErrors}
             onCreate={(date) => openSessionCreate(undefined, date)}
+            onCreateHistorical={openHistoricalSessionCreate}
+            onEdit={openSessionEdit}
+            onChangeStatus={(session, status) => void changeSessionStatus(session, status)}
+            onOpenWorkbench={(sessionId) => {
+              setWorkbenchRequestedSessionId(sessionId);
+              navigate(viewPath.overview);
+            }}
             canCreate={canPlan || canSession}
+            canManage={canSession}
             canReview={canReview}
             requestedSessionId={planOpenSessionId}
             onRequestConsumed={() => setPlanOpenSessionId("")}
@@ -1855,7 +1976,7 @@ const Academy: React.FC = () => {
             canManage={canCourse}
             onCreate={openCourseCreate}
             onSettings={() => setCourseSettingsOpen(true)}
-            onSopSettings={() => openSopSettings()}
+            onSopSettings={openSopTemplateList}
             onView={(course) => {
               setSelectedCourseId(course.id);
               if (!courseAssets[course.id]) void loadCourseAssets(course.id);
@@ -2050,14 +2171,40 @@ const Academy: React.FC = () => {
           </>
         )}
       </ProtectedFormDialog>
-      <Drawer anchor="right" open={sopSettingsOpen} onClose={() => void closeSopSettings()} PaperProps={{ role: "dialog", "aria-modal": true, "aria-label": "SOP模板设置", sx: { width: { xs: "100%", md: 760 }, maxWidth: "100vw", bgcolor: palette.soft } }}>
+      <Drawer anchor="right" open={sopSettingsOpen} onClose={() => void closeSopSettings()} PaperProps={{ role: "dialog", "aria-modal": true, "aria-label": "SOP模板设置", sx: { width: { xs: "100%", md: 980 }, maxWidth: "100vw", bgcolor: palette.soft } }}>
         <Stack sx={{ minHeight: "100%" }}>
           <Paper square elevation={0} sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${palette.line}` }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Box><Typography fontSize={20} fontWeight={950}>SOP模板设置</Typography><Typography fontSize={12.5} color="text.secondary">配置步骤、负责人角色、截止规则和完成方式</Typography></Box><IconButton aria-label="关闭SOP模板设置" onClick={() => void closeSopSettings()}><CloseIcon /></IconButton></Stack></Paper>
           <Box sx={{ p: 2, flex: 1 }}>
-            {!sopEditing ? <Stack spacing={1.2}>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={() => openSopSettings()} sx={{ alignSelf: "flex-end" }}>新建SOP模板</Button>
-              {sopTemplates.map((template) => <Paper key={template.id} variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}><Box><Stack direction="row" spacing={1} alignItems="center"><Typography fontWeight={950}>{template.name}</Typography>{template.isDefault && <Chip size="small" color="primary" label="默认" />}<Chip size="small" label={template.status === "ACTIVE" ? "启用" : "停用"} /></Stack><Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>{template.description || "暂无说明"}</Typography><Typography fontSize={12} color="text.secondary" sx={{ mt: 0.5 }}>{template.steps.length} 个步骤</Typography></Box><Button size="small" variant="outlined" onClick={() => openSopSettings(template)}>编辑模板</Button></Stack></Paper>)}
-              {!sopTemplates.length && <Paper variant="outlined" sx={{ p: 5, textAlign: "center" }}><Typography fontWeight={900}>暂无SOP模板</Typography><Typography fontSize={12.5} color="text.secondary">新建模板后，课程即可绑定并生成动态任务。</Typography></Paper>}
+            {!sopEditing ? <Stack spacing={1.5}>
+              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1}>
+                <Box><Typography fontWeight={950}>模板列表</Typography><Typography fontSize={12.5} color="text.secondary">统一维护课程流程模板；课程创建后会固定绑定所选模板。</Typography></Box>
+                <Button variant="contained" startIcon={<AddIcon />} onClick={() => openSopSettings()}>新建SOP模板</Button>
+              </Stack>
+              <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
+                <TableContainer>
+                  <SystemDataTable tableId="academy-sop-template-list" aria-label="SOP模板列表">
+                    <TableHead><TableRow><TableCell>模板名称</TableCell><TableCell>步骤</TableCell><TableCell>默认模板</TableCell><TableCell>状态</TableCell><TableCell>最近更新</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
+                    <TableBody>
+                      {sopTemplates.slice(sopTemplatePage * sopTemplatePageSize, (sopTemplatePage + 1) * sopTemplatePageSize).map((template) => (
+                        <TableRow key={template.id} hover>
+                          <TableCell><Typography fontWeight={850}>{template.name}</Typography><Typography fontSize={12} color="text.secondary" noWrap sx={{ maxWidth: 330 }}>{template.description || "暂无说明"}</Typography></TableCell>
+                          <TableCell>{template.steps.length} 步</TableCell>
+                          <TableCell>{template.isDefault ? <Chip size="small" color="primary" label="默认" /> : "—"}</TableCell>
+                          <TableCell><Chip size="small" color={template.status === "ACTIVE" ? "success" : "default"} label={template.status === "ACTIVE" ? "已启用" : "已停用"} /></TableCell>
+                          <TableCell>{formatDate(template.updatedAt)}</TableCell>
+                          <TableCell align="right"><Stack direction="row" spacing={0.25} justifyContent="flex-end">
+                            <Tooltip title="编辑模板" arrow><IconButton size="small" aria-label={`编辑模板 ${template.name}`} onClick={() => openSopSettings(template)}><EditOutlinedIcon fontSize="small" /></IconButton></Tooltip>
+                            <Tooltip title={template.isDefault && template.status === "ACTIVE" ? "默认模板不能停用" : template.status === "ACTIVE" ? "停用模板" : "启用模板"} arrow><span><IconButton size="small" color={template.status === "ACTIVE" ? "warning" : "success"} disabled={saving || (template.isDefault && template.status === "ACTIVE")} aria-label={`${template.status === "ACTIVE" ? "停用" : "启用"}模板 ${template.name}`} onClick={() => void changeSopTemplateStatus(template)}>{template.status === "ACTIVE" ? <ToggleOnOutlinedIcon fontSize="small" /> : <ToggleOffOutlinedIcon fontSize="small" />}</IconButton></span></Tooltip>
+                            <Tooltip title={template.isDefault ? "默认模板不能删除" : "删除模板"} arrow><span><IconButton size="small" color="error" disabled={saving || template.isDefault} aria-label={`删除模板 ${template.name}`} onClick={() => void deleteSopTemplate(template)}><DeleteOutlineIcon fontSize="small" /></IconButton></span></Tooltip>
+                          </Stack></TableCell>
+                        </TableRow>
+                      ))}
+                      {!sopTemplates.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 7 }}><Typography fontWeight={900}>暂无SOP模板</Typography><Typography fontSize={12.5} color="text.secondary">点击右上角“新建SOP模板”开始配置。</Typography></TableCell></TableRow>}
+                    </TableBody>
+                  </SystemDataTable>
+                </TableContainer>
+                <TablePagination count={sopTemplates.length} page={sopTemplatePage} rowsPerPage={sopTemplatePageSize} onPageChange={(_, nextPage) => setSopTemplatePage(nextPage)} onRowsPerPageChange={(event) => { setSopTemplatePageSize(Number(event.target.value)); setSopTemplatePage(0); }} sx={{ borderTop: `1px solid ${palette.line}` }} />
+              </Paper>
             </Stack> : <Stack spacing={1.5}>
               <Paper variant="outlined" sx={{ ...panelSx, p: 1.6 }}><Stack spacing={1.2}><TextField label="模板名称 *" value={sopEditing.name} onChange={(event) => setSopEditing({ ...sopEditing, name: event.target.value })} /><TextField label="模板说明" multiline minRows={2} value={sopEditing.description} onChange={(event) => setSopEditing({ ...sopEditing, description: event.target.value })} /><Stack direction="row" spacing={1}><TextField select label="状态" fullWidth value={sopEditing.status} onChange={(event) => setSopEditing({ ...sopEditing, status: event.target.value as AcademySopTemplate["status"] })}><MenuItem value="ACTIVE">启用</MenuItem><MenuItem value="INACTIVE">停用</MenuItem></TextField><TextField select label="默认模板" fullWidth value={sopEditing.isDefault ? "YES" : "NO"} onChange={(event) => setSopEditing({ ...sopEditing, isDefault: event.target.value === "YES" })}><MenuItem value="YES">是</MenuItem><MenuItem value="NO">否</MenuItem></TextField></Stack></Stack></Paper>
               {sopEditing.steps.map((step, index) => <Paper key={`${step.stepKey}-${index}`} variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Typography fontWeight={950}>第 {index + 1} 步</Typography><Stack direction="row" spacing={0.5}><Button size="small" disabled={index === 0} onClick={() => moveSopStep(index, -1)}>上移</Button><Button size="small" disabled={index === sopEditing.steps.length - 1} onClick={() => moveSopStep(index, 1)}>下移</Button><Button color="error" size="small" disabled={sopEditing.steps.length === 1} onClick={() => setSopEditing({ ...sopEditing, steps: sopEditing.steps.filter((_, itemIndex) => itemIndex !== index) })}>删除</Button></Stack></Stack><Box sx={{ mt: 1.2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 1.2 }}><TextField label="步骤名称 *" value={step.title} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, title: event.target.value, stepKey: step.id ? step.stepKey : `STEP_${index + 1}_${event.target.value.trim().replace(/\s+/g, "_").slice(0, 16) || index + 1}` }; setSopEditing({ ...sopEditing, steps }); }} /><TextField select label="负责人角色" value={step.assigneeRole} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, assigneeRole: event.target.value as AcademySopTemplateStep["assigneeRole"] }; setSopEditing({ ...sopEditing, steps }); }}>{[["PROJECT_OWNER", "项目负责人"], ["CONTENT_OWNER", "内容负责人"], ["MATERIAL_OWNER", "素材负责人"], ["LECTURER", "主讲人"], ["REVIEW_OWNER", "复盘负责人"]].map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField><TextField select label="流程阶段" value={step.category} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, category: event.target.value as AcademySopTemplateStep["category"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="BEFORE">课前准备</MenuItem><MenuItem value="DURING">课程执行</MenuItem><MenuItem value="AFTER">课后跟进</MenuItem></TextField><TextField select label="时间基准" value={step.dueAnchor} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, dueAnchor: event.target.value as AcademySopTemplateStep["dueAnchor"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="STARTS_AT">相对开课时间</MenuItem><MenuItem value="ENDS_AT">相对结束时间</MenuItem></TextField><TextField label="时间偏移（分钟）" type="number" helperText="负数表示提前；留空表示不设截止时间" value={step.dueOffsetMinutes ?? ""} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, dueOffsetMinutes: event.target.value === "" ? null : Number(event.target.value) }; setSopEditing({ ...sopEditing, steps }); }} /><TextField select label="完成方式" value={step.completionMode} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, completionMode: event.target.value as AcademySopTemplateStep["completionMode"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="CONFIRM">直接确认</MenuItem><MenuItem value="NOTE">填写说明</MenuItem><MenuItem value="ATTACHMENT">上传附件</MenuItem><MenuItem value="CHECKLIST">检查确认</MenuItem></TextField><TextField select label="是否必做" value={step.isRequired ? "YES" : "NO"} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, isRequired: event.target.value === "YES" }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="YES">必做</MenuItem><MenuItem value="NO">选做</MenuItem></TextField><TextField select label="是否需要验收" value={step.requiresReview ? "YES" : "NO"} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, requiresReview: event.target.value === "YES" }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="NO">提交后直接完成</MenuItem><MenuItem value="YES">项目负责人验收</MenuItem></TextField><TextField label="完成标准" multiline minRows={2} value={step.acceptanceCriteria || ""} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, acceptanceCriteria: event.target.value }; setSopEditing({ ...sopEditing, steps }); }} sx={{ gridColumn: { md: "1 / -1" } }} /></Box></Paper>)}
@@ -2114,7 +2261,7 @@ const Academy: React.FC = () => {
       </ProtectedFormDialog>
       <ProtectedFormDialog
         open={sessionOpen}
-        onClose={() => setSessionOpen(false)}
+        onClose={() => { setSessionOpen(false); setSessionEditingId(""); setSessionHistoricalMode(false); }}
         submitting={saving}
         markButtonClicksDirty={false}
         fullWidth
@@ -2124,25 +2271,35 @@ const Academy: React.FC = () => {
         {({ markDirty, requestClose }) => (
           <>
             <DialogCloseTitle onClose={() => void requestClose()}>
-              新建课程安排
+              {sessionEditingId ? "编辑课程安排" : sessionHistoricalMode ? "补录历史课程" : "新建课程安排"}
             </DialogCloseTitle>
             <DialogContent dividers sx={{ bgcolor: palette.soft }}>
               <Stack spacing={2}>
+                {sessionHistoricalMode && <Alert severity="info">历史补录允许选择过去时间，用于补齐既有课程记录；保存后仍按SOP流程核对并推进状态。</Alert>}
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
                   <SectionTitle title="1 课程和时间" helper="选择课程，确定本次授课时间与方式。" />
                   <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
-                    <TextField select label="课程 *" value={sessionForm.courseId} onChange={(event) => {
+                    <TextField select disabled={Boolean(sessionEditingId)} label="课程 *" value={sessionForm.courseId} onChange={(event) => {
                       markDirty();
                       const course = courses.find((item) => item.id === event.target.value);
                       const startsAt = sessionForm.startsAt ? new Date(sessionForm.startsAt) : new Date();
-                      setSessionForm({ ...sessionForm, courseId: event.target.value, title: course ? `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}` : "", lecturerUserId: course?.lecturerUserId || "" });
+                      const endsAt = new Date(startsAt.getTime() + (course?.defaultDurationMinutes || 120) * 60_000);
+                      const localEnd = new Date(endsAt.getTime() - endsAt.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+                      setSessionForm({ ...sessionForm, courseId: event.target.value, title: course ? `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}` : "", endsAt: localEnd, lecturerUserId: course?.lecturerUserId || "" });
                     }}>
                       {courses.filter((item) => item.status === "ACTIVE").map((item) => <MenuItem key={item.id} value={item.id}>{item.code} · {item.title}</MenuItem>)}
                     </TextField>
                     <TextField label="安排名称" helperText="未填写时系统会按课程名称和日期自动生成" value={sessionForm.title} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, title: event.target.value }); }} />
                   </Box>
                   <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
-                    <TextField type="datetime-local" label="开始时间 *" InputLabelProps={{ shrink: true }} value={sessionForm.startsAt} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, startsAt: event.target.value }); }} />
+                    <TextField type="datetime-local" label="开始时间 *" InputLabelProps={{ shrink: true }} inputProps={!sessionHistoricalMode && !sessionEditingId ? { min: new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16) } : undefined} value={sessionForm.startsAt} onChange={(event) => {
+                      markDirty();
+                      const start = new Date(event.target.value);
+                      const duration = selectedSessionCourse?.defaultDurationMinutes || 120;
+                      const end = new Date(start.getTime() + duration * 60_000);
+                      const localEnd = Number.isNaN(end.getTime()) ? sessionForm.endsAt : new Date(end.getTime() - end.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+                      setSessionForm({ ...sessionForm, startsAt: event.target.value, endsAt: localEnd });
+                    }} />
                     <TextField type="datetime-local" label="结束时间 *" InputLabelProps={{ shrink: true }} value={sessionForm.endsAt} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, endsAt: event.target.value }); }} />
                     <TextField select label="授课方式 *" value={sessionForm.deliveryMode} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, deliveryMode: event.target.value as CreateAcademySessionInput["deliveryMode"], venue: "", meetingUrl: "" }); }}>
                       {Object.entries(deliveryModeLabel).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
@@ -2174,7 +2331,7 @@ const Academy: React.FC = () => {
                 disabled={saving || !sessionForm.courseId || !sessionForm.startsAt || !sessionForm.endsAt || missingSessionOwner || (sessionForm.deliveryMode === "ONLINE" ? !sessionForm.meetingUrl?.trim() : !sessionForm.venue.trim())}
                 onClick={() => void saveSession()}
               >
-                保存课程安排并生成任务
+                {sessionEditingId ? "保存课程安排" : "保存课程安排并生成任务"}
               </Button>
             </DialogActions>
           </>
@@ -2472,7 +2629,9 @@ const Overview: React.FC<{
   onTaskPageSizeChange: (pageSize: number) => void;
   onOpenTask: (task: AcademyMyTask) => void;
   onChangeSessionStatus: (session: AcademySession, status: AcademySession["status"]) => void;
-}> = ({ sessions, managedSessions, canManageSessions, tasks, taskTotal, taskPage, taskPageSize, onTaskPageChange, onTaskPageSizeChange, onOpenTask, onChangeSessionStatus }) => {
+  requestedSessionId?: string;
+  onRequestedSessionConsumed: () => void;
+}> = ({ sessions, managedSessions, canManageSessions, tasks, taskTotal, taskPage, taskPageSize, onTaskPageChange, onTaskPageSizeChange, onOpenTask, onChangeSessionStatus, requestedSessionId, onRequestedSessionConsumed }) => {
   const [selectedCourseId, setSelectedCourseId] = useState("");
   const monday = new Date();
   const weekday = monday.getDay() || 7;
@@ -2489,6 +2648,11 @@ const Overview: React.FC<{
   });
   const todoTasks = tasks;
   const activeCourses = sessions.filter((session) => session.status !== "COMPLETED" && session.status !== "CANCELLED");
+  useEffect(() => {
+    if (!requestedSessionId || !activeCourses.some((session) => session.id === requestedSessionId)) return;
+    setSelectedCourseId(requestedSessionId);
+    onRequestedSessionConsumed();
+  }, [activeCourses, onRequestedSessionConsumed, requestedSessionId]);
   useEffect(() => {
     if (activeCourses.some((session) => session.id === selectedCourseId)) return;
     setSelectedCourseId(activeCourses.find((session) => session.status === "IN_PROGRESS")?.id || activeCourses[0]?.id || "");

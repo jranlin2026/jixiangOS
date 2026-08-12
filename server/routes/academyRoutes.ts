@@ -63,6 +63,10 @@ export function createAcademyRouter(deps: {
     const result = await deps.service.saveSopTemplate(req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
+  router.delete('/sop-templates/:templateId', deps.requireCourseWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.deleteSopTemplate(String(req.params.templateId), req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
   router.put('/course-categories', deps.requireCourseWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.saveCourseCategory(req.body || {}, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
@@ -100,8 +104,17 @@ export function createAcademyRouter(deps: {
     res.status(statusFor(result.code)).json(result);
   });
   router.post('/sessions', deps.requireArrangementWrite, async (req: AuthenticatedRequest, res) => {
-    const result = await deps.service.createSession(req.body || {}, req.currentUser!);
+    const { isHistoricalBackfill: _ignored, ...body } = req.body || {};
+    const result = await deps.service.createSession(body, req.currentUser!);
     res.status(statusFor(result.code, 201)).json(result);
+  });
+  router.post('/sessions/historical', deps.requireArrangementWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.createSession({ ...(req.body || {}), isHistoricalBackfill: true }, req.currentUser!);
+    res.status(statusFor(result.code, 201)).json(result);
+  });
+  router.put('/sessions/:sessionId', deps.requireArrangementWrite, async (req: AuthenticatedRequest, res) => {
+    const result = await deps.service.updateSession(String(req.params.sessionId), req.body || {}, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
   });
   router.post('/sessions/:sessionId/status', deps.requireSessionWrite, async (req: AuthenticatedRequest, res) => {
     const result = await deps.service.changeSessionStatus(String(req.params.sessionId), String(req.body?.status || '') as AcademySessionStatus, req.currentUser!);

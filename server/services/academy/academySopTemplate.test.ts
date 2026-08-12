@@ -3,10 +3,14 @@ import { createAcademyService, type AcademySopTemplateRecord } from "./academySe
 
 const now = new Date("2026-08-12T09:00:00.000Z");
 let saved: AcademySopTemplateRecord | null = null;
+let deletedId = "";
+let linkedCourseCount = 0;
 const repository: any = {
   listSopTemplates: async () => saved ? [saved] : [],
   findSopTemplateById: async (id: string) => saved?.id === id ? saved : null,
   saveSopTemplate: async (template: AcademySopTemplateRecord) => (saved = template),
+  deleteSopTemplate: async (id: string) => { deletedId = id; saved = null; },
+  listCourses: async () => ({ items: [], total: linkedCourseCount }),
 };
 const actor: any = { id: "u-1", name: "课程管理员", role: "admin", permissions: ["*"] };
 const service = createAcademyService(repository, { now: () => now, resolveScope: async () => ({ unrestricted: true, visibleUserIds: [] }) });
@@ -47,5 +51,19 @@ assert.equal(result.data?.steps[0].sortOrder, 1);
 assert.equal(result.data?.steps[1].completionMode, "ATTACHMENT");
 assert.equal(result.data?.steps[0].requiresReview, false, "每个步骤应独立配置是否验收");
 assert.equal((await service.listSopTemplates(actor)).data?.[0].name, "线下训练营流程");
+
+const cannotDeleteDefault = await service.deleteSopTemplate(result.data!.id, actor);
+assert.equal(cannotDeleteDefault.code, 409, "默认模板不得删除");
+
+saved = { ...result.data!, isDefault: false };
+linkedCourseCount = 2;
+const cannotDeleteLinked = await service.deleteSopTemplate(result.data!.id, actor);
+assert.equal(cannotDeleteLinked.code, 409, "已被课程使用的模板不得删除");
+assert.equal(deletedId, "");
+
+linkedCourseCount = 0;
+const deleted = await service.deleteSopTemplate(result.data!.id, actor);
+assert.equal(deleted.code, 0);
+assert.equal(deletedId, result.data!.id, "未被课程使用的非默认模板应允许删除");
 
 console.log("academy SOP template tests passed");

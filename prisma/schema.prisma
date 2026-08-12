@@ -1155,6 +1155,7 @@ model AcademySession {
   dealTarget          Int      @default(0)
   targetRevenue       Decimal  @default(0) @db.Decimal(14, 2)
   status              String   @default("PLANNED") @db.VarChar(24)
+  isHistoricalBackfill Boolean @default(false)
   facilitatorUserId   String?  @db.VarChar(64)
   facilitatorUserName String?  @db.VarChar(100)
   lecturerUserId      String?  @db.VarChar(64)
@@ -1192,6 +1193,8 @@ model AcademySessionTask {
   assigneeUserName   String?   @db.VarChar(100)
   collaboratorNames  Json?
   dueAt              DateTime?
+  dueAnchor          String?   @db.VarChar(24)
+  dueOffsetMinutes   Int?
   acceptanceCriteria String?   @db.Text
   sopTemplateId      String?   @db.VarChar(64)
   sopTemplateStepId  String?   @db.VarChar(64)

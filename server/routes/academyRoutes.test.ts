@@ -20,6 +20,9 @@ const service: any = {
   listMyTasks: async (query: any, current: any) => (calls.push(['my-tasks', query, current.id]), ok({ items: [], total: 0, page: query.page, pageSize: query.pageSize })),
   listCourseCategories: async () => (calls.push(['course-categories']), ok([{ id: 'category-1', name: '公开课' }])),
   saveCourseCategory: async (body: any) => (calls.push(['save-course-category', body]), ok({ id: 'category-2', ...body })),
+  listSopTemplates: async () => (calls.push(['sop-templates']), ok([])),
+  saveSopTemplate: async (body: any) => (calls.push(['save-sop-template', body]), ok({ id: 'sop-1', ...body })),
+  deleteSopTemplate: async (id: string) => (calls.push(['delete-sop-template', id]), ok({ id })),
   listCourses: async (query: any) => (calls.push(['courses', query]), ok({ items: [], total: 21, page: query.page, pageSize: query.pageSize })),
   listSessions: async (query: any) => (calls.push(['sessions', query]), ok({ items: [], total: 0, page: query.page, pageSize: query.pageSize })),
   createCourse: async (body: any) => (calls.push(['create-course', body]), ok({ id: 'course-1' })),
@@ -28,6 +31,7 @@ const service: any = {
   listCourseAssets: async (id: string) => (calls.push(['course-assets', id]), ok([])),
   saveCourseAsset: async (id: string, body: any) => (calls.push(['save-course-asset', id, body]), ok({ id: 'asset-1', courseId: id, ...body })),
   createSession: async (body: any) => (calls.push(['create-session', body]), ok({ id: 'session-1' })),
+  updateSession: async (id: string, body: any) => (calls.push(['update-session', id, body]), ok({ id, ...body })),
   getSessionDetail: async (id: string) => (calls.push(['session-detail', id]), ok({ id, tasks: [], engagements: [], review: null })),
   changeSessionStatus: async (id: string, status: string) => (calls.push(['status', id, status]), ok({ id, status })),
   getSessionNextStep: async (id: string) => (calls.push(['next-step', id]), ok({ task: { id: 'task-1' }, reason: 'NEAREST_DUE' })),
@@ -103,6 +107,12 @@ try {
   assert.equal(categories.status, 200);
   assert.equal((await categories.json()).data[0].name, '公开课');
 
+  const templates = await fetch(`${base}/sop-templates`);
+  assert.equal(templates.status, 200);
+  const deletedTemplate = await fetch(`${base}/sop-templates/sop-1`, { method: 'DELETE' });
+  assert.equal(deletedTemplate.status, 200);
+  assert.deepEqual(calls.find((call) => call[0] === 'delete-sop-template'), ['delete-sop-template', 'sop-1']);
+
   const savedCategory = await fetch(`${base}/course-categories`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: '老板增长课' }) });
   assert.equal(savedCategory.status, 200);
   assert.deepEqual(calls.find((call) => call[0] === 'save-course-category'), ['save-course-category', { name: '老板增长课' }]);
@@ -130,6 +140,13 @@ try {
   assert.equal(detail.status, 200);
   assert.deepEqual(calls.find((call) => call[0] === 'session-detail'), ['session-detail', 'session-1']);
   assert.ok(calls.some((call) => call[0] === 'gate' && call[1] === 'session-detail-read' && call[2] === '/sessions/session-1'));
+  const updatedSession = await fetch(`${base}/sessions/session-1`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: '调整课程安排' }) });
+  assert.equal(updatedSession.status, 200);
+  assert.deepEqual(calls.find((call) => call[0] === 'update-session'), ['update-session', 'session-1', { title: '调整课程安排' }]);
+  await fetch(`${base}/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: '普通排期', isHistoricalBackfill: true }) });
+  assert.deepEqual(calls.filter((call) => call[0] === 'create-session').slice(-1)[0], ['create-session', { title: '普通排期' }], '普通排期端点必须剥离客户端伪造的历史补录标记');
+  await fetch(`${base}/sessions/historical`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: '历史课程' }) });
+  assert.deepEqual(calls.filter((call) => call[0] === 'create-session').slice(-1)[0], ['create-session', { title: '历史课程', isHistoricalBackfill: true }], '历史补录只能通过独立端点注入可信标记');
 
   const nextStep = await fetch(`${base}/sessions/session-1/next-step`);
   assert.equal(nextStep.status, 200);

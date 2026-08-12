@@ -132,6 +132,9 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
       }, { isolationLevel: "Serializable" });
       return template;
     },
+    async deleteSopTemplate(id) {
+      await prisma.academySopTemplate.delete({ where: { id } });
+    },
     async listCourseCategories() {
       const rows = await prisma.businessRecord.findMany({
         where: { domain: ACADEMY_COURSE_CATEGORY_DOMAIN },
@@ -459,6 +462,28 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
       });
       if (!result.count) return null;
       const record = await prisma.academySession.findUnique({ where: { id } });
+      return record ? mapSession(record) : null;
+    },
+    async updateSession(id, expectedStatus, update, taskUpdates) {
+      const record = await prisma.$transaction(async (tx: any) => {
+        const { audience, isInvitable, ...sessionUpdate } = update;
+        const current = await tx.academySession.findUnique({ where: { id }, select: { collaboratorUserIds: true } });
+        const collaborators = (Array.isArray(current?.collaboratorUserIds) ? current.collaboratorUserIds : [])
+          .filter((value: string) => !value.startsWith("__academy_"));
+        const collaboratorUserIds = audience
+          ? [
+              ...collaborators,
+              ...(audience === "ALL_EMPLOYEES" ? [ACADEMY_ALL_EMPLOYEES_MARKER] : []),
+              ...(audience === "ALL_EMPLOYEES" && isInvitable ? [ACADEMY_INVITABLE_MARKER] : []),
+            ]
+          : undefined;
+        const changed = await tx.academySession.updateMany({ where: { id, status: expectedStatus }, data: { ...sessionUpdate, ...(collaboratorUserIds ? { collaboratorUserIds } : {}) } });
+        if (!changed.count) return null;
+        for (const taskUpdate of taskUpdates) {
+          await tx.academySessionTask.update({ where: { id: taskUpdate.id }, data: taskUpdate.update });
+        }
+        return tx.academySession.findUnique({ where: { id } });
+      });
       return record ? mapSession(record) : null;
     },
     async listSessionTasks(sessionId) {

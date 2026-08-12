@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { AcademySession, AcademySessionDetail } from "../../types/academy";
-import { getArrangementNextAction } from "./AcademyPlans";
+import { getArrangementNextAction, getArrangementTimingState } from "./AcademyPlans";
 
 const session = {
   id: "session-1",
@@ -43,10 +43,20 @@ assert.equal(
   "必做准备未完成时应引导完善准备",
 );
 
+assert.deepEqual(
+  getArrangementTimingState({ ...session, endsAt: "2026-08-12T08:00:00.000Z" }, new Date("2026-08-12T10:00:00.000Z")),
+  { overdue: true, label: "待确认结束 · 已超时2小时" },
+  "授课结束时间已过但课程未完结时必须提醒负责人确认结束",
+);
 const readyDetail = {
   ...detail,
   tasks: detail.tasks.map((task) => ({ ...task, status: "DONE" as const })),
 };
+assert.equal(
+  getArrangementNextAction({ ...session, status: "IN_PROGRESS" }, readyDetail).label,
+  "结束课程",
+  "进行中课程必须提供明确的结束操作",
+);
 assert.deepEqual(
   getArrangementNextAction(session, readyDetail),
   { label: "确认开课", nextStatus: "READY", tab: 0 },

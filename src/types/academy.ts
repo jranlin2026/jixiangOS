@@ -119,6 +119,7 @@ export interface AcademySession {
   dealTarget: number;
   targetRevenue: number;
   status: AcademySessionStatus;
+  isHistoricalBackfill?: boolean;
   audience?: "ALL_EMPLOYEES" | "RESPONSIBLE_ONLY";
   isInvitable?: boolean;
   canOpenDetail?: boolean;
@@ -191,6 +192,8 @@ export interface AcademySessionTask {
   assigneeUserName?: string;
   collaboratorNames?: string[];
   dueAt?: string;
+  dueAnchor?: "STARTS_AT" | "ENDS_AT";
+  dueOffsetMinutes?: number | null;
   acceptanceCriteria?: string;
   sopTemplateId?: string;
   sopTemplateStepId?: string;
@@ -302,7 +305,7 @@ export type CreateAcademySessionInput = Pick<
   | "contentOwnerUserId"
   | "materialOwnerUserId"
   | "reviewOwnerUserId"
->;
+> & { isHistoricalBackfill?: boolean };
 export type SaveAcademyEngagementInput = Omit<
   AcademyEngagement,
   | "id"

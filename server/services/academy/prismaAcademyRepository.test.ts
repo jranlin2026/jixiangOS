@@ -3,6 +3,7 @@ import { createPrismaAcademyRepository } from "./prismaAcademyRepository";
 
 const calls: Array<{ model: string; method: string; args: any }> = [];
 const now = new Date("2026-08-08T09:00:00.000Z");
+let transactionSessionRow: any = null;
 let businessRecordFindManyRows: any[] | null = null;
 let businessRecordFindManyQueue: any[][] = [];
 let businessRecordFindUniqueRow: any = null;
@@ -14,6 +15,7 @@ const client: any = {
     ),
     findUnique: async () => null,
     findFirst: async () => null,
+    delete: async (args: any) => (calls.push({ model: "sopTemplate", method: "delete", args }), args.where),
   },
   academyCourse: {
     findMany: async (args: any) => (
@@ -110,9 +112,18 @@ const client: any = {
         deleteMany: async (args: any) => (calls.push({ model: "sopStep", method: "deleteMany", args }), { count: 0 }),
         createMany: async (args: any) => (calls.push({ model: "sopStep", method: "createMany", args }), { count: args.data.length }),
       },
-      academySession: { create: async ({ data }: any) => data },
+      academySession: {
+        create: async ({ data }: any) => data,
+        findUnique: async () => transactionSessionRow,
+        updateMany: async (args: any) => {
+          calls.push({ model: "transactionSession", method: "updateMany", args });
+          transactionSessionRow = transactionSessionRow ? { ...transactionSessionRow, ...args.data } : null;
+          return { count: transactionSessionRow ? 1 : 0 };
+        },
+      },
       academySessionTask: {
         createMany: async ({ data }: any) => ({ count: data.length }),
+        update: async (args: any) => (calls.push({ model: "task", method: "update", args }), args.data),
       },
     });
   },
@@ -121,6 +132,8 @@ const client: any = {
 const repository = createPrismaAcademyRepository(client);
 const templates = await repository.listSopTemplates!();
 assert.deepEqual(templates[0].steps.map((step) => step.stepKey), ["FIRST", "SECOND"], "模板步骤必须按配置顺序返回");
+await repository.deleteSopTemplate!("sop-delete");
+assert.deepEqual(calls.find((call) => call.model === "sopTemplate" && call.method === "delete")?.args.where, { id: "sop-delete" });
 const initialCategories = await repository.listCourseCategories();
 assert.deepEqual(initialCategories, []);
 const categoryListCall = calls.find(
@@ -289,6 +302,22 @@ await repository.updateSessionStatus("session-1", "PLANNED", "READY");
 const statusCall = calls.find(
   (call) => call.model === "session" && call.method === "updateMany",
 );
+
+transactionSessionRow = {
+  id: "session-edit",
+  status: "PLANNED",
+  capacity: 20,
+  targetRevenue: 0,
+  collaboratorUserIds: ["collaborator-1", "__academy_all_employees__", "__academy_invitable__"],
+};
+await repository.updateSession("session-edit", "PLANNED", {
+  title: "调整安排",
+  audience: "RESPONSIBLE_ONLY",
+  isInvitable: false,
+}, []);
+const arrangementUpdateCall = calls.find((call) => call.model === "transactionSession" && call.method === "updateMany");
+assert.deepEqual(arrangementUpdateCall?.args.where, { id: "session-edit", status: "PLANNED" }, "编辑课程安排必须带旧状态避免并发覆盖");
+assert.deepEqual(arrangementUpdateCall?.args.data.collaboratorUserIds, ["collaborator-1"], "调整课程可见范围时必须移除旧公共标记并保留真实协作人");
 assert.deepEqual(
   statusCall?.args.where,
   { id: "session-1", status: "PLANNED" },

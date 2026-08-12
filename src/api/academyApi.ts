@@ -55,6 +55,9 @@ export const academyApi = {
   saveSopTemplate(input: Omit<AcademySopTemplate, 'updatedAt'>): Promise<ApiResponse<AcademySopTemplate>> {
     return backendRequest('/academy/sop-templates', { method: 'PUT', body: JSON.stringify(input) });
   },
+  deleteSopTemplate(id: string): Promise<ApiResponse<{ id: string }>> {
+    return backendRequest(`/academy/sop-templates/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
   saveCourseCategory(input: SaveAcademyCourseCategoryInput): Promise<ApiResponse<AcademyCourseCategory>> {
     return backendRequest('/academy/course-categories', { method: 'PUT', body: JSON.stringify(input) });
   },
@@ -81,6 +84,12 @@ export const academyApi = {
   },
   createSession(input: CreateAcademySessionInput): Promise<ApiResponse<AcademySession>> {
     return backendRequest('/academy/sessions', { method: 'POST', body: JSON.stringify(input) });
+  },
+  createHistoricalSession(input: CreateAcademySessionInput): Promise<ApiResponse<AcademySession>> {
+    return backendRequest('/academy/sessions/historical', { method: 'POST', body: JSON.stringify(input) });
+  },
+  updateSession(id: string, input: CreateAcademySessionInput): Promise<ApiResponse<AcademySession>> {
+    return backendRequest(`/academy/sessions/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) });
   },
   getSessionDetail(id: string): Promise<ApiResponse<AcademySessionDetail>> {
     return backendRequest(`/academy/sessions/${encodeURIComponent(id)}`);

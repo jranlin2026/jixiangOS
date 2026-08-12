@@ -54,6 +54,10 @@ function createRepository(): AcademyRepository {
       else sopTemplates.push(template);
       return template;
     },
+    deleteSopTemplate: async (id) => {
+      const index = sopTemplates.findIndex((item) => item.id === id);
+      if (index >= 0) sopTemplates.splice(index, 1);
+    },
     listCourseCategories: async () => categories,
     upsertCourseCategory: async (category) => {
       const index = categories.findIndex((item) => item.id === category.id);
@@ -146,6 +150,16 @@ function createRepository(): AcademyRepository {
       );
       if (!session) return null;
       session.status = status;
+      return session;
+    },
+    updateSession: async (id, expectedStatus, update, taskUpdates) => {
+      const session = sessions.find((item) => item.id === id && item.status === expectedStatus);
+      if (!session) return null;
+      Object.assign(session, update);
+      taskUpdates.forEach(({ id: taskId, update: taskUpdate }) => {
+        const task = tasks.find((item) => item.id === taskId);
+        if (task) Object.assign(task, taskUpdate);
+      });
       return session;
     },
     listSessionTasks: async (sessionId) =>
@@ -539,11 +553,8 @@ assert.equal(sessionResult.code, 0);
 assert.equal(sessionResult.data?.tasks[0]?.assigneeUserName, actor.name);
 assert.ok(sessionResult.data?.tasks[0]?.dueAt instanceof Date);
 assert.match(sessionResult.data?.tasks[0]?.acceptanceCriteria || "", /课程目标/);
-assert.equal(
-  "dueOffsetMinutes" in (sessionResult.data?.tasks[0] || {}),
-  false,
-  "任务模板的截止时间偏移只用于计算，不得泄漏到持久化任务记录",
-);
+assert.equal(sessionResult.data?.tasks[0]?.dueAnchor, "STARTS_AT", "安排任务必须快照截止时间基准，避免模板后续修改影响已排期课程");
+assert.equal(typeof sessionResult.data?.tasks[0]?.dueOffsetMinutes, "number", "安排任务必须快照截止偏移以支持安全调整时间");
 assert.deepEqual(
   sessionResult.data?.tasks.map((task: any) => task.templateKey),
   [
@@ -604,6 +615,27 @@ assert.equal(compactSession.data?.tasks[0]?.completionMode, "CONFIRM");
 assert.equal(compactSession.data?.tasks[0]?.sopTemplateId, compactTemplate.data!.id);
 assert.equal(compactSession.data?.tasks[0]?.assigneeRole, "PROJECT_OWNER");
 assert.equal(compactSession.data?.tasks[1]?.dueAt?.toISOString(), "2026-08-20T11:30:00.000Z");
+const updatedCompactSession = await service.updateSession(compactSession.data!.id, {
+  title: "调整后的课程安排",
+  startsAt: "2026-08-20T10:00:00.000Z",
+  endsAt: "2026-08-20T12:00:00.000Z",
+  deliveryMode: "LIVE",
+  venue: "调整后直播间",
+  capacity: 30,
+  projectOwnerUserId: actor.id,
+  audience: "ALL_EMPLOYEES",
+  isInvitable: false,
+}, actor);
+assert.equal(updatedCompactSession.code, 0, "已排期课程应允许负责人调整时间和人员");
+assert.equal(updatedCompactSession.data?.title, "调整后的课程安排");
+assert.equal(updatedCompactSession.data?.endsAt.toISOString(), "2026-08-20T12:00:00.000Z");
+const partialVisibilityUpdate = await service.updateSession(compactSession.data!.id, {
+  startsAt: "2026-08-20T10:00:00.000Z",
+  endsAt: "2026-08-20T12:00:00.000Z",
+  venue: "调整后直播间",
+  projectOwnerUserId: actor.id,
+}, actor);
+assert.equal(partialVisibilityUpdate.data?.isInvitable, false, "部分编辑不得把原本禁止邀约的课程自动开放邀约");
 assert.equal((await service.updateCourse(courseResult.data!.id, { ...courseResult.data, status: "ACTIVE", sopTemplateId: "" }, actor)).code, 0);
 
 const taskAuthorizationSession = await repository.createSession({

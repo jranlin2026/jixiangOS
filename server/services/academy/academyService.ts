@@ -116,6 +116,7 @@ export type AcademySessionRecord = {
   dealTarget?: number;
   targetRevenue?: number;
   status: AcademySessionStatus;
+  isHistoricalBackfill?: boolean;
   audience: "ALL_EMPLOYEES" | "RESPONSIBLE_ONLY";
   isInvitable: boolean;
   facilitatorUserId?: string | null;
@@ -143,6 +144,8 @@ export type AcademySessionTaskRecord = {
   assigneeUserName?: string | null;
   collaboratorNames?: string[] | null;
   dueAt?: Date | null;
+  dueAnchor?: "STARTS_AT" | "ENDS_AT" | null;
+  dueOffsetMinutes?: number | null;
   acceptanceCriteria?: string | null;
   sopTemplateId?: string | null;
   sopTemplateStepId?: string | null;
@@ -239,6 +242,7 @@ export interface AcademyRepository {
   findSopTemplateById?(id: string): Promise<AcademySopTemplateRecord | null>;
   findDefaultSopTemplate?(): Promise<AcademySopTemplateRecord | null>;
   saveSopTemplate?(template: AcademySopTemplateRecord): Promise<AcademySopTemplateRecord>;
+  deleteSopTemplate?(id: string): Promise<void>;
   listCourseCategories(): Promise<AcademyCourseCategoryRecord[]>;
   upsertCourseCategory(category: AcademyCourseCategoryRecord): Promise<AcademyCourseCategoryRecord>;
   listCourses(
@@ -286,6 +290,12 @@ export interface AcademyRepository {
     id: string,
     expectedStatus: AcademySessionStatus,
     status: AcademySessionStatus,
+  ): Promise<AcademySessionRecord | null>;
+  updateSession(
+    id: string,
+    expectedStatus: AcademySessionStatus,
+    update: Partial<AcademySessionRecord>,
+    taskUpdates: Array<{ id: string; update: Partial<AcademySessionTaskRecord> }>,
   ): Promise<AcademySessionRecord | null>;
   listSessionTasks(sessionId: string): Promise<AcademySessionTaskRecord[]>;
   listMyTasks(
@@ -631,6 +641,21 @@ export function createAcademyService(
         updatedAt: timestamp,
         steps,
       }));
+    },
+    async deleteSopTemplate(id: string, _actor: AuthenticatedUser) {
+      const templateId = String(id || "").trim();
+      if (!templateId) return invalid("SOP模板标识不能为空");
+      const existing = await repository.findSopTemplateById?.(templateId) || null;
+      if (!existing) return invalid("SOP模板不存在", 404);
+      if (existing.isDefault) return invalid("默认SOP模板不能删除，请先将其他模板设为默认模板", 409);
+      const linked = await repository.listCourses(
+        { page: 1, pageSize: 1, sopTemplateId: templateId },
+        { unrestricted: true, visibleUserIds: [] },
+      );
+      if (linked.total) return invalid(`该模板已绑定${linked.total}门课程，不能删除`, 409);
+      if (!repository.deleteSopTemplate) return invalid("SOP模板删除暂不可用", 503);
+      await repository.deleteSopTemplate(templateId);
+      return success({ id: templateId });
     },
     async saveCourseCategory(raw: Record<string, unknown>, _actor: AuthenticatedUser) {
       const id = String(raw.id || "").trim() || `academy-category-${randomUUID()}`;
@@ -1039,6 +1064,10 @@ export function createAcademyService(
       )
         return invalid("课程和时间不能为空");
       if (endsAt <= startsAt) return invalid("结束时间必须晚于开始时间");
+      if (startsAt < now() && raw.isHistoricalBackfill !== true)
+        return invalid("正常排期不能选择过去时间；如需补录，请开启历史课程补录");
+      if (raw.isHistoricalBackfill === true && startsAt >= now())
+        return invalid("历史课程补录必须选择过去的开课时间");
       if (!Number.isInteger(capacity) || capacity <= 0)
         return invalid("场次容量必须是正整数");
       if (!DELIVERY_MODES.has(deliveryMode)) return invalid("请选择有效的授课方式");
@@ -1122,6 +1151,7 @@ export function createAcademyService(
         dealTarget: targets.dealTarget!,
         targetRevenue,
         status: "PLANNED",
+        isHistoricalBackfill: raw.isHistoricalBackfill === true,
         audience,
         isInvitable: audience === "ALL_EMPLOYEES" && raw.isInvitable !== false,
         facilitatorUserId: projectOwner.id,
@@ -1157,6 +1187,8 @@ export function createAcademyService(
           assigneeUserName: assignee.name,
           collaboratorNames: [],
           dueAt: item.dueOffsetMinutes == null ? null : new Date(anchor.getTime() + item.dueOffsetMinutes * 60_000),
+          dueAnchor: item.dueAnchor,
+          dueOffsetMinutes: item.dueOffsetMinutes,
           acceptanceCriteria: item.acceptanceCriteria || null,
           sopTemplateId: template.id,
           sopTemplateStepId: item.id,
@@ -1169,6 +1201,81 @@ export function createAcademyService(
         };
       });
       return success(await repository.createSession(session, checklist));
+    },
+    async updateSession(id: string, raw: Record<string, unknown>, actor: AuthenticatedUser) {
+      const scope = await resolveScope(actor);
+      const current = await repository.findSessionById(id, scope);
+      if (!current) return invalid("课程安排不存在", 404);
+      if (!["PLANNED", "READY"].includes(current.status)) return invalid("只有已排期或待开课课程可以调整安排", 409);
+      const startsAt = new Date(String(raw.startsAt || current.startsAt));
+      const endsAt = new Date(String(raw.endsAt || current.endsAt));
+      if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) return invalid("课程时间不能为空");
+      if (endsAt <= startsAt) return invalid("结束时间必须晚于开始时间");
+      if (current.isHistoricalBackfill && startsAt >= now()) return invalid("历史补录课程必须保留在过去时间");
+      if (!current.isHistoricalBackfill && startsAt < now() && current.startsAt >= now()) return invalid("正常排期不能调整到过去时间");
+      if (!current.isHistoricalBackfill && current.startsAt < now() && startsAt.getTime() !== current.startsAt.getTime()) return invalid("已过期的普通排期不能再调整开课时间；如需补录请新建历史课程");
+      const deliveryMode = String(raw.deliveryMode || current.deliveryMode || "LIVE") as AcademyDeliveryMode;
+      if (!DELIVERY_MODES.has(deliveryMode)) return invalid("请选择有效的授课方式");
+      const venue = String(raw.venue ?? current.venue ?? "").trim();
+      const meetingUrl = String(raw.meetingUrl ?? current.meetingUrl ?? "").trim();
+      if ((deliveryMode === "OFFLINE" || deliveryMode === "LIVE") && !venue) return invalid(deliveryMode === "OFFLINE" ? "请填写授课场地" : "请填写直播间");
+      if (deliveryMode === "ONLINE" && !meetingUrl) return invalid("请填写会议链接");
+      const projectOwnerUserId = String(raw.projectOwnerUserId || raw.facilitatorUserId || current.facilitatorUserId || "").trim();
+      const lecturerUserId = String(raw.lecturerUserId || current.lecturerUserId || "").trim();
+      const [projectOwner, lecturer] = await Promise.all([
+        repository.findActiveUserById(projectOwnerUserId),
+        lecturerUserId ? repository.findActiveUserById(lecturerUserId) : Promise.resolve(null),
+      ]);
+      if (!projectOwner) return invalid("请选择有效的项目负责人");
+      if (lecturerUserId && !lecturer) return invalid("请选择有效的主讲人");
+      const tasks = await repository.listSessionTasks(id);
+      const ownerIds: Record<AcademyTaskAssigneeRole, string> = {
+        PROJECT_OWNER: projectOwner.id,
+        CONTENT_OWNER: String(raw.contentOwnerUserId || tasks.find((item) => item.assigneeRole === "CONTENT_OWNER")?.assigneeUserId || projectOwner.id),
+        MATERIAL_OWNER: String(raw.materialOwnerUserId || tasks.find((item) => item.assigneeRole === "MATERIAL_OWNER")?.assigneeUserId || projectOwner.id),
+        LECTURER: lecturer?.id || projectOwner.id,
+        REVIEW_OWNER: String(raw.reviewOwnerUserId || tasks.find((item) => item.assigneeRole === "REVIEW_OWNER")?.assigneeUserId || projectOwner.id),
+      };
+      const ownerEntries = await Promise.all(Object.entries(ownerIds).map(async ([role, userId]) => [role, await repository.findActiveUserById(userId)] as const));
+      if (ownerEntries.some(([, user]) => !user)) return invalid("负责人中包含已停用或不存在的员工");
+      const owners = Object.fromEntries(ownerEntries) as Record<AcademyTaskAssigneeRole, { id: string; name: string }>;
+      const taskUpdates = tasks.map((task) => {
+        const role = task.assigneeRole || "PROJECT_OWNER";
+        const owner = owners[role];
+        const usesEndAnchor = task.dueAnchor ? task.dueAnchor === "ENDS_AT" : task.category === "AFTER";
+        const oldAnchor = usesEndAnchor ? current.endsAt : current.startsAt;
+        const newAnchor = usesEndAnchor ? endsAt : startsAt;
+        const offsetMinutes = task.dueOffsetMinutes ?? (task.dueAt == null ? null : Math.round((task.dueAt.getTime() - oldAnchor.getTime()) / 60_000));
+        const dueAt = offsetMinutes == null ? null : new Date(newAnchor.getTime() + offsetMinutes * 60_000);
+        return { id: task.id, update: { assigneeUserId: owner.id, assigneeUserName: owner.name, dueAt, updatedAt: now() } };
+      });
+      const capacity = Number(raw.capacity ?? current.capacity);
+      if (!Number.isInteger(capacity) || capacity <= 0) return invalid("课程容量必须是正整数");
+      const targets = {
+        inviteTarget: asNonNegativeInteger(raw.inviteTarget ?? current.inviteTarget),
+        registrationTarget: asNonNegativeInteger(raw.registrationTarget ?? current.registrationTarget),
+        attendanceTarget: asNonNegativeInteger(raw.attendanceTarget ?? current.attendanceTarget),
+        consultationTarget: asNonNegativeInteger(raw.consultationTarget ?? current.consultationTarget),
+        dealTarget: asNonNegativeInteger(raw.dealTarget ?? current.dealTarget),
+      };
+      if (Object.values(targets).some((value) => value === null)) return invalid("经营目标人数必须是大于等于0的整数");
+      const targetRevenue = Number(raw.targetRevenue ?? current.targetRevenue ?? 0);
+      if (!Number.isFinite(targetRevenue) || targetRevenue < 0) return invalid("目标成交金额必须大于等于0");
+      const audience = raw.audience == null
+        ? current.audience
+        : raw.audience === "RESPONSIBLE_ONLY" ? "RESPONSIBLE_ONLY" : "ALL_EMPLOYEES";
+      const updated = await repository.updateSession(id, current.status, {
+        title: String(raw.title || current.title).trim(), startsAt, endsAt, deliveryMode, venue,
+        meetingUrl: meetingUrl || null, capacity, facilitatorUserId: projectOwner.id,
+        facilitatorUserName: projectOwner.name, lecturerUserId: lecturer?.id || null,
+        lecturerUserName: lecturer?.name || null,
+        inviteTarget: targets.inviteTarget!, registrationTarget: targets.registrationTarget!,
+        attendanceTarget: targets.attendanceTarget!, consultationTarget: targets.consultationTarget!,
+        dealTarget: targets.dealTarget!, targetRevenue, audience,
+        isInvitable: audience === "ALL_EMPLOYEES" && (raw.isInvitable == null ? current.isInvitable : raw.isInvitable !== false),
+        updatedAt: now(),
+      }, taskUpdates);
+      return updated ? success(updated) : invalid("课程安排已变化，请刷新后重试", 409);
     },
     async changeSessionStatus(
       id: string,

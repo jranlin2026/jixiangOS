@@ -23,6 +23,11 @@ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import CloseIcon from "@mui/icons-material/Close";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import EventAvailableOutlinedIcon from "@mui/icons-material/EventAvailableOutlined";
+import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
+import StopCircleOutlinedIcon from "@mui/icons-material/StopCircleOutlined";
+import CancelOutlinedIcon from "@mui/icons-material/CancelOutlined";
+import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
+import AssessmentOutlinedIcon from "@mui/icons-material/AssessmentOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import TablePagination from "../../shared/components/TablePagination";
 import SystemDataTable from "../../shared/components/SystemDataTable";
@@ -86,13 +91,21 @@ const shortDate = (date: Date) =>
 const formatDateTime = (value?: string) =>
   value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "-";
 
+export const getArrangementTimingState = (session: AcademySession, now = new Date()) => {
+  if (["COMPLETED", "CANCELLED"].includes(session.status)) return { overdue: false, label: "" };
+  const overdueMs = now.getTime() - new Date(session.endsAt).getTime();
+  if (overdueMs <= 0) return { overdue: false, label: "" };
+  const hours = Math.max(1, Math.floor(overdueMs / 3_600_000));
+  return { overdue: true, label: `待确认结束 · 已超时${hours}小时` };
+};
+
 export const getArrangementNextAction = (
   session: AcademySession,
   detail?: AcademySessionDetail,
 ) => {
   if (session.status === "PLANNED") {
     const beforeTasks = detail?.tasks.filter((task) => task.category === "BEFORE" && task.isRequired) || [];
-    const ready = beforeTasks.length > 0 && beforeTasks.every((task) => task.status === "DONE");
+    const ready = Boolean(detail) && beforeTasks.every((task) => task.status === "DONE");
     return ready
       ? { label: "确认开课", nextStatus: "READY" as AcademySessionStatus, tab: 0 }
       : { label: "完善SOP流程", tab: 0 };
@@ -100,7 +113,7 @@ export const getArrangementNextAction = (
   if (session.status === "READY")
     return { label: "进入课程执行", nextStatus: "IN_PROGRESS" as AcademySessionStatus, tab: 0 };
   if (session.status === "IN_PROGRESS")
-    return { label: "完成课程并填写结果", nextStatus: "COMPLETED" as AcademySessionStatus, tab: 2 };
+    return { label: "结束课程", nextStatus: "COMPLETED" as AcademySessionStatus, tab: 2 };
   if (session.status === "COMPLETED")
     return detail?.review ? { label: "查看复盘结果", tab: 2 } : { label: "填写复盘结果", tab: 2 };
   return { label: "查看取消记录", tab: 0 };
@@ -111,7 +124,12 @@ type PlansProps = {
   details: Record<string, AcademySessionDetail>;
   detailErrors: Record<string, string>;
   onCreate: (date?: Date) => void;
+  onCreateHistorical: () => void;
+  onEdit: (session: AcademySession) => void;
+  onChangeStatus: (session: AcademySession, status: AcademySessionStatus) => void;
+  onOpenWorkbench: (sessionId: string) => void;
   canCreate: boolean;
+  canManage: boolean;
   canReview: boolean;
   requestedSessionId?: string;
   onRequestConsumed: () => void;
@@ -128,7 +146,12 @@ export const Plans: React.FC<PlansProps> = ({
   details,
   detailErrors,
   onCreate,
+  onCreateHistorical,
+  onEdit,
+  onChangeStatus,
+  onOpenWorkbench,
   canCreate,
+  canManage,
   canReview,
   requestedSessionId,
   onRequestConsumed,
@@ -142,7 +165,7 @@ export const Plans: React.FC<PlansProps> = ({
   const [weekOffset, setWeekOffset] = useState(0);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
-  const [bucket, setBucket] = useState<"UPCOMING" | "COMPLETED">("UPCOMING");
+  const [bucket, setBucket] = useState<"UPCOMING" | "IN_PROGRESS" | "COMPLETED">("UPCOMING");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [customerPage, setCustomerPage] = useState(0);
@@ -184,7 +207,9 @@ export const Plans: React.FC<PlansProps> = ({
       .includes(search.toLowerCase());
     const matchesBucket = bucket === "COMPLETED"
       ? item.status === "COMPLETED"
-      : ["PLANNED", "READY"].includes(item.status);
+      : bucket === "IN_PROGRESS"
+        ? item.status === "IN_PROGRESS"
+        : ["PLANNED", "READY"].includes(item.status);
     return matchesSearch && matchesBucket;
   });
   const maxPage = Math.max(0, Math.ceil(filtered.length / pageSize) - 1);
@@ -244,7 +269,10 @@ export const Plans: React.FC<PlansProps> = ({
           <Typography fontSize={18} fontWeight={950}>课程安排</Typography>
           <Typography fontSize={12.5} color="text.secondary">安排未来课程，查看已完结课程的客户结果与复盘</Typography>
         </Box>
-        {canCreate && <Button variant="contained" startIcon={<AddIcon />} onClick={() => onCreate()}>新建课程安排</Button>}
+        {canCreate && <Stack direction="row" spacing={1}>
+          <Button variant="outlined" onClick={onCreateHistorical}>补录历史课程</Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => onCreate()}>新建课程安排</Button>
+        </Stack>}
       </Stack>
 
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5, overflow: "hidden" }}>
@@ -264,23 +292,33 @@ export const Plans: React.FC<PlansProps> = ({
               const items = weekSessions.filter((item) => new Date(item.startsAt).toDateString() === date.toDateString());
               return <Box key={date.toISOString()} sx={{ minHeight: 190, p: 1.1, bgcolor: items.length ? "#F4F8FF" : "#fff", borderRight: index < 6 ? `1px solid ${colors.line}` : 0 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center"><Stack direction="row" spacing={0.7}><Typography fontWeight={900} fontSize={13}>周{"一二三四五六日"[index]}</Typography><Typography fontSize={12} color="text.secondary">{String(date.getMonth() + 1).padStart(2, "0")}-{String(date.getDate()).padStart(2, "0")}</Typography></Stack>{canCreate && <IconButton size="small" aria-label="当天新增课程安排" onClick={() => onCreate(date)}><AddIcon fontSize="small" /></IconButton>}</Stack>
-                {items.length ? <Stack spacing={0.8} sx={{ mt: 1 }}>{items.map((item) => { const canOpen = item.canOpenDetail !== false && ["PLANNED", "READY", "COMPLETED"].includes(item.status); return <Box key={item.id} role={canOpen ? "button" : undefined} tabIndex={canOpen ? 0 : undefined} aria-label={canOpen ? `查看课程安排 ${item.title}` : undefined} onClick={canOpen ? () => openDetail(item) : undefined} onKeyDown={canOpen ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDetail(item); } } : undefined} sx={{ p: 1, borderRadius: 1, bgcolor: "#fff", border: "1px solid #C9DBFF", cursor: canOpen ? "pointer" : "default", "&:focus-visible": { outline: `2px solid ${colors.blue}` } }}><Typography fontSize={12.5} fontWeight={900} noWrap>{item.title}</Typography><Typography fontSize={11.5} color="text.secondary">{formatTime(item.startsAt)} · {deliveryModeLabel[item.deliveryMode] || item.deliveryMode}</Typography><Chip size="small" label={statusLabel[item.status] || item.status} sx={{ mt: 0.7 }} /></Box>; })}</Stack> : <Typography fontSize={12} color="text.secondary" textAlign="center" sx={{ mt: 7 }}>暂无安排</Typography>}
+                {items.length ? <Stack spacing={0.8} sx={{ mt: 1 }}>{items.map((item) => {
+                  const canOpen = item.canOpenDetail !== false && (item.status === "COMPLETED" || item.status === "IN_PROGRESS" || canCreate);
+                  const handleOpen = () => {
+                    if (!canOpen) return;
+                    if (item.status === "COMPLETED") openDetail(item);
+                    else if (item.status === "IN_PROGRESS") onOpenWorkbench(item.id);
+                    else if (canCreate) onEdit(item);
+                  };
+                  return <Box key={item.id} role={canOpen ? "button" : undefined} tabIndex={canOpen ? 0 : undefined} aria-label={canOpen ? `${item.status === "COMPLETED" ? "查看课程结果" : item.status === "IN_PROGRESS" ? "进入课程工作台" : "编辑课程安排"} ${item.title}` : undefined} onClick={canOpen ? handleOpen : undefined} onKeyDown={canOpen ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); handleOpen(); } } : undefined} sx={{ p: 1, borderRadius: 1, bgcolor: "#fff", border: "1px solid #C9DBFF", cursor: canOpen ? "pointer" : "default", "&:focus-visible": { outline: `2px solid ${colors.blue}` } }}><Typography fontSize={12.5} fontWeight={900} noWrap>{item.title}</Typography><Typography fontSize={11.5} color="text.secondary">{formatTime(item.startsAt)}–{formatTime(item.endsAt)} · {deliveryModeLabel[item.deliveryMode] || item.deliveryMode}</Typography><Chip size="small" label={statusLabel[item.status] || item.status} sx={{ mt: 0.7 }} /></Box>;
+                })}</Stack> : <Typography fontSize={12} color="text.secondary" textAlign="center" sx={{ mt: 7 }}>暂无安排</Typography>}
               </Box>;
             })}
           </Box>
         </Box>
       </Paper>
 
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1.2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0, 1fr))" }, gap: 1.2 }}>
         {[
           { key: "UPCOMING", label: "待开课安排", helper: "设置时间、讲师和课程负责人", count: sessions.filter((item) => ["PLANNED", "READY"].includes(item.status)).length },
+          { key: "IN_PROGRESS", label: "进行中课程", helper: "进入工作台推进课程和SOP", count: sessions.filter((item) => item.status === "IN_PROGRESS").length },
           { key: "COMPLETED", label: "已完结课程", helper: "查看客户结果、经营数据和复盘", count: sessions.filter((item) => item.status === "COMPLETED").length },
-        ].map((item) => <Paper component="button" type="button" aria-pressed={bucket === item.key} key={item.key} variant="outlined" onClick={() => setBucket(item.key as "UPCOMING" | "COMPLETED")} sx={{ ...panelSx, p: 1.6, textAlign: "left", cursor: "pointer", borderColor: bucket === item.key ? colors.blue : colors.line, bgcolor: bucket === item.key ? colors.blueSoft : "#fff" }}><Stack direction="row" justifyContent="space-between"><Box><Typography fontWeight={950}>{item.label}</Typography><Typography fontSize={12.5} color="text.secondary">{item.helper}</Typography></Box><Typography fontSize={24} fontWeight={950} color={bucket === item.key ? colors.blue : colors.ink}>{item.count}</Typography></Stack></Paper>)}
+        ].map((item) => <Paper component="button" type="button" aria-pressed={bucket === item.key} key={item.key} variant="outlined" onClick={() => setBucket(item.key as "UPCOMING" | "IN_PROGRESS" | "COMPLETED")} sx={{ ...panelSx, p: 1.6, textAlign: "left", cursor: "pointer", borderColor: bucket === item.key ? colors.blue : colors.line, bgcolor: bucket === item.key ? colors.blueSoft : "#fff" }}><Stack direction="row" justifyContent="space-between"><Box><Typography fontWeight={950}>{item.label}</Typography><Typography fontSize={12.5} color="text.secondary">{item.helper}</Typography></Box><Typography fontSize={24} fontWeight={950} color={bucket === item.key ? colors.blue : colors.ink}>{item.count}</Typography></Stack></Paper>)}
       </Box>
 
       <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
         <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" alignItems={{ lg: "center" }} spacing={1} sx={{ p: 1.5, borderBottom: `1px solid ${colors.line}` }}>
-          <Box><Typography fontWeight={900}>{bucket === "UPCOMING" ? "待开课安排" : "已完结课程"}</Typography><Typography fontSize={12.5} color="text.secondary">{bucket === "UPCOMING" ? "点击一行查看课程安排信息；进行中课程统一到我的工作台推进" : "点击一行查看客户结果、课程数据和复盘"}</Typography></Box>
+          <Box><Typography fontWeight={900}>{bucket === "UPCOMING" ? "待开课安排" : bucket === "IN_PROGRESS" ? "进行中课程" : "已完结课程"}</Typography><Typography fontSize={12.5} color="text.secondary">{bucket === "UPCOMING" ? "直接编辑安排、确认待开课或取消；超时课程会提醒确认" : bucket === "IN_PROGRESS" ? "进入我的工作台推进SOP，课程结束后由负责人确认完结" : "查看客户结果、课程数据和复盘"}</Typography></Box>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
             <TextField size="small" placeholder="搜索课程、安排、地点或负责人" value={search} onChange={(event) => setSearch(event.target.value)} InputProps={{ startAdornment: <SearchIcon sx={{ mr: 0.7, color: "#98A2B3", fontSize: 20 }} /> }} />
           </Stack>
@@ -293,7 +331,29 @@ export const Plans: React.FC<PlansProps> = ({
               {paged.map((item) => {
                 const detail = details[item.id];
                 const deals = detail?.engagements.filter((engagement) => Boolean(engagement.orderNo)).length || 0;
-                return <TableRow key={item.id} hover={item.canOpenDetail !== false} role={item.canOpenDetail === false ? undefined : "button"} tabIndex={item.canOpenDetail === false ? undefined : 0} aria-label={item.canOpenDetail === false ? undefined : `查看课程安排 ${item.title}`} onClick={item.canOpenDetail === false ? undefined : () => openDetail(item)} onKeyDown={item.canOpenDetail === false ? undefined : (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDetail(item); } }} sx={{ cursor: item.canOpenDetail === false ? "default" : "pointer", "&:focus-visible": { outline: `2px solid ${colors.blue}`, outlineOffset: -2 } }}><TableCell>{new Date(item.startsAt).toLocaleDateString("zh-CN")}<Typography fontSize={12} color="text.secondary">{formatTime(item.startsAt)}–{formatTime(item.endsAt)}</Typography></TableCell><TableCell sx={{ fontWeight: 850 }}>{item.title}<Typography fontSize={12} color="text.secondary">{item.course?.title || "课程待关联"}</Typography></TableCell><TableCell>{deliveryModeLabel[item.deliveryMode] || item.deliveryMode}<Typography fontSize={12} color="text.secondary">{item.deliveryMode === "ONLINE" ? "线上" : item.venue || "地点待填"}</Typography></TableCell><TableCell>{item.lecturerUserName || "待确定"}</TableCell><TableCell>{item.facilitatorUserName || "待分配"}</TableCell><TableCell>邀约 {item.inviteTarget || 0} · 到课 {item.attendanceTarget || 0}<Typography fontSize={12} color="text.secondary">成交 {item.dealTarget || 0} · ¥{Number(item.targetRevenue || 0).toLocaleString("zh-CN")}</Typography></TableCell><TableCell>{bucket === "COMPLETED" ? `到课 ${detail?.engagements.filter((engagement) => engagement.attendanceStatus === "ATTENDED").length || 0} · 成交 ${deals}` : <Chip size="small" label={statusLabel[item.status] || item.status} />}</TableCell><TableCell>{bucket === "COMPLETED" ? <Chip size="small" label={detail?.review ? "已复盘" : "待复盘"} color={detail?.review ? "success" : "warning"} /> : <Typography fontSize={12.5} color="primary" fontWeight={800}>查看安排</Typography>}</TableCell></TableRow>;
+                const timing = getArrangementTimingState(item);
+                const nextAction = getArrangementNextAction(item, detail);
+                const completed = item.status === "COMPLETED";
+                return <TableRow key={item.id}>
+                  <TableCell>{new Date(item.startsAt).toLocaleDateString("zh-CN")}<Typography fontSize={12} color="text.secondary">{formatTime(item.startsAt)}–{formatTime(item.endsAt)}</Typography></TableCell>
+                  <TableCell sx={{ fontWeight: 850 }}>{item.title}<Typography fontSize={12} color="text.secondary">{item.course?.title || "课程待关联"}</Typography></TableCell>
+                  <TableCell>{deliveryModeLabel[item.deliveryMode] || item.deliveryMode}<Typography fontSize={12} color="text.secondary">{item.deliveryMode === "ONLINE" ? "线上" : item.venue || "地点待填"}</Typography></TableCell>
+                  <TableCell>{item.lecturerUserName || "待确定"}</TableCell>
+                  <TableCell>{item.facilitatorUserName || "待分配"}</TableCell>
+                  <TableCell>邀约 {item.inviteTarget || 0} · 到课 {item.attendanceTarget || 0}<Typography fontSize={12} color="text.secondary">成交 {item.dealTarget || 0} · ¥{Number(item.targetRevenue || 0).toLocaleString("zh-CN")}</Typography></TableCell>
+                  <TableCell>{completed ? `到课 ${detail?.engagements.filter((engagement) => engagement.attendanceStatus === "ATTENDED").length || 0} · 成交 ${deals}` : <Stack spacing={0.5} alignItems="flex-start"><Chip size="small" label={statusLabel[item.status] || item.status} />{timing.overdue && <Typography fontSize={11.5} color="error.main" fontWeight={800}>{timing.label}</Typography>}</Stack>}</TableCell>
+                  <TableCell>
+                    {completed ? <Stack direction="row" spacing={0.5} alignItems="center"><Chip size="small" label={detail?.review ? "已复盘" : "待复盘"} color={detail?.review ? "success" : "warning"} /><Tooltip title="查看课程结果"><IconButton size="small" aria-label={`查看课程结果 ${item.title}`} onClick={(event) => { event.stopPropagation(); openDetail(item); }}><AssessmentOutlinedIcon fontSize="small" /></IconButton></Tooltip></Stack> : <Stack direction="row" spacing={0.5} alignItems="center">
+                      {canCreate && ["PLANNED", "READY"].includes(item.status) && <Tooltip title="编辑课程安排"><IconButton size="small" aria-label={`编辑课程安排 ${item.title}`} onClick={() => onEdit(item)}><EditOutlinedIcon fontSize="small" /></IconButton></Tooltip>}
+                      {item.status === "PLANNED" && nextAction.nextStatus && canManage && <Button size="small" variant="contained" startIcon={<EventAvailableOutlinedIcon />} onClick={() => onChangeStatus(item, nextAction.nextStatus!)}>{nextAction.label}</Button>}
+                      {item.status === "PLANNED" && !nextAction.nextStatus && <Button size="small" startIcon={<DashboardOutlinedIcon />} onClick={() => onOpenWorkbench(item.id)}>完善SOP</Button>}
+                      {item.status === "READY" && canManage && <Button size="small" variant="contained" startIcon={<PlayCircleOutlineIcon />} onClick={() => onChangeStatus(item, "IN_PROGRESS")}>开始课程</Button>}
+                      {item.status === "IN_PROGRESS" && <Button size="small" startIcon={<DashboardOutlinedIcon />} onClick={() => onOpenWorkbench(item.id)}>工作台</Button>}
+                      {item.status === "IN_PROGRESS" && canManage && <Button size="small" variant="contained" color="success" startIcon={<StopCircleOutlinedIcon />} onClick={() => onChangeStatus(item, "COMPLETED")}>结束课程</Button>}
+                      {canManage && ["PLANNED", "READY"].includes(item.status) && <Tooltip title="取消课程安排"><IconButton size="small" color="error" aria-label={`取消课程安排 ${item.title}`} onClick={() => onChangeStatus(item, "CANCELLED")}><CancelOutlinedIcon fontSize="small" /></IconButton></Tooltip>}
+                    </Stack>}
+                  </TableCell>
+                </TableRow>;
               })}
               {!paged.length && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 6 }}><Typography fontWeight={850}>当前筛选暂无课程安排</Typography><Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>调整筛选条件或新建课程安排</Typography></TableCell></TableRow>}
             </TableBody>
