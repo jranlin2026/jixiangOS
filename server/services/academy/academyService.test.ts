@@ -144,12 +144,17 @@ function createRepository(): AcademyRepository {
       tasks.push(...checklist);
       return { ...session, tasks: checklist };
     },
-    updateSessionStatus: async (id, expectedStatus, status) => {
+    updateSessionStatus: async (id, expectedStatus, status, taskUpdate) => {
       const session = sessions.find(
         (item) => item.id === id && item.status === expectedStatus,
       );
       if (!session) return null;
       session.status = status;
+      if (taskUpdate) {
+        tasks
+          .filter((task) => task.sessionId === id && !["DONE", "SKIPPED"].includes(task.status))
+          .forEach((task) => Object.assign(task, taskUpdate));
+      }
       return session;
     },
     updateSession: async (id, expectedStatus, update, taskUpdates) => {
@@ -164,8 +169,21 @@ function createRepository(): AcademyRepository {
     },
     listSessionTasks: async (sessionId) =>
       tasks.filter((task) => task.sessionId === sessionId),
-    listMyTasks: async (userId, { page, pageSize }) => {
-      const mine = tasks.filter((task) => task.assigneeUserId === userId).map((task) => {
+    listMyTasks: async (userId, { page, pageSize, status }, scope) => {
+      const mine = tasks.filter((task) => {
+        const session = sessions.find((item) => item.id === task.sessionId);
+        if (!session) return false;
+        if (status === "REVIEW") return task.status === "SUBMITTED" && sessionVisible(session, scope);
+        if (status === "HISTORY") {
+          return (
+            (task.assigneeUserId === userId && ["SUBMITTED", "DONE", "SKIPPED"].includes(task.status)) ||
+            (task.reviewedById === userId && ["DONE", "REJECTED"].includes(task.status))
+          );
+        }
+        if (task.assigneeUserId !== userId || session.status === "CANCELLED") return false;
+        if (status === "OPEN") return !["DONE", "SKIPPED", "SUBMITTED"].includes(task.status);
+        return !status || task.status === status;
+      }).map((task) => {
         const session = sessions.find((item) => item.id === task.sessionId)!;
         return {
           ...task,
@@ -184,8 +202,8 @@ function createRepository(): AcademyRepository {
       const session = sessions.find((item) => item.id === task.sessionId);
       return task.id === id && session && sessionVisible(session, scope);
     }) || null,
-    updateTaskStatus: async (id, update) => {
-      const task = tasks.find((item) => item.id === id);
+    updateTaskStatus: async (id, expectedStatus, update) => {
+      const task = tasks.find((item) => item.id === id && item.status === expectedStatus && sessions.find((session) => session.id === item.sessionId)?.status !== "CANCELLED");
       if (!task) return null;
       Object.assign(task, update);
       return task;
@@ -725,6 +743,41 @@ assert.equal(
   true,
   "OPEN待办必须包含未关闭的本人SOP任务",
 );
+
+const cancellationSession = await service.createSession({
+  courseId: courseResult.data!.id,
+  sopTemplateId: oneStepTemplate.data!.id,
+  title: "取消任务闭环测试",
+  startsAt: "2026-08-19T09:00:00.000Z",
+  endsAt: "2026-08-19T10:00:00.000Z",
+  venue: "测试直播间",
+  capacity: 10,
+  projectOwnerUserId: actor.id,
+}, actor);
+assert.equal(cancellationSession.code, 0);
+assert.equal((await service.changeSessionStatus(cancellationSession.data!.id, "CANCELLED", actor)).code, 0);
+const cancelledTask = (await repository.listSessionTasks(cancellationSession.data!.id))[0];
+assert.equal(cancelledTask.status, "SKIPPED", "取消课程后未完成任务必须自动关闭");
+assert.equal(cancelledTask.note, "课程安排已取消，任务自动关闭");
+const tasksAfterCancellation = await (service as any).listMyTasks({ page: 1, pageSize: 100, status: "OPEN" }, actor);
+assert.equal(tasksAfterCancellation.data.items.some((task: any) => task.sessionId === cancellationSession.data!.id), false, "已取消课程任务不得继续出现在个人待办");
+const cancelledHistory = await (service as any).listMyTasks({ page: 1, pageSize: 100, status: "HISTORY" }, actor);
+assert.equal(cancelledHistory.data.items.some((task: any) => task.sessionId === cancellationSession.data!.id && task.status === "SKIPPED"), true, "已取消课程任务应保留在处理记录");
+
+const directConfirmSession = await service.createSession({
+  courseId: courseResult.data!.id,
+  sopTemplateId: oneStepTemplate.data!.id,
+  title: "一步确认完成测试",
+  startsAt: "2026-08-20T09:00:00.000Z",
+  endsAt: "2026-08-20T10:00:00.000Z",
+  venue: "测试直播间",
+  capacity: 10,
+  projectOwnerUserId: actor.id,
+}, actor);
+assert.equal(directConfirmSession.code, 0);
+const directConfirmTask = directConfirmSession.data!.tasks[0];
+assert.equal((await service.updateTask(directConfirmTask.id, { status: "SUBMITTED" }, actor)).code, 0, "直接确认任务应支持从待处理一步完成");
+assert.equal((await repository.findTaskById(directConfirmTask.id))?.status, "DONE", "无需验收的直接确认任务应立即完成");
 
 const contentTask = sessionResult.data!.tasks.find((task: any) => task.templateKey === "COURSE_DEVELOPMENT")!;
 const contentOwner = { ...actor, id: "user-content", name: "课程内容负责人", permissions: [] };

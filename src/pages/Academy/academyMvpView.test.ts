@@ -10,6 +10,10 @@ const plans = readFileSync(new URL("./AcademyPlans.tsx", import.meta.url), "utf8
 
 assert.match(academy, /academyApi\.getPublicCalendar/, "全员周历应使用独立安全日历接口");
 assert.match(academy, /academyApi\.listMyTasks/, "我的待办应使用本人任务安全接口");
+assert.match(academy, /待我处理[\s\S]*待我验收[\s\S]*处理记录/, "个人工作台任务必须按处理、验收和记录分类");
+assert.match(academy, /确认完成/, "直接确认型任务必须提供明确的一步完成入口");
+assert.match(academy, /当前等待/, "非本人节点必须明确显示当前等待谁处理");
+assert.match(academy, /!workbenchTask\.eventId/, "历史处理记录必须整体只读，不能再次操作当前任务或附件");
 assert.doesNotMatch(academy, /view === "overview"[\s\S]{0,300}loadDetail/, "工作台周历不应预取任何课程详情");
 assert.match(academy, /title="全员课程周历"/, "工作台应明确标记全员课程周历");
 assert.match(academy, /课程执行接力/, "工作台应集中展示所选课程的SOP执行进度");
@@ -37,6 +41,9 @@ assert.match(plans, /复盘记录/, "详情底部应展示可编辑的复盘记�
 assert.match(plans, /academy-arrangement-customer-progress[\s\S]*<TablePagination/, "客户推进表应使用统一分页");
 assert.doesNotMatch(plans, /从我的客户添加|记录到课|快速跟进|关联订单/, "课程详情只看数据，客户操作应统一留在邀约跟进页面");
 assert.doesNotMatch(plans, /提交验收|>开始<|>通过<|>驳回</, "课程详情SOP只展示进度，任务操作应统一留在我的待办");
+assert.match(plans, /已取消归档/, "取消课程必须进入独立归档分类");
+assert.match(plans, /取消并关闭任务/, "取消操作必须明确说明会关闭课程任务");
+assert.match(plans, /课程任务归档/, "取消归档详情必须能回看自动关闭及已完成任务的结果");
 assert.match(plans, /编辑复盘/, "有复盘权限时应提供明确的编辑入口");
 
 assert.match(academy, /客户邀约与跟进/, "邀约跟进页应按销售任务重新命名页面标题");

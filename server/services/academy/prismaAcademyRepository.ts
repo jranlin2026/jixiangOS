@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   AcademyCourseRecord,
   AcademyCourseAssetRecord,
@@ -16,8 +17,43 @@ import { BUSINESS_ATTACHMENT_DOMAIN } from "../businessAttachmentService";
 const ACADEMY_COURSE_ASSET_DOMAIN = "academy_course_assets";
 const ACADEMY_COURSE_CATEGORY_DOMAIN = "academy_course_categories";
 const ACADEMY_TASK_ATTACHMENT_DOMAIN = "academy_task_attachments";
+const ACADEMY_TASK_EVENT_DOMAIN = "academy_task_events";
 const ACADEMY_ALL_EMPLOYEES_MARKER = "__academy_all_employees__";
 const ACADEMY_INVITABLE_MARKER = "__academy_invitable__";
+
+const taskEventRecord = (task: any, eventType: string) => {
+  const session = task.session
+    ? {
+        id: task.session.id,
+        title: task.session.title,
+        startsAt: task.session.startsAt,
+        endsAt: task.session.endsAt,
+        status: task.session.status,
+      }
+    : undefined;
+  const taskSnapshot = { ...task, session };
+  return {
+    id: `academy-task-event:${randomUUID()}`,
+    domain: ACADEMY_TASK_EVENT_DOMAIN,
+    recordId: randomUUID(),
+    title: task.title,
+    status: task.status,
+    owner: task.assigneeUserId || null,
+    mergedById:
+      ["DONE", "REJECTED"].includes(task.status) && task.reviewedById
+        ? task.reviewedById
+        : null,
+    mergedByName:
+      ["DONE", "REJECTED"].includes(task.status) && task.reviewedByName
+        ? task.reviewedByName
+        : null,
+    eventAt: task.updatedAt || new Date(),
+    data: {
+      eventType,
+      task: JSON.parse(JSON.stringify(taskSnapshot)),
+    },
+  };
+};
 
 const publicTaskAttachment = (row: any) => {
   const data = row?.data && typeof row.data === "object" ? row.data as any : {};
@@ -451,13 +487,34 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
       id,
       expectedStatus,
       status: AcademySessionStatus,
+      taskUpdate,
     ) {
-      const result = await prisma.academySession.updateMany({
-        where: { id, status: expectedStatus },
-        data: { status },
+      const record = await prisma.$transaction(async (tx: any) => {
+        const result = await tx.academySession.updateMany({
+          where: { id, status: expectedStatus },
+          data: { status },
+        });
+        if (!result.count) return null;
+        const session = await tx.academySession.findUnique({ where: { id } });
+        if (taskUpdate) {
+          const closingTasks = await tx.academySessionTask.findMany({
+            where: { sessionId: id, status: { notIn: ["DONE", "SKIPPED"] } },
+          });
+          await tx.academySessionTask.updateMany({
+            where: { sessionId: id, status: { notIn: ["DONE", "SKIPPED"] } },
+            data: taskUpdate,
+          });
+          await Promise.all(
+            closingTasks.map((task: any) => {
+              const updatedTask = { ...task, ...taskUpdate, session };
+              return tx.businessRecord.create({
+                data: taskEventRecord(updatedTask, "SESSION_CANCELLED"),
+              });
+            }),
+          );
+        }
+        return session;
       });
-      if (!result.count) return null;
-      const record = await prisma.academySession.findUnique({ where: { id } });
       return record ? mapSession(record) : null;
     },
     async updateSession(id, expectedStatus, update, taskUpdates) {
@@ -488,13 +545,43 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         orderBy: { createdAt: "asc" },
       });
     },
-    async listMyTasks(userId, { page, pageSize, status }) {
-      const where = {
-        assigneeUserId: userId,
-        ...(status === "OPEN"
-          ? { status: { notIn: ["DONE", "SKIPPED"] } }
-          : status ? { status } : {}),
-      };
+    async listMyTasks(userId, { page, pageSize, status }, scope) {
+      if (status === "HISTORY") {
+        const where = {
+          domain: ACADEMY_TASK_EVENT_DOMAIN,
+          OR: [{ owner: userId }, { mergedById: userId }],
+        };
+        const [rows, total] = await prisma.$transaction([
+          prisma.businessRecord.findMany({
+            where,
+            select: { recordId: true, data: true },
+            orderBy: { eventAt: "desc" },
+            skip: (page - 1) * pageSize,
+            take: pageSize,
+          }),
+          prisma.businessRecord.count({ where }),
+        ]);
+        return {
+          items: rows
+            .map((row: any) => {
+              const data = row.data && typeof row.data === "object" ? row.data : {};
+              return data.task
+                ? { ...data.task, eventId: row.recordId }
+                : null;
+            })
+            .filter(Boolean),
+          total,
+        };
+      }
+      const where = status === "REVIEW"
+        ? { status: "SUBMITTED", session: sessionScopeWhere(scope || { unrestricted: false, visibleUserIds: [] }) }
+        : {
+              assigneeUserId: userId,
+              session: { status: { not: "CANCELLED" } },
+              ...(status === "OPEN"
+                ? { status: { notIn: ["DONE", "SKIPPED", "SUBMITTED"] } }
+                : status ? { status } : {}),
+            };
       const select = {
         id: true,
         sessionId: true,
@@ -551,16 +638,32 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
           })
         : prisma.academySessionTask.findUnique({ where: { id } });
     },
-    async updateTaskStatus(id, update) {
-      try {
-        return await prisma.academySessionTask.update({
-          where: { id },
+    async updateTaskStatus(id, expectedStatus, update) {
+      return prisma.$transaction(async (tx: any) => {
+        const changed = await tx.academySessionTask.updateMany({
+          where: { id, status: expectedStatus, session: { status: { not: "CANCELLED" } } },
           data: update,
         });
-      } catch (error: any) {
-        if (error?.code === "P2025") return null;
-        throw error;
-      }
+        if (!changed.count) return null;
+        const task = await tx.academySessionTask.findUnique({
+          where: { id },
+          include: { session: true },
+        });
+        if (!task) return null;
+        await tx.businessRecord.create({
+          data: taskEventRecord(
+            task,
+            task.status === "REJECTED"
+              ? "REVIEW_REJECTED"
+              : task.status === "DONE"
+                ? "TASK_COMPLETED"
+                : task.status === "SUBMITTED"
+                  ? "TASK_SUBMITTED"
+                  : "TASK_UPDATED",
+          ),
+        });
+        return task;
+      });
     },
     async listTaskAttachments(taskId) {
       const result = await prisma.businessRecord.findMany({

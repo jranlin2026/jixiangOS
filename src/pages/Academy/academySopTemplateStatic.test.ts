@@ -9,6 +9,7 @@ assert.doesNotMatch(source, /SOP模板设置/, "页面不应继续使用难理�
 assert.match(source, /流程列表/, "打开课程流程设置必须先展示流程列表");
 assert.match(source, /academy-sop-template-list/, "流程列表必须复用系统统一表格样式");
 assert.match(source, /新建课程流程/, "流程列表右上角必须提供新建入口");
+assert.match(source, /设为默认流程/, "启用的课程流程必须能在列表中设为默认流程");
 assert.match(source, /编辑流程[\s\S]*停用流程[\s\S]*启用流程[\s\S]*删除流程/, "流程操作必须提供编辑、启停和删除图标");
 assert.match(source, /deleteSopTemplate/, "模板删除必须通过受保护的服务接口执行");
 assert.match(source, /流程阶段/, "模板步骤必须可配置课前、课中和课后阶段");

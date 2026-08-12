@@ -63,6 +63,10 @@ const client: any = {
       calls.push({ model: "businessRecord", method: "update", args }),
       args.data
     ),
+    count: async (args: any) => (
+      calls.push({ model: "businessRecord", method: "count", args }),
+      0
+    ),
   },
   academySession: {
     findMany: async (args: any) => (
@@ -123,7 +127,19 @@ const client: any = {
       },
       academySessionTask: {
         createMany: async ({ data }: any) => ({ count: data.length }),
+        findMany: async (args: any) => (
+          calls.push({ model: "transactionTask", method: "findMany", args }),
+          []
+        ),
         update: async (args: any) => (calls.push({ model: "task", method: "update", args }), args.data),
+        updateMany: async (args: any) => (calls.push({ model: "transactionTask", method: "updateMany", args }), { count: 1 }),
+        findUnique: async ({ where }: any) => ({ id: where.id, title: "测试任务", status: "DONE", updatedAt: now, session: transactionSessionRow }),
+      },
+      businessRecord: {
+        create: async (args: any) => (
+          calls.push({ model: "transactionBusinessRecord", method: "create", args }),
+          args.data
+        ),
       },
     });
   },
@@ -292,7 +308,7 @@ assert.equal(publicCalendarCall.where.status.not, "CANCELLED");
 
 await repository.listMyTasks("user-assignee", { page: 2, pageSize: 10, status: "OPEN" });
 const myTaskCall = calls.find((call) => call.model === "task" && call.method === "findMany")?.args;
-assert.deepEqual(myTaskCall.where, { assigneeUserId: "user-assignee", status: { notIn: ["DONE", "SKIPPED"] } });
+assert.deepEqual(myTaskCall.where, { assigneeUserId: "user-assignee", session: { status: { not: "CANCELLED" } }, status: { notIn: ["DONE", "SKIPPED", "SUBMITTED"] } });
 assert.equal(myTaskCall.skip, 10);
 assert.equal(myTaskCall.take, 10);
 assert.equal(myTaskCall.select.completionMode, true);
@@ -309,10 +325,37 @@ assert.deepEqual(myTaskCall.select.session.select, {
   status: true,
 }, "本人任务投影只能带上打开待办所必需的课程安排上下文");
 
-await repository.updateSessionStatus("session-1", "PLANNED", "READY");
+calls.length = 0;
+await repository.listMyTasks("user-reviewer", { page: 1, pageSize: 10, status: "REVIEW" }, { unrestricted: false, visibleUserIds: ["user-reviewer"] });
+const reviewTaskCall = calls.find((call) => call.model === "task" && call.method === "findMany")?.args;
+assert.equal(reviewTaskCall.where.status, "SUBMITTED");
+assert.ok(reviewTaskCall.where.session.OR, "待验收任务必须继续受课程安排数据范围限制");
+
+calls.length = 0;
+await repository.listMyTasks("user-assignee", { page: 1, pageSize: 10, status: "HISTORY" });
+const historyTaskCall = calls.find((call) => call.model === "businessRecord" && call.method === "findMany")?.args;
+assert.deepEqual(historyTaskCall.where, {
+  domain: "academy_task_events",
+  OR: [{ owner: "user-assignee" }, { mergedById: "user-assignee" }],
+}, "处理记录必须读取不可覆盖的本人任务与验收事件");
+
+calls.length = 0;
+await repository.updateTaskStatus("task-conditional", "PENDING", { status: "SUBMITTED" });
+const conditionalTaskUpdate = calls.find((call) => call.model === "transactionTask" && call.method === "updateMany")?.args;
+assert.deepEqual(conditionalTaskUpdate.where, { id: "task-conditional", status: "PENDING", session: { status: { not: "CANCELLED" } } }, "任务提交必须原子校验旧状态且课程未取消");
+assert.ok(calls.some((call) => call.model === "transactionBusinessRecord" && call.method === "create"), "每次任务状态变化必须写入不可覆盖的操作事件");
+
+transactionSessionRow = { id: "session-1", status: "PLANNED", collaboratorUserIds: [], capacity: 10 };
+calls.length = 0;
+await repository.updateSessionStatus("session-1", "PLANNED", "CANCELLED", { status: "SKIPPED", note: "课程安排已取消，任务自动关闭" });
 const statusCall = calls.find(
-  (call) => call.model === "session" && call.method === "updateMany",
+  (call) => call.model === "transactionSession" && call.method === "updateMany",
 );
+const cancelledTaskUpdate = calls.find(
+  (call) => call.model === "transactionTask" && call.method === "updateMany",
+)?.args;
+assert.deepEqual(cancelledTaskUpdate.where, { sessionId: "session-1", status: { notIn: ["DONE", "SKIPPED"] } }, "取消课程必须只关闭尚未完成的任务");
+assert.equal(cancelledTaskUpdate.data.status, "SKIPPED", "取消课程必须把未完成任务标记为已关闭");
 
 transactionSessionRow = {
   id: "session-edit",
@@ -326,7 +369,8 @@ await repository.updateSession("session-edit", "PLANNED", {
   audience: "RESPONSIBLE_ONLY",
   isInvitable: false,
 }, []);
-const arrangementUpdateCall = calls.find((call) => call.model === "transactionSession" && call.method === "updateMany");
+const arrangementUpdateCalls = calls.filter((call) => call.model === "transactionSession" && call.method === "updateMany");
+const arrangementUpdateCall = arrangementUpdateCalls[arrangementUpdateCalls.length - 1];
 assert.deepEqual(arrangementUpdateCall?.args.where, { id: "session-edit", status: "PLANNED" }, "编辑课程安排必须带旧状态避免并发覆盖");
 assert.deepEqual(arrangementUpdateCall?.args.data.collaboratorUserIds, ["collaborator-1"], "调整课程可见范围时必须移除旧公共标记并保留真实协作人");
 assert.deepEqual(

@@ -290,6 +290,7 @@ export interface AcademyRepository {
     id: string,
     expectedStatus: AcademySessionStatus,
     status: AcademySessionStatus,
+    taskUpdate?: Partial<AcademySessionTaskRecord>,
   ): Promise<AcademySessionRecord | null>;
   updateSession(
     id: string,
@@ -301,10 +302,12 @@ export interface AcademyRepository {
   listMyTasks(
     userId: string,
     input: { page: number; pageSize: number; status?: string },
+    scope?: AcademyAccessScope,
   ): Promise<{ items: AcademyMyTaskRecord[]; total: number }>;
   findTaskById(id: string, scope?: AcademyAccessScope): Promise<AcademySessionTaskRecord | null>;
   updateTaskStatus(
     id: string,
+    expectedStatus: AcademyTaskStatus,
     update: Partial<AcademySessionTaskRecord>,
   ): Promise<AcademySessionTaskRecord | null>;
   listTaskAttachments(taskId: string): Promise<BusinessAttachment[]>;
@@ -356,7 +359,7 @@ const COURSE_STATUS_TRANSITIONS: Record<
 };
 
 const TASK_STATUS_TRANSITIONS: Record<AcademyTaskStatus, AcademyTaskStatus[]> = {
-  PENDING: ["IN_PROGRESS", "BLOCKED", "SKIPPED"],
+  PENDING: ["IN_PROGRESS", "SUBMITTED", "BLOCKED", "SKIPPED"],
   IN_PROGRESS: ["SUBMITTED", "BLOCKED"],
   SUBMITTED: ["DONE", "REJECTED"],
   REJECTED: ["IN_PROGRESS"],
@@ -542,12 +545,23 @@ export function createAcademyService(
       const page = Math.max(1, Number(raw.page) || 1);
       const pageSize = Math.min(100, Math.max(1, Number(raw.pageSize) || 10));
       const requestedStatus = String(raw.status || "OPEN").trim().toUpperCase();
+      if (requestedStatus === "REVIEW" && !hasPermission(actor, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, "write")) {
+        return success({ items: [], total: 0, page, pageSize });
+      }
       const result = await repository.listMyTasks(actor.id, {
         page,
         pageSize,
         status: requestedStatus === "ALL" ? undefined : requestedStatus,
+      }, requestedStatus === "REVIEW" ? await resolveScope(actor) : undefined);
+      return success({
+        ...result,
+        items:
+          requestedStatus === "HISTORY"
+            ? result.items.map((item) => ({ ...item, attachments: [] }))
+            : await attachTaskEvidence(result.items),
+        page,
+        pageSize,
       });
-      return success({ ...result, items: await attachTaskEvidence(result.items), page, pageSize });
     },
     async getSessionNextStep(id: string, actor: AuthenticatedUser) {
       const session = await repository.findSessionById(id, await resolveScope(actor));
@@ -1271,6 +1285,16 @@ export function createAcademyService(
         id,
         session.status,
         nextStatus,
+        nextStatus === "CANCELLED"
+          ? {
+              status: "SKIPPED",
+              note: "课程安排已取消，任务自动关闭",
+              completedAt: now(),
+              completedById: actor.id,
+              completedByName: actor.name,
+              updatedAt: now(),
+            }
+          : undefined,
       );
       return updated
         ? success(updated)
@@ -1314,7 +1338,7 @@ export function createAcademyService(
         return invalid("驳回验收时必须填写原因");
       const timestamp = now();
       const nextStatus = raw.status === "SUBMITTED" && !current.requiresReview ? "DONE" : raw.status;
-      const updated = await repository.updateTaskStatus(id, {
+      const updated = await repository.updateTaskStatus(id, current.status, {
         status: nextStatus,
         note: raw.note?.trim() || null,
         submissionNote:

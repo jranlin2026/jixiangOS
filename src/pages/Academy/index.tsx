@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Box,
   Alert,
@@ -53,7 +59,13 @@ import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import ToggleOffOutlinedIcon from "@mui/icons-material/ToggleOffOutlined";
 import ToggleOnOutlinedIcon from "@mui/icons-material/ToggleOnOutlined";
 import { useLocation, useNavigate } from "react-router-dom";
-import { academyApi, customerApi, orderApi, productApi, settingsApi } from "../../api";
+import {
+  academyApi,
+  customerApi,
+  orderApi,
+  productApi,
+  settingsApi,
+} from "../../api";
 import type {
   AcademyAssetType,
   AcademyCourse,
@@ -93,7 +105,10 @@ import {
   ModuleTabs,
 } from "../../shared/components/ModuleShell";
 import { Plans } from "./AcademyPlans";
-import { getAcademyPrivateLoadPlan, taskRequiresEvidence } from "./academyMvpModel";
+import {
+  getAcademyPrivateLoadPlan,
+  taskRequiresEvidence,
+} from "./academyMvpModel";
 import {
   clampPageIndex,
   getCourseStatusAction,
@@ -124,12 +139,7 @@ const panelSx = {
   bgcolor: "#fff",
 };
 
-type AcademyView =
-  | "overview"
-  | "courses"
-  | "plans"
-  | "learners"
-  | "reviews";
+type AcademyView = "overview" | "courses" | "plans" | "learners" | "reviews";
 const viewPath: Record<AcademyView, string> = {
   overview: ROUTES.ACADEMY,
   courses: `${ROUTES.ACADEMY}/courses`,
@@ -244,7 +254,7 @@ const statusLabel: Record<string, string> = {
   DONE: "已完成",
   REJECTED: "验收驳回",
   BLOCKED: "受阻",
-  SKIPPED: "已跳过",
+  SKIPPED: "已关闭",
   CONFIRMED: "已确认",
   INVITED: "已邀约",
   REGISTERED: "已报名",
@@ -339,15 +349,22 @@ const Academy: React.FC = () => {
   });
   const [courses, setCourses] = useState<AcademyCourse[]>([]);
   const [sessions, setSessions] = useState<AcademySession[]>([]);
-  const [publicCalendar, setPublicCalendar] = useState<AcademyPublicCalendarItem[]>([]);
+  const [publicCalendar, setPublicCalendar] = useState<
+    AcademyPublicCalendarItem[]
+  >([]);
   const [myTasks, setMyTasks] = useState<AcademyMyTask[]>([]);
   const [myTaskTotal, setMyTaskTotal] = useState(0);
   const [myTaskPage, setMyTaskPage] = useState(0);
   const [myTaskPageSize, setMyTaskPageSize] = useState(10);
+  const [myTaskView, setMyTaskView] = useState<"OPEN" | "REVIEW" | "HISTORY">(
+    "OPEN",
+  );
   const [details, setDetails] = useState<Record<string, AcademySessionDetail>>(
     {},
   );
-  const [sessionDetailErrors, setSessionDetailErrors] = useState<Record<string, string>>({});
+  const [sessionDetailErrors, setSessionDetailErrors] = useState<
+    Record<string, string>
+  >({});
   const sessionDetailRequestsRef = useRef<Set<string>>(new Set());
   const [selectedSessionId, setSelectedSessionId] = useState("");
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -359,51 +376,79 @@ const Academy: React.FC = () => {
   const [sessionOpen, setSessionOpen] = useState(false);
   const [sessionEditingId, setSessionEditingId] = useState("");
   const [sessionHistoricalMode, setSessionHistoricalMode] = useState(false);
-  const [workbenchRequestedSessionId, setWorkbenchRequestedSessionId] = useState("");
+  const [workbenchRequestedSessionId, setWorkbenchRequestedSessionId] =
+    useState("");
   const [engagementOpen, setEngagementOpen] = useState(false);
   const [engagementEditingId, setEngagementEditingId] = useState("");
-  const [engagementMode, setEngagementMode] = useState<"sales" | "execution">("sales");
+  const [engagementMode, setEngagementMode] = useState<"sales" | "execution">(
+    "sales",
+  );
   const [planOpenSessionId, setPlanOpenSessionId] = useState("");
   const [courseForm, setCourseForm] = useState(emptyCourse);
   const [academyUsers, setAcademyUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [courseCategories, setCourseCategories] = useState<AcademyCourseCategory[]>([]);
+  const [courseCategories, setCourseCategories] = useState<
+    AcademyCourseCategory[]
+  >([]);
   const [sopTemplates, setSopTemplates] = useState<AcademySopTemplate[]>([]);
   const [sopSettingsOpen, setSopSettingsOpen] = useState(false);
   const [sopEditing, setSopEditing] = useState<AcademySopTemplate | null>(null);
   const [sopEditingBaseline, setSopEditingBaseline] = useState("");
+  const [sopAdvanced, setSopAdvanced] = useState(false);
   const [sopTemplatePage, setSopTemplatePage] = useState(0);
   const [sopTemplatePageSize, setSopTemplatePageSize] = useState(10);
-  const [categoryForm, setCategoryForm] = useState({ id: "", name: "", description: "", sortOrder: 1, isActive: true });
+  const [categoryForm, setCategoryForm] = useState({
+    id: "",
+    name: "",
+    description: "",
+    sortOrder: 1,
+    isActive: true,
+  });
   const [sessionForm, setSessionForm] = useState(emptySession);
   const [engagementForm, setEngagementForm] = useState(emptyEngagement);
   const [reviewForm, setReviewForm] = useState(emptyReview);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
-  const [selectedInviteCustomers, setSelectedInviteCustomers] = useState<Customer[]>([]);
+  const [selectedInviteCustomers, setSelectedInviteCustomers] = useState<
+    Customer[]
+  >([]);
   const [customerResultTotal, setCustomerResultTotal] = useState(0);
   const [customerPage, setCustomerPage] = useState(0);
   const [customerPageSize, setCustomerPageSize] = useState(20);
   const [customerLoadError, setCustomerLoadError] = useState("");
-  const [courseAssets, setCourseAssets] = useState<Record<string, AcademyCourseAsset[]>>({});
-  const [courseAssetsLoadingIds, setCourseAssetsLoadingIds] = useState<Set<string>>(new Set());
-  const [courseAssetLoadErrors, setCourseAssetLoadErrors] = useState<Record<string, string>>({});
+  const [courseAssets, setCourseAssets] = useState<
+    Record<string, AcademyCourseAsset[]>
+  >({});
+  const [courseAssetsLoadingIds, setCourseAssetsLoadingIds] = useState<
+    Set<string>
+  >(new Set());
+  const [courseAssetLoadErrors, setCourseAssetLoadErrors] = useState<
+    Record<string, string>
+  >({});
   const courseAssetRequestsRef = useRef<Set<string>>(new Set());
   const [assetOpen, setAssetOpen] = useState(false);
   const [assetCourseId, setAssetCourseId] = useState("");
   const [assetType, setAssetType] = useState<AcademyAssetType>("PPT");
   const [assetTitle, setAssetTitle] = useState("");
-  const [existingAssetAttachments, setExistingAssetAttachments] = useState<BusinessAttachment[]>([]);
-  const [assetAttachments, setAssetAttachments] = useState<BusinessAttachment[]>([]);
+  const [existingAssetAttachments, setExistingAssetAttachments] = useState<
+    BusinessAttachment[]
+  >([]);
+  const [assetAttachments, setAssetAttachments] = useState<
+    BusinessAttachment[]
+  >([]);
   const [taskAction, setTaskAction] = useState<{
     task: AcademySessionTask;
     status: AcademySessionTask["status"];
   } | null>(null);
   const [taskActionNote, setTaskActionNote] = useState("");
-  const [workbenchTask, setWorkbenchTask] = useState<AcademyMyTask | null>(null);
+  const [workbenchTask, setWorkbenchTask] = useState<AcademyMyTask | null>(
+    null,
+  );
   const [workbenchTaskNote, setWorkbenchTaskNote] = useState("");
-  const [taskEvidenceAttachments, setTaskEvidenceAttachments] = useState<BusinessAttachment[]>([]);
+  const [taskEvidenceAttachments, setTaskEvidenceAttachments] = useState<
+    BusinessAttachment[]
+  >([]);
   const [taskEvidenceLoading, setTaskEvidenceLoading] = useState(false);
   const [taskEvidenceUploading, setTaskEvidenceUploading] = useState(false);
   const activeTaskEvidenceIdRef = useRef("");
@@ -414,24 +459,47 @@ const Academy: React.FC = () => {
   } | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [saving, setSaving] = useState(false);
-  const [courseStatusChangingIds, setCourseStatusChangingIds] = useState<Set<string>>(new Set());
+  const [courseStatusChangingIds, setCourseStatusChangingIds] = useState<
+    Set<string>
+  >(new Set());
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
 
-  const selectedSessionCourse = courses.find((course) => course.id === sessionForm.courseId);
-  const selectedSessionTemplate = sopTemplates.find((template) => template.id === sessionForm.sopTemplateId);
-  const selectedSessionSnapshotTasks = sessionEditingId ? details[sessionEditingId]?.tasks || [] : [];
-  const selectedSessionRoles = new Set(selectedSessionTemplate?.steps.map((step) => step.assigneeRole) || selectedSessionSnapshotTasks.map((task) => task.assigneeRole).filter(Boolean) as AcademySopTemplateStep["assigneeRole"][]);
-  const sessionOwnerFields: Array<[keyof CreateAcademySessionInput, string, AcademySopTemplateStep["assigneeRole"] | "ALWAYS"]> = [
+  const selectedSessionCourse = courses.find(
+    (course) => course.id === sessionForm.courseId,
+  );
+  const selectedSessionTemplate = sopTemplates.find(
+    (template) => template.id === sessionForm.sopTemplateId,
+  );
+  const selectedSessionSnapshotTasks = sessionEditingId
+    ? details[sessionEditingId]?.tasks || []
+    : [];
+  const selectedSessionRoles = new Set(
+    selectedSessionTemplate?.steps.map((step) => step.assigneeRole) ||
+      (selectedSessionSnapshotTasks
+        .map((task) => task.assigneeRole)
+        .filter(Boolean) as AcademySopTemplateStep["assigneeRole"][]),
+  );
+  const sessionOwnerFields: Array<
+    [
+      keyof CreateAcademySessionInput,
+      string,
+      AcademySopTemplateStep["assigneeRole"] | "ALWAYS",
+    ]
+  > = [
     ["projectOwnerUserId", "项目负责人 *", "ALWAYS"],
     ["contentOwnerUserId", "课程内容负责人 *", "CONTENT_OWNER"],
     ["materialOwnerUserId", "素材负责人 *", "MATERIAL_OWNER"],
     ["lecturerUserId", "主讲人 *", "LECTURER"],
     ["reviewOwnerUserId", "复盘负责人 *", "REVIEW_OWNER"],
   ];
-  const visibleSessionOwnerFields = sessionOwnerFields.filter(([, , role]) => role === "ALWAYS" || selectedSessionRoles.has(role));
-  const missingSessionOwner = visibleSessionOwnerFields.some(([key]) => !String(sessionForm[key] || "").trim());
+  const visibleSessionOwnerFields = sessionOwnerFields.filter(
+    ([, , role]) => role === "ALWAYS" || selectedSessionRoles.has(role),
+  );
+  const missingSessionOwner = visibleSessionOwnerFields.some(
+    ([key]) => !String(sessionForm[key] || "").trim(),
+  );
 
   const view: AcademyView = location.pathname.endsWith("/plans")
     ? "plans"
@@ -441,9 +509,9 @@ const Academy: React.FC = () => {
           location.pathname.endsWith("/engagements") ||
           location.pathname.endsWith("/handoffs")
         ? "learners"
-          : location.pathname.endsWith("/reviews")
-            ? "reviews"
-            : "overview";
+        : location.pathname.endsWith("/reviews")
+          ? "reviews"
+          : "overview";
 
   const canPlan = hasPermission(
     currentUser,
@@ -496,7 +564,10 @@ const Academy: React.FC = () => {
   useEffect(() => {
     if (location.pathname.endsWith("/sessions"))
       navigate(viewPath.plans, { replace: true });
-    if (location.pathname.endsWith("/engagements") || location.pathname.endsWith("/handoffs"))
+    if (
+      location.pathname.endsWith("/engagements") ||
+      location.pathname.endsWith("/handoffs")
+    )
       navigate(viewPath.learners, { replace: true });
     if (location.pathname.endsWith("/reviews"))
       navigate(viewPath.plans, { replace: true });
@@ -512,16 +583,19 @@ const Academy: React.FC = () => {
       settingsApi.fetchAssignableUsers({ isActive: true }),
       productApi.getProducts(),
     ]).then(([usersResponse, productsResponse]) => {
-      if (usersResponse.code === 0) setAcademyUsers(usersResponse.data.filter((item) => item.isActive));
+      if (usersResponse.code === 0)
+        setAcademyUsers(usersResponse.data.filter((item) => item.isActive));
       if (productsResponse.code === 0) setProducts(productsResponse.data);
     });
   }, [courseOpen, currentUser?.id]);
   useEffect(() => {
     if (!sessionOpen) return;
-    void settingsApi.fetchAssignableUsers({ isActive: true }).then((response) => {
-      if (response.code === 0)
-        setAcademyUsers(response.data.filter((item) => item.isActive));
-    });
+    void settingsApi
+      .fetchAssignableUsers({ isActive: true })
+      .then((response) => {
+        if (response.code === 0)
+          setAcademyUsers(response.data.filter((item) => item.isActive));
+      });
   }, [sessionOpen]);
   useEffect(() => {
     if (visibleNavItems.some((item) => item.value === view)) return;
@@ -539,10 +613,18 @@ const Academy: React.FC = () => {
     calendarStart.setDate(calendarStart.getDate() - 42);
     calendarEnd.setDate(calendarEnd.getDate() + 42);
     const [publicCalendarResponse, myTaskResponse] = await Promise.all([
-      academyApi.getPublicCalendar({ start: calendarStart.toISOString(), end: calendarEnd.toISOString() }),
-      academyApi.listMyTasks({ page: myTaskPage + 1, pageSize: myTaskPageSize, status: "OPEN" }),
+      academyApi.getPublicCalendar({
+        start: calendarStart.toISOString(),
+        end: calendarEnd.toISOString(),
+      }),
+      academyApi.listMyTasks({
+        page: myTaskPage + 1,
+        pageSize: myTaskPageSize,
+        status: myTaskView,
+      }),
     ]);
-    if (publicCalendarResponse.code === 0) setPublicCalendar(publicCalendarResponse.data);
+    if (publicCalendarResponse.code === 0)
+      setPublicCalendar(publicCalendarResponse.data);
     if (myTaskResponse.code === 0) {
       setMyTasks(myTaskResponse.data.items);
       setMyTaskTotal(myTaskResponse.data.total);
@@ -550,20 +632,42 @@ const Academy: React.FC = () => {
     const privateLoadPlan = getAcademyPrivateLoadPlan({
       plan: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE),
       course: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE),
-      session: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE),
-      engagement: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE),
+      session: hasPermission(
+        currentUser,
+        PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
+      ),
+      engagement: hasPermission(
+        currentUser,
+        PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE,
+      ),
       review: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE),
     });
     if (!privateLoadPlan.dashboard) {
       setLoading(false);
       return;
     }
-    const [dashboardResponse, courseResponse, sessionResponse, categoryResponse, sopResponse] = await Promise.all([
-      privateLoadPlan.dashboard ? academyApi.getDashboard() : Promise.resolve(null),
-      privateLoadPlan.courses ? academyApi.listCourses({ page: 1, pageSize: 100 }) : Promise.resolve(null),
-      privateLoadPlan.sessions ? academyApi.listSessions({ page: 1, pageSize: 100 }) : Promise.resolve(null),
-      privateLoadPlan.categories ? academyApi.listCourseCategories() : Promise.resolve(null),
-      privateLoadPlan.templates ? academyApi.listSopTemplates() : Promise.resolve(null),
+    const [
+      dashboardResponse,
+      courseResponse,
+      sessionResponse,
+      categoryResponse,
+      sopResponse,
+    ] = await Promise.all([
+      privateLoadPlan.dashboard
+        ? academyApi.getDashboard()
+        : Promise.resolve(null),
+      privateLoadPlan.courses
+        ? academyApi.listCourses({ page: 1, pageSize: 100 })
+        : Promise.resolve(null),
+      privateLoadPlan.sessions
+        ? academyApi.listSessions({ page: 1, pageSize: 100 })
+        : Promise.resolve(null),
+      privateLoadPlan.categories
+        ? academyApi.listCourseCategories()
+        : Promise.resolve(null),
+      privateLoadPlan.templates
+        ? academyApi.listSopTemplates()
+        : Promise.resolve(null),
     ]);
     const loadErrors: string[] = [];
     if (dashboardResponse) {
@@ -578,7 +682,8 @@ const Academy: React.FC = () => {
       } else loadErrors.push(`课程列表：${courseResponse.message}`);
     }
     if (categoryResponse) {
-      if (categoryResponse.code === 0) setCourseCategories(categoryResponse.data);
+      if (categoryResponse.code === 0)
+        setCourseCategories(categoryResponse.data);
       else loadErrors.push(`课程分类：${categoryResponse.message}`);
     }
     if (sopResponse) {
@@ -589,7 +694,10 @@ const Academy: React.FC = () => {
       if (sessionResponse.code !== 0) {
         loadErrors.push(`课程安排：${sessionResponse.message}`);
       } else {
-        const remainingSessionPages = Math.max(0, Math.ceil(sessionResponse.data.total / 100) - 1);
+        const remainingSessionPages = Math.max(
+          0,
+          Math.ceil(sessionResponse.data.total / 100) - 1,
+        );
         const remainingSessionResponses = remainingSessionPages
           ? await Promise.all(
               Array.from({ length: remainingSessionPages }, (_, index) =>
@@ -597,7 +705,9 @@ const Academy: React.FC = () => {
               ),
             )
           : [];
-        const failedSessionPage = remainingSessionResponses.find((response) => response.code !== 0);
+        const failedSessionPage = remainingSessionResponses.find(
+          (response) => response.code !== 0,
+        );
         if (failedSessionPage && failedSessionPage.code !== 0) {
           loadErrors.push(`课程安排：${failedSessionPage.message}`);
         } else {
@@ -608,13 +718,28 @@ const Academy: React.FC = () => {
             ),
           ];
           setSessions(allSessions);
-          if (!selectedSessionId && allSessions[0]) setSelectedSessionId(allSessions[0].id);
+          if (!selectedSessionId && allSessions[0])
+            setSelectedSessionId(allSessions[0].id);
         }
       }
     }
     setLoading(false);
-    if (loadErrors.length) await alert(loadErrors.join("\n"), "部分商学院数据加载失败");
-  }, [alert, canCourse, canEngagement, canPlan, canReview, canSession, currentUser, myTaskPage, myTaskPageSize, selectedCourseId, selectedSessionId]);
+    if (loadErrors.length)
+      await alert(loadErrors.join("\n"), "部分商学院数据加载失败");
+  }, [
+    alert,
+    canCourse,
+    canEngagement,
+    canPlan,
+    canReview,
+    canSession,
+    currentUser,
+    myTaskPage,
+    myTaskPageSize,
+    myTaskView,
+    selectedCourseId,
+    selectedSessionId,
+  ]);
 
   useEffect(() => {
     void loadBase();
@@ -632,7 +757,10 @@ const Academy: React.FC = () => {
       try {
         const response = await academyApi.getSessionDetail(sessionId);
         if (response.code !== 0) {
-          setSessionDetailErrors((current) => ({ ...current, [sessionId]: response.message }));
+          setSessionDetailErrors((current) => ({
+            ...current,
+            [sessionId]: response.message,
+          }));
           if (open) await alert(response.message, "课程安排详情加载失败");
           return;
         }
@@ -645,7 +773,10 @@ const Academy: React.FC = () => {
         if (open) setDetail(response.data);
       } catch {
         const message = "课程安排详情加载失败，请重试。";
-        setSessionDetailErrors((current) => ({ ...current, [sessionId]: message }));
+        setSessionDetailErrors((current) => ({
+          ...current,
+          [sessionId]: message,
+        }));
         if (open) await alert(message, "课程安排详情加载失败");
       } finally {
         sessionDetailRequestsRef.current.delete(sessionId);
@@ -659,7 +790,9 @@ const Academy: React.FC = () => {
       if (!courseId) return;
       if (courseAssetRequestsRef.current.has(courseId)) return;
       courseAssetRequestsRef.current.add(courseId);
-      setCourseAssetsLoadingIds((current) => updatePendingCourseIds(current, courseId, true));
+      setCourseAssetsLoadingIds((current) =>
+        updatePendingCourseIds(current, courseId, true),
+      );
       setCourseAssetLoadErrors((current) => {
         const next = { ...current };
         delete next[courseId];
@@ -668,18 +801,29 @@ const Academy: React.FC = () => {
       try {
         const response = await academyApi.listCourseAssets(courseId);
         if (response.code !== 0) {
-          setCourseAssetLoadErrors((current) => ({ ...current, [courseId]: response.message }));
+          setCourseAssetLoadErrors((current) => ({
+            ...current,
+            [courseId]: response.message,
+          }));
           await alert(response.message, "课程资产加载失败");
           return;
         }
-        setCourseAssets((current) => ({ ...current, [courseId]: response.data }));
+        setCourseAssets((current) => ({
+          ...current,
+          [courseId]: response.data,
+        }));
       } catch {
         const message = "课程资产加载失败，请重试。";
-        setCourseAssetLoadErrors((current) => ({ ...current, [courseId]: message }));
+        setCourseAssetLoadErrors((current) => ({
+          ...current,
+          [courseId]: message,
+        }));
         await alert(message, "课程资产加载失败");
       } finally {
         courseAssetRequestsRef.current.delete(courseId);
-        setCourseAssetsLoadingIds((current) => updatePendingCourseIds(current, courseId, false));
+        setCourseAssetsLoadingIds((current) =>
+          updatePendingCourseIds(current, courseId, false),
+        );
       }
     },
     [alert],
@@ -699,7 +843,12 @@ const Academy: React.FC = () => {
     setCustomerSearchLoading(true);
     setCustomerLoadError("");
     const timer = window.setTimeout(() => {
-      void customerApi.fetchCustomers({ page: customerPage + 1, pageSize: customerPageSize, search: customerSearch.trim() || undefined })
+      void customerApi
+        .fetchCustomers({
+          page: customerPage + 1,
+          pageSize: customerPageSize,
+          search: customerSearch.trim() || undefined,
+        })
         .then((response) => {
           if (active && response.code === 0) {
             setCustomers(response.data.items);
@@ -725,8 +874,17 @@ const Academy: React.FC = () => {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [canEngagement, customerPage, customerPageSize, customerSearch, engagementMode, engagementOpen]);
-  useEffect(() => { setCustomerPage(0); }, [customerSearch]);
+  }, [
+    canEngagement,
+    customerPage,
+    customerPageSize,
+    customerSearch,
+    engagementMode,
+    engagementOpen,
+  ]);
+  useEffect(() => {
+    setCustomerPage(0);
+  }, [customerSearch]);
   useEffect(() => {
     if (!selectedDetail) return;
     const review = selectedDetail.review;
@@ -754,23 +912,41 @@ const Academy: React.FC = () => {
     page * pageSize + pageSize,
   );
   const engagementSessions = useMemo(
-    () => sessions.filter((item) => item.audience === "ALL_EMPLOYEES" && item.isInvitable && item.status !== "CANCELLED"),
+    () =>
+      sessions.filter(
+        (item) =>
+          item.audience === "ALL_EMPLOYEES" &&
+          item.isInvitable &&
+          item.status !== "CANCELLED",
+      ),
     [sessions],
   );
   const invitableSessions = useMemo(
-    () => sessions.filter((item) => item.audience === "ALL_EMPLOYEES" && item.isInvitable && ["PLANNED", "READY"].includes(item.status)),
+    () =>
+      sessions.filter(
+        (item) =>
+          item.audience === "ALL_EMPLOYEES" &&
+          item.isInvitable &&
+          ["PLANNED", "READY"].includes(item.status),
+      ),
     [sessions],
   );
   useEffect(() => {
     if (view !== "learners") return;
-    if (engagementSessions.some((item) => item.id === selectedSessionId)) return;
+    if (engagementSessions.some((item) => item.id === selectedSessionId))
+      return;
     const nextId = engagementSessions[0]?.id || "";
     setSelectedSessionId(nextId);
     if (nextId && !details[nextId]) void loadDetail(nextId);
   }, [details, engagementSessions, loadDetail, selectedSessionId, view]);
   const selectedEngagements = selectedDetail?.engagements || [];
   const existingInviteCustomerIds = useMemo(
-    () => new Set(selectedEngagements.map((item) => item.customerId).filter((id): id is string => Boolean(id))),
+    () =>
+      new Set(
+        selectedEngagements
+          .map((item) => item.customerId)
+          .filter((id): id is string => Boolean(id)),
+      ),
     [selectedEngagements],
   );
   const confirmed = selectedEngagements.filter(
@@ -789,7 +965,11 @@ const Academy: React.FC = () => {
       ? await academyApi.updateCourse(courseEditingId, courseForm)
       : await academyApi.createCourse(courseForm);
     setSaving(false);
-    if (response.code !== 0) return alert(response.message, courseEditingId ? "课程保存失败" : "课程创建失败");
+    if (response.code !== 0)
+      return alert(
+        response.message,
+        courseEditingId ? "课程保存失败" : "课程创建失败",
+      );
     setCourseOpen(false);
     setCourseEditingId("");
     setCourseForm(emptyCourse);
@@ -821,37 +1001,51 @@ const Academy: React.FC = () => {
     const response = await academyApi.saveCourseCategory(categoryForm);
     setSaving(false);
     if (response.code !== 0) return alert(response.message, "课程分类保存失败");
-    setCategoryForm({ id: "", name: "", description: "", sortOrder: courseCategories.length + 1, isActive: true });
+    setCategoryForm({
+      id: "",
+      name: "",
+      description: "",
+      sortOrder: courseCategories.length + 1,
+      isActive: true,
+    });
     setCourseSettingsOpen(false);
     await loadBase();
   };
   const openSopTemplateList = () => {
     setSopEditing(null);
     setSopEditingBaseline("");
+    setSopAdvanced(false);
     setSopTemplatePage(0);
     setSopSettingsOpen(true);
   };
   const openSopSettings = (template?: AcademySopTemplate) => {
-    const draft: AcademySopTemplate = template ? { ...template, steps: template.steps.map((step) => ({ ...step })) } : {
-      id: "",
-      name: "",
-      description: "",
-      status: "ACTIVE",
-      isDefault: !sopTemplates.length,
-      steps: [emptySopStep(0)],
-      updatedAt: "",
-    };
+    const draft: AcademySopTemplate = template
+      ? { ...template, steps: template.steps.map((step) => ({ ...step })) }
+      : {
+          id: "",
+          name: "",
+          description: "",
+          status: "ACTIVE",
+          isDefault: !sopTemplates.length,
+          steps: [emptySopStep(0)],
+          updatedAt: "",
+        };
     setSopEditing(draft);
     setSopEditingBaseline(JSON.stringify(draft));
+    setSopAdvanced(false);
     setSopSettingsOpen(true);
   };
   const closeSopSettings = async (toList = false) => {
     if (sopEditing && JSON.stringify(sopEditing) !== sopEditingBaseline) {
-      const discard = await confirm("当前课程流程还有未保存内容，确定放弃吗？", "放弃流程修改");
+      const discard = await confirm(
+        "当前课程流程还有未保存内容，确定放弃吗？",
+        "放弃流程修改",
+      );
       if (!discard) return;
     }
     setSopEditing(null);
     setSopEditingBaseline("");
+    setSopAdvanced(false);
     if (!toList) setSopSettingsOpen(false);
   };
   const saveSopTemplate = async () => {
@@ -863,7 +1057,10 @@ const Academy: React.FC = () => {
       description: sopEditing.description,
       status: sopEditing.status,
       isDefault: sopEditing.isDefault,
-      steps: sopEditing.steps.map((step, index) => ({ ...step, sortOrder: index + 1 })),
+      steps: sopEditing.steps.map((step, index) => ({
+        ...step,
+        sortOrder: index + 1,
+      })),
     });
     setSaving(false);
     if (response.code !== 0) return alert(response.message, "课程流程保存失败");
@@ -874,24 +1071,57 @@ const Academy: React.FC = () => {
   const changeSopTemplateStatus = async (template: AcademySopTemplate) => {
     const nextStatus = template.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
     if (nextStatus === "INACTIVE") {
-      const approved = await confirm(`确定停用“${template.name}”吗？停用后新建课程安排不能再选择它。`, "停用课程流程");
+      const approved = await confirm(
+        `确定停用“${template.name}”吗？停用后新建课程安排不能再选择它。`,
+        "停用课程流程",
+      );
       if (!approved) return;
     }
     setSaving(true);
-    const response = await academyApi.saveSopTemplate({ ...template, status: nextStatus });
+    const response = await academyApi.saveSopTemplate({
+      ...template,
+      status: nextStatus,
+    });
     setSaving(false);
-    if (response.code !== 0) return alert(response.message, nextStatus === "ACTIVE" ? "课程流程启用失败" : "课程流程停用失败");
+    if (response.code !== 0)
+      return alert(
+        response.message,
+        nextStatus === "ACTIVE" ? "课程流程启用失败" : "课程流程停用失败",
+      );
+    await loadBase();
+  };
+  const setDefaultSopTemplate = async (template: AcademySopTemplate) => {
+    if (template.isDefault || template.status !== "ACTIVE") return;
+    const approved = await confirm(
+      `确定将“${template.name}”设为默认课程流程吗？新建课程安排会优先选择它。`,
+      "设为默认课程流程",
+    );
+    if (!approved) return;
+    setSaving(true);
+    const response = await academyApi.saveSopTemplate({
+      ...template,
+      isDefault: true,
+    });
+    setSaving(false);
+    if (response.code !== 0)
+      return alert(response.message, "默认课程流程设置失败");
     await loadBase();
   };
   const deleteSopTemplate = async (template: AcademySopTemplate) => {
-    const approved = await confirm(`确定删除“${template.name}”吗？删除后无法恢复。`, "删除课程流程");
+    const approved = await confirm(
+      `确定删除“${template.name}”吗？删除后无法恢复。`,
+      "删除课程流程",
+    );
     if (!approved) return;
     setSaving(true);
     const response = await academyApi.deleteSopTemplate(template.id);
     setSaving(false);
     if (response.code !== 0) return alert(response.message, "课程流程删除失败");
     const remaining = Math.max(0, sopTemplates.length - 1);
-    const lastPage = Math.max(0, Math.ceil(remaining / sopTemplatePageSize) - 1);
+    const lastPage = Math.max(
+      0,
+      Math.ceil(remaining / sopTemplatePageSize) - 1,
+    );
     setSopTemplatePage((page) => Math.min(page, lastPage));
     await loadBase();
   };
@@ -901,11 +1131,24 @@ const Academy: React.FC = () => {
     if (target < 0 || target >= sopEditing.steps.length) return;
     const steps = [...sopEditing.steps];
     [steps[index], steps[target]] = [steps[target], steps[index]];
-    setSopEditing({ ...sopEditing, steps: steps.map((step, itemIndex) => ({ ...step, sortOrder: itemIndex + 1 })) });
+    setSopEditing({
+      ...sopEditing,
+      steps: steps.map((step, itemIndex) => ({
+        ...step,
+        sortOrder: itemIndex + 1,
+      })),
+    });
   };
   const saveSession = async () => {
-    if (!sessionHistoricalMode && !sessionEditingId && new Date(sessionForm.startsAt).getTime() < Date.now())
-      return alert("正常排期不能选择过去时间；历史课程请使用“补录历史课程”。", "课程时间不正确");
+    if (
+      !sessionHistoricalMode &&
+      !sessionEditingId &&
+      new Date(sessionForm.startsAt).getTime() < Date.now()
+    )
+      return alert(
+        "正常排期不能选择过去时间；历史课程请使用“补录历史课程”。",
+        "课程时间不正确",
+      );
     setSaving(true);
     const input = { ...sessionForm };
     const response = sessionEditingId
@@ -933,11 +1176,17 @@ const Academy: React.FC = () => {
   ) => {
     if (saving) return;
     if (status === "CANCELLED") {
-      const approved = await confirm(`确定取消“${session.title}”吗？取消后不会进入工作台。`, "取消课程安排");
+      const approved = await confirm(
+        `确定取消“${session.title}”吗？取消后不会进入工作台。`,
+        "取消课程安排",
+      );
       if (!approved) return;
     }
     if (status === "COMPLETED") {
-      const approved = await confirm(`确定“${session.title}”已经结束吗？确认后将进入已完结课程，可填写复盘。`, "结束课程");
+      const approved = await confirm(
+        `确定“${session.title}”已经结束吗？确认后将进入已完结课程，可填写复盘。`,
+        "结束课程",
+      );
       if (!approved) return;
     }
     setSaving(true);
@@ -947,12 +1196,18 @@ const Academy: React.FC = () => {
         await alert(response.message, "课程安排状态更新失败");
         return;
       }
-      setSessions((current) => current.map((item) => (
-        item.id === session.id ? { ...item, ...response.data } : item
-      )));
-      setPublicCalendar((current) => current.map((item) => (
-        item.id === session.id ? { ...item, status: response.data.status } : item
-      )));
+      setSessions((current) =>
+        current.map((item) =>
+          item.id === session.id ? { ...item, ...response.data } : item,
+        ),
+      );
+      setPublicCalendar((current) =>
+        current.map((item) =>
+          item.id === session.id
+            ? { ...item, status: response.data.status }
+            : item,
+        ),
+      );
       await loadDetail(session.id);
     } finally {
       setSaving(false);
@@ -971,7 +1226,9 @@ const Academy: React.FC = () => {
     setSessionForm({
       ...emptySession,
       courseId: course?.id || "",
-      title: course ? `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}` : "",
+      title: course
+        ? `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}`
+        : "",
       startsAt: toLocalInput(startsAt),
       endsAt: toLocalInput(endsAt),
       facilitatorUserId: "",
@@ -980,7 +1237,9 @@ const Academy: React.FC = () => {
       materialOwnerUserId: "",
       lecturerUserId: "",
       reviewOwnerUserId: "",
-      sopTemplateId: sopTemplates.find((item) => item.isDefault && item.status === "ACTIVE")?.id || "",
+      sopTemplateId:
+        sopTemplates.find((item) => item.isDefault && item.status === "ACTIVE")
+          ?.id || "",
     });
     setSessionEditingId("");
     setSessionHistoricalMode(false);
@@ -990,26 +1249,40 @@ const Academy: React.FC = () => {
     const startsAt = new Date(Date.now() - 24 * 60 * 60_000);
     startsAt.setMinutes(0, 0, 0);
     const endsAt = new Date(startsAt.getTime() + 120 * 60_000);
-    const toLocalInput = (value: Date) => new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    const toLocalInput = (value: Date) =>
+      new Date(value.getTime() - value.getTimezoneOffset() * 60_000)
+        .toISOString()
+        .slice(0, 16);
     setSessionEditingId("");
     setSessionHistoricalMode(true);
-    setSessionForm({ ...emptySession, startsAt: toLocalInput(startsAt), endsAt: toLocalInput(endsAt), sopTemplateId: sopTemplates.find((item) => item.isDefault && item.status === "ACTIVE")?.id || "" });
+    setSessionForm({
+      ...emptySession,
+      startsAt: toLocalInput(startsAt),
+      endsAt: toLocalInput(endsAt),
+      sopTemplateId:
+        sopTemplates.find((item) => item.isDefault && item.status === "ACTIVE")
+          ?.id || "",
+    });
     setSessionOpen(true);
   };
   const openSessionEdit = async (session: AcademySession) => {
     const toLocalInput = (value: string) => {
       const date = new Date(value);
-      return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+      return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+        .toISOString()
+        .slice(0, 16);
     };
     let sessionDetail = details[session.id];
     if (!sessionDetail) {
       const response = await academyApi.getSessionDetail(session.id);
-      if (response.code !== 0) return alert(response.message, "课程安排加载失败");
+      if (response.code !== 0)
+        return alert(response.message, "课程安排加载失败");
       sessionDetail = response.data;
       setDetails((current) => ({ ...current, [session.id]: response.data }));
     }
     const tasks = sessionDetail.tasks;
-    const ownerFor = (role: AcademySopTemplateStep["assigneeRole"]) => tasks.find((task) => task.assigneeRole === role)?.assigneeUserId || "";
+    const ownerFor = (role: AcademySopTemplateStep["assigneeRole"]) =>
+      tasks.find((task) => task.assigneeRole === role)?.assigneeUserId || "";
     setSessionEditingId(session.id);
     setSessionHistoricalMode(new Date(session.startsAt).getTime() < Date.now());
     setSessionForm({
@@ -1058,7 +1331,9 @@ const Academy: React.FC = () => {
       );
       if (!confirmed) return;
     }
-    setCourseStatusChangingIds((current) => updatePendingCourseIds(current, course.id, true));
+    setCourseStatusChangingIds((current) =>
+      updatePendingCourseIds(current, course.id, true),
+    );
     try {
       const response = await academyApi.changeCourseStatus(course.id, status);
       if (response.code !== 0) {
@@ -1066,7 +1341,9 @@ const Academy: React.FC = () => {
         return;
       }
       setCourses((current) => replaceCourseById(current, response.data));
-      const activeDelta = Number(response.data.status === "ACTIVE") - Number(course.status === "ACTIVE");
+      const activeDelta =
+        Number(response.data.status === "ACTIVE") -
+        Number(course.status === "ACTIVE");
       if (activeDelta) {
         setDashboard((current) => ({
           ...current,
@@ -1077,7 +1354,9 @@ const Academy: React.FC = () => {
     } catch {
       await alert("请检查网络连接后重试。", "课程状态更新失败");
     } finally {
-      setCourseStatusChangingIds((current) => updatePendingCourseIds(current, course.id, false));
+      setCourseStatusChangingIds((current) =>
+        updatePendingCourseIds(current, course.id, false),
+      );
     }
   };
   const updateTask = async (
@@ -1088,7 +1367,10 @@ const Academy: React.FC = () => {
     if (saving) return;
     if (status === "SUBMITTED") {
       if (taskEvidenceLoading || taskEvidenceUploading) return;
-      if (taskRequiresEvidence(task) && !taskEvidenceAttachmentsRef.current.length) {
+      if (
+        taskRequiresEvidence(task) &&
+        !taskEvidenceAttachmentsRef.current.length
+      ) {
         await alert("该节点需至少上传1个交付文件后才能提交。", "缺少交付文件");
         return;
       }
@@ -1098,9 +1380,12 @@ const Academy: React.FC = () => {
       const response = await academyApi.updateTask(task.id, {
         status,
         ...(status === "SUBMITTED" ? { submissionNote: note } : {}),
-        ...(status === "DONE" || status === "REJECTED" ? { reviewNote: note } : {}),
+        ...(status === "DONE" || status === "REJECTED"
+          ? { reviewNote: note }
+          : {}),
       });
-      if (response.code !== 0) return alert(response.message, "任务状态更新失败");
+      if (response.code !== 0)
+        return alert(response.message, "任务状态更新失败");
       setTaskAction(null);
       setTaskActionNote("");
       activeTaskEvidenceIdRef.current = "";
@@ -1122,7 +1407,10 @@ const Academy: React.FC = () => {
     if (saving) return;
     if (status === "SUBMITTED") {
       if (taskEvidenceLoading || taskEvidenceUploading) return;
-      if (taskRequiresEvidence(task) && !taskEvidenceAttachmentsRef.current.length) {
+      if (
+        taskRequiresEvidence(task) &&
+        !taskEvidenceAttachmentsRef.current.length
+      ) {
         await alert("该节点需至少上传1个交付文件后才能提交。", "缺少交付文件");
         return;
       }
@@ -1131,78 +1419,132 @@ const Academy: React.FC = () => {
     try {
       const response = await academyApi.updateTask(task.id, {
         status,
-        ...(status === "SUBMITTED" ? { submissionNote: workbenchTaskNote.trim() } : {}),
+        ...(status === "SUBMITTED"
+          ? { submissionNote: workbenchTaskNote.trim() }
+          : {}),
+        ...(status === "DONE" || status === "REJECTED"
+          ? { reviewNote: workbenchTaskNote.trim() }
+          : {}),
       });
       if (response.code !== 0) return alert(response.message, "任务更新失败");
       const nextTask = { ...task, ...response.data, session: task.session };
       setWorkbenchTask(nextTask);
-      setMyTasks((current) => current.map((item) => item.id === task.id ? nextTask : item));
-      setPublicCalendar((current) => current.map((session) => {
-        if (session.id !== task.session.id) return session;
-        const sessionTasks = session.tasks.map((item) => item.taskId === task.id ? { ...item, status: response.data.status } : item);
-        const done = sessionTasks.filter((item) => ["DONE", "SKIPPED"].includes(item.status)).length;
-        return {
-          ...session,
-          tasks: sessionTasks,
-          currentStep: sessionTasks.find((item) => !["DONE", "SKIPPED"].includes(item.status)),
-          progress: { done, total: sessionTasks.length, percent: sessionTasks.length ? Math.round(done / sessionTasks.length * 100) : 0 },
-        };
-      }));
+      setMyTasks((current) =>
+        current.map((item) => (item.id === task.id ? nextTask : item)),
+      );
+      setPublicCalendar((current) =>
+        current.map((session) => {
+          if (session.id !== task.session.id) return session;
+          const sessionTasks = session.tasks.map((item) =>
+            item.taskId === task.id
+              ? { ...item, status: response.data.status }
+              : item,
+          );
+          const done = sessionTasks.filter((item) =>
+            ["DONE", "SKIPPED"].includes(item.status),
+          ).length;
+          return {
+            ...session,
+            tasks: sessionTasks,
+            currentStep: sessionTasks.find(
+              (item) => !["DONE", "SKIPPED"].includes(item.status),
+            ),
+            progress: {
+              done,
+              total: sessionTasks.length,
+              percent: sessionTasks.length
+                ? Math.round((done / sessionTasks.length) * 100)
+                : 0,
+            },
+          };
+        }),
+      );
       setWorkbenchTaskNote("");
+      if (["DONE", "REJECTED", "SUBMITTED"].includes(status)) void loadBase();
     } catch {
       await alert("请检查网络连接后重试。", "任务更新失败");
     } finally {
       setSaving(false);
     }
   };
-  const loadTaskEvidence = useCallback(async (taskId: string) => {
-    activeTaskEvidenceIdRef.current = taskId;
-    taskEvidenceAttachmentsRef.current = [];
-    setTaskEvidenceAttachments([]);
-    setTaskEvidenceUploading(false);
-    setTaskEvidenceLoading(true);
-    try {
-      const response = await academyApi.listTaskAttachments(taskId);
-      if (activeTaskEvidenceIdRef.current !== taskId) return;
-      if (response.code !== 0) {
-        taskEvidenceAttachmentsRef.current = [];
-        setTaskEvidenceAttachments([]);
-        await alert(response.message, "交付文件加载失败");
-        return;
-      }
-      taskEvidenceAttachmentsRef.current = response.data;
-      setTaskEvidenceAttachments(response.data);
-    } catch {
-      if (activeTaskEvidenceIdRef.current !== taskId) return;
+  const loadTaskEvidence = useCallback(
+    async (taskId: string) => {
+      activeTaskEvidenceIdRef.current = taskId;
       taskEvidenceAttachmentsRef.current = [];
       setTaskEvidenceAttachments([]);
-      await alert("请检查网络连接后重试。", "交付文件加载失败");
-    } finally {
-      if (activeTaskEvidenceIdRef.current === taskId) setTaskEvidenceLoading(false);
-    }
-  }, [alert]);
-  const replaceTaskEvidenceState = (taskId: string, attachments: BusinessAttachment[]) => {
+      setTaskEvidenceUploading(false);
+      setTaskEvidenceLoading(true);
+      try {
+        const response = await academyApi.listTaskAttachments(taskId);
+        if (activeTaskEvidenceIdRef.current !== taskId) return;
+        if (response.code !== 0) {
+          taskEvidenceAttachmentsRef.current = [];
+          setTaskEvidenceAttachments([]);
+          await alert(response.message, "交付文件加载失败");
+          return;
+        }
+        taskEvidenceAttachmentsRef.current = response.data;
+        setTaskEvidenceAttachments(response.data);
+      } catch {
+        if (activeTaskEvidenceIdRef.current !== taskId) return;
+        taskEvidenceAttachmentsRef.current = [];
+        setTaskEvidenceAttachments([]);
+        await alert("请检查网络连接后重试。", "交付文件加载失败");
+      } finally {
+        if (activeTaskEvidenceIdRef.current === taskId)
+          setTaskEvidenceLoading(false);
+      }
+    },
+    [alert],
+  );
+  const replaceTaskEvidenceState = (
+    taskId: string,
+    attachments: BusinessAttachment[],
+  ) => {
     if (activeTaskEvidenceIdRef.current !== taskId) return;
     taskEvidenceAttachmentsRef.current = attachments;
     setTaskEvidenceAttachments(attachments);
   };
-  const syncTaskEvidence = (taskId: string, attachments: BusinessAttachment[]) => {
-    setWorkbenchTask((current) => current?.id === taskId ? { ...current, attachments } : current);
-    setMyTasks((current) => current.map((task) => task.id === taskId ? { ...task, attachments } : task));
-    setDetails((current) => Object.fromEntries(Object.entries(current).map(([sessionId, sessionDetail]) => [
-      sessionId,
-      {
-        ...sessionDetail,
-        tasks: sessionDetail.tasks.map((task) => task.id === taskId ? { ...task, attachments } : task),
-      },
-    ])));
+  const syncTaskEvidence = (
+    taskId: string,
+    attachments: BusinessAttachment[],
+  ) => {
+    setWorkbenchTask((current) =>
+      current?.id === taskId ? { ...current, attachments } : current,
+    );
+    setMyTasks((current) =>
+      current.map((task) =>
+        task.id === taskId ? { ...task, attachments } : task,
+      ),
+    );
+    setDetails((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([sessionId, sessionDetail]) => [
+          sessionId,
+          {
+            ...sessionDetail,
+            tasks: sessionDetail.tasks.map((task) =>
+              task.id === taskId ? { ...task, attachments } : task,
+            ),
+          },
+        ]),
+      ),
+    );
   };
-  const bindTaskEvidence = async (taskId: string, attachment: BusinessAttachment) => {
+  const bindTaskEvidence = async (
+    taskId: string,
+    attachment: BusinessAttachment,
+  ) => {
     if (activeTaskEvidenceIdRef.current !== taskId) return false;
     try {
-      const byId = new Map(taskEvidenceAttachmentsRef.current.map((item) => [item.id, item]));
+      const byId = new Map(
+        taskEvidenceAttachmentsRef.current.map((item) => [item.id, item]),
+      );
       byId.set(attachment.id, attachment);
-      const response = await academyApi.addTaskAttachment(taskId, Array.from(byId.keys()));
+      const response = await academyApi.addTaskAttachment(
+        taskId,
+        Array.from(byId.keys()),
+      );
       if (activeTaskEvidenceIdRef.current !== taskId) return false;
       if (response.code !== 0) {
         await alert(response.message, "交付文件关联失败");
@@ -1217,13 +1559,19 @@ const Academy: React.FC = () => {
       return false;
     }
   };
-  const unbindTaskEvidence = async (taskId: string, attachment: BusinessAttachment) => {
+  const unbindTaskEvidence = async (
+    taskId: string,
+    attachment: BusinessAttachment,
+  ) => {
     if (activeTaskEvidenceIdRef.current !== taskId) return false;
     try {
       const remainingIds = taskEvidenceAttachmentsRef.current
         .filter((item) => item.id !== attachment.id)
         .map((item) => item.id);
-      const response = await academyApi.removeTaskAttachment(taskId, remainingIds);
+      const response = await academyApi.removeTaskAttachment(
+        taskId,
+        remainingIds,
+      );
       if (activeTaskEvidenceIdRef.current !== taskId) return false;
       if (response.code !== 0) {
         await alert(response.message, "交付文件删除失败");
@@ -1238,7 +1586,10 @@ const Academy: React.FC = () => {
       return false;
     }
   };
-  const openTaskAction = (task: AcademySessionTask, status: AcademySessionTask["status"]) => {
+  const openTaskAction = (
+    task: AcademySessionTask,
+    status: AcademySessionTask["status"],
+  ) => {
     if (status === "IN_PROGRESS") {
       void updateTask(task, status);
       return;
@@ -1247,11 +1598,19 @@ const Academy: React.FC = () => {
     setTaskActionNote("");
     void loadTaskEvidence(task.id);
   };
-  const openAssetUpload = (course: AcademyCourse, nextType: AcademyAssetType) => {
-    const existing = courseAssets[course.id]?.find((item) => item.assetType === nextType);
+  const openAssetUpload = (
+    course: AcademyCourse,
+    nextType: AcademyAssetType,
+  ) => {
+    const existing = courseAssets[course.id]?.find(
+      (item) => item.assetType === nextType,
+    );
     setAssetCourseId(course.id);
     setAssetType(nextType);
-    setAssetTitle(existing?.title || `${course.title} · ${assetTypes.find((item) => item.value === nextType)?.label || "课程资产"}`);
+    setAssetTitle(
+      existing?.title ||
+        `${course.title} · ${assetTypes.find((item) => item.value === nextType)?.label || "课程资产"}`,
+    );
     setExistingAssetAttachments(existing?.attachments || []);
     setAssetAttachments([]);
     setAssetOpen(true);
@@ -1270,8 +1629,15 @@ const Academy: React.FC = () => {
   };
   const openOrderLink = async (engagement: AcademyEngagement) => {
     if (!engagement.customerId)
-      return alert("请先将该学员关联到CRM客户，再关联正式订单。", "暂不能关联订单");
-    const response = await orderApi.fetchOrders({ customerId: engagement.customerId, page: 1, pageSize: 100 });
+      return alert(
+        "请先将该学员关联到CRM客户，再关联正式订单。",
+        "暂不能关联订单",
+      );
+    const response = await orderApi.fetchOrders({
+      customerId: engagement.customerId,
+      page: 1,
+      pageSize: 100,
+    });
     if (response.code !== 0) return alert(response.message, "正式订单加载失败");
     setOrderLink({ engagement, orders: response.data.items });
     setSelectedOrderId(engagement.orderId || "");
@@ -1281,9 +1647,12 @@ const Academy: React.FC = () => {
     const order = orderLink.orders.find((item) => item.id === selectedOrderId);
     if (!order) return;
     setSaving(true);
-    const response = await academyApi.linkEngagementOrder(orderLink.engagement.id, {
-      orderId: order.id,
-    });
+    const response = await academyApi.linkEngagementOrder(
+      orderLink.engagement.id,
+      {
+        orderId: order.id,
+      },
+    );
     setSaving(false);
     if (response.code !== 0) return alert(response.message, "订单关联失败");
     setOrderLink(null);
@@ -1291,21 +1660,25 @@ const Academy: React.FC = () => {
   };
   const saveEngagement = async () => {
     setSaving(true);
-    const response = engagementMode === "execution" && engagementEditingId
-      ? await academyApi.updateEngagementExecution(engagementEditingId, {
-          attendanceStatus: engagementForm.attendanceStatus,
-          interactionLevel: engagementForm.interactionLevel,
-          courseAssessment: engagementForm.courseAssessment,
-        })
-      : engagementMode === "sales" && engagementEditingId
-        ? await academyApi.quickFollowUp(engagementEditingId, {
-            content: engagementForm.notes || "",
-            invitationStatus: engagementForm.invitationStatus,
+    const response =
+      engagementMode === "execution" && engagementEditingId
+        ? await academyApi.updateEngagementExecution(engagementEditingId, {
+            attendanceStatus: engagementForm.attendanceStatus,
+            interactionLevel: engagementForm.interactionLevel,
             courseAssessment: engagementForm.courseAssessment,
-            nextFollowUpAt: engagementForm.nextFollowUpAt,
           })
-        : await academyApi.saveEngagement(engagementForm);
-    if (response.code !== 0) { setSaving(false); return alert(response.message, "学员记录保存失败"); }
+        : engagementMode === "sales" && engagementEditingId
+          ? await academyApi.quickFollowUp(engagementEditingId, {
+              content: engagementForm.notes || "",
+              invitationStatus: engagementForm.invitationStatus,
+              courseAssessment: engagementForm.courseAssessment,
+              nextFollowUpAt: engagementForm.nextFollowUpAt,
+            })
+          : await academyApi.saveEngagement(engagementForm);
+    if (response.code !== 0) {
+      setSaving(false);
+      return alert(response.message, "学员记录保存失败");
+    }
     setSaving(false);
     setEngagementOpen(false);
     setEngagementEditingId("");
@@ -1323,14 +1696,23 @@ const Academy: React.FC = () => {
     if (response.code !== 0) return alert(response.message, "批量邀约失败");
     const successCount = response.data.created.length;
     const failedCount = response.data.rejected.length;
-    const customerNames = new Map(selectedInviteCustomers.map((customer) => [customer.id, customer.name]));
-    const rejectedSummary = response.data.rejected.slice(0, 10)
-      .map((item) => `${customerNames.get(item.customerId) || item.customerId}：${item.message}`)
+    const customerNames = new Map(
+      selectedInviteCustomers.map((customer) => [customer.id, customer.name]),
+    );
+    const rejectedSummary = response.data.rejected
+      .slice(0, 10)
+      .map(
+        (item) =>
+          `${customerNames.get(item.customerId) || item.customerId}：${item.message}`,
+      )
       .join("\n");
     setSelectedInviteCustomers([]);
     setEngagementOpen(false);
     await loadDetail(selectedSessionId);
-    await alert(`已加入 ${successCount} 位客户${failedCount ? `，${failedCount} 位未加入。\n${rejectedSummary}${failedCount > 10 ? `\n其余 ${failedCount - 10} 位请按客户权限或状态检查。` : ""}` : "。"}`, "客户邀约完成");
+    await alert(
+      `已加入 ${successCount} 位客户${failedCount ? `，${failedCount} 位未加入。\n${rejectedSummary}${failedCount > 10 ? `\n其余 ${failedCount - 10} 位请按客户权限或状态检查。` : ""}` : "。"}`,
+      "客户邀约完成",
+    );
   };
   const saveReview = async (value: SaveAcademyReviewInput = reviewForm) => {
     setSaving(true);
@@ -1582,7 +1964,11 @@ const Academy: React.FC = () => {
                           />
                         </TableCell>
                         <TableCell>
-                          <Stack direction="row" spacing={0.5} alignItems="center">
+                          <Stack
+                            direction="row"
+                            spacing={0.5}
+                            alignItems="center"
+                          >
                             <Chip
                               size="small"
                               label={statusLabel[task.status] || task.status}
@@ -1591,32 +1977,73 @@ const Academy: React.FC = () => {
                                 bgcolor:
                                   task.status === "DONE"
                                     ? palette.greenSoft
-                                    : task.status === "BLOCKED" || task.status === "REJECTED"
+                                    : task.status === "BLOCKED" ||
+                                        task.status === "REJECTED"
                                       ? palette.redSoft
                                       : palette.blueSoft,
                                 color:
                                   task.status === "DONE"
                                     ? palette.green
-                                    : task.status === "BLOCKED" || task.status === "REJECTED"
+                                    : task.status === "BLOCKED" ||
+                                        task.status === "REJECTED"
                                       ? palette.red
                                       : palette.blue,
                               }}
                             />
-                            {task.assigneeUserId === currentUser?.id && task.status === "PENDING" && (
-                              <Button size="small" onClick={() => openTaskAction(task, "IN_PROGRESS")}>开始</Button>
-                            )}
-                            {task.assigneeUserId === currentUser?.id && task.status === "IN_PROGRESS" && (
-                              <Button size="small" onClick={() => openTaskAction(task, "SUBMITTED")}>提交验收</Button>
-                            )}
+                            {task.assigneeUserId === currentUser?.id &&
+                              task.status === "PENDING" && (
+                                <Button
+                                  size="small"
+                                  onClick={() =>
+                                    openTaskAction(task, "IN_PROGRESS")
+                                  }
+                                >
+                                  开始
+                                </Button>
+                              )}
+                            {task.assigneeUserId === currentUser?.id &&
+                              task.status === "IN_PROGRESS" && (
+                                <Button
+                                  size="small"
+                                  onClick={() =>
+                                    openTaskAction(task, "SUBMITTED")
+                                  }
+                                >
+                                  提交验收
+                                </Button>
+                              )}
                             {canSession && task.status === "SUBMITTED" && (
                               <>
-                                <Button size="small" color="success" onClick={() => openTaskAction(task, "DONE")}>通过</Button>
-                                <Button size="small" color="error" onClick={() => openTaskAction(task, "REJECTED")}>驳回</Button>
+                                <Button
+                                  size="small"
+                                  color="success"
+                                  onClick={() => openTaskAction(task, "DONE")}
+                                >
+                                  通过
+                                </Button>
+                                <Button
+                                  size="small"
+                                  color="error"
+                                  onClick={() =>
+                                    openTaskAction(task, "REJECTED")
+                                  }
+                                >
+                                  驳回
+                                </Button>
                               </>
                             )}
-                            {task.assigneeUserId === currentUser?.id && (task.status === "REJECTED" || task.status === "BLOCKED") && (
-                              <Button size="small" onClick={() => openTaskAction(task, "IN_PROGRESS")}>重新处理</Button>
-                            )}
+                            {task.assigneeUserId === currentUser?.id &&
+                              (task.status === "REJECTED" ||
+                                task.status === "BLOCKED") && (
+                                <Button
+                                  size="small"
+                                  onClick={() =>
+                                    openTaskAction(task, "IN_PROGRESS")
+                                  }
+                                >
+                                  重新处理
+                                </Button>
+                              )}
                           </Stack>
                         </TableCell>
                       </TableRow>
@@ -1828,39 +2255,66 @@ const Academy: React.FC = () => {
                 {taskAction && (
                   <Box sx={{ mb: 2 }}>
                     {taskAction.status !== "SUBMITTED" && (
-                      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5, mb: 1.5 }}>
-                        <Typography fontSize={12} color="text.secondary">负责人完成说明</Typography>
+                      <Paper
+                        variant="outlined"
+                        sx={{ ...panelSx, p: 1.5, mb: 1.5 }}
+                      >
+                        <Typography fontSize={12} color="text.secondary">
+                          负责人完成说明
+                        </Typography>
                         <Typography sx={{ mt: 0.5, whiteSpace: "pre-wrap" }}>
                           {taskAction.task.submissionNote || "未填写完成说明"}
                         </Typography>
                       </Paper>
                     )}
-                    {taskAction.task.completionMode === "ATTACHMENT" && <BusinessAttachmentPicker
-                      title="交付证据"
-                      description={taskAction.status === "SUBMITTED" ? "支持PPT、文档和图片，单个文件不超过20MB；完成说明可填写网盘或在线文档链接。" : "验收时可查看和下载负责人提交的文件。"}
-                      value={taskEvidenceAttachments}
-                      onChange={(attachments) => replaceTaskEvidenceState(taskAction.task.id, attachments)}
-                      category="academy-task-evidence"
-                      draftKey={`academy-task:${taskAction.task.id}`}
-                      maxCount={10}
-                      imagesOnly={false}
-                      disabled={
-                        taskEvidenceLoading ||
-                        taskEvidenceUploading ||
-                        !taskActionCanEditEvidence
-                      }
-                      onUploadingChange={setTaskEvidenceUploading}
-                      onUploaded={async (attachment) => bindTaskEvidence(taskAction.task.id, attachment)}
-                      onRemove={async (attachment) => unbindTaskEvidence(taskAction.task.id, attachment)}
-                    />}
+                    {taskAction.task.completionMode === "ATTACHMENT" && (
+                      <BusinessAttachmentPicker
+                        title="交付证据"
+                        description={
+                          taskAction.status === "SUBMITTED"
+                            ? "支持PPT、文档和图片，单个文件不超过20MB；完成说明可填写网盘或在线文档链接。"
+                            : "验收时可查看和下载负责人提交的文件。"
+                        }
+                        value={taskEvidenceAttachments}
+                        onChange={(attachments) =>
+                          replaceTaskEvidenceState(
+                            taskAction.task.id,
+                            attachments,
+                          )
+                        }
+                        category="academy-task-evidence"
+                        draftKey={`academy-task:${taskAction.task.id}`}
+                        maxCount={10}
+                        imagesOnly={false}
+                        disabled={
+                          taskEvidenceLoading ||
+                          taskEvidenceUploading ||
+                          !taskActionCanEditEvidence
+                        }
+                        onUploadingChange={setTaskEvidenceUploading}
+                        onUploaded={async (attachment) =>
+                          bindTaskEvidence(taskAction.task.id, attachment)
+                        }
+                        onRemove={async (attachment) =>
+                          unbindTaskEvidence(taskAction.task.id, attachment)
+                        }
+                      />
+                    )}
                   </Box>
                 )}
                 <TextField
                   fullWidth
                   multiline
                   minRows={3}
-                  required={taskAction?.status === "SUBMITTED" || taskAction?.status === "REJECTED"}
-                  label={taskAction?.status === "REJECTED" ? "驳回原因" : "完成说明 / 验收意见"}
+                  required={
+                    taskAction?.status === "SUBMITTED" ||
+                    taskAction?.status === "REJECTED"
+                  }
+                  label={
+                    taskAction?.status === "REJECTED"
+                      ? "驳回原因"
+                      : "完成说明 / 验收意见"
+                  }
                   value={taskActionNote}
                   onChange={(event) => {
                     markDirty();
@@ -1872,17 +2326,31 @@ const Academy: React.FC = () => {
                 <Button onClick={() => void requestClose()}>取消</Button>
                 <Button
                   variant="contained"
-                  color={taskAction?.status === "REJECTED" ? "error" : "primary"}
+                  color={
+                    taskAction?.status === "REJECTED" ? "error" : "primary"
+                  }
                   disabled={
                     saving ||
                     taskEvidenceLoading ||
                     taskEvidenceUploading ||
                     !taskAction ||
-                    ((taskAction.status === "SUBMITTED" || taskAction.status === "REJECTED") && !taskActionNote.trim()) ||
-                    (taskAction.status === "SUBMITTED" && !taskActionCanEditEvidence) ||
-                    (taskAction.status === "SUBMITTED" && taskRequiresEvidence(taskAction.task) && !taskEvidenceAttachments.length)
+                    ((taskAction.status === "SUBMITTED" ||
+                      taskAction.status === "REJECTED") &&
+                      !taskActionNote.trim()) ||
+                    (taskAction.status === "SUBMITTED" &&
+                      !taskActionCanEditEvidence) ||
+                    (taskAction.status === "SUBMITTED" &&
+                      taskRequiresEvidence(taskAction.task) &&
+                      !taskEvidenceAttachments.length)
                   }
-                  onClick={() => taskAction && void updateTask(taskAction.task, taskAction.status, taskActionNote)}
+                  onClick={() =>
+                    taskAction &&
+                    void updateTask(
+                      taskAction.task,
+                      taskAction.status,
+                      taskActionNote,
+                    )
+                  }
                 >
                   确认
                 </Button>
@@ -1924,16 +2392,29 @@ const Academy: React.FC = () => {
             taskTotal={myTaskTotal}
             taskPage={myTaskPage}
             taskPageSize={myTaskPageSize}
+            taskView={myTaskView}
+            canReviewTasks={canSession}
+            onTaskViewChange={(value) => {
+              setMyTaskView(value);
+              setMyTaskPage(0);
+            }}
             onTaskPageChange={setMyTaskPage}
-            onTaskPageSizeChange={(size) => { setMyTaskPageSize(size); setMyTaskPage(0); }}
+            onTaskPageSizeChange={(size) => {
+              setMyTaskPageSize(size);
+              setMyTaskPage(0);
+            }}
             onOpenTask={(task) => {
               setWorkbenchTask(task);
               setWorkbenchTaskNote("");
-              void loadTaskEvidence(task.id);
+              if (!task.eventId) void loadTaskEvidence(task.id);
             }}
-            onChangeSessionStatus={(session, status) => void changeSessionStatus(session, status)}
+            onChangeSessionStatus={(session, status) =>
+              void changeSessionStatus(session, status)
+            }
             requestedSessionId={workbenchRequestedSessionId}
-            onRequestedSessionConsumed={() => setWorkbenchRequestedSessionId("")}
+            onRequestedSessionConsumed={() =>
+              setWorkbenchRequestedSessionId("")
+            }
           />
         )}
         {view === "plans" && (
@@ -1944,7 +2425,9 @@ const Academy: React.FC = () => {
             onCreate={(date) => openSessionCreate(undefined, date)}
             onCreateHistorical={openHistoricalSessionCreate}
             onEdit={openSessionEdit}
-            onChangeStatus={(session, status) => void changeSessionStatus(session, status)}
+            onChangeStatus={(session, status) =>
+              void changeSessionStatus(session, status)
+            }
             onOpenWorkbench={(sessionId) => {
               setWorkbenchRequestedSessionId(sessionId);
               navigate(viewPath.overview);
@@ -2001,10 +2484,17 @@ const Academy: React.FC = () => {
             }}
             detail={selectedDetail}
             canManage={canEngagement}
-            canAddCustomer={invitableSessions.some((item) => item.id === selectedSessionId)}
+            canAddCustomer={invitableSessions.some(
+              (item) => item.id === selectedSessionId,
+            )}
             onAdd={() => {
-              if (!invitableSessions.some((item) => item.id === selectedSessionId)) {
-                void alert("当前课程已开课或结束，不能继续添加邀约客户，但仍可维护已有客户跟进。", "暂不能添加客户");
+              if (
+                !invitableSessions.some((item) => item.id === selectedSessionId)
+              ) {
+                void alert(
+                  "当前课程已开课或结束，不能继续添加邀约客户，但仍可维护已有客户跟进。",
+                  "暂不能添加客户",
+                );
                 return;
               }
               setEngagementMode("sales");
@@ -2041,34 +2531,282 @@ const Academy: React.FC = () => {
         )}
       </Stack>
 
-      <Drawer anchor="right" open={Boolean(workbenchTask)} onClose={() => { setWorkbenchTask(null); activeTaskEvidenceIdRef.current = ""; taskEvidenceAttachmentsRef.current = []; setTaskEvidenceAttachments([]); setTaskEvidenceLoading(false); setTaskEvidenceUploading(false); }} PaperProps={{ role: "dialog", "aria-label": "我的商学院任务", sx: { width: { xs: "100%", sm: 520 }, maxWidth: "100vw", p: 2 } }}>
-        {workbenchTask && <Stack spacing={2}>
-          <Stack direction="row" justifyContent="space-between" alignItems="flex-start"><Box><Typography fontSize={20} fontWeight={950}>{workbenchTask.title}</Typography><Typography fontSize={12.5} color="text.secondary">{workbenchTask.session.title} · {formatDate(workbenchTask.session.startsAt)}</Typography></Box><IconButton aria-label="关闭我的任务" onClick={() => { setWorkbenchTask(null); activeTaskEvidenceIdRef.current = ""; taskEvidenceAttachmentsRef.current = []; setTaskEvidenceAttachments([]); setTaskEvidenceLoading(false); setTaskEvidenceUploading(false); }}><CloseIcon /></IconButton></Stack>
-          <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}><Typography fontSize={12} color="text.secondary">完成标准</Typography><Typography sx={{ mt: 0.5 }}>{workbenchTask.acceptanceCriteria || "完成后提交负责人确认"}</Typography><Divider sx={{ my: 1.5 }} /><Typography fontSize={12} color="text.secondary">截止时间</Typography><Typography sx={{ mt: 0.5 }}>{formatDate(workbenchTask.dueAt)}</Typography></Paper>
-          {workbenchTask.completionMode === "ATTACHMENT" && <BusinessAttachmentPicker
-            title="任务交付文件"
-            description="支持PPT、文档和图片，单个文件不超过20MB；完成说明可填写网盘或在线文档链接。"
-            value={taskEvidenceAttachments}
-            onChange={(attachments) => replaceTaskEvidenceState(workbenchTask.id, attachments)}
-            category="academy-task-evidence"
-            draftKey={`academy-task:${workbenchTask.id}`}
-            maxCount={10}
-            imagesOnly={false}
-            disabled={taskEvidenceLoading || taskEvidenceUploading || !["IN_PROGRESS", "REJECTED", "BLOCKED"].includes(workbenchTask.status)}
-            onUploadingChange={setTaskEvidenceUploading}
-            onUploaded={async (attachment) => bindTaskEvidence(workbenchTask.id, attachment)}
-            onRemove={async (attachment) => unbindTaskEvidence(workbenchTask.id, attachment)}
-          />}
-          {workbenchTask.status === "PENDING" && <Button variant="contained" disabled={saving} onClick={() => void updateWorkbenchTask(workbenchTask, "IN_PROGRESS")}>开始处理</Button>}
-          {["IN_PROGRESS", "REJECTED", "BLOCKED"].includes(workbenchTask.status) && <><TextField multiline minRows={3} label={workbenchTask.completionMode === "CONFIRM" ? "完成说明（选填）" : "完成说明 *"} helperText={taskEvidenceUploading ? "交付文件正在上传并关联，请稍候" : taskRequiresEvidence(workbenchTask) && !taskEvidenceAttachments.length ? "该步骤配置为必须上传附件" : workbenchTask.completionMode === "CHECKLIST" ? "确认完成标准后填写检查结果" : "可粘贴网盘或在线文档链接"} value={workbenchTaskNote} onChange={(event) => setWorkbenchTaskNote(event.target.value)} /><Button variant="contained" disabled={saving || taskEvidenceLoading || taskEvidenceUploading || (workbenchTask.completionMode !== "CONFIRM" && !workbenchTaskNote.trim()) || (taskRequiresEvidence(workbenchTask) && !taskEvidenceAttachments.length)} onClick={() => void updateWorkbenchTask(workbenchTask, "SUBMITTED")}>{workbenchTask.requiresReview ? "提交验收" : "确认完成"}</Button></>}
-          {workbenchTask.status === "SUBMITTED" && <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Typography color="text.secondary">已提交，等待项目负责人确认。</Typography><Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>本次完成说明</Typography><Typography sx={{ mt: 0.4, whiteSpace: "pre-wrap" }}>{workbenchTask.submissionNote || "-"}</Typography></Paper>}
-          {workbenchTask.status === "DONE" && <Paper variant="outlined" sx={{ ...panelSx, p: 2, bgcolor: palette.greenSoft, borderColor: "#B7E5CF" }}><Stack direction="row" spacing={1} alignItems="center"><TaskAltIcon color="success" /><Box><Typography fontWeight={950} color="success.main">该步骤已完成</Typography><Typography fontSize={12.5} color="text.secondary">完成时间：{formatDate(workbenchTask.completedAt || workbenchTask.reviewedAt || workbenchTask.submittedAt)}</Typography></Box></Stack>{(workbenchTask.submissionNote || workbenchTask.note) && <><Divider sx={{ my: 1.5 }} /><Typography fontSize={12} color="text.secondary">完成结果</Typography><Typography sx={{ mt: 0.5, whiteSpace: "pre-wrap" }}>{workbenchTask.submissionNote || workbenchTask.note}</Typography></>}</Paper>}
-        </Stack>}
+      <Drawer
+        anchor="right"
+        open={Boolean(workbenchTask)}
+        onClose={() => {
+          setWorkbenchTask(null);
+          activeTaskEvidenceIdRef.current = "";
+          taskEvidenceAttachmentsRef.current = [];
+          setTaskEvidenceAttachments([]);
+          setTaskEvidenceLoading(false);
+          setTaskEvidenceUploading(false);
+        }}
+        PaperProps={{
+          role: "dialog",
+          "aria-label": "我的商学院任务",
+          sx: { width: { xs: "100%", sm: 520 }, maxWidth: "100vw", p: 2 },
+        }}
+      >
+        {workbenchTask && (
+          <Stack spacing={2}>
+            <Stack
+              direction="row"
+              justifyContent="space-between"
+              alignItems="flex-start"
+            >
+              <Box>
+                <Typography fontSize={20} fontWeight={950}>
+                  {workbenchTask.title}
+                </Typography>
+                <Typography fontSize={12.5} color="text.secondary">
+                  {workbenchTask.session.title} ·{" "}
+                  {formatDate(workbenchTask.session.startsAt)}
+                </Typography>
+              </Box>
+              <IconButton
+                aria-label="关闭我的任务"
+                onClick={() => {
+                  setWorkbenchTask(null);
+                  activeTaskEvidenceIdRef.current = "";
+                  taskEvidenceAttachmentsRef.current = [];
+                  setTaskEvidenceAttachments([]);
+                  setTaskEvidenceLoading(false);
+                  setTaskEvidenceUploading(false);
+                }}
+              >
+                <CloseIcon />
+              </IconButton>
+            </Stack>
+            <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
+              <Typography fontSize={12} color="text.secondary">
+                完成标准
+              </Typography>
+              <Typography sx={{ mt: 0.5 }}>
+                {workbenchTask.acceptanceCriteria || "完成后提交负责人确认"}
+              </Typography>
+              <Divider sx={{ my: 1.5 }} />
+              <Typography fontSize={12} color="text.secondary">
+                截止时间
+              </Typography>
+              <Typography sx={{ mt: 0.5 }}>
+                {formatDate(workbenchTask.dueAt)}
+              </Typography>
+            </Paper>
+            {!workbenchTask.eventId && workbenchTask.completionMode === "ATTACHMENT" && (
+              <BusinessAttachmentPicker
+                title="任务交付文件"
+                description="支持PPT、文档和图片，单个文件不超过20MB；完成说明可填写网盘或在线文档链接。"
+                value={taskEvidenceAttachments}
+                onChange={(attachments) =>
+                  replaceTaskEvidenceState(workbenchTask.id, attachments)
+                }
+                category="academy-task-evidence"
+                draftKey={`academy-task:${workbenchTask.id}`}
+                maxCount={10}
+                imagesOnly={false}
+                disabled={
+                  taskEvidenceLoading ||
+                  taskEvidenceUploading ||
+                  !["IN_PROGRESS", "REJECTED", "BLOCKED"].includes(
+                    workbenchTask.status,
+                  )
+                }
+                onUploadingChange={setTaskEvidenceUploading}
+                onUploaded={async (attachment) =>
+                  bindTaskEvidence(workbenchTask.id, attachment)
+                }
+                onRemove={async (attachment) =>
+                  unbindTaskEvidence(workbenchTask.id, attachment)
+                }
+              />
+            )}
+            {!workbenchTask.eventId && workbenchTask.status === "PENDING" &&
+              workbenchTask.completionMode === "CONFIRM" && (
+                <Button
+                  variant="contained"
+                  disabled={saving}
+                  onClick={() =>
+                    void updateWorkbenchTask(workbenchTask, "SUBMITTED")
+                  }
+                >
+                  {workbenchTask.requiresReview ? "确认并提交验收" : "确认完成"}
+                </Button>
+              )}
+            {!workbenchTask.eventId && workbenchTask.status === "PENDING" &&
+              workbenchTask.completionMode !== "CONFIRM" && (
+                <Button
+                  variant="contained"
+                  disabled={saving}
+                  onClick={() =>
+                    void updateWorkbenchTask(workbenchTask, "IN_PROGRESS")
+                  }
+                >
+                  开始处理
+                </Button>
+              )}
+            {!workbenchTask.eventId && ["IN_PROGRESS", "REJECTED", "BLOCKED"].includes(
+              workbenchTask.status,
+            ) && (
+              <>
+                <TextField
+                  multiline
+                  minRows={3}
+                  label={
+                    workbenchTask.completionMode === "CONFIRM"
+                      ? "完成说明（选填）"
+                      : "完成说明 *"
+                  }
+                  helperText={
+                    taskEvidenceUploading
+                      ? "交付文件正在上传并关联，请稍候"
+                      : taskRequiresEvidence(workbenchTask) &&
+                          !taskEvidenceAttachments.length
+                        ? "该步骤配置为必须上传附件"
+                        : workbenchTask.completionMode === "CHECKLIST"
+                          ? "确认完成标准后填写检查结果"
+                          : "可粘贴网盘或在线文档链接"
+                  }
+                  value={workbenchTaskNote}
+                  onChange={(event) => setWorkbenchTaskNote(event.target.value)}
+                />
+                <Button
+                  variant="contained"
+                  disabled={
+                    saving ||
+                    taskEvidenceLoading ||
+                    taskEvidenceUploading ||
+                    (workbenchTask.completionMode !== "CONFIRM" &&
+                      !workbenchTaskNote.trim()) ||
+                    (taskRequiresEvidence(workbenchTask) &&
+                      !taskEvidenceAttachments.length)
+                  }
+                  onClick={() =>
+                    void updateWorkbenchTask(workbenchTask, "SUBMITTED")
+                  }
+                >
+                  {workbenchTask.requiresReview ? "提交验收" : "确认完成"}
+                </Button>
+              </>
+            )}
+            {workbenchTask.status === "SUBMITTED" && (
+              <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+                <Typography color="text.secondary">
+                  已提交，等待项目负责人确认。
+                </Typography>
+                <Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>
+                  本次完成说明
+                </Typography>
+                <Typography sx={{ mt: 0.4, whiteSpace: "pre-wrap" }}>
+                  {workbenchTask.submissionNote || "-"}
+                </Typography>
+              </Paper>
+            )}
+            {!workbenchTask.eventId && workbenchTask.status === "SUBMITTED" && canSession && (
+              <>
+                <TextField
+                  multiline
+                  minRows={2}
+                  label="验收意见"
+                  placeholder="通过可选填；驳回时必须填写原因"
+                  value={workbenchTaskNote}
+                  onChange={(event) => setWorkbenchTaskNote(event.target.value)}
+                />
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    disabled={saving}
+                    onClick={() =>
+                      void updateWorkbenchTask(workbenchTask, "DONE")
+                    }
+                  >
+                    验收通过
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    disabled={saving || !workbenchTaskNote.trim()}
+                    onClick={() =>
+                      void updateWorkbenchTask(workbenchTask, "REJECTED")
+                    }
+                  >
+                    驳回修改
+                  </Button>
+                </Stack>
+              </>
+            )}
+            {workbenchTask.status === "DONE" && (
+              <Paper
+                variant="outlined"
+                sx={{
+                  ...panelSx,
+                  p: 2,
+                  bgcolor: palette.greenSoft,
+                  borderColor: "#B7E5CF",
+                }}
+              >
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <TaskAltIcon color="success" />
+                  <Box>
+                    <Typography fontWeight={950} color="success.main">
+                      该步骤已完成
+                    </Typography>
+                    <Typography fontSize={12.5} color="text.secondary">
+                      完成时间：
+                      {formatDate(
+                        workbenchTask.completedAt ||
+                          workbenchTask.reviewedAt ||
+                          workbenchTask.submittedAt,
+                      )}
+                    </Typography>
+                  </Box>
+                </Stack>
+                {(workbenchTask.submissionNote || workbenchTask.note) && (
+                  <>
+                    <Divider sx={{ my: 1.5 }} />
+                    <Typography fontSize={12} color="text.secondary">
+                      完成结果
+                    </Typography>
+                    <Typography sx={{ mt: 0.5, whiteSpace: "pre-wrap" }}>
+                      {workbenchTask.submissionNote || workbenchTask.note}
+                    </Typography>
+                  </>
+                )}
+              </Paper>
+            )}
+            {workbenchTask.status === "SKIPPED" && (
+              <Paper variant="outlined" sx={{ ...panelSx, p: 2, bgcolor: palette.soft }}>
+                <Typography fontWeight={950}>该任务已关闭</Typography>
+                <Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>
+                  {workbenchTask.note || "关联课程安排已取消，任务无需继续处理。"}
+                </Typography>
+                <Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>
+                  关闭时间：{formatDate(workbenchTask.completedAt)}
+                </Typography>
+              </Paper>
+            )}
+            {workbenchTask.status === "REJECTED" && (
+              <Paper variant="outlined" sx={{ ...panelSx, p: 2, bgcolor: palette.redSoft }}>
+                <Typography fontWeight={950} color="error.main">该次验收已驳回</Typography>
+                <Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>
+                  {workbenchTask.reviewNote || "未填写驳回原因"}
+                </Typography>
+                <Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>
+                  验收人：{workbenchTask.reviewedByName || "-"} · {formatDate(workbenchTask.reviewedAt)}
+                </Typography>
+              </Paper>
+            )}
+          </Stack>
+        )}
       </Drawer>
 
       <ProtectedFormDialog
         open={courseOpen}
-        onClose={() => { setCourseOpen(false); setCourseEditingId(""); }}
+        onClose={() => {
+          setCourseOpen(false);
+          setCourseEditingId("");
+        }}
         submitting={saving}
         markButtonClicksDirty={false}
         fullWidth
@@ -2083,36 +2821,153 @@ const Academy: React.FC = () => {
             <DialogContent dividers>
               <Stack spacing={2.2}>
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="1 基础信息" helper="沉淀可复用课程内容；主讲人和本次负责人在课程安排中设置。" />
-                  <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
-                    <TextField label="课程名称 *" value={courseForm.title} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, title: event.target.value }); }} />
-                    <TextField select label="课程分类 *" value={courseForm.category} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, category: event.target.value }); }}>
-                      {courseCategories.filter((item) => item.isActive || item.name === courseForm.category).map((item) => <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>)}
+                  <SectionTitle
+                    title="1 基础信息"
+                    helper="沉淀可复用课程内容；主讲人和本次负责人在课程安排中设置。"
+                  />
+                  <Box
+                    sx={{
+                      mt: 2,
+                      display: "grid",
+                      gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                      gap: 2,
+                    }}
+                  >
+                    <TextField
+                      label="课程名称 *"
+                      value={courseForm.title}
+                      onChange={(event) => {
+                        markDirty();
+                        setCourseForm({
+                          ...courseForm,
+                          title: event.target.value,
+                        });
+                      }}
+                    />
+                    <TextField
+                      select
+                      label="课程分类 *"
+                      value={courseForm.category}
+                      onChange={(event) => {
+                        markDirty();
+                        setCourseForm({
+                          ...courseForm,
+                          category: event.target.value,
+                        });
+                      }}
+                    >
+                      {courseCategories
+                        .filter(
+                          (item) =>
+                            item.isActive || item.name === courseForm.category,
+                        )
+                        .map((item) => (
+                          <MenuItem key={item.id} value={item.name}>
+                            {item.name}
+                          </MenuItem>
+                        ))}
                     </TextField>
-                    <TextField select label="课程维护人 *" helperText="负责维护课程内容，不代表每次课程安排的负责人" value={courseForm.ownerUserId} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, ownerUserId: event.target.value }); }}>
-                      {academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}
+                    <TextField
+                      select
+                      label="课程维护人 *"
+                      helperText="负责维护课程内容，不代表每次课程安排的负责人"
+                      value={courseForm.ownerUserId}
+                      onChange={(event) => {
+                        markDirty();
+                        setCourseForm({
+                          ...courseForm,
+                          ownerUserId: event.target.value,
+                        });
+                      }}
+                    >
+                      {academyUsers.map((user) => (
+                        <MenuItem key={user.id} value={user.id}>
+                          {user.name}（{user.positionName || user.role}）
+                        </MenuItem>
+                      ))}
                     </TextField>
-                    <TextField label="默认时长（分钟）*" type="number" value={courseForm.defaultDurationMinutes} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, defaultDurationMinutes: Number(event.target.value) }); }} />
+                    <TextField
+                      label="默认时长（分钟）*"
+                      type="number"
+                      value={courseForm.defaultDurationMinutes}
+                      onChange={(event) => {
+                        markDirty();
+                        setCourseForm({
+                          ...courseForm,
+                          defaultDurationMinutes: Number(event.target.value),
+                        });
+                      }}
+                    />
                   </Box>
                 </Paper>
 
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="2 课程定位" helper="明确这门课讲给谁、解决什么问题。" />
+                  <SectionTitle
+                    title="2 课程定位"
+                    helper="明确这门课讲给谁、解决什么问题。"
+                  />
                   <Stack spacing={2} sx={{ mt: 2 }}>
-                    <TextField label="课程定位与简介" multiline minRows={3} value={courseForm.summary} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, summary: event.target.value }); }} />
-                    <TextField label="目标客户" multiline minRows={2} placeholder="例如：正在推进企业AI升级的传统企业经营者" value={courseForm.targetAudience || ""} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, targetAudience: event.target.value }); }} />
+                    <TextField
+                      label="课程定位与简介"
+                      multiline
+                      minRows={3}
+                      value={courseForm.summary}
+                      onChange={(event) => {
+                        markDirty();
+                        setCourseForm({
+                          ...courseForm,
+                          summary: event.target.value,
+                        });
+                      }}
+                    />
+                    <TextField
+                      label="目标客户"
+                      multiline
+                      minRows={2}
+                      placeholder="例如：正在推进企业AI升级的传统企业经营者"
+                      value={courseForm.targetAudience || ""}
+                      onChange={(event) => {
+                        markDirty();
+                        setCourseForm({
+                          ...courseForm,
+                          targetAudience: event.target.value,
+                        });
+                      }}
+                    />
                   </Stack>
                 </Paper>
 
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="3 业务目标" helper="沉淀课程交付目标，并连接后续转化产品。" />
+                  <SectionTitle
+                    title="3 业务目标"
+                    helper="沉淀课程交付目标，并连接后续转化产品。"
+                  />
                   <Stack spacing={2} sx={{ mt: 2 }}>
-                    <TextField label="客户核心问题" multiline minRows={2} value={courseForm.customerProblem || ""} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, customerProblem: event.target.value }); }} />
+                    <TextField
+                      label="客户核心问题"
+                      multiline
+                      minRows={2}
+                      value={courseForm.customerProblem || ""}
+                      onChange={(event) => {
+                        markDirty();
+                        setCourseForm({
+                          ...courseForm,
+                          customerProblem: event.target.value,
+                        });
+                      }}
+                    />
                     <Box>
-                      <Typography fontSize={13} fontWeight={800} sx={{ mb: 1 }}>课程目标</Typography>
+                      <Typography fontSize={13} fontWeight={800} sx={{ mb: 1 }}>
+                        课程目标
+                      </Typography>
                       <Stack spacing={1}>
                         {courseForm.objectives.map((objective, index) => (
-                          <Stack key={index} direction="row" spacing={1} alignItems="center">
+                          <Stack
+                            key={index}
+                            direction="row"
+                            spacing={1}
+                            alignItems="center"
+                          >
                             <TextField
                               fullWidth
                               label={`目标 ${index + 1}`}
@@ -2124,7 +2979,11 @@ const Academy: React.FC = () => {
                                 setCourseForm({ ...courseForm, objectives });
                               }}
                               onPaste={(event) => {
-                                const lines = event.clipboardData.getData("text").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+                                const lines = event.clipboardData
+                                  .getData("text")
+                                  .split(/\r?\n/)
+                                  .map((item) => item.trim())
+                                  .filter(Boolean);
                                 if (lines.length <= 1) return;
                                 event.preventDefault();
                                 markDirty();
@@ -2133,18 +2992,71 @@ const Academy: React.FC = () => {
                                 setCourseForm({ ...courseForm, objectives });
                               }}
                             />
-                            <Button color="error" onClick={() => { markDirty(); setCourseForm({ ...courseForm, objectives: courseForm.objectives.filter((_, itemIndex) => itemIndex !== index) }); }}>删除</Button>
+                            <Button
+                              color="error"
+                              onClick={() => {
+                                markDirty();
+                                setCourseForm({
+                                  ...courseForm,
+                                  objectives: courseForm.objectives.filter(
+                                    (_, itemIndex) => itemIndex !== index,
+                                  ),
+                                });
+                              }}
+                            >
+                              删除
+                            </Button>
                           </Stack>
                         ))}
-                        <Button variant="outlined" startIcon={<AddIcon />} sx={{ alignSelf: "flex-start" }} onClick={() => { markDirty(); setCourseForm({ ...courseForm, objectives: [...courseForm.objectives, ""] }); }}>
+                        <Button
+                          variant="outlined"
+                          startIcon={<AddIcon />}
+                          sx={{ alignSelf: "flex-start" }}
+                          onClick={() => {
+                            markDirty();
+                            setCourseForm({
+                              ...courseForm,
+                              objectives: [...courseForm.objectives, ""],
+                            });
+                          }}
+                        >
                           添加课程目标
                         </Button>
                       </Stack>
                     </Box>
-                    <TextField label="核心观点" multiline minRows={2} value={courseForm.coreViewpoint || ""} onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, coreViewpoint: event.target.value }); }} />
-                    <TextField select label="转化产品" value={courseForm.conversionProductId || ""} helperText="可选；关联系统设置中已启用的产品，后续用于转化与复盘。" onChange={(event) => { markDirty(); setCourseForm({ ...courseForm, conversionProductId: event.target.value }); }}>
+                    <TextField
+                      label="核心观点"
+                      multiline
+                      minRows={2}
+                      value={courseForm.coreViewpoint || ""}
+                      onChange={(event) => {
+                        markDirty();
+                        setCourseForm({
+                          ...courseForm,
+                          coreViewpoint: event.target.value,
+                        });
+                      }}
+                    />
+                    <TextField
+                      select
+                      label="转化产品"
+                      value={courseForm.conversionProductId || ""}
+                      helperText="可选；关联系统设置中已启用的产品，后续用于转化与复盘。"
+                      onChange={(event) => {
+                        markDirty();
+                        setCourseForm({
+                          ...courseForm,
+                          conversionProductId: event.target.value,
+                        });
+                      }}
+                    >
                       <MenuItem value="">暂不关联</MenuItem>
-                      {products.map((product) => <MenuItem key={product.id} value={product.id}>{product.name} · ¥{product.price.toLocaleString("zh-CN")}</MenuItem>)}
+                      {products.map((product) => (
+                        <MenuItem key={product.id} value={product.id}>
+                          {product.name} · ¥
+                          {product.price.toLocaleString("zh-CN")}
+                        </MenuItem>
+                      ))}
                     </TextField>
                   </Stack>
                 </Paper>
@@ -2155,7 +3067,11 @@ const Academy: React.FC = () => {
               <Button
                 variant="contained"
                 disabled={
-                  saving || !courseForm.title.trim() || !courseForm.category || !courseForm.ownerUserId || !courseForm.defaultDurationMinutes
+                  saving ||
+                  !courseForm.title.trim() ||
+                  !courseForm.category ||
+                  !courseForm.ownerUserId ||
+                  !courseForm.defaultDurationMinutes
                 }
                 onClick={() => void saveCourse()}
               >
@@ -2165,47 +3081,599 @@ const Academy: React.FC = () => {
           </>
         )}
       </ProtectedFormDialog>
-      <Drawer anchor="right" open={sopSettingsOpen} onClose={() => void closeSopSettings()} PaperProps={{ role: "dialog", "aria-modal": true, "aria-label": "课程流程设置", sx: { width: { xs: "100%", md: 980 }, maxWidth: "100vw", bgcolor: palette.soft } }}>
+      <Drawer
+        anchor="right"
+        open={sopSettingsOpen}
+        onClose={() => void closeSopSettings()}
+        PaperProps={{
+          role: "dialog",
+          "aria-modal": true,
+          "aria-label": "课程流程设置",
+          sx: {
+            width: { xs: "100%", md: 980 },
+            maxWidth: "100vw",
+            bgcolor: palette.soft,
+          },
+        }}
+      >
         <Stack sx={{ minHeight: "100%" }}>
-          <Paper square elevation={0} sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${palette.line}` }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Box><Typography fontSize={20} fontWeight={950}>课程流程设置</Typography><Typography fontSize={12.5} color="text.secondary">配置每次课程安排可以选择的执行步骤、负责人角色和完成方式</Typography></Box><IconButton aria-label="关闭课程流程设置" onClick={() => void closeSopSettings()}><CloseIcon /></IconButton></Stack></Paper>
+          <Paper
+            square
+            elevation={0}
+            sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${palette.line}` }}
+          >
+            <Stack
+              direction="row"
+              justifyContent="space-between"
+              alignItems="center"
+            >
+              <Box>
+                <Typography fontSize={20} fontWeight={950}>
+                  课程流程设置
+                </Typography>
+                <Typography fontSize={12.5} color="text.secondary">
+                  配置每次课程安排可以选择的执行步骤、负责人角色和完成方式
+                </Typography>
+              </Box>
+              <IconButton
+                aria-label="关闭课程流程设置"
+                onClick={() => void closeSopSettings()}
+              >
+                <CloseIcon />
+              </IconButton>
+            </Stack>
+          </Paper>
           <Box sx={{ p: 2, flex: 1 }}>
-            {!sopEditing ? <Stack spacing={1.5}>
-              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1}>
-                <Box><Typography fontWeight={950}>流程列表</Typography><Typography fontSize={12.5} color="text.secondary">统一维护可选课程流程；新建课程安排时选择并生成本次任务。</Typography></Box>
-                <Button variant="contained" startIcon={<AddIcon />} onClick={() => openSopSettings()}>新建课程流程</Button>
-              </Stack>
-              <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
-                <TableContainer>
-                  <SystemDataTable tableId="academy-sop-template-list" aria-label="课程流程列表">
-                    <TableHead><TableRow><TableCell>流程名称</TableCell><TableCell>步骤</TableCell><TableCell>默认流程</TableCell><TableCell>状态</TableCell><TableCell>最近更新</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
-                    <TableBody>
-                      {sopTemplates.slice(sopTemplatePage * sopTemplatePageSize, (sopTemplatePage + 1) * sopTemplatePageSize).map((template) => (
-                        <TableRow key={template.id} hover>
-                          <TableCell><Typography fontWeight={850}>{template.name}</Typography><Typography fontSize={12} color="text.secondary" noWrap sx={{ maxWidth: 330 }}>{template.description || "暂无说明"}</Typography></TableCell>
-                          <TableCell>{template.steps.length} 步</TableCell>
-                          <TableCell>{template.isDefault ? <Chip size="small" color="primary" label="默认" /> : "—"}</TableCell>
-                          <TableCell><Chip size="small" color={template.status === "ACTIVE" ? "success" : "default"} label={template.status === "ACTIVE" ? "已启用" : "已停用"} /></TableCell>
-                          <TableCell>{formatDate(template.updatedAt)}</TableCell>
-                          <TableCell align="right"><Stack direction="row" spacing={0.25} justifyContent="flex-end">
-                            <Tooltip title="编辑流程" arrow><IconButton size="small" aria-label={`编辑流程 ${template.name}`} onClick={() => openSopSettings(template)}><EditOutlinedIcon fontSize="small" /></IconButton></Tooltip>
-                            <Tooltip title={template.isDefault && template.status === "ACTIVE" ? "默认流程不能停用" : template.status === "ACTIVE" ? "停用流程" : "启用流程"} arrow><span><IconButton size="small" color={template.status === "ACTIVE" ? "warning" : "success"} disabled={saving || (template.isDefault && template.status === "ACTIVE")} aria-label={`${template.status === "ACTIVE" ? "停用" : "启用"}流程 ${template.name}`} onClick={() => void changeSopTemplateStatus(template)}>{template.status === "ACTIVE" ? <ToggleOnOutlinedIcon fontSize="small" /> : <ToggleOffOutlinedIcon fontSize="small" />}</IconButton></span></Tooltip>
-                            <Tooltip title={template.isDefault ? "默认流程不能删除" : "删除流程"} arrow><span><IconButton size="small" color="error" disabled={saving || template.isDefault} aria-label={`删除流程 ${template.name}`} onClick={() => void deleteSopTemplate(template)}><DeleteOutlineIcon fontSize="small" /></IconButton></span></Tooltip>
-                          </Stack></TableCell>
+            {!sopEditing ? (
+              <Stack spacing={1.5}>
+                <Stack
+                  direction={{ xs: "column", sm: "row" }}
+                  justifyContent="space-between"
+                  alignItems={{ sm: "center" }}
+                  spacing={1}
+                >
+                  <Box>
+                    <Typography fontWeight={950}>流程列表</Typography>
+                    <Typography fontSize={12.5} color="text.secondary">
+                      统一维护可选课程流程；新建课程安排时选择并生成本次任务。
+                    </Typography>
+                  </Box>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => openSopSettings()}
+                  >
+                    新建课程流程
+                  </Button>
+                </Stack>
+                <Paper
+                  variant="outlined"
+                  sx={{ ...panelSx, overflow: "hidden" }}
+                >
+                  <TableContainer>
+                    <SystemDataTable
+                      tableId="academy-sop-template-list"
+                      aria-label="课程流程列表"
+                    >
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>流程名称</TableCell>
+                          <TableCell>步骤</TableCell>
+                          <TableCell>默认流程</TableCell>
+                          <TableCell>状态</TableCell>
+                          <TableCell>最近更新</TableCell>
+                          <TableCell align="right">操作</TableCell>
                         </TableRow>
-                      ))}
-                      {!sopTemplates.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 7 }}><Typography fontWeight={900}>暂无课程流程</Typography><Typography fontSize={12.5} color="text.secondary">点击右上角“新建课程流程”开始配置。</Typography></TableCell></TableRow>}
-                    </TableBody>
-                  </SystemDataTable>
-                </TableContainer>
-                <TablePagination count={sopTemplates.length} page={sopTemplatePage} rowsPerPage={sopTemplatePageSize} onPageChange={(_, nextPage) => setSopTemplatePage(nextPage)} onRowsPerPageChange={(event) => { setSopTemplatePageSize(Number(event.target.value)); setSopTemplatePage(0); }} sx={{ borderTop: `1px solid ${palette.line}` }} />
-              </Paper>
-            </Stack> : <Stack spacing={1.5}>
-              <Paper variant="outlined" sx={{ ...panelSx, p: 1.6 }}><Stack spacing={1.2}><TextField label="流程名称 *" value={sopEditing.name} onChange={(event) => setSopEditing({ ...sopEditing, name: event.target.value })} /><TextField label="流程说明" multiline minRows={2} value={sopEditing.description} onChange={(event) => setSopEditing({ ...sopEditing, description: event.target.value })} /><Stack direction="row" spacing={1}><TextField select label="状态" fullWidth value={sopEditing.status} onChange={(event) => setSopEditing({ ...sopEditing, status: event.target.value as AcademySopTemplate["status"] })}><MenuItem value="ACTIVE">启用</MenuItem><MenuItem value="INACTIVE">停用</MenuItem></TextField><TextField select label="默认流程" fullWidth value={sopEditing.isDefault ? "YES" : "NO"} onChange={(event) => setSopEditing({ ...sopEditing, isDefault: event.target.value === "YES" })}><MenuItem value="YES">是</MenuItem><MenuItem value="NO">否</MenuItem></TextField></Stack></Stack></Paper>
-              {sopEditing.steps.map((step, index) => <Paper key={`${step.stepKey}-${index}`} variant="outlined" sx={{ ...panelSx, p: 1.5 }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Typography fontWeight={950}>第 {index + 1} 步</Typography><Stack direction="row" spacing={0.5}><Button size="small" disabled={index === 0} onClick={() => moveSopStep(index, -1)}>上移</Button><Button size="small" disabled={index === sopEditing.steps.length - 1} onClick={() => moveSopStep(index, 1)}>下移</Button><Button color="error" size="small" disabled={sopEditing.steps.length === 1} onClick={() => setSopEditing({ ...sopEditing, steps: sopEditing.steps.filter((_, itemIndex) => itemIndex !== index) })}>删除</Button></Stack></Stack><Box sx={{ mt: 1.2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 1.2 }}><TextField label="步骤名称 *" value={step.title} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, title: event.target.value, stepKey: step.id ? step.stepKey : `STEP_${index + 1}_${event.target.value.trim().replace(/\s+/g, "_").slice(0, 16) || index + 1}` }; setSopEditing({ ...sopEditing, steps }); }} /><TextField select label="负责人角色" value={step.assigneeRole} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, assigneeRole: event.target.value as AcademySopTemplateStep["assigneeRole"] }; setSopEditing({ ...sopEditing, steps }); }}>{[["PROJECT_OWNER", "项目负责人"], ["CONTENT_OWNER", "内容负责人"], ["MATERIAL_OWNER", "素材负责人"], ["LECTURER", "主讲人"], ["REVIEW_OWNER", "复盘负责人"]].map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField><TextField select label="流程阶段" value={step.category} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, category: event.target.value as AcademySopTemplateStep["category"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="BEFORE">课前准备</MenuItem><MenuItem value="DURING">课程执行</MenuItem><MenuItem value="AFTER">课后跟进</MenuItem></TextField><TextField select label="时间基准" value={step.dueAnchor} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, dueAnchor: event.target.value as AcademySopTemplateStep["dueAnchor"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="STARTS_AT">相对开课时间</MenuItem><MenuItem value="ENDS_AT">相对结束时间</MenuItem></TextField><TextField label="时间偏移（分钟）" type="number" helperText="负数表示提前；留空表示不设截止时间" value={step.dueOffsetMinutes ?? ""} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, dueOffsetMinutes: event.target.value === "" ? null : Number(event.target.value) }; setSopEditing({ ...sopEditing, steps }); }} /><TextField select label="完成方式" value={step.completionMode} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, completionMode: event.target.value as AcademySopTemplateStep["completionMode"] }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="CONFIRM">直接确认</MenuItem><MenuItem value="NOTE">填写说明</MenuItem><MenuItem value="ATTACHMENT">上传附件</MenuItem><MenuItem value="CHECKLIST">检查确认</MenuItem></TextField><TextField select label="是否必做" value={step.isRequired ? "YES" : "NO"} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, isRequired: event.target.value === "YES" }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="YES">必做</MenuItem><MenuItem value="NO">选做</MenuItem></TextField><TextField select label="是否需要验收" value={step.requiresReview ? "YES" : "NO"} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, requiresReview: event.target.value === "YES" }; setSopEditing({ ...sopEditing, steps }); }}><MenuItem value="NO">提交后直接完成</MenuItem><MenuItem value="YES">项目负责人验收</MenuItem></TextField><TextField label="完成标准" multiline minRows={2} value={step.acceptanceCriteria || ""} onChange={(event) => { const steps = [...sopEditing.steps]; steps[index] = { ...step, acceptanceCriteria: event.target.value }; setSopEditing({ ...sopEditing, steps }); }} sx={{ gridColumn: { md: "1 / -1" } }} /></Box></Paper>)}
-              <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setSopEditing({ ...sopEditing, steps: [...sopEditing.steps, emptySopStep(sopEditing.steps.length)] })}>添加步骤</Button>
-            </Stack>}
+                      </TableHead>
+                      <TableBody>
+                        {sopTemplates
+                          .slice(
+                            sopTemplatePage * sopTemplatePageSize,
+                            (sopTemplatePage + 1) * sopTemplatePageSize,
+                          )
+                          .map((template) => (
+                            <TableRow key={template.id} hover>
+                              <TableCell>
+                                <Typography fontWeight={850}>
+                                  {template.name}
+                                </Typography>
+                                <Typography
+                                  fontSize={12}
+                                  color="text.secondary"
+                                  noWrap
+                                  sx={{ maxWidth: 330 }}
+                                >
+                                  {template.description || "暂无说明"}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>{template.steps.length} 步</TableCell>
+                              <TableCell>
+                                {template.isDefault ? (
+                                  <Chip
+                                    size="small"
+                                    color="primary"
+                                    label="默认"
+                                  />
+                                ) : (
+                                  "—"
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Chip
+                                  size="small"
+                                  color={
+                                    template.status === "ACTIVE"
+                                      ? "success"
+                                      : "default"
+                                  }
+                                  label={
+                                    template.status === "ACTIVE"
+                                      ? "已启用"
+                                      : "已停用"
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell>
+                                {formatDate(template.updatedAt)}
+                              </TableCell>
+                              <TableCell align="right">
+                                <Stack
+                                  direction="row"
+                                  spacing={0.25}
+                                  justifyContent="flex-end"
+                                >
+                                  <Tooltip title="编辑流程" arrow>
+                                    <IconButton
+                                      size="small"
+                                      aria-label={`编辑流程 ${template.name}`}
+                                      onClick={() => openSopSettings(template)}
+                                    >
+                                      <EditOutlinedIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip
+                                    title={
+                                      template.isDefault
+                                        ? "当前默认流程"
+                                        : template.status !== "ACTIVE"
+                                          ? "请先启用流程"
+                                          : "设为默认流程"
+                                    }
+                                    arrow
+                                  >
+                                    <span>
+                                      <IconButton
+                                        size="small"
+                                        color={
+                                          template.isDefault
+                                            ? "primary"
+                                            : "default"
+                                        }
+                                        disabled={
+                                          saving ||
+                                          template.isDefault ||
+                                          template.status !== "ACTIVE"
+                                        }
+                                        aria-label={`设为默认流程 ${template.name}`}
+                                        onClick={() =>
+                                          void setDefaultSopTemplate(template)
+                                        }
+                                      >
+                                        <EventAvailableOutlinedIcon fontSize="small" />
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                  <Tooltip
+                                    title={
+                                      template.isDefault &&
+                                      template.status === "ACTIVE"
+                                        ? "默认流程不能停用"
+                                        : template.status === "ACTIVE"
+                                          ? "停用流程"
+                                          : "启用流程"
+                                    }
+                                    arrow
+                                  >
+                                    <span>
+                                      <IconButton
+                                        size="small"
+                                        color={
+                                          template.status === "ACTIVE"
+                                            ? "warning"
+                                            : "success"
+                                        }
+                                        disabled={
+                                          saving ||
+                                          (template.isDefault &&
+                                            template.status === "ACTIVE")
+                                        }
+                                        aria-label={`${template.status === "ACTIVE" ? "停用" : "启用"}流程 ${template.name}`}
+                                        onClick={() =>
+                                          void changeSopTemplateStatus(template)
+                                        }
+                                      >
+                                        {template.status === "ACTIVE" ? (
+                                          <ToggleOnOutlinedIcon fontSize="small" />
+                                        ) : (
+                                          <ToggleOffOutlinedIcon fontSize="small" />
+                                        )}
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                  <Tooltip
+                                    title={
+                                      template.isDefault
+                                        ? "默认流程不能删除"
+                                        : "删除流程"
+                                    }
+                                    arrow
+                                  >
+                                    <span>
+                                      <IconButton
+                                        size="small"
+                                        color="error"
+                                        disabled={saving || template.isDefault}
+                                        aria-label={`删除流程 ${template.name}`}
+                                        onClick={() =>
+                                          void deleteSopTemplate(template)
+                                        }
+                                      >
+                                        <DeleteOutlineIcon fontSize="small" />
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                </Stack>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        {!sopTemplates.length && (
+                          <TableRow>
+                            <TableCell
+                              colSpan={6}
+                              align="center"
+                              sx={{ py: 7 }}
+                            >
+                              <Typography fontWeight={900}>
+                                暂无课程流程
+                              </Typography>
+                              <Typography
+                                fontSize={12.5}
+                                color="text.secondary"
+                              >
+                                点击右上角“新建课程流程”开始配置。
+                              </Typography>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </SystemDataTable>
+                  </TableContainer>
+                  <TablePagination
+                    count={sopTemplates.length}
+                    page={sopTemplatePage}
+                    rowsPerPage={sopTemplatePageSize}
+                    onPageChange={(_, nextPage) => setSopTemplatePage(nextPage)}
+                    onRowsPerPageChange={(event) => {
+                      setSopTemplatePageSize(Number(event.target.value));
+                      setSopTemplatePage(0);
+                    }}
+                    sx={{ borderTop: `1px solid ${palette.line}` }}
+                  />
+                </Paper>
+              </Stack>
+            ) : (
+              <Stack spacing={1.5}>
+                <Paper variant="outlined" sx={{ ...panelSx, p: 1.6 }}>
+                  <Stack spacing={1.2}>
+                    <Stack
+                      direction={{ xs: "column", sm: "row" }}
+                      justifyContent="space-between"
+                      spacing={1}
+                    >
+                      <Box>
+                        <Typography fontWeight={950}>流程基本信息</Typography>
+                        <Typography fontSize={12.5} color="text.secondary">
+                          这里只设置流程名称和每一步需要谁完成；启停、默认流程在列表操作。
+                        </Typography>
+                      </Box>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => setSopAdvanced((value) => !value)}
+                      >
+                        {sopAdvanced ? "收起高级设置" : "高级设置"}
+                      </Button>
+                    </Stack>
+                    <TextField
+                      label="流程名称 *"
+                      value={sopEditing.name}
+                      onChange={(event) =>
+                        setSopEditing({
+                          ...sopEditing,
+                          name: event.target.value,
+                        })
+                      }
+                    />
+                    <TextField
+                      label="流程说明"
+                      multiline
+                      minRows={2}
+                      value={sopEditing.description}
+                      onChange={(event) =>
+                        setSopEditing({
+                          ...sopEditing,
+                          description: event.target.value,
+                        })
+                      }
+                    />
+                  </Stack>
+                </Paper>
+                {sopEditing.steps.map((step, index) => (
+                  <Paper
+                    key={`${step.stepKey}-${index}`}
+                    variant="outlined"
+                    sx={{ ...panelSx, p: 1.5 }}
+                  >
+                    <Stack
+                      direction="row"
+                      justifyContent="space-between"
+                      alignItems="center"
+                    >
+                      <Typography fontWeight={950}>
+                        第 {index + 1} 步
+                      </Typography>
+                      <Stack direction="row" spacing={0.5}>
+                        <Button
+                          size="small"
+                          disabled={index === 0}
+                          onClick={() => moveSopStep(index, -1)}
+                        >
+                          上移
+                        </Button>
+                        <Button
+                          size="small"
+                          disabled={index === sopEditing.steps.length - 1}
+                          onClick={() => moveSopStep(index, 1)}
+                        >
+                          下移
+                        </Button>
+                        <Button
+                          color="error"
+                          size="small"
+                          disabled={sopEditing.steps.length === 1}
+                          onClick={() =>
+                            setSopEditing({
+                              ...sopEditing,
+                              steps: sopEditing.steps.filter(
+                                (_, itemIndex) => itemIndex !== index,
+                              ),
+                            })
+                          }
+                        >
+                          删除
+                        </Button>
+                      </Stack>
+                    </Stack>
+                    <Box
+                      sx={{
+                        mt: 1.2,
+                        display: "grid",
+                        gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                        gap: 1.2,
+                      }}
+                    >
+                      <TextField
+                        label="步骤名称 *"
+                        value={step.title}
+                        onChange={(event) => {
+                          const steps = [...sopEditing.steps];
+                          steps[index] = {
+                            ...step,
+                            title: event.target.value,
+                            stepKey: step.id
+                              ? step.stepKey
+                              : `STEP_${index + 1}_${event.target.value.trim().replace(/\s+/g, "_").slice(0, 16) || index + 1}`,
+                          };
+                          setSopEditing({ ...sopEditing, steps });
+                        }}
+                      />
+                      <TextField
+                        select
+                        label="负责人角色"
+                        value={step.assigneeRole}
+                        onChange={(event) => {
+                          const steps = [...sopEditing.steps];
+                          steps[index] = {
+                            ...step,
+                            assigneeRole: event.target
+                              .value as AcademySopTemplateStep["assigneeRole"],
+                          };
+                          setSopEditing({ ...sopEditing, steps });
+                        }}
+                      >
+                        {[
+                          ["PROJECT_OWNER", "项目负责人"],
+                          ["CONTENT_OWNER", "内容负责人"],
+                          ["MATERIAL_OWNER", "素材负责人"],
+                          ["LECTURER", "主讲人"],
+                          ["REVIEW_OWNER", "复盘负责人"],
+                        ].map(([value, label]) => (
+                          <MenuItem key={value} value={value}>
+                            {label}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                      {sopAdvanced && (
+                        <TextField
+                          select
+                          label="流程阶段"
+                          value={step.category}
+                          onChange={(event) => {
+                            const steps = [...sopEditing.steps];
+                            steps[index] = {
+                              ...step,
+                              category: event.target
+                                .value as AcademySopTemplateStep["category"],
+                            };
+                            setSopEditing({ ...sopEditing, steps });
+                          }}
+                        >
+                          <MenuItem value="BEFORE">课前准备</MenuItem>
+                          <MenuItem value="DURING">课程执行</MenuItem>
+                          <MenuItem value="AFTER">课后跟进</MenuItem>
+                        </TextField>
+                      )}
+                      {sopAdvanced && (
+                        <TextField
+                          select
+                          label="时间基准"
+                          value={step.dueAnchor}
+                          onChange={(event) => {
+                            const steps = [...sopEditing.steps];
+                            steps[index] = {
+                              ...step,
+                              dueAnchor: event.target
+                                .value as AcademySopTemplateStep["dueAnchor"],
+                            };
+                            setSopEditing({ ...sopEditing, steps });
+                          }}
+                        >
+                          <MenuItem value="STARTS_AT">相对开课时间</MenuItem>
+                          <MenuItem value="ENDS_AT">相对结束时间</MenuItem>
+                        </TextField>
+                      )}
+                      {sopAdvanced && (
+                        <TextField
+                          label="时间偏移（分钟）"
+                          type="number"
+                          helperText="负数表示提前；留空表示不设截止时间"
+                          value={step.dueOffsetMinutes ?? ""}
+                          onChange={(event) => {
+                            const steps = [...sopEditing.steps];
+                            steps[index] = {
+                              ...step,
+                              dueOffsetMinutes:
+                                event.target.value === ""
+                                  ? null
+                                  : Number(event.target.value),
+                            };
+                            setSopEditing({ ...sopEditing, steps });
+                          }}
+                        />
+                      )}
+                      <TextField
+                        select
+                        label="完成方式"
+                        value={step.completionMode}
+                        onChange={(event) => {
+                          const steps = [...sopEditing.steps];
+                          steps[index] = {
+                            ...step,
+                            completionMode: event.target
+                              .value as AcademySopTemplateStep["completionMode"],
+                          };
+                          setSopEditing({ ...sopEditing, steps });
+                        }}
+                      >
+                        <MenuItem value="CONFIRM">直接确认</MenuItem>
+                        <MenuItem value="NOTE">填写说明</MenuItem>
+                        <MenuItem value="ATTACHMENT">上传附件</MenuItem>
+                        <MenuItem value="CHECKLIST">检查确认</MenuItem>
+                      </TextField>
+                      {sopAdvanced && (
+                        <TextField
+                          select
+                          label="是否必做"
+                          value={step.isRequired ? "YES" : "NO"}
+                          onChange={(event) => {
+                            const steps = [...sopEditing.steps];
+                            steps[index] = {
+                              ...step,
+                              isRequired: event.target.value === "YES",
+                            };
+                            setSopEditing({ ...sopEditing, steps });
+                          }}
+                        >
+                          <MenuItem value="YES">必做</MenuItem>
+                          <MenuItem value="NO">选做</MenuItem>
+                        </TextField>
+                      )}
+                      <TextField
+                        select
+                        label="是否需要验收"
+                        value={step.requiresReview ? "YES" : "NO"}
+                        onChange={(event) => {
+                          const steps = [...sopEditing.steps];
+                          steps[index] = {
+                            ...step,
+                            requiresReview: event.target.value === "YES",
+                          };
+                          setSopEditing({ ...sopEditing, steps });
+                        }}
+                      >
+                        <MenuItem value="NO">提交后直接完成</MenuItem>
+                        <MenuItem value="YES">项目负责人验收</MenuItem>
+                      </TextField>
+                      <TextField
+                        label="完成标准"
+                        multiline
+                        minRows={2}
+                        value={step.acceptanceCriteria || ""}
+                        onChange={(event) => {
+                          const steps = [...sopEditing.steps];
+                          steps[index] = {
+                            ...step,
+                            acceptanceCriteria: event.target.value,
+                          };
+                          setSopEditing({ ...sopEditing, steps });
+                        }}
+                        sx={{ gridColumn: { md: "1 / -1" } }}
+                      />
+                    </Box>
+                  </Paper>
+                ))}
+                <Button
+                  variant="outlined"
+                  startIcon={<AddIcon />}
+                  onClick={() =>
+                    setSopEditing({
+                      ...sopEditing,
+                      steps: [
+                        ...sopEditing.steps,
+                        emptySopStep(sopEditing.steps.length),
+                      ],
+                    })
+                  }
+                >
+                  添加步骤
+                </Button>
+              </Stack>
+            )}
           </Box>
-          {sopEditing && <Paper square elevation={0} sx={{ p: 1.5, borderTop: `1px solid ${palette.line}` }}><Stack direction="row" justifyContent="flex-end" spacing={1}><Button onClick={() => void closeSopSettings(true)}>返回列表</Button><Button variant="contained" disabled={saving || !sopEditing.name.trim() || sopEditing.steps.some((step) => !step.title.trim())} onClick={() => void saveSopTemplate()}>{saving ? "保存中…" : "保存流程"}</Button></Stack></Paper>}
+          {sopEditing && (
+            <Paper
+              square
+              elevation={0}
+              sx={{ p: 1.5, borderTop: `1px solid ${palette.line}` }}
+            >
+              <Stack direction="row" justifyContent="flex-end" spacing={1}>
+                <Button onClick={() => void closeSopSettings(true)}>
+                  返回列表
+                </Button>
+                <Button
+                  variant="contained"
+                  disabled={
+                    saving ||
+                    !sopEditing.name.trim() ||
+                    sopEditing.steps.some((step) => !step.title.trim())
+                  }
+                  onClick={() => void saveSopTemplate()}
+                >
+                  {saving ? "保存中…" : "保存流程"}
+                </Button>
+              </Stack>
+            </Paper>
+          )}
         </Stack>
       </Drawer>
       <ProtectedFormDialog
@@ -2217,45 +3685,162 @@ const Academy: React.FC = () => {
         maxWidth="md"
         resetKey={String(courseSettingsOpen)}
       >
-        {({ markDirty, requestClose }) => <>
-        <DialogCloseTitle onClose={() => void requestClose()}>课程分类设置</DialogCloseTitle>
-        <DialogContent dividers>
-          <SectionTitle title="课程分类" helper="分类由商学院统一维护；已使用的分类建议停用，不直接删除。" />
-          <Stack spacing={1.2} sx={{ mt: 2 }}>
-            {courseCategories.map((category) => (
-              <Paper key={category.id} variant="outlined" sx={{ p: 1.5, borderColor: palette.line }}>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1.2} alignItems={{ md: "center" }}>
-                  <Box flex={1}>
-                    <Typography fontWeight={800}>{category.name}</Typography>
-                    <Typography fontSize={12.5} color="text.secondary">{category.description || "暂无说明"}</Typography>
-                  </Box>
-                  <Chip size="small" label={category.isActive ? "启用" : "停用"} color={category.isActive ? "success" : "default"} />
-                  <Button size="small" onClick={() => setCategoryForm({ id: category.id, name: category.name, description: category.description, sortOrder: category.sortOrder, isActive: category.isActive })}>编辑</Button>
-                  <Button size="small" color={category.isActive ? "error" : "primary"} onClick={() => void academyApi.saveCourseCategory({ id: category.id, name: category.name, description: category.description, sortOrder: category.sortOrder, isActive: !category.isActive }).then(async (response) => { if (response.code !== 0) alert(response.message, "课程分类更新失败"); else await loadBase(); })}>
-                    {category.isActive ? "停用" : "启用"}
-                  </Button>
-                </Stack>
+        {({ markDirty, requestClose }) => (
+          <>
+            <DialogCloseTitle onClose={() => void requestClose()}>
+              课程分类设置
+            </DialogCloseTitle>
+            <DialogContent dividers>
+              <SectionTitle
+                title="课程分类"
+                helper="分类由商学院统一维护；已使用的分类建议停用，不直接删除。"
+              />
+              <Stack spacing={1.2} sx={{ mt: 2 }}>
+                {courseCategories.map((category) => (
+                  <Paper
+                    key={category.id}
+                    variant="outlined"
+                    sx={{ p: 1.5, borderColor: palette.line }}
+                  >
+                    <Stack
+                      direction={{ xs: "column", md: "row" }}
+                      spacing={1.2}
+                      alignItems={{ md: "center" }}
+                    >
+                      <Box flex={1}>
+                        <Typography fontWeight={800}>
+                          {category.name}
+                        </Typography>
+                        <Typography fontSize={12.5} color="text.secondary">
+                          {category.description || "暂无说明"}
+                        </Typography>
+                      </Box>
+                      <Chip
+                        size="small"
+                        label={category.isActive ? "启用" : "停用"}
+                        color={category.isActive ? "success" : "default"}
+                      />
+                      <Button
+                        size="small"
+                        onClick={() =>
+                          setCategoryForm({
+                            id: category.id,
+                            name: category.name,
+                            description: category.description,
+                            sortOrder: category.sortOrder,
+                            isActive: category.isActive,
+                          })
+                        }
+                      >
+                        编辑
+                      </Button>
+                      <Button
+                        size="small"
+                        color={category.isActive ? "error" : "primary"}
+                        onClick={() =>
+                          void academyApi
+                            .saveCourseCategory({
+                              id: category.id,
+                              name: category.name,
+                              description: category.description,
+                              sortOrder: category.sortOrder,
+                              isActive: !category.isActive,
+                            })
+                            .then(async (response) => {
+                              if (response.code !== 0)
+                                alert(response.message, "课程分类更新失败");
+                              else await loadBase();
+                            })
+                        }
+                      >
+                        {category.isActive ? "停用" : "启用"}
+                      </Button>
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+              <Paper variant="outlined" sx={{ ...panelSx, p: 2, mt: 2 }}>
+                <Typography fontWeight={900} sx={{ mb: 1.5 }}>
+                  {categoryForm.id ? "编辑分类" : "新增分类"}
+                </Typography>
+                <Box
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                    gap: 1.5,
+                  }}
+                >
+                  <TextField
+                    label="分类名称 *"
+                    value={categoryForm.name}
+                    onChange={(event) => {
+                      markDirty();
+                      setCategoryForm({
+                        ...categoryForm,
+                        name: event.target.value,
+                      });
+                    }}
+                  />
+                  <TextField
+                    label="排序"
+                    type="number"
+                    value={categoryForm.sortOrder}
+                    onChange={(event) => {
+                      markDirty();
+                      setCategoryForm({
+                        ...categoryForm,
+                        sortOrder: Number(event.target.value),
+                      });
+                    }}
+                  />
+                  <TextField
+                    label="分类说明"
+                    value={categoryForm.description}
+                    onChange={(event) => {
+                      markDirty();
+                      setCategoryForm({
+                        ...categoryForm,
+                        description: event.target.value,
+                      });
+                    }}
+                    sx={{ gridColumn: { md: "1 / -1" } }}
+                  />
+                </Box>
               </Paper>
-            ))}
-          </Stack>
-          <Paper variant="outlined" sx={{ ...panelSx, p: 2, mt: 2 }}>
-            <Typography fontWeight={900} sx={{ mb: 1.5 }}>{categoryForm.id ? "编辑分类" : "新增分类"}</Typography>
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 1.5 }}>
-              <TextField label="分类名称 *" value={categoryForm.name} onChange={(event) => { markDirty(); setCategoryForm({ ...categoryForm, name: event.target.value }); }} />
-              <TextField label="排序" type="number" value={categoryForm.sortOrder} onChange={(event) => { markDirty(); setCategoryForm({ ...categoryForm, sortOrder: Number(event.target.value) }); }} />
-              <TextField label="分类说明" value={categoryForm.description} onChange={(event) => { markDirty(); setCategoryForm({ ...categoryForm, description: event.target.value }); }} sx={{ gridColumn: { md: "1 / -1" } }} />
-            </Box>
-          </Paper>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => { markDirty(); setCategoryForm({ id: "", name: "", description: "", sortOrder: courseCategories.length + 1, isActive: true }); }}>清空</Button>
-          <Button variant="contained" disabled={saving || !categoryForm.name.trim()} onClick={() => void saveCourseCategory()}>保存分类</Button>
-        </DialogActions>
-        </>}
+            </DialogContent>
+            <DialogActions>
+              <Button
+                onClick={() => {
+                  markDirty();
+                  setCategoryForm({
+                    id: "",
+                    name: "",
+                    description: "",
+                    sortOrder: courseCategories.length + 1,
+                    isActive: true,
+                  });
+                }}
+              >
+                清空
+              </Button>
+              <Button
+                variant="contained"
+                disabled={saving || !categoryForm.name.trim()}
+                onClick={() => void saveCourseCategory()}
+              >
+                保存分类
+              </Button>
+            </DialogActions>
+          </>
+        )}
       </ProtectedFormDialog>
       <ProtectedFormDialog
         open={sessionOpen}
-        onClose={() => { setSessionOpen(false); setSessionEditingId(""); setSessionHistoricalMode(false); }}
+        onClose={() => {
+          setSessionOpen(false);
+          setSessionEditingId("");
+          setSessionHistoricalMode(false);
+        }}
         submitting={saving}
         markButtonClicksDirty={false}
         fullWidth
@@ -2265,60 +3850,337 @@ const Academy: React.FC = () => {
         {({ markDirty, requestClose }) => (
           <>
             <DialogCloseTitle onClose={() => void requestClose()}>
-              {sessionEditingId ? "编辑课程安排" : sessionHistoricalMode ? "补录历史课程" : "新建课程安排"}
+              {sessionEditingId
+                ? "编辑课程安排"
+                : sessionHistoricalMode
+                  ? "补录历史课程"
+                  : "新建课程安排"}
             </DialogCloseTitle>
             <DialogContent dividers sx={{ bgcolor: palette.soft }}>
               <Stack spacing={2}>
-                {sessionHistoricalMode && <Alert severity="info">历史补录允许选择过去时间，用于补齐既有课程记录；保存后仍按课程执行流程核对并推进状态。</Alert>}
+                {sessionHistoricalMode && (
+                  <Alert severity="info">
+                    历史补录允许选择过去时间，用于补齐既有课程记录；保存后仍按课程执行流程核对并推进状态。
+                  </Alert>
+                )}
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="1 课程和时间" helper="选择课程，确定本次授课时间与方式。" />
-                  <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
-                    <TextField select disabled={Boolean(sessionEditingId)} label="课程 *" value={sessionForm.courseId} onChange={(event) => {
-                      markDirty();
-                      const course = courses.find((item) => item.id === event.target.value);
-                      const startsAt = sessionForm.startsAt ? new Date(sessionForm.startsAt) : new Date();
-                      const endsAt = new Date(startsAt.getTime() + (course?.defaultDurationMinutes || 120) * 60_000);
-                      const localEnd = new Date(endsAt.getTime() - endsAt.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-                      setSessionForm({ ...sessionForm, courseId: event.target.value, title: course ? `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}` : "", endsAt: localEnd });
-                    }}>
-                      {courses.filter((item) => item.status === "ACTIVE").map((item) => <MenuItem key={item.id} value={item.id}>{item.code} · {item.title}</MenuItem>)}
+                  <SectionTitle
+                    title="1 课程和时间"
+                    helper="选择课程，确定本次授课时间与方式。"
+                  />
+                  <Box
+                    sx={{
+                      mt: 2,
+                      display: "grid",
+                      gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                      gap: 2,
+                    }}
+                  >
+                    <TextField
+                      select
+                      disabled={Boolean(sessionEditingId)}
+                      label="课程 *"
+                      value={sessionForm.courseId}
+                      onChange={(event) => {
+                        markDirty();
+                        const course = courses.find(
+                          (item) => item.id === event.target.value,
+                        );
+                        const startsAt = sessionForm.startsAt
+                          ? new Date(sessionForm.startsAt)
+                          : new Date();
+                        const endsAt = new Date(
+                          startsAt.getTime() +
+                            (course?.defaultDurationMinutes || 120) * 60_000,
+                        );
+                        const localEnd = new Date(
+                          endsAt.getTime() -
+                            endsAt.getTimezoneOffset() * 60_000,
+                        )
+                          .toISOString()
+                          .slice(0, 16);
+                        setSessionForm({
+                          ...sessionForm,
+                          courseId: event.target.value,
+                          title: course
+                            ? `${course.title}｜${startsAt.toLocaleDateString("zh-CN")}`
+                            : "",
+                          endsAt: localEnd,
+                        });
+                      }}
+                    >
+                      {courses
+                        .filter((item) => item.status === "ACTIVE")
+                        .map((item) => (
+                          <MenuItem key={item.id} value={item.id}>
+                            {item.code} · {item.title}
+                          </MenuItem>
+                        ))}
                     </TextField>
-                    <TextField label="安排名称" helperText="未填写时系统会按课程名称和日期自动生成" value={sessionForm.title} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, title: event.target.value }); }} />
+                    <TextField
+                      label="安排名称"
+                      helperText="未填写时系统会按课程名称和日期自动生成"
+                      value={sessionForm.title}
+                      onChange={(event) => {
+                        markDirty();
+                        setSessionForm({
+                          ...sessionForm,
+                          title: event.target.value,
+                        });
+                      }}
+                    />
                   </Box>
-                  <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
-                    <TextField type="datetime-local" label="开始时间 *" InputLabelProps={{ shrink: true }} inputProps={!sessionHistoricalMode && !sessionEditingId ? { min: new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16) } : undefined} value={sessionForm.startsAt} onChange={(event) => {
-                      markDirty();
-                      const start = new Date(event.target.value);
-                      const duration = selectedSessionCourse?.defaultDurationMinutes || 120;
-                      const end = new Date(start.getTime() + duration * 60_000);
-                      const localEnd = Number.isNaN(end.getTime()) ? sessionForm.endsAt : new Date(end.getTime() - end.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-                      setSessionForm({ ...sessionForm, startsAt: event.target.value, endsAt: localEnd });
-                    }} />
-                    <TextField type="datetime-local" label="结束时间 *" InputLabelProps={{ shrink: true }} value={sessionForm.endsAt} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, endsAt: event.target.value }); }} />
-                    <TextField select label="授课方式 *" value={sessionForm.deliveryMode} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, deliveryMode: event.target.value as CreateAcademySessionInput["deliveryMode"], venue: "", meetingUrl: "" }); }}>
-                      {Object.entries(deliveryModeLabel).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                  <Box
+                    sx={{
+                      mt: 2,
+                      display: "grid",
+                      gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                      gap: 2,
+                    }}
+                  >
+                    <TextField
+                      type="datetime-local"
+                      label="开始时间 *"
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={
+                        !sessionHistoricalMode && !sessionEditingId
+                          ? {
+                              min: new Date(
+                                Date.now() -
+                                  new Date().getTimezoneOffset() * 60_000,
+                              )
+                                .toISOString()
+                                .slice(0, 16),
+                            }
+                          : undefined
+                      }
+                      value={sessionForm.startsAt}
+                      onChange={(event) => {
+                        markDirty();
+                        const start = new Date(event.target.value);
+                        const duration =
+                          selectedSessionCourse?.defaultDurationMinutes || 120;
+                        const end = new Date(
+                          start.getTime() + duration * 60_000,
+                        );
+                        const localEnd = Number.isNaN(end.getTime())
+                          ? sessionForm.endsAt
+                          : new Date(
+                              end.getTime() - end.getTimezoneOffset() * 60_000,
+                            )
+                              .toISOString()
+                              .slice(0, 16);
+                        setSessionForm({
+                          ...sessionForm,
+                          startsAt: event.target.value,
+                          endsAt: localEnd,
+                        });
+                      }}
+                    />
+                    <TextField
+                      type="datetime-local"
+                      label="结束时间 *"
+                      InputLabelProps={{ shrink: true }}
+                      value={sessionForm.endsAt}
+                      onChange={(event) => {
+                        markDirty();
+                        setSessionForm({
+                          ...sessionForm,
+                          endsAt: event.target.value,
+                        });
+                      }}
+                    />
+                    <TextField
+                      select
+                      label="授课方式 *"
+                      value={sessionForm.deliveryMode}
+                      onChange={(event) => {
+                        markDirty();
+                        setSessionForm({
+                          ...sessionForm,
+                          deliveryMode: event.target
+                            .value as CreateAcademySessionInput["deliveryMode"],
+                          venue: "",
+                          meetingUrl: "",
+                        });
+                      }}
+                    >
+                      {Object.entries(deliveryModeLabel).map(
+                        ([value, label]) => (
+                          <MenuItem key={value} value={value}>
+                            {label}
+                          </MenuItem>
+                        ),
+                      )}
                     </TextField>
-                    {sessionForm.deliveryMode === "ONLINE"
-                      ? <TextField label="线上会议链接 *" value={sessionForm.meetingUrl || ""} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, meetingUrl: event.target.value }); }} />
-                      : <TextField label={sessionForm.deliveryMode === "LIVE" ? "直播间 / 直播账号 *" : "授课场地 *"} value={sessionForm.venue} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, venue: event.target.value }); }} />}
+                    {sessionForm.deliveryMode === "ONLINE" ? (
+                      <TextField
+                        label="线上会议链接 *"
+                        value={sessionForm.meetingUrl || ""}
+                        onChange={(event) => {
+                          markDirty();
+                          setSessionForm({
+                            ...sessionForm,
+                            meetingUrl: event.target.value,
+                          });
+                        }}
+                      />
+                    ) : (
+                      <TextField
+                        label={
+                          sessionForm.deliveryMode === "LIVE"
+                            ? "直播间 / 直播账号 *"
+                            : "授课场地 *"
+                        }
+                        value={sessionForm.venue}
+                        onChange={(event) => {
+                          markDirty();
+                          setSessionForm({
+                            ...sessionForm,
+                            venue: event.target.value,
+                          });
+                        }}
+                      />
+                    )}
                   </Box>
                 </Paper>
 
                 <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-                  <SectionTitle title="2 执行流程与负责人" helper="选择本次课程执行流程，再把流程角色分配给具体员工。" />
-                  <TextField sx={{ mt: 2 }} fullWidth select disabled={Boolean(sessionEditingId)} label="课程执行流程 *" value={sessionForm.sopTemplateId || ""} helperText={sessionEditingId ? "已生成任务的安排不能更换流程" : "选择后可预览本次会生成的步骤"} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, sopTemplateId: event.target.value }); }}>
-                    {sopTemplates.filter((item) => item.status === "ACTIVE").map((item) => <MenuItem key={item.id} value={item.id}>{item.name} · {item.steps.length} 步</MenuItem>)}
+                  <SectionTitle
+                    title="2 执行流程与负责人"
+                    helper="选择本次课程执行流程，再把流程角色分配给具体员工。"
+                  />
+                  <TextField
+                    sx={{ mt: 2 }}
+                    fullWidth
+                    select
+                    disabled={Boolean(sessionEditingId)}
+                    label="课程执行流程 *"
+                    value={sessionForm.sopTemplateId || ""}
+                    helperText={
+                      sessionEditingId
+                        ? "已生成任务的安排不能更换流程"
+                        : "选择后可预览本次会生成的步骤"
+                    }
+                    onChange={(event) => {
+                      markDirty();
+                      setSessionForm({
+                        ...sessionForm,
+                        sopTemplateId: event.target.value,
+                      });
+                    }}
+                  >
+                    {sopTemplates
+                      .filter((item) => item.status === "ACTIVE")
+                      .map((item) => (
+                        <MenuItem key={item.id} value={item.id}>
+                          {item.name} · {item.steps.length} 步
+                        </MenuItem>
+                      ))}
                   </TextField>
-                  {selectedSessionTemplate && <Paper variant="outlined" sx={{ mt: 1.5, p: 1.5, bgcolor: palette.soft }}><Stack spacing={0.7}><Typography fontSize={13} fontWeight={900}>本次将生成 {selectedSessionTemplate.steps.length} 个执行步骤</Typography>{selectedSessionTemplate.steps.map((step, index) => <Stack key={step.id || step.stepKey} direction="row" spacing={1} alignItems="center"><Chip size="small" label={index + 1} /><Typography fontSize={13} fontWeight={800}>{step.title}</Typography><Typography fontSize={12} color="text.secondary">· {step.completionMode === "ATTACHMENT" ? "上传附件" : step.completionMode === "NOTE" ? "填写说明" : step.completionMode === "CHECKLIST" ? "检查确认" : "直接确认"}</Typography></Stack>)}</Stack></Paper>}
-                  <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
-                    {visibleSessionOwnerFields.map(([key, label]) => <TextField key={key} select label={label} value={String(sessionForm[key] || "")} onChange={(event) => { markDirty(); const value = event.target.value; setSessionForm({ ...sessionForm, [key]: value, ...(key === "projectOwnerUserId" ? { facilitatorUserId: value } : {}) }); }}>{academyUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || user.role}）</MenuItem>)}</TextField>)}
-                    <TextField select label="允许销售邀约" value={sessionForm.isInvitable ? "YES" : "NO"} onChange={(event) => { markDirty(); setSessionForm({ ...sessionForm, isInvitable: event.target.value === "YES" }); }}><MenuItem value="YES">允许</MenuItem><MenuItem value="NO">不允许</MenuItem></TextField>
+                  {selectedSessionTemplate && (
+                    <Paper
+                      variant="outlined"
+                      sx={{ mt: 1.5, p: 1.5, bgcolor: palette.soft }}
+                    >
+                      <Stack spacing={0.7}>
+                        <Typography fontSize={13} fontWeight={900}>
+                          本次将生成 {selectedSessionTemplate.steps.length}{" "}
+                          个执行步骤
+                        </Typography>
+                        {selectedSessionTemplate.steps.map((step, index) => (
+                          <Stack
+                            key={step.id || step.stepKey}
+                            direction="row"
+                            spacing={1}
+                            alignItems="center"
+                          >
+                            <Chip size="small" label={index + 1} />
+                            <Typography fontSize={13} fontWeight={800}>
+                              {step.title}
+                            </Typography>
+                            <Typography fontSize={12} color="text.secondary">
+                              ·{" "}
+                              {step.completionMode === "ATTACHMENT"
+                                ? "上传附件"
+                                : step.completionMode === "NOTE"
+                                  ? "填写说明"
+                                  : step.completionMode === "CHECKLIST"
+                                    ? "检查确认"
+                                    : "直接确认"}
+                            </Typography>
+                          </Stack>
+                        ))}
+                      </Stack>
+                    </Paper>
+                  )}
+                  <Box
+                    sx={{
+                      mt: 2,
+                      display: "grid",
+                      gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                      gap: 2,
+                    }}
+                  >
+                    {visibleSessionOwnerFields.map(([key, label]) => (
+                      <TextField
+                        key={key}
+                        select
+                        label={label}
+                        value={String(sessionForm[key] || "")}
+                        onChange={(event) => {
+                          markDirty();
+                          const value = event.target.value;
+                          setSessionForm({
+                            ...sessionForm,
+                            [key]: value,
+                            ...(key === "projectOwnerUserId"
+                              ? { facilitatorUserId: value }
+                              : {}),
+                          });
+                        }}
+                      >
+                        {academyUsers.map((user) => (
+                          <MenuItem key={user.id} value={user.id}>
+                            {user.name}（{user.positionName || user.role}）
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    ))}
+                    <TextField
+                      select
+                      label="允许销售邀约"
+                      value={sessionForm.isInvitable ? "YES" : "NO"}
+                      onChange={(event) => {
+                        markDirty();
+                        setSessionForm({
+                          ...sessionForm,
+                          isInvitable: event.target.value === "YES",
+                        });
+                      }}
+                    >
+                      <MenuItem value="YES">允许</MenuItem>
+                      <MenuItem value="NO">不允许</MenuItem>
+                    </TextField>
                   </Box>
                 </Paper>
 
-                <Paper variant="outlined" sx={{ ...panelSx, p: 2, bgcolor: palette.blueSoft }}>
-                  <Typography fontWeight={900}>保存后生成本次课程任务</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{selectedSessionTemplate?.name || "尚未选择课程流程"}；共 {selectedSessionTemplate?.steps.length || 0} 步。以后调整流程设置，不影响本次已生成任务。</Typography>
+                <Paper
+                  variant="outlined"
+                  sx={{ ...panelSx, p: 2, bgcolor: palette.blueSoft }}
+                >
+                  <Typography fontWeight={900}>
+                    保存后生成本次课程任务
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ mt: 0.5 }}
+                  >
+                    {selectedSessionTemplate?.name || "尚未选择课程流程"}；共{" "}
+                    {selectedSessionTemplate?.steps.length || 0}{" "}
+                    步。以后调整流程设置，不影响本次已生成任务。
+                  </Typography>
                 </Paper>
               </Stack>
             </DialogContent>
@@ -2326,7 +4188,17 @@ const Academy: React.FC = () => {
               <Button onClick={() => void requestClose()}>取消</Button>
               <Button
                 variant="contained"
-                disabled={saving || !sessionForm.courseId || !sessionForm.sopTemplateId || !sessionForm.startsAt || !sessionForm.endsAt || missingSessionOwner || (sessionForm.deliveryMode === "ONLINE" ? !sessionForm.meetingUrl?.trim() : !sessionForm.venue.trim())}
+                disabled={
+                  saving ||
+                  !sessionForm.courseId ||
+                  !sessionForm.sopTemplateId ||
+                  !sessionForm.startsAt ||
+                  !sessionForm.endsAt ||
+                  missingSessionOwner ||
+                  (sessionForm.deliveryMode === "ONLINE"
+                    ? !sessionForm.meetingUrl?.trim()
+                    : !sessionForm.venue.trim())
+                }
                 onClick={() => void saveSession()}
               >
                 {sessionEditingId ? "保存课程安排" : "保存课程安排并生成任务"}
@@ -2341,118 +4213,391 @@ const Academy: React.FC = () => {
         submitting={saving}
         markButtonClicksDirty={false}
         fullWidth
-        maxWidth={engagementMode === "sales" && !engagementEditingId ? "lg" : "sm"}
+        maxWidth={
+          engagementMode === "sales" && !engagementEditingId ? "lg" : "sm"
+        }
         resetKey={String(engagementOpen)}
       >
         {({ markDirty, requestClose }) => (
           <>
             <DialogCloseTitle onClose={() => void requestClose()}>
-              {engagementMode === "execution" ? "记录学员执行" : engagementEditingId ? "客户跟进" : "添加邀约客户"}
+              {engagementMode === "execution"
+                ? "记录学员执行"
+                : engagementEditingId
+                  ? "客户跟进"
+                  : "添加邀约客户"}
             </DialogCloseTitle>
             <DialogContent dividers>
               <Stack spacing={2}>
                 {engagementMode === "execution" ? (
                   <>
-                    <TextField label="学员" value={engagementForm.participantName} disabled />
-                    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
-                  <TextField
-                    select
-                    label="到课状态"
-                    value={engagementForm.attendanceStatus}
-                    onChange={(event) => {
-                      markDirty();
-                      setEngagementForm({ ...engagementForm, attendanceStatus: event.target.value });
-                    }}
-                  >
-                    <MenuItem value="UNKNOWN">未确认</MenuItem>
-                    <MenuItem value="ATTENDED">已到课</MenuItem>
-                    <MenuItem value="ABSENT">未到课</MenuItem>
-                  </TextField>
-                  <TextField
-                    select
-                    label="课堂互动"
-                    value={engagementForm.interactionLevel || ""}
-                    onChange={(event) => {
-                      markDirty();
-                      setEngagementForm({ ...engagementForm, interactionLevel: event.target.value });
-                    }}
-                  >
-                    <MenuItem value="">待记录</MenuItem>
-                    <MenuItem value="HIGH">高</MenuItem>
-                    <MenuItem value="MEDIUM">中</MenuItem>
-                    <MenuItem value="LOW">低</MenuItem>
-                  </TextField>
-                  <TextField
-                    select
-                    label="课程评估"
-                    value={engagementForm.courseAssessment || ""}
-                    onChange={(event) => {
-                      markDirty();
-                      setEngagementForm({ ...engagementForm, courseAssessment: event.target.value });
-                    }}
-                  >
-                    <MenuItem value="">待评估</MenuItem>
-                    <MenuItem value="A">A类重点跟进</MenuItem>
-                    <MenuItem value="B">B类建立计划</MenuItem>
-                    <MenuItem value="C">C类持续培育</MenuItem>
-                  </TextField>
+                    <TextField
+                      label="学员"
+                      value={engagementForm.participantName}
+                      disabled
+                    />
+                    <Box
+                      sx={{
+                        display: "grid",
+                        gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+                        gap: 1.5,
+                      }}
+                    >
+                      <TextField
+                        select
+                        label="到课状态"
+                        value={engagementForm.attendanceStatus}
+                        onChange={(event) => {
+                          markDirty();
+                          setEngagementForm({
+                            ...engagementForm,
+                            attendanceStatus: event.target.value,
+                          });
+                        }}
+                      >
+                        <MenuItem value="UNKNOWN">未确认</MenuItem>
+                        <MenuItem value="ATTENDED">已到课</MenuItem>
+                        <MenuItem value="ABSENT">未到课</MenuItem>
+                      </TextField>
+                      <TextField
+                        select
+                        label="课堂互动"
+                        value={engagementForm.interactionLevel || ""}
+                        onChange={(event) => {
+                          markDirty();
+                          setEngagementForm({
+                            ...engagementForm,
+                            interactionLevel: event.target.value,
+                          });
+                        }}
+                      >
+                        <MenuItem value="">待记录</MenuItem>
+                        <MenuItem value="HIGH">高</MenuItem>
+                        <MenuItem value="MEDIUM">中</MenuItem>
+                        <MenuItem value="LOW">低</MenuItem>
+                      </TextField>
+                      <TextField
+                        select
+                        label="课程评估"
+                        value={engagementForm.courseAssessment || ""}
+                        onChange={(event) => {
+                          markDirty();
+                          setEngagementForm({
+                            ...engagementForm,
+                            courseAssessment: event.target.value,
+                          });
+                        }}
+                      >
+                        <MenuItem value="">待评估</MenuItem>
+                        <MenuItem value="A">A类重点跟进</MenuItem>
+                        <MenuItem value="B">B类建立计划</MenuItem>
+                        <MenuItem value="C">C类持续培育</MenuItem>
+                      </TextField>
                     </Box>
                   </>
                 ) : (
                   <>
                     {engagementEditingId ? (
-                      <TextField label="CRM客户" value={engagementForm.participantName} disabled />
-                    ) : <Stack spacing={1.2}>
-                      <TextField size="small" label="搜索CRM客户" placeholder="输入客户姓名、公司或手机号" value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} InputProps={{ startAdornment: <SearchIcon sx={{ mr: 0.8, color: "#98A2B3" }} /> }} />
-                      <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
-                        <Button
+                      <TextField
+                        label="CRM客户"
+                        value={engagementForm.participantName}
+                        disabled
+                      />
+                    ) : (
+                      <Stack spacing={1.2}>
+                        <TextField
                           size="small"
-                          variant="outlined"
-                          disabled={!customers.length || customerSearchLoading}
-                          onClick={() => {
-                            markDirty();
-                            setSelectedInviteCustomers((current) => {
-                              const selectedById = new Map(current.map((customer) => [customer.id, customer]));
-                              customers
-                                .filter((customer) => !existingInviteCustomerIds.has(customer.id))
-                                .slice(0, Math.max(0, 100 - selectedById.size))
-                                .forEach((customer) => selectedById.set(customer.id, customer));
-                              return Array.from(selectedById.values());
-                            });
+                          label="搜索CRM客户"
+                          placeholder="输入客户姓名、公司或手机号"
+                          value={customerSearch}
+                          onChange={(event) =>
+                            setCustomerSearch(event.target.value)
+                          }
+                          InputProps={{
+                            startAdornment: (
+                              <SearchIcon sx={{ mr: 0.8, color: "#98A2B3" }} />
+                            ),
                           }}
+                        />
+                        <Stack
+                          direction="row"
+                          justifyContent="space-between"
+                          alignItems="center"
+                          spacing={1}
                         >
-                          全选当前页
-                        </Button>
-                        <Typography fontSize={12.5} color="text.secondary">
-                          已选 {selectedInviteCustomers.length}/100 位 · 共 {customerResultTotal} 位本人可见客户
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            disabled={
+                              !customers.length || customerSearchLoading
+                            }
+                            onClick={() => {
+                              markDirty();
+                              setSelectedInviteCustomers((current) => {
+                                const selectedById = new Map(
+                                  current.map((customer) => [
+                                    customer.id,
+                                    customer,
+                                  ]),
+                                );
+                                customers
+                                  .filter(
+                                    (customer) =>
+                                      !existingInviteCustomerIds.has(
+                                        customer.id,
+                                      ),
+                                  )
+                                  .slice(
+                                    0,
+                                    Math.max(0, 100 - selectedById.size),
+                                  )
+                                  .forEach((customer) =>
+                                    selectedById.set(customer.id, customer),
+                                  );
+                                return Array.from(selectedById.values());
+                              });
+                            }}
+                          >
+                            全选当前页
+                          </Button>
+                          <Typography fontSize={12.5} color="text.secondary">
+                            已选 {selectedInviteCustomers.length}/100 位 · 共{" "}
+                            {customerResultTotal} 位本人可见客户
+                          </Typography>
+                        </Stack>
+                        <Paper
+                          variant="outlined"
+                          sx={{ ...panelSx, overflow: "hidden" }}
+                        >
+                          <TableContainer sx={{ maxHeight: 390 }}>
+                            <SystemDataTable
+                              tableId="academy-invite-customer-picker"
+                              sx={{ minWidth: 760 }}
+                            >
+                              <TableHead>
+                                <TableRow>
+                                  <TableCell padding="checkbox" />
+                                  <TableCell>客户</TableCell>
+                                  <TableCell>公司</TableCell>
+                                  <TableCell>手机号</TableCell>
+                                  <TableCell>客户标签</TableCell>
+                                  <TableCell>销售负责人</TableCell>
+                                  <TableCell>状态</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {customers.map((customer) => {
+                                  const selected = selectedInviteCustomers.some(
+                                    (item) => item.id === customer.id,
+                                  );
+                                  const alreadyAdded =
+                                    existingInviteCustomerIds.has(customer.id);
+                                  const selectionFull =
+                                    !selected &&
+                                    selectedInviteCustomers.length >= 100;
+                                  return (
+                                    <TableRow
+                                      key={customer.id}
+                                      hover={!alreadyAdded}
+                                    >
+                                      <TableCell padding="checkbox">
+                                        <Checkbox
+                                          checked={selected || alreadyAdded}
+                                          disabled={
+                                            alreadyAdded || selectionFull
+                                          }
+                                          onChange={() => {
+                                            markDirty();
+                                            setSelectedInviteCustomers(
+                                              (current) =>
+                                                selected
+                                                  ? current.filter(
+                                                      (item) =>
+                                                        item.id !== customer.id,
+                                                    )
+                                                  : current.length < 100
+                                                    ? [...current, customer]
+                                                    : current,
+                                            );
+                                          }}
+                                          inputProps={{
+                                            "aria-label": alreadyAdded
+                                              ? `客户 ${customer.name} 已在名单`
+                                              : `选择客户 ${customer.name}`,
+                                          }}
+                                        />
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 850 }}>
+                                        {customer.name}
+                                      </TableCell>
+                                      <TableCell>
+                                        {customer.company || "未填写"}
+                                      </TableCell>
+                                      <TableCell>
+                                        {customer.phone || "未填写"}
+                                      </TableCell>
+                                      <TableCell>
+                                        {customer.tags
+                                          ?.slice(0, 2)
+                                          .join("、") || "暂无标签"}
+                                      </TableCell>
+                                      <TableCell>
+                                        {customer.owner || "待分配"}
+                                      </TableCell>
+                                      <TableCell>
+                                        {alreadyAdded ? (
+                                          <Chip size="small" label="已在名单" />
+                                        ) : (
+                                          "可添加"
+                                        )}
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })}
+                                {!customers.length &&
+                                  !customerSearchLoading &&
+                                  !customerLoadError && (
+                                    <TableRow>
+                                      <TableCell
+                                        colSpan={7}
+                                        align="center"
+                                        sx={{ py: 5 }}
+                                      >
+                                        <Typography fontWeight={850}>
+                                          未找到本人可见客户
+                                        </Typography>
+                                        <Typography
+                                          fontSize={12.5}
+                                          color="text.secondary"
+                                          sx={{ mt: 0.5 }}
+                                        >
+                                          请调整姓名、公司或手机号搜索条件
+                                        </Typography>
+                                      </TableCell>
+                                    </TableRow>
+                                  )}
+                                {customerSearchLoading && (
+                                  <TableRow>
+                                    <TableCell
+                                      colSpan={7}
+                                      align="center"
+                                      sx={{ py: 5 }}
+                                    >
+                                      <CircularProgress size={24} />
+                                      <Typography
+                                        fontSize={12.5}
+                                        color="text.secondary"
+                                        sx={{ mt: 1 }}
+                                      >
+                                        正在加载CRM客户…
+                                      </Typography>
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                                {customerLoadError &&
+                                  !customerSearchLoading && (
+                                    <TableRow>
+                                      <TableCell
+                                        colSpan={7}
+                                        align="center"
+                                        sx={{ py: 5, color: "error.main" }}
+                                      >
+                                        {customerLoadError}
+                                      </TableCell>
+                                    </TableRow>
+                                  )}
+                              </TableBody>
+                            </SystemDataTable>
+                          </TableContainer>
+                          <TablePagination
+                            count={customerResultTotal}
+                            page={customerPage}
+                            rowsPerPage={customerPageSize}
+                            onPageChange={(_, next) => setCustomerPage(next)}
+                            onRowsPerPageChange={(event) => {
+                              setCustomerPageSize(Number(event.target.value));
+                              setCustomerPage(0);
+                            }}
+                          />
+                        </Paper>
+                        <Typography fontSize={12} color="text.secondary">
+                          加入后统一进入“待邀约”，跨页选择会保留；单次最多添加100位，已有客户不会重复加入。
                         </Typography>
                       </Stack>
-                      <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
-                        <TableContainer sx={{ maxHeight: 390 }}><SystemDataTable tableId="academy-invite-customer-picker" sx={{ minWidth: 760 }}><TableHead><TableRow><TableCell padding="checkbox" /><TableCell>客户</TableCell><TableCell>公司</TableCell><TableCell>手机号</TableCell><TableCell>客户标签</TableCell><TableCell>销售负责人</TableCell><TableCell>状态</TableCell></TableRow></TableHead><TableBody>
-                          {customers.map((customer) => {
-                            const selected = selectedInviteCustomers.some((item) => item.id === customer.id);
-                            const alreadyAdded = existingInviteCustomerIds.has(customer.id);
-                            const selectionFull = !selected && selectedInviteCustomers.length >= 100;
-                            return <TableRow key={customer.id} hover={!alreadyAdded}><TableCell padding="checkbox"><Checkbox checked={selected || alreadyAdded} disabled={alreadyAdded || selectionFull} onChange={() => { markDirty(); setSelectedInviteCustomers((current) => selected ? current.filter((item) => item.id !== customer.id) : current.length < 100 ? [...current, customer] : current); }} inputProps={{ "aria-label": alreadyAdded ? `客户 ${customer.name} 已在名单` : `选择客户 ${customer.name}` }} /></TableCell><TableCell sx={{ fontWeight: 850 }}>{customer.name}</TableCell><TableCell>{customer.company || "未填写"}</TableCell><TableCell>{customer.phone || "未填写"}</TableCell><TableCell>{customer.tags?.slice(0, 2).join("、") || "暂无标签"}</TableCell><TableCell>{customer.owner || "待分配"}</TableCell><TableCell>{alreadyAdded ? <Chip size="small" label="已在名单" /> : "可添加"}</TableCell></TableRow>;
-                          })}
-                          {!customers.length && !customerSearchLoading && !customerLoadError && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}><Typography fontWeight={850}>未找到本人可见客户</Typography><Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>请调整姓名、公司或手机号搜索条件</Typography></TableCell></TableRow>}
-                          {customerSearchLoading && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}><CircularProgress size={24} /><Typography fontSize={12.5} color="text.secondary" sx={{ mt: 1 }}>正在加载CRM客户…</Typography></TableCell></TableRow>}
-                          {customerLoadError && !customerSearchLoading && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5, color: "error.main" }}>{customerLoadError}</TableCell></TableRow>}
-                        </TableBody></SystemDataTable></TableContainer>
-                        <TablePagination count={customerResultTotal} page={customerPage} rowsPerPage={customerPageSize} onPageChange={(_, next) => setCustomerPage(next)} onRowsPerPageChange={(event) => { setCustomerPageSize(Number(event.target.value)); setCustomerPage(0); }} />
-                      </Paper>
-                      <Typography fontSize={12} color="text.secondary">加入后统一进入“待邀约”，跨页选择会保留；单次最多添加100位，已有客户不会重复加入。</Typography>
-                    </Stack>}
+                    )}
                     {engagementEditingId && (
                       <>
-                        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
-                          <TextField select label="邀约状态" value={engagementForm.invitationStatus} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, invitationStatus: event.target.value }); }}>
-                            <MenuItem value="PENDING">待邀约</MenuItem><MenuItem value="INVITED">已邀约</MenuItem><MenuItem value="CONFIRMED">已确认</MenuItem><MenuItem value="DECLINED">已拒绝</MenuItem>
+                        <Box
+                          sx={{
+                            display: "grid",
+                            gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+                            gap: 1.5,
+                          }}
+                        >
+                          <TextField
+                            select
+                            label="邀约状态"
+                            value={engagementForm.invitationStatus}
+                            onChange={(event) => {
+                              markDirty();
+                              setEngagementForm({
+                                ...engagementForm,
+                                invitationStatus: event.target.value,
+                              });
+                            }}
+                          >
+                            <MenuItem value="PENDING">待邀约</MenuItem>
+                            <MenuItem value="INVITED">已邀约</MenuItem>
+                            <MenuItem value="CONFIRMED">已确认</MenuItem>
+                            <MenuItem value="DECLINED">已拒绝</MenuItem>
                           </TextField>
-                          <TextField select label="ABC分层" value={engagementForm.courseAssessment || ""} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, courseAssessment: event.target.value }); }}><MenuItem value="">待分层</MenuItem><MenuItem value="A">A类重点跟进</MenuItem><MenuItem value="B">B类建立计划</MenuItem><MenuItem value="C">C类持续培育</MenuItem></TextField>
+                          <TextField
+                            select
+                            label="ABC分层"
+                            value={engagementForm.courseAssessment || ""}
+                            onChange={(event) => {
+                              markDirty();
+                              setEngagementForm({
+                                ...engagementForm,
+                                courseAssessment: event.target.value,
+                              });
+                            }}
+                          >
+                            <MenuItem value="">待分层</MenuItem>
+                            <MenuItem value="A">A类重点跟进</MenuItem>
+                            <MenuItem value="B">B类建立计划</MenuItem>
+                            <MenuItem value="C">C类持续培育</MenuItem>
+                          </TextField>
                         </Box>
-                        <TextField type="datetime-local" label="下次跟进时间" InputLabelProps={{ shrink: true }} value={engagementForm.nextFollowUpAt?.slice(0, 16) || ""} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, nextFollowUpAt: event.target.value }); }} />
-                        <TextField multiline minRows={2} required label="跟进内容 *" value={engagementForm.notes || ""} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, notes: event.target.value }); }} />
+                        <TextField
+                          type="datetime-local"
+                          label="下次跟进时间"
+                          InputLabelProps={{ shrink: true }}
+                          value={
+                            engagementForm.nextFollowUpAt?.slice(0, 16) || ""
+                          }
+                          onChange={(event) => {
+                            markDirty();
+                            setEngagementForm({
+                              ...engagementForm,
+                              nextFollowUpAt: event.target.value,
+                            });
+                          }}
+                        />
+                        <TextField
+                          multiline
+                          minRows={2}
+                          required
+                          label="跟进内容 *"
+                          value={engagementForm.notes || ""}
+                          onChange={(event) => {
+                            markDirty();
+                            setEngagementForm({
+                              ...engagementForm,
+                              notes: event.target.value,
+                            });
+                          }}
+                        />
                       </>
                     )}
                   </>
@@ -2463,10 +4608,27 @@ const Academy: React.FC = () => {
               <Button onClick={() => void requestClose()}>取消</Button>
               <Button
                 variant="contained"
-                disabled={saving || (engagementMode === "sales" && !engagementEditingId && !selectedInviteCustomers.length) || (engagementMode === "sales" && Boolean(engagementEditingId) && (!engagementForm.customerId || !engagementForm.notes?.trim()))}
-                onClick={() => void (engagementMode === "sales" && !engagementEditingId ? saveBatchInvites() : saveEngagement())}
+                disabled={
+                  saving ||
+                  (engagementMode === "sales" &&
+                    !engagementEditingId &&
+                    !selectedInviteCustomers.length) ||
+                  (engagementMode === "sales" &&
+                    Boolean(engagementEditingId) &&
+                    (!engagementForm.customerId ||
+                      !engagementForm.notes?.trim()))
+                }
+                onClick={() =>
+                  void (engagementMode === "sales" && !engagementEditingId
+                    ? saveBatchInvites()
+                    : saveEngagement())
+                }
               >
-                {engagementMode === "execution" ? "保存学员执行" : engagementEditingId ? "保存并同步CRM跟进" : `加入名单（${selectedInviteCustomers.length}）`}
+                {engagementMode === "execution"
+                  ? "保存学员执行"
+                  : engagementEditingId
+                    ? "保存并同步CRM跟进"
+                    : `加入名单（${selectedInviteCustomers.length}）`}
               </Button>
             </DialogActions>
           </>
@@ -2498,7 +4660,9 @@ const Academy: React.FC = () => {
                   }}
                 >
                   {assetTypes.map((item) => (
-                    <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
+                    <MenuItem key={item.value} value={item.value}>
+                      {item.label}
+                    </MenuItem>
                   ))}
                 </TextField>
                 <TextField
@@ -2514,7 +4678,12 @@ const Academy: React.FC = () => {
                     <Typography variant="subtitle2" sx={{ mb: 1 }}>
                       已关联文件
                     </Typography>
-                    <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                    <Stack
+                      direction="row"
+                      spacing={1}
+                      useFlexGap
+                      flexWrap="wrap"
+                    >
                       {existingAssetAttachments.map((attachment) => (
                         <Chip
                           key={attachment.id}
@@ -2551,7 +4720,8 @@ const Academy: React.FC = () => {
                 disabled={
                   saving ||
                   !assetTitle.trim() ||
-                  existingAssetAttachments.length + assetAttachments.length === 0
+                  existingAssetAttachments.length + assetAttachments.length ===
+                    0
                 }
                 onClick={() => void saveCourseAsset()}
               >
@@ -2578,7 +4748,8 @@ const Academy: React.FC = () => {
             <DialogContent dividers>
               <Stack spacing={2}>
                 <Typography color="text.secondary">
-                  学员：{orderLink?.engagement.participantName}。成交金额和后续交付以所选正式订单为准。
+                  学员：{orderLink?.engagement.participantName}
+                  。成交金额和后续交付以所选正式订单为准。
                 </Typography>
                 <TextField
                   select
@@ -2591,18 +4762,26 @@ const Academy: React.FC = () => {
                 >
                   {orderLink?.orders.map((order) => (
                     <MenuItem key={order.id} value={order.id}>
-                      {order.orderNo} · {order.productName || order.productLevel} · ¥{Number(order.actualAmount || 0).toLocaleString("zh-CN")}
+                      {order.orderNo} ·{" "}
+                      {order.productName || order.productLevel} · ¥
+                      {Number(order.actualAmount || 0).toLocaleString("zh-CN")}
                     </MenuItem>
                   ))}
                 </TextField>
                 {!orderLink?.orders.length && (
-                  <Typography color="text.secondary">该客户暂无可关联的正式订单。</Typography>
+                  <Typography color="text.secondary">
+                    该客户暂无可关联的正式订单。
+                  </Typography>
                 )}
               </Stack>
             </DialogContent>
             <DialogActions>
               <Button onClick={() => void requestClose()}>取消</Button>
-              <Button variant="contained" disabled={saving || !selectedOrderId} onClick={() => void saveOrderLink()}>
+              <Button
+                variant="contained"
+                disabled={saving || !selectedOrderId}
+                onClick={() => void saveOrderLink()}
+              >
                 确认关联
               </Button>
             </DialogActions>
@@ -2623,13 +4802,36 @@ const Overview: React.FC<{
   taskTotal: number;
   taskPage: number;
   taskPageSize: number;
+  taskView: "OPEN" | "REVIEW" | "HISTORY";
+  canReviewTasks: boolean;
+  onTaskViewChange: (value: "OPEN" | "REVIEW" | "HISTORY") => void;
   onTaskPageChange: (page: number) => void;
   onTaskPageSizeChange: (pageSize: number) => void;
   onOpenTask: (task: AcademyMyTask) => void;
-  onChangeSessionStatus: (session: AcademySession, status: AcademySession["status"]) => void;
+  onChangeSessionStatus: (
+    session: AcademySession,
+    status: AcademySession["status"],
+  ) => void;
   requestedSessionId?: string;
   onRequestedSessionConsumed: () => void;
-}> = ({ sessions, managedSessions, canManageSessions, tasks, taskTotal, taskPage, taskPageSize, onTaskPageChange, onTaskPageSizeChange, onOpenTask, onChangeSessionStatus, requestedSessionId, onRequestedSessionConsumed }) => {
+}> = ({
+  sessions,
+  managedSessions,
+  canManageSessions,
+  tasks,
+  taskTotal,
+  taskPage,
+  taskPageSize,
+  taskView,
+  canReviewTasks,
+  onTaskViewChange,
+  onTaskPageChange,
+  onTaskPageSizeChange,
+  onOpenTask,
+  onChangeSessionStatus,
+  requestedSessionId,
+  onRequestedSessionConsumed,
+}) => {
   const [selectedCourseId, setSelectedCourseId] = useState("");
   const monday = new Date();
   const weekday = monday.getDay() || 7;
@@ -2645,27 +4847,42 @@ const Overview: React.FC<{
     return { date, sessions: daySessions };
   });
   const todoTasks = tasks;
-  const activeCourses = sessions.filter((session) => session.status !== "COMPLETED" && session.status !== "CANCELLED");
+  const activeCourses = sessions.filter(
+    (session) =>
+      session.status !== "COMPLETED" && session.status !== "CANCELLED",
+  );
   useEffect(() => {
-    if (!requestedSessionId || !activeCourses.some((session) => session.id === requestedSessionId)) return;
+    if (
+      !requestedSessionId ||
+      !activeCourses.some((session) => session.id === requestedSessionId)
+    )
+      return;
     setSelectedCourseId(requestedSessionId);
     onRequestedSessionConsumed();
   }, [activeCourses, onRequestedSessionConsumed, requestedSessionId]);
   useEffect(() => {
-    if (activeCourses.some((session) => session.id === selectedCourseId)) return;
-    setSelectedCourseId(activeCourses.find((session) => session.status === "IN_PROGRESS")?.id || activeCourses[0]?.id || "");
+    if (activeCourses.some((session) => session.id === selectedCourseId))
+      return;
+    setSelectedCourseId(
+      activeCourses.find((session) => session.status === "IN_PROGRESS")?.id ||
+        activeCourses[0]?.id ||
+        "",
+    );
   }, [activeCourses, selectedCourseId]);
-  const selectedCourse = activeCourses.find((session) => session.id === selectedCourseId) || null;
-  const selectedManagedCourse = managedSessions.find((session) => session.id === selectedCourseId) || null;
-  const statusAction = selectedManagedCourse && canManageSessions
-    ? selectedManagedCourse.status === "PLANNED"
-      ? { label: "确认待开课", status: "READY" as const }
-      : selectedManagedCourse.status === "READY"
-        ? { label: "开始课程", status: "IN_PROGRESS" as const }
-        : selectedManagedCourse.status === "IN_PROGRESS"
-          ? { label: "确认课程完成", status: "COMPLETED" as const }
-          : null
-    : null;
+  const selectedCourse =
+    activeCourses.find((session) => session.id === selectedCourseId) || null;
+  const selectedManagedCourse =
+    managedSessions.find((session) => session.id === selectedCourseId) || null;
+  const statusAction =
+    selectedManagedCourse && canManageSessions
+      ? selectedManagedCourse.status === "PLANNED"
+        ? { label: "确认待开课", status: "READY" as const }
+        : selectedManagedCourse.status === "READY"
+          ? { label: "开始课程", status: "IN_PROGRESS" as const }
+          : selectedManagedCourse.status === "IN_PROGRESS"
+            ? { label: "确认课程完成", status: "COMPLETED" as const }
+            : null
+      : null;
   const openMyStep = (taskId?: string) => {
     if (!taskId) return;
     const loadedTask = tasks.find((item) => item.id === taskId);
@@ -2691,7 +4908,13 @@ const Overview: React.FC<{
       submittedAt: task.submittedAt,
       reviewedAt: task.reviewedAt,
       completedAt: task.completedAt,
-      session: { id: selectedCourse.id, title: selectedCourse.title, startsAt: selectedCourse.startsAt, endsAt: selectedCourse.endsAt, status: selectedCourse.status },
+      session: {
+        id: selectedCourse.id,
+        title: selectedCourse.title,
+        startsAt: selectedCourse.startsAt,
+        endsAt: selectedCourse.endsAt,
+        status: selectedCourse.status,
+      },
     });
   };
   return (
@@ -2720,9 +4943,14 @@ const Overview: React.FC<{
             </Typography>
             <Chip size="small" variant="outlined" label="本周" />
           </Stack>
-          <Chip size="small" label="全员可见 · 只读" sx={{ bgcolor: palette.blueSoft, color: palette.blue }} />
+          <Chip
+            size="small"
+            label="全员可见 · 只读"
+            sx={{ bgcolor: palette.blueSoft, color: palette.blue }}
+          />
         </Stack>
-        <Box title="全员课程周历"
+        <Box
+          title="全员课程周历"
           sx={{
             mt: 1.3,
             display: "grid",
@@ -2754,56 +4982,132 @@ const Overview: React.FC<{
                 >{`${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`}</Typography>
               </Stack>
               {daySessions.length ? (
-                daySessions.map((session) => session.status === "COMPLETED" ? (
-                  <Stack key={session.id} spacing={0.55} sx={{ mt: 1.2, p: 1, width: "100%", textAlign: "left", border: `1px solid ${palette.line}`, borderRadius: 1, bgcolor: "#fff" }}>
-                    <Typography color={palette.green} fontWeight={900} fontSize={13}>• 已完结</Typography>
-                    <Typography fontSize={13}>{new Date(session.startsAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}–{new Date(session.endsAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</Typography>
-                    <Typography fontWeight={900} fontSize={13.5}>{session.title}</Typography>
-                    <Typography fontSize={12.5} color="text.secondary">主讲人：{session.lecturerUserName || "待确定"}</Typography>
-                    <Chip size="small" label="已完结" sx={{ alignSelf: "flex-start", height: 22, bgcolor: palette.greenSoft, color: palette.green, fontWeight: 800 }} />
-                  </Stack>
-                ) : (
-                  <Stack component="button" type="button" key={session.id} aria-pressed={selectedCourseId === session.id} aria-label={`查看课程进度 ${session.title}`} spacing={0.55} onClick={() => setSelectedCourseId(session.id)} sx={{ mt: 1.2, p: 1, width: "100%", textAlign: "left", border: `1px solid ${selectedCourseId === session.id ? palette.blue : palette.line}`, borderRadius: 1, bgcolor: selectedCourseId === session.id ? palette.blueSoft : "#fff", cursor: "pointer", "&:focus-visible": { outline: `2px solid ${palette.blue}` } }}>
-                    <Typography
-                      color={palette.blue}
-                      fontWeight={900}
-                      fontSize={13}
-                    >
-                      • 有课程
-                    </Typography>
-                    <Typography fontSize={13}>
-                      {new Date(session.startsAt).toLocaleTimeString("zh-CN", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                      –
-                      {new Date(session.endsAt).toLocaleTimeString("zh-CN", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </Typography>
-                    <Typography
-                      fontWeight={900}
-                      fontSize={13.5}
-                      sx={{ lineHeight: 1.4 }}
-                    >
-                      {session.title}
-                    </Typography>
-                    <Typography fontSize={12.5} color="text.secondary">主讲人：{session.lecturerUserName || "待确定"}</Typography>
-                    <Chip
-                      size="small"
-                      label={statusLabel[session.status] || session.status}
+                daySessions.map((session) =>
+                  session.status === "COMPLETED" ? (
+                    <Stack
+                      key={session.id}
+                      spacing={0.55}
                       sx={{
-                        alignSelf: "flex-start",
-                        height: 22,
-                        bgcolor: palette.greenSoft,
-                        color: palette.green,
-                        fontWeight: 800,
+                        mt: 1.2,
+                        p: 1,
+                        width: "100%",
+                        textAlign: "left",
+                        border: `1px solid ${palette.line}`,
+                        borderRadius: 1,
+                        bgcolor: "#fff",
                       }}
-                    />
-                    <Typography fontSize={11.5} color="text.secondary">进度 {session.progress.done}/{session.progress.total} · {session.progress.percent}%</Typography>
-                  </Stack>
-                ))
+                    >
+                      <Typography
+                        color={palette.green}
+                        fontWeight={900}
+                        fontSize={13}
+                      >
+                        • 已完结
+                      </Typography>
+                      <Typography fontSize={13}>
+                        {new Date(session.startsAt).toLocaleTimeString(
+                          "zh-CN",
+                          { hour: "2-digit", minute: "2-digit" },
+                        )}
+                        –
+                        {new Date(session.endsAt).toLocaleTimeString("zh-CN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </Typography>
+                      <Typography fontWeight={900} fontSize={13.5}>
+                        {session.title}
+                      </Typography>
+                      <Typography fontSize={12.5} color="text.secondary">
+                        主讲人：{session.lecturerUserName || "待确定"}
+                      </Typography>
+                      <Chip
+                        size="small"
+                        label="已完结"
+                        sx={{
+                          alignSelf: "flex-start",
+                          height: 22,
+                          bgcolor: palette.greenSoft,
+                          color: palette.green,
+                          fontWeight: 800,
+                        }}
+                      />
+                    </Stack>
+                  ) : (
+                    <Stack
+                      component="button"
+                      type="button"
+                      key={session.id}
+                      aria-pressed={selectedCourseId === session.id}
+                      aria-label={`查看课程进度 ${session.title}`}
+                      spacing={0.55}
+                      onClick={() => setSelectedCourseId(session.id)}
+                      sx={{
+                        mt: 1.2,
+                        p: 1,
+                        width: "100%",
+                        textAlign: "left",
+                        border: `1px solid ${selectedCourseId === session.id ? palette.blue : palette.line}`,
+                        borderRadius: 1,
+                        bgcolor:
+                          selectedCourseId === session.id
+                            ? palette.blueSoft
+                            : "#fff",
+                        cursor: "pointer",
+                        "&:focus-visible": {
+                          outline: `2px solid ${palette.blue}`,
+                        },
+                      }}
+                    >
+                      <Typography
+                        color={palette.blue}
+                        fontWeight={900}
+                        fontSize={13}
+                      >
+                        • 有课程
+                      </Typography>
+                      <Typography fontSize={13}>
+                        {new Date(session.startsAt).toLocaleTimeString(
+                          "zh-CN",
+                          {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          },
+                        )}
+                        –
+                        {new Date(session.endsAt).toLocaleTimeString("zh-CN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </Typography>
+                      <Typography
+                        fontWeight={900}
+                        fontSize={13.5}
+                        sx={{ lineHeight: 1.4 }}
+                      >
+                        {session.title}
+                      </Typography>
+                      <Typography fontSize={12.5} color="text.secondary">
+                        主讲人：{session.lecturerUserName || "待确定"}
+                      </Typography>
+                      <Chip
+                        size="small"
+                        label={statusLabel[session.status] || session.status}
+                        sx={{
+                          alignSelf: "flex-start",
+                          height: 22,
+                          bgcolor: palette.greenSoft,
+                          color: palette.green,
+                          fontWeight: 800,
+                        }}
+                      />
+                      <Typography fontSize={11.5} color="text.secondary">
+                        进度 {session.progress.done}/{session.progress.total} ·{" "}
+                        {session.progress.percent}%
+                      </Typography>
+                    </Stack>
+                  ),
+                )
               ) : (
                 <Typography
                   color="#98A2B3"
@@ -2821,67 +5125,311 @@ const Overview: React.FC<{
       <Paper variant="outlined" sx={{ ...panelSx, p: { xs: 1.4, md: 1.8 } }}>
         <SectionTitle
           title="课程执行接力"
-          helper={selectedCourse ? `${selectedCourse.title} · 已完成 ${selectedCourse.progress.done}/${selectedCourse.progress.total}` : "选择未完结课程，查看现在做到哪一步"}
-          action={activeCourses.length ? <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}><TextField select size="small" label="查看未完结课程" value={selectedCourseId} onChange={(event) => setSelectedCourseId(event.target.value)} sx={{ minWidth: 240 }}>{activeCourses.map((session) => <MenuItem key={session.id} value={session.id}>{session.title} · {new Date(session.startsAt).toLocaleDateString("zh-CN")}</MenuItem>)}</TextField>{selectedCourse && <Chip label={`${selectedCourse.progress.percent}%`} sx={{ bgcolor: palette.blueSoft, color: palette.blue, fontWeight: 950, fontSize: 16 }} />}</Stack> : undefined}
+          helper={
+            selectedCourse
+              ? `${selectedCourse.title} · 已完成 ${selectedCourse.progress.done}/${selectedCourse.progress.total}`
+              : "选择未完结课程，查看现在做到哪一步"
+          }
+          action={
+            activeCourses.length ? (
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={1}
+                alignItems={{ sm: "center" }}
+              >
+                <TextField
+                  select
+                  size="small"
+                  label="查看未完结课程"
+                  value={selectedCourseId}
+                  onChange={(event) => setSelectedCourseId(event.target.value)}
+                  sx={{ minWidth: 240 }}
+                >
+                  {activeCourses.map((session) => (
+                    <MenuItem key={session.id} value={session.id}>
+                      {session.title} ·{" "}
+                      {new Date(session.startsAt).toLocaleDateString("zh-CN")}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                {selectedCourse && (
+                  <Chip
+                    label={`${selectedCourse.progress.percent}%`}
+                    sx={{
+                      bgcolor: palette.blueSoft,
+                      color: palette.blue,
+                      fontWeight: 950,
+                      fontSize: 16,
+                    }}
+                  />
+                )}
+              </Stack>
+            ) : undefined
+          }
         />
-        {selectedCourse ? <>
-          <LinearProgress variant="determinate" value={selectedCourse.progress.percent} sx={{ mt: 1.4, height: 8, borderRadius: 4 }} />
-          <Paper variant="outlined" sx={{ mt: 1.4, p: 1.3, bgcolor: palette.blueSoft, borderColor: "#C9DBFF" }}>
-            <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}>
-              <Box><Typography fontSize={12} color="text.secondary">当前步骤</Typography><Typography fontWeight={950}>{selectedCourse.currentStep ? `第${selectedCourse.currentStep.stepNumber || 1}步 · ${selectedCourse.currentStep.title}` : "全部流程已结束"}</Typography></Box>
-              <Box><Typography fontSize={12} color="text.secondary">当前接力人</Typography><Typography fontWeight={900}>{selectedCourse.currentStep?.assigneeUserName || "暂无待处理负责人"}</Typography></Box>
-              <Box><Typography fontSize={12} color="text.secondary">截止时间</Typography><Typography fontWeight={800}>{formatDate(selectedCourse.currentStep?.dueAt)}</Typography></Box>
-              {statusAction && <Button variant="contained" onClick={() => selectedManagedCourse && onChangeSessionStatus(selectedManagedCourse, statusAction.status)}>{statusAction.label}</Button>}
-            </Stack>
-          </Paper>
-          <Box sx={{ mt: 1.6, overflowX: "auto", pb: 0.5 }}>
-            <Box sx={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(selectedCourse.tasks.length, 1)}, minmax(125px, 1fr))`, minWidth: Math.max(selectedCourse.tasks.length * 125, 760), position: "relative", "&:before": { content: '\"\"', position: "absolute", top: 16, left: 30, right: 30, height: 2, bgcolor: palette.line } }}>
-              {selectedCourse.tasks.map((task) => {
-                const done = ["DONE", "SKIPPED"].includes(task.status);
-                const risky = ["BLOCKED", "REJECTED"].includes(task.status) || Boolean(task.dueAt && new Date(task.dueAt) < new Date() && !done);
-                return <Stack component={task.isMine ? "button" : "div"} type={task.isMine ? "button" : undefined} key={`${task.stepNumber}-${task.title}`} alignItems="center" spacing={0.55} onClick={task.isMine ? () => openMyStep(task.taskId) : undefined} sx={{ position: "relative", px: 0.6, py: 0, border: 0, bgcolor: "transparent", cursor: task.isMine ? "pointer" : "default", "&:focus-visible": { outline: `2px solid ${palette.blue}`, borderRadius: 1 } }}>
-                  <Box sx={{ width: 32, height: 32, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: done ? palette.green : risky ? palette.red : task.isMine ? palette.blue : "#fff", color: done || risky || task.isMine ? "#fff" : palette.blue, border: `2px solid ${done ? palette.green : risky ? palette.red : palette.blue}`, fontSize: 11, fontWeight: 950, zIndex: 1 }}>{done ? "✓" : task.stepNumber || "·"}</Box>
-                  <Typography fontSize={12} fontWeight={950} textAlign="center">{task.title}</Typography>
-                  <Typography fontSize={11} color="text.secondary" textAlign="center">{task.assigneeUserName || "待分配"}</Typography>
-                  <Chip size="small" label={task.isMine ? "我负责" : statusLabel[task.status] || task.status} sx={{ height: 21, bgcolor: task.isMine ? palette.blueSoft : undefined, color: task.isMine ? palette.blue : undefined, fontWeight: 800 }} />
-                </Stack>;
-              })}
+        {selectedCourse ? (
+          <>
+            <LinearProgress
+              variant="determinate"
+              value={selectedCourse.progress.percent}
+              sx={{ mt: 1.4, height: 8, borderRadius: 4 }}
+            />
+            <Paper
+              variant="outlined"
+              sx={{
+                mt: 1.4,
+                p: 1.3,
+                bgcolor: palette.blueSoft,
+                borderColor: "#C9DBFF",
+              }}
+            >
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                justifyContent="space-between"
+                spacing={1}
+              >
+                <Box>
+                  <Typography fontSize={12} color="text.secondary">
+                    当前步骤
+                  </Typography>
+                  <Typography fontWeight={950}>
+                    {selectedCourse.currentStep
+                      ? `第${selectedCourse.currentStep.stepNumber || 1}步 · ${selectedCourse.currentStep.title}`
+                      : "全部流程已结束"}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography fontSize={12} color="text.secondary">
+                    当前接力人
+                  </Typography>
+                  <Typography fontWeight={900}>
+                    {selectedCourse.currentStep?.assigneeUserName ||
+                      "暂无待处理负责人"}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography fontSize={12} color="text.secondary">
+                    截止时间
+                  </Typography>
+                  <Typography fontWeight={800}>
+                    {formatDate(selectedCourse.currentStep?.dueAt)}
+                  </Typography>
+                </Box>
+              </Stack>
+            </Paper>
+            <Box sx={{ mt: 1.6, overflowX: "auto", pb: 0.5 }}>
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: `repeat(${Math.max(selectedCourse.tasks.length, 1)}, minmax(125px, 1fr))`,
+                  minWidth: Math.max(selectedCourse.tasks.length * 125, 760),
+                  position: "relative",
+                  "&:before": {
+                    content: '\"\"',
+                    position: "absolute",
+                    top: 16,
+                    left: 30,
+                    right: 30,
+                    height: 2,
+                    bgcolor: palette.line,
+                  },
+                }}
+              >
+                {selectedCourse.tasks.map((task) => {
+                  const done = ["DONE", "SKIPPED"].includes(task.status);
+                  const risky =
+                    ["BLOCKED", "REJECTED"].includes(task.status) ||
+                    Boolean(
+                      task.dueAt && new Date(task.dueAt) < new Date() && !done,
+                    );
+                  return (
+                    <Stack
+                      component={task.isMine ? "button" : "div"}
+                      type={task.isMine ? "button" : undefined}
+                      key={`${task.stepNumber}-${task.title}`}
+                      alignItems="center"
+                      spacing={0.55}
+                      onClick={
+                        task.isMine ? () => openMyStep(task.taskId) : undefined
+                      }
+                      sx={{
+                        position: "relative",
+                        px: 0.6,
+                        py: 0,
+                        border: 0,
+                        bgcolor: "transparent",
+                        cursor: task.isMine ? "pointer" : "default",
+                        "&:focus-visible": {
+                          outline: `2px solid ${palette.blue}`,
+                          borderRadius: 1,
+                        },
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: "50%",
+                          display: "grid",
+                          placeItems: "center",
+                          bgcolor: done
+                            ? palette.green
+                            : risky
+                              ? palette.red
+                              : task.isMine
+                                ? palette.blue
+                                : "#fff",
+                          color:
+                            done || risky || task.isMine
+                              ? "#fff"
+                              : palette.blue,
+                          border: `2px solid ${done ? palette.green : risky ? palette.red : palette.blue}`,
+                          fontSize: 11,
+                          fontWeight: 950,
+                          zIndex: 1,
+                        }}
+                      >
+                        {done ? "✓" : task.stepNumber || "·"}
+                      </Box>
+                      <Typography
+                        fontSize={12}
+                        fontWeight={950}
+                        textAlign="center"
+                      >
+                        {task.title}
+                      </Typography>
+                      <Typography
+                        fontSize={11}
+                        color="text.secondary"
+                        textAlign="center"
+                      >
+                        {task.assigneeUserName || "待分配"}
+                      </Typography>
+                      <Chip
+                        size="small"
+                        label={
+                          task.isMine
+                            ? "我负责"
+                            : statusLabel[task.status] || task.status
+                        }
+                        sx={{
+                          height: 21,
+                          bgcolor: task.isMine ? palette.blueSoft : undefined,
+                          color: task.isMine ? palette.blue : undefined,
+                          fontWeight: 800,
+                        }}
+                      />
+                    </Stack>
+                  );
+                })}
+              </Box>
             </Box>
+            <Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>
+              {selectedCourse.currentStep?.isMine
+                ? "当前轮到你处理，点击蓝色“我负责”节点即可完成。"
+                : selectedCourse.currentStep
+                  ? `当前等待 ${selectedCourse.currentStep.assigneeUserName || "负责人"} 处理，你可以在这里查看进度。`
+                  : "全部课程任务已经完成。"}
+            </Typography>
+            {statusAction && (
+              <Paper variant="outlined" sx={{ mt: 1.4, p: 1.3 }}>
+                <Stack
+                  direction={{ xs: "column", sm: "row" }}
+                  justifyContent="space-between"
+                  alignItems={{ sm: "center" }}
+                  spacing={1}
+                >
+                  <Box>
+                    <Typography fontWeight={900}>课程状态</Typography>
+                    <Typography fontSize={12.5} color="text.secondary">
+                      {selectedManagedCourse?.status === "PLANNED" &&
+                      selectedCourse.progress.done <
+                        selectedCourse.progress.total
+                        ? "完成全部必做课前任务后，才可确认待开课。"
+                        : `课程任务已到当前阶段，可执行“${statusAction.label}”。`}
+                    </Typography>
+                  </Box>
+                  <Button
+                    variant="contained"
+                    disabled={
+                      selectedManagedCourse?.status === "PLANNED" &&
+                      selectedCourse.progress.done <
+                        selectedCourse.progress.total
+                    }
+                    onClick={() =>
+                      selectedManagedCourse &&
+                      onChangeSessionStatus(
+                        selectedManagedCourse,
+                        statusAction.status,
+                      )
+                    }
+                  >
+                    {statusAction.label}
+                  </Button>
+                </Stack>
+              </Paper>
+            )}
+          </>
+        ) : (
+          <Box sx={{ py: 5, textAlign: "center" }}>
+            <Typography fontWeight={900}>当前没有未完结课程</Typography>
+            <Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>
+              新的课程安排创建后会显示在这里
+            </Typography>
           </Box>
-          <Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>蓝色“我负责”节点可直接打开处理；其他节点只显示负责人和进度。</Typography>
-        </> : <Box sx={{ py: 5, textAlign: "center" }}><Typography fontWeight={900}>当前没有未完结课程</Typography><Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>新的课程安排创建后会显示在这里</Typography></Box>}
+        )}
       </Paper>
 
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
         <SectionTitle
-          title="我的待办"
-          helper={`${taskTotal} 项待推进`}
+          title="我的课程任务"
+          helper={
+            taskView === "OPEN"
+              ? `${taskTotal} 项等你处理`
+              : taskView === "REVIEW"
+                ? `${taskTotal} 项等你验收`
+                : `${taskTotal} 条处理记录`
+          }
         />
+        <Tabs
+          value={taskView}
+          onChange={(_, value) => onTaskViewChange(value)}
+          sx={{ mt: 0.5, minHeight: 42 }}
+        >
+          <Tab value="OPEN" label="待我处理" />
+          {canReviewTasks && <Tab value="REVIEW" label="待我验收" />}
+          <Tab value="HISTORY" label="处理记录" />
+        </Tabs>
         <TableContainer sx={{ mt: 1 }}>
           <SystemDataTable tableId="academy-overview-execution-tasks">
             <TableHead>
               <TableRow>
                 <TableCell>任务内容</TableCell>
                 <TableCell>关联课程安排</TableCell>
-                <TableCell>任务类型</TableCell>
-                <TableCell>负责人</TableCell>
+                <TableCell>
+                  {taskView === "REVIEW" ? "提交人" : "完成方式"}
+                </TableCell>
                 <TableCell>截止时间</TableCell>
                 <TableCell>状态</TableCell>
+                <TableCell align="right">操作</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {todoTasks.map((task) => (
-                <TableRow key={task.id} hover onClick={() => onOpenTask(task)} sx={{ cursor: "pointer" }}>
+                <TableRow key={task.eventId || task.id} hover>
                   <TableCell sx={{ fontWeight: 700 }}>{task.title}</TableCell>
                   <TableCell>{task.session.title}</TableCell>
                   <TableCell>
-                    {task.category === "BEFORE"
-                      ? "课前准备"
-                      : task.category === "DURING"
-                        ? "现场执行"
-                        : "课后跟进"}
+                    {taskView === "REVIEW"
+                      ? task.submittedByName || task.assigneeUserName || "-"
+                      : task.completionMode === "CONFIRM"
+                        ? "直接确认"
+                        : task.completionMode === "ATTACHMENT"
+                          ? "上传交付物"
+                          : task.completionMode === "CHECKLIST"
+                            ? "检查确认"
+                            : "填写说明"}
                   </TableCell>
-                  <TableCell>{task.assigneeUserName || "待分配"}</TableCell>
                   <TableCell>{formatDate(task.dueAt)}</TableCell>
                   <TableCell>
                     <Chip
@@ -2900,19 +5448,40 @@ const Overview: React.FC<{
                       }}
                     />
                   </TableCell>
+                  <TableCell align="right">
+                    <Button size="small" onClick={() => onOpenTask(task)}>
+                      {taskView === "OPEN"
+                        ? "去处理"
+                        : taskView === "REVIEW"
+                          ? "去验收"
+                          : "查看结果"}
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
               {!todoTasks.length && (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                    暂无待办任务
+                    {taskView === "OPEN"
+                      ? "当前没有待处理任务"
+                      : taskView === "REVIEW"
+                        ? "当前没有待验收任务"
+                        : "暂无处理记录"}
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </SystemDataTable>
         </TableContainer>
-        <TablePagination count={taskTotal} page={taskPage} rowsPerPage={taskPageSize} onPageChange={(_, next) => onTaskPageChange(next)} onRowsPerPageChange={(event) => onTaskPageSizeChange(Number(event.target.value))} />
+        <TablePagination
+          count={taskTotal}
+          page={taskPage}
+          rowsPerPage={taskPageSize}
+          onPageChange={(_, next) => onTaskPageChange(next)}
+          onRowsPerPageChange={(event) =>
+            onTaskPageSizeChange(Number(event.target.value))
+          }
+        />
       </Paper>
     </>
   );
@@ -2959,8 +5528,15 @@ export const LegacyPlans: React.FC<{
           alignItems={{ md: "center" }}
           spacing={1}
         >
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-            <Typography sx={{ fontWeight: 900, fontSize: 16, color: palette.ink }}>
+          <Stack
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            flexWrap="wrap"
+          >
+            <Typography
+              sx={{ fontWeight: 900, fontSize: 16, color: palette.ink }}
+            >
               本周课程计划
             </Typography>
             <Typography fontSize={13} color="text.secondary">
@@ -2974,7 +5550,11 @@ export const LegacyPlans: React.FC<{
             >
               <ChevronLeftIcon fontSize="small" />
             </IconButton>
-            <Button size="small" variant="outlined" onClick={() => setWeekOffset(0)}>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => setWeekOffset(0)}
+            >
               本周
             </Button>
             <IconButton
@@ -3211,18 +5791,34 @@ export const LegacyPlans: React.FC<{
                 {(selectedDetail?.tasks || []).map((task) => (
                   <TableRow key={task.id}>
                     <TableCell>
-                      <Checkbox size="small" checked={task.status === "DONE"} readOnly />
+                      <Checkbox
+                        size="small"
+                        checked={task.status === "DONE"}
+                        readOnly
+                      />
                       {task.title}
                     </TableCell>
                     <TableCell>
-                      {task.completedByName || selected?.facilitatorUserName || "待分配"}
+                      {task.completedByName ||
+                        selected?.facilitatorUserName ||
+                        "待分配"}
                     </TableCell>
                     <TableCell>-</TableCell>
-                    <TableCell>{task.completedAt ? formatDate(task.completedAt) : "待安排"}</TableCell>
+                    <TableCell>
+                      {task.completedAt
+                        ? formatDate(task.completedAt)
+                        : "待安排"}
+                    </TableCell>
                     <TableCell>
                       <Chip
                         size="small"
-                        label={task.status === "BLOCKED" ? "高" : task.status === "PENDING" ? "中" : "低"}
+                        label={
+                          task.status === "BLOCKED"
+                            ? "高"
+                            : task.status === "PENDING"
+                              ? "中"
+                              : "低"
+                        }
                         sx={{
                           height: 21,
                           bgcolor:
@@ -3240,7 +5836,12 @@ export const LegacyPlans: React.FC<{
                         }}
                       />
                     </TableCell>
-                    <TableCell sx={{ color: task.status === "DONE" ? palette.green : palette.blue }}>
+                    <TableCell
+                      sx={{
+                        color:
+                          task.status === "DONE" ? palette.green : palette.blue,
+                      }}
+                    >
                       {statusLabel[task.status] || task.status}
                     </TableCell>
                   </TableRow>
@@ -3303,7 +5904,10 @@ export const CourseDetailWorkspace: React.FC<{
   onEdit: (course: AcademyCourse) => void;
   onUploadAsset: (course: AcademyCourse, assetType: AcademyAssetType) => void;
   onReloadAssets: (course: AcademyCourse) => void;
-  onStatusChange: (course: AcademyCourse, status: AcademyCourse["status"]) => void;
+  onStatusChange: (
+    course: AcademyCourse,
+    status: AcademyCourse["status"],
+  ) => void;
   onCreateSession: (course: AcademyCourse) => void;
 }> = ({
   course,
@@ -3323,6 +5927,9 @@ export const CourseDetailWorkspace: React.FC<{
   const [detailTab, setDetailTab] = useState(0);
   const [sessionPage, setSessionPage] = useState(0);
   const [sessionPageSize, setSessionPageSize] = useState(10);
+  const sessionMaxPage = Math.max(0, Math.ceil(sessions.length / sessionPageSize) - 1);
+  useEffect(() => setSessionPage(0), [course.id]);
+  useEffect(() => { if (sessionPage > sessionMaxPage) setSessionPage(sessionMaxPage); }, [sessionMaxPage, sessionPage]);
   const statusAction = getCourseStatusAction(course);
   const pagedSessions = sessions.slice(
     sessionPage * sessionPageSize,
@@ -3333,7 +5940,10 @@ export const CourseDetailWorkspace: React.FC<{
     { label: "转化产品", value: course.conversionProductName || "未关联" },
     { label: "课程维护人", value: course.ownerUserName },
     { label: "默认时长", value: `${course.defaultDurationMinutes} 分钟` },
-    { label: "最近更新", value: new Date(course.updatedAt).toLocaleDateString("zh-CN") },
+    {
+      label: "最近更新",
+      value: new Date(course.updatedAt).toLocaleDateString("zh-CN"),
+    },
   ];
 
   return (
@@ -3354,41 +5964,83 @@ export const CourseDetailWorkspace: React.FC<{
             >
               关闭课程详情
             </Button>
-            <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+            <Stack
+              direction="row"
+              spacing={1}
+              alignItems="center"
+              useFlexGap
+              flexWrap="wrap"
+            >
               <Typography fontSize={{ xs: 21, md: 24 }} fontWeight={950}>
                 {course.title}
               </Typography>
-              <Chip size="small" label={statusLabel[course.status]} sx={courseStatusChipSx(course.status)} />
+              <Chip
+                size="small"
+                label={statusLabel[course.status]}
+                sx={courseStatusChipSx(course.status)}
+              />
             </Stack>
-            <Stack direction="row" spacing={0.8} useFlexGap flexWrap="wrap" sx={{ mt: 0.7 }}>
+            <Stack
+              direction="row"
+              spacing={0.8}
+              useFlexGap
+              flexWrap="wrap"
+              sx={{ mt: 0.7 }}
+            >
               <Typography fontSize={13} color="text.secondary" fontWeight={700}>
                 {course.code}
               </Typography>
-              <Typography fontSize={13} color="text.disabled">·</Typography>
-              <Typography fontSize={13} color="text.secondary">{course.category}</Typography>
-              <Typography fontSize={13} color="text.disabled">·</Typography>
+              <Typography fontSize={13} color="text.disabled">
+                ·
+              </Typography>
               <Typography fontSize={13} color="text.secondary">
-                最近更新 {new Date(course.updatedAt).toLocaleDateString("zh-CN")}
+                {course.category}
+              </Typography>
+              <Typography fontSize={13} color="text.disabled">
+                ·
+              </Typography>
+              <Typography fontSize={13} color="text.secondary">
+                最近更新{" "}
+                {new Date(course.updatedAt).toLocaleDateString("zh-CN")}
               </Typography>
             </Stack>
             {assetsLoading && (
-              <Typography role="status" fontSize={12} color="primary" sx={{ mt: 0.7 }}>
+              <Typography
+                role="status"
+                fontSize={12}
+                color="primary"
+                sx={{ mt: 0.7 }}
+              >
                 正在加载课程资产…
               </Typography>
             )}
             {assetsError && !assetsLoading && (
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.7 }}>
+              <Stack
+                direction="row"
+                spacing={1}
+                alignItems="center"
+                sx={{ mt: 0.7 }}
+              >
                 <Typography role="alert" fontSize={12} color="error">
                   课程资产加载失败
                 </Typography>
-                <Button size="small" color="error" onClick={() => onReloadAssets(course)}>
+                <Button
+                  size="small"
+                  color="error"
+                  onClick={() => onReloadAssets(course)}
+                >
                   重新加载课程资产
                 </Button>
               </Stack>
             )}
           </Box>
           {canManage && (
-            <Stack direction="row" spacing={0.8} alignItems="center" alignSelf={{ md: "center" }}>
+            <Stack
+              direction="row"
+              spacing={0.8}
+              alignItems="center"
+              alignSelf={{ md: "center" }}
+            >
               <Tooltip title="编辑课程" arrow>
                 <IconButton
                   color="primary"
@@ -3401,12 +6053,20 @@ export const CourseDetailWorkspace: React.FC<{
               <Tooltip title={`${statusAction.label}课程`} arrow>
                 <span>
                   <IconButton
-                    color={statusAction.label === "归档" ? "warning" : "success"}
+                    color={
+                      statusAction.label === "归档" ? "warning" : "success"
+                    }
                     aria-label={`${statusAction.label}课程 ${course.title}`}
                     disabled={statusChanging}
-                    onClick={() => onStatusChange(course, statusAction.nextStatus)}
+                    onClick={() =>
+                      onStatusChange(course, statusAction.nextStatus)
+                    }
                   >
-                    {statusChanging ? <CircularProgress size={20} /> : courseStatusIcon(statusAction.label)}
+                    {statusChanging ? (
+                      <CircularProgress size={20} />
+                    ) : (
+                      courseStatusIcon(statusAction.label)
+                    )}
                   </IconButton>
                 </span>
               </Tooltip>
@@ -3425,12 +6085,17 @@ export const CourseDetailWorkspace: React.FC<{
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 2fr) minmax(280px, 1fr)" },
+          gridTemplateColumns: {
+            xs: "1fr",
+            lg: "minmax(0, 2fr) minmax(280px, 1fr)",
+          },
           gap: 1.5,
         }}
       >
         <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-          <Typography fontSize={16} fontWeight={950}>课程定位</Typography>
+          <Typography fontSize={16} fontWeight={950}>
+            课程定位
+          </Typography>
           <Typography fontSize={13.5} lineHeight={1.75} sx={{ mt: 1 }}>
             {course.summary || "当前还没有维护课程定位与简介。"}
           </Typography>
@@ -3444,24 +6109,56 @@ export const CourseDetailWorkspace: React.FC<{
           >
             {[
               { label: "目标客户", value: course.targetAudience || "未填写" },
-              { label: "客户核心问题", value: course.customerProblem || "未填写" },
+              {
+                label: "客户核心问题",
+                value: course.customerProblem || "未填写",
+              },
               { label: "核心观点", value: course.coreViewpoint || "未填写" },
-              { label: "课程目标", value: course.objectives.join("；") || "未填写" },
+              {
+                label: "课程目标",
+                value: course.objectives.join("；") || "未填写",
+              },
             ].map((row) => (
-              <Box key={row.label} sx={{ p: 1.35, borderRadius: 1.2, bgcolor: palette.soft }}>
-                <Typography fontSize={11.5} color="text.secondary" fontWeight={800}>{row.label}</Typography>
-                <Typography fontSize={13} lineHeight={1.6} sx={{ mt: 0.45 }}>{row.value}</Typography>
+              <Box
+                key={row.label}
+                sx={{ p: 1.35, borderRadius: 1.2, bgcolor: palette.soft }}
+              >
+                <Typography
+                  fontSize={11.5}
+                  color="text.secondary"
+                  fontWeight={800}
+                >
+                  {row.label}
+                </Typography>
+                <Typography fontSize={13} lineHeight={1.6} sx={{ mt: 0.45 }}>
+                  {row.value}
+                </Typography>
               </Box>
             ))}
           </Box>
         </Paper>
         <Paper variant="outlined" sx={{ ...panelSx, p: 2 }}>
-          <Typography fontSize={16} fontWeight={950}>课程运营信息</Typography>
+          <Typography fontSize={16} fontWeight={950}>
+            课程运营信息
+          </Typography>
           <Stack spacing={1.25} sx={{ mt: 1.4 }}>
             {overviewRows.map((row) => (
-              <Stack key={row.label} direction="row" justifyContent="space-between" spacing={2}>
-                <Typography fontSize={12.5} color="text.secondary" fontWeight={700}>{row.label}</Typography>
-                <Typography fontSize={13} fontWeight={800} textAlign="right">{row.value}</Typography>
+              <Stack
+                key={row.label}
+                direction="row"
+                justifyContent="space-between"
+                spacing={2}
+              >
+                <Typography
+                  fontSize={12.5}
+                  color="text.secondary"
+                  fontWeight={700}
+                >
+                  {row.label}
+                </Typography>
+                <Typography fontSize={13} fontWeight={800} textAlign="right">
+                  {row.value}
+                </Typography>
               </Stack>
             ))}
           </Stack>
@@ -3477,12 +6174,20 @@ export const CourseDetailWorkspace: React.FC<{
           sx={{ px: 1.2, borderBottom: `1px solid ${palette.line}` }}
         >
           <Tab label="课程内容" />
-          <Tab label={assetsLoading ? "课程资产（加载中）" : assetsError ? "课程资产（加载失败）" : `课程资产（${assets.length}）`} />
+          <Tab
+            label={
+              assetsLoading
+                ? "课程资产（加载中）"
+                : assetsError
+                  ? "课程资产（加载失败）"
+                  : `课程资产（${assets.length}）`
+            }
+          />
           <Tab label={`场次记录（${sessions.length}）`} />
         </Tabs>
         <Box sx={{ p: { xs: 1.5, md: 2 } }}>
-          {detailTab === 0 && (
-            course.objectives.length ? (
+          {detailTab === 0 &&
+            (course.objectives.length ? (
               <Stack spacing={1}>
                 {course.objectives.map((objective, index) => (
                   <Stack
@@ -3490,12 +6195,24 @@ export const CourseDetailWorkspace: React.FC<{
                     direction="row"
                     spacing={1.2}
                     alignItems="flex-start"
-                    sx={{ p: 1.4, border: `1px solid ${palette.line}`, borderRadius: 1.2 }}
+                    sx={{
+                      p: 1.4,
+                      border: `1px solid ${palette.line}`,
+                      borderRadius: 1.2,
+                    }}
                   >
                     <Chip size="small" label={index + 1} color="primary" />
                     <Box>
-                      <Typography fontSize={13.5} fontWeight={850}>{objective}</Typography>
-                      <Typography fontSize={11.5} color="text.secondary" sx={{ mt: 0.3 }}>课程内容节点</Typography>
+                      <Typography fontSize={13.5} fontWeight={850}>
+                        {objective}
+                      </Typography>
+                      <Typography
+                        fontSize={11.5}
+                        color="text.secondary"
+                        sx={{ mt: 0.3 }}
+                      >
+                        课程内容节点
+                      </Typography>
                     </Box>
                   </Stack>
                 ))}
@@ -3504,61 +6221,106 @@ export const CourseDetailWorkspace: React.FC<{
               <Stack alignItems="center" spacing={1} sx={{ py: 5 }}>
                 <AutoStoriesIcon color="primary" sx={{ fontSize: 34 }} />
                 <Typography fontWeight={900}>当前还没有课程内容结构</Typography>
-                <Typography fontSize={12.5} color="text.secondary" textAlign="center">
+                <Typography
+                  fontSize={12.5}
+                  color="text.secondary"
+                  textAlign="center"
+                >
                   完善课程目标后，可以继续维护课程内容节点。
                 </Typography>
-                {canManage && <Button variant="outlined" onClick={() => onEdit(course)}>完善课程内容</Button>}
+                {canManage && (
+                  <Button variant="outlined" onClick={() => onEdit(course)}>
+                    完善课程内容
+                  </Button>
+                )}
               </Stack>
-            )
-          )}
-          {detailTab === 1 && (
-            assetsLoading ? (
+            ))}
+          {detailTab === 1 &&
+            (assetsLoading ? (
               <Stack alignItems="center" spacing={1.2} sx={{ py: 6 }}>
                 <CircularProgress size={28} />
-                <Typography fontSize={13} color="text.secondary">正在加载课程资产…</Typography>
+                <Typography fontSize={13} color="text.secondary">
+                  正在加载课程资产…
+                </Typography>
               </Stack>
             ) : assetsError ? (
               <Stack alignItems="center" spacing={1.2} sx={{ py: 6 }}>
                 <WarningAmberIcon color="error" sx={{ fontSize: 34 }} />
                 <Typography fontWeight={900}>课程资产加载失败</Typography>
-                <Typography fontSize={12.5} color="text.secondary">当前不展示空数据，重新加载后再进行资产操作。</Typography>
-                <Button variant="outlined" onClick={() => onReloadAssets(course)}>重新加载课程资产</Button>
+                <Typography fontSize={12.5} color="text.secondary">
+                  当前不展示空数据，重新加载后再进行资产操作。
+                </Typography>
+                <Button
+                  variant="outlined"
+                  onClick={() => onReloadAssets(course)}
+                >
+                  重新加载课程资产
+                </Button>
               </Stack>
-            ) : <Box
-              sx={{
-                display: "grid",
-                gridTemplateColumns: { xs: "1fr", md: "1fr 1fr", xl: "repeat(3, 1fr)" },
-                gap: 1.2,
-              }}
-            >
-              {assetTypes.map((assetType) => {
-                const asset = assets.find((item) => item.assetType === assetType.value);
-                return (
-                  <Paper key={assetType.value} variant="outlined" sx={{ p: 1.5, borderColor: palette.line }}>
-                    <Stack direction="row" justifyContent="space-between" spacing={1}>
-                      <Box minWidth={0}>
-                        <Typography fontSize={13.5} fontWeight={900}>{assetType.label}</Typography>
-                        <Typography fontSize={11.5} color="text.secondary" sx={{ mt: 0.5 }}>
-                          {asset
-                            ? `${asset.attachments.length} 个文件 · ${asset.ownerUserName} · ${formatDate(asset.updatedAt)}`
-                            : "当前还没有上传文件"}
-                        </Typography>
-                      </Box>
-                      {canManage && (
-                        <Button size="small" onClick={() => onUploadAsset(course, assetType.value)}>
-                          {asset ? "更新" : "上传"}
-                        </Button>
-                      )}
-                    </Stack>
-                  </Paper>
-                );
-              })}
-            </Box>
-          )}
+            ) : (
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: {
+                    xs: "1fr",
+                    md: "1fr 1fr",
+                    xl: "repeat(3, 1fr)",
+                  },
+                  gap: 1.2,
+                }}
+              >
+                {assetTypes.map((assetType) => {
+                  const asset = assets.find(
+                    (item) => item.assetType === assetType.value,
+                  );
+                  return (
+                    <Paper
+                      key={assetType.value}
+                      variant="outlined"
+                      sx={{ p: 1.5, borderColor: palette.line }}
+                    >
+                      <Stack
+                        direction="row"
+                        justifyContent="space-between"
+                        spacing={1}
+                      >
+                        <Box minWidth={0}>
+                          <Typography fontSize={13.5} fontWeight={900}>
+                            {assetType.label}
+                          </Typography>
+                          <Typography
+                            fontSize={11.5}
+                            color="text.secondary"
+                            sx={{ mt: 0.5 }}
+                          >
+                            {asset
+                              ? `${asset.attachments.length} 个文件 · ${asset.ownerUserName} · ${formatDate(asset.updatedAt)}`
+                              : "当前还没有上传文件"}
+                          </Typography>
+                        </Box>
+                        {canManage && (
+                          <Button
+                            size="small"
+                            onClick={() =>
+                              onUploadAsset(course, assetType.value)
+                            }
+                          >
+                            {asset ? "更新" : "上传"}
+                          </Button>
+                        )}
+                      </Stack>
+                    </Paper>
+                  );
+                })}
+              </Box>
+            ))}
           {detailTab === 2 && (
             <>
               <TableContainer sx={{ overflowX: "auto" }}>
-                <SystemDataTable tableId="academy-course-session-records" sx={{ minWidth: 760 }}>
+                <SystemDataTable
+                  tableId="academy-course-session-records"
+                  sx={{ minWidth: 760 }}
+                >
                   <TableHead>
                     <TableRow>
                       <TableCell>课程安排名称</TableCell>
@@ -3572,12 +6334,25 @@ export const CourseDetailWorkspace: React.FC<{
                   <TableBody>
                     {pagedSessions.map((session) => (
                       <TableRow key={session.id} hover>
-                        <TableCell sx={{ fontWeight: 800 }}>{session.title}</TableCell>
+                        <TableCell sx={{ fontWeight: 800 }}>
+                          {session.title}
+                        </TableCell>
                         <TableCell>{formatDate(session.startsAt)}</TableCell>
                         <TableCell>{session.venue || "待定"}</TableCell>
-                        <TableCell>{session.facilitatorUserName || "待分配"}</TableCell>
-                        <TableCell>{session._count?.engagements || 0}/{session.capacity}</TableCell>
-                        <TableCell><Chip size="small" label={statusLabel[session.status] || session.status} /></TableCell>
+                        <TableCell>
+                          {session.facilitatorUserName || "待分配"}
+                        </TableCell>
+                        <TableCell>
+                          {session._count?.engagements || 0}/{session.capacity}
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            size="small"
+                            label={
+                              statusLabel[session.status] || session.status
+                            }
+                          />
+                        </TableCell>
                       </TableRow>
                     ))}
                     {!pagedSessions.length && (
@@ -3585,9 +6360,14 @@ export const CourseDetailWorkspace: React.FC<{
                         <TableCell colSpan={6} align="center" sx={{ py: 5 }}>
                           <Stack alignItems="center" spacing={1}>
                             <CalendarMonthIcon color="primary" />
-                            <Typography fontWeight={850}>当前课程还没有排期记录</Typography>
+                            <Typography fontWeight={850}>
+                              当前课程还没有排期记录
+                            </Typography>
                             {canManage && (
-                              <Button variant="outlined" onClick={() => onCreateSession(course)}>
+                              <Button
+                                variant="outlined"
+                                onClick={() => onCreateSession(course)}
+                              >
                                 新建课程安排
                               </Button>
                             )}
@@ -3682,20 +6462,49 @@ export const CourseWorkspace: React.FC<{
   onCreateSession,
 }) => {
   const [detailCourse, setDetailCourse] = useState<AcademyCourse | null>(null);
-  const [draftFilters, setDraftFilters] = useState({ search: "", category: "", status: "" });
-  const [filters, setFilters] = useState({ search: "", category: "", status: "" });
+  const [draftFilters, setDraftFilters] = useState({
+    search: "",
+    category: "",
+    status: "",
+  });
+  const [filters, setFilters] = useState({
+    search: "",
+    category: "",
+    status: "",
+  });
   const [coursePage, setCoursePage] = useState(0);
   const [coursePageSize, setCoursePageSize] = useState(10);
-  const filtered = useMemo(() => items.filter((item) => {
-    const matchesSearch = !filters.search || `${item.code}${item.title}${item.ownerUserName}${item.conversionProductName || ""}`.toLowerCase().includes(filters.search.toLowerCase());
-    return matchesSearch && (!filters.category || item.category === filters.category) && (!filters.status || item.status === filters.status);
-  }), [filters, items]);
+  const filtered = useMemo(
+    () =>
+      items.filter((item) => {
+        const matchesSearch =
+          !filters.search ||
+          `${item.code}${item.title}${item.ownerUserName}${item.conversionProductName || ""}`
+            .toLowerCase()
+            .includes(filters.search.toLowerCase());
+        return (
+          matchesSearch &&
+          (!filters.category || item.category === filters.category) &&
+          (!filters.status || item.status === filters.status)
+        );
+      }),
+    [filters, items],
+  );
   useEffect(() => {
-    const nextPage = clampPageIndex(coursePage, filtered.length, coursePageSize);
+    const nextPage = clampPageIndex(
+      coursePage,
+      filtered.length,
+      coursePageSize,
+    );
     if (nextPage !== coursePage) setCoursePage(nextPage);
   }, [coursePage, coursePageSize, filtered.length]);
-  const pageItems = filtered.slice(coursePage * coursePageSize, coursePage * coursePageSize + coursePageSize);
-  const selectedSessions = detailCourse ? sessions.filter((item) => item.courseId === detailCourse.id) : [];
+  const pageItems = filtered.slice(
+    coursePage * coursePageSize,
+    coursePage * coursePageSize + coursePageSize,
+  );
+  const selectedSessions = detailCourse
+    ? sessions.filter((item) => item.courseId === detailCourse.id)
+    : [];
   const selectedAssets = detailCourse ? assets[detailCourse.id] || [] : [];
   const resetFilters = () => {
     const empty = { search: "", category: "", status: "" };
@@ -3726,10 +6535,24 @@ export const CourseWorkspace: React.FC<{
         sx={{ mb: 1.5 }}
       >
         <Box>
-          <Typography fontSize={18} fontWeight={950}>课程库</Typography>
-          <Typography fontSize={12.5} color="text.secondary">维护可重复使用的课程内容与资产</Typography>
+          <Typography fontSize={18} fontWeight={950}>
+            课程库
+          </Typography>
+          <Typography fontSize={12.5} color="text.secondary">
+            维护可重复使用的课程内容与资产
+          </Typography>
         </Box>
-        {canManage && <Stack direction="row" spacing={1}><Button variant="contained" startIcon={<AddIcon />} onClick={onCreate}>新建课程</Button></Stack>}
+        {canManage && (
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={onCreate}
+            >
+              新建课程
+            </Button>
+          </Stack>
+        )}
       </Stack>
       <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
         <Stack
@@ -3745,8 +6568,12 @@ export const CourseWorkspace: React.FC<{
             size="small"
             placeholder="搜索课程名称、编码、维护人或产品"
             value={draftFilters.search}
-            onChange={(event) => setDraftFilters({ ...draftFilters, search: event.target.value })}
-            onKeyDown={(event) => { if (event.key === "Enter") applyFilters(); }}
+            onChange={(event) =>
+              setDraftFilters({ ...draftFilters, search: event.target.value })
+            }
+            onKeyDown={(event) => {
+              if (event.key === "Enter") applyFilters();
+            }}
             InputProps={{
               startAdornment: (
                 <SearchIcon sx={{ mr: 0.8, color: "#98A2B3", fontSize: 20 }} />
@@ -3759,18 +6586,26 @@ export const CourseWorkspace: React.FC<{
             size="small"
             label="课程分类"
             value={draftFilters.category}
-            onChange={(event) => setDraftFilters({ ...draftFilters, category: event.target.value })}
+            onChange={(event) =>
+              setDraftFilters({ ...draftFilters, category: event.target.value })
+            }
             sx={{ minWidth: 130 }}
           >
             <MenuItem value="">全部</MenuItem>
-            {categories.map((category) => <MenuItem key={category.id} value={category.name}>{category.name}</MenuItem>)}
+            {categories.map((category) => (
+              <MenuItem key={category.id} value={category.name}>
+                {category.name}
+              </MenuItem>
+            ))}
           </TextField>
           <TextField
             select
             size="small"
             label="课程状态"
             value={draftFilters.status}
-            onChange={(event) => setDraftFilters({ ...draftFilters, status: event.target.value })}
+            onChange={(event) =>
+              setDraftFilters({ ...draftFilters, status: event.target.value })
+            }
             sx={{ minWidth: 130 }}
           >
             <MenuItem value="">全部</MenuItem>
@@ -3779,12 +6614,24 @@ export const CourseWorkspace: React.FC<{
             <MenuItem value="ARCHIVED">已归档</MenuItem>
           </TextField>
           <Box flex={1} />
-          <Button startIcon={<RefreshIcon />} variant="outlined" onClick={resetFilters}>
+          <Button
+            startIcon={<RefreshIcon />}
+            variant="outlined"
+            onClick={resetFilters}
+          >
             重置
           </Button>
-          <Button variant="contained" onClick={applyFilters}>查询</Button>
+          <Button variant="contained" onClick={applyFilters}>
+            查询
+          </Button>
           {canManage && (
-            <Button variant="outlined" startIcon={<SettingsOutlinedIcon />} onClick={onSettings}>分类设置</Button>
+            <Button
+              variant="outlined"
+              startIcon={<SettingsOutlinedIcon />}
+              onClick={onSettings}
+            >
+              分类设置
+            </Button>
           )}
         </Stack>
         <Typography
@@ -3830,11 +6677,15 @@ export const CourseWorkspace: React.FC<{
                     "&.Mui-selected:hover": { bgcolor: "#EDF4FF" },
                   }}
                 >
-                  <TableCell sx={{ fontWeight: 750, color: "text.secondary" }}>{item.code}</TableCell>
+                  <TableCell sx={{ fontWeight: 750, color: "text.secondary" }}>
+                    {item.code}
+                  </TableCell>
                   <TableCell sx={{ fontWeight: 850 }}>{item.title}</TableCell>
                   <TableCell>{item.category}</TableCell>
                   <TableCell>{item.targetAudience || "未填写"}</TableCell>
-                  <TableCell>{item.conversionProductName || "未关联"}</TableCell>
+                  <TableCell>
+                    {item.conversionProductName || "未关联"}
+                  </TableCell>
                   <TableCell>{item.ownerUserName}</TableCell>
                   <TableCell>
                     <Chip
@@ -3847,13 +6698,20 @@ export const CourseWorkspace: React.FC<{
                     {new Date(item.updatedAt).toLocaleDateString("zh-CN")}
                   </TableCell>
                   <TableCell>
-                    {sessions.filter((session) => session.courseId === item.id).length}
+                    {
+                      sessions.filter((session) => session.courseId === item.id)
+                        .length
+                    }
                   </TableCell>
                   <TableCell
                     align="center"
                     onClick={(event) => event.stopPropagation()}
                   >
-                    <Stack direction="row" spacing={0.25} justifyContent="center">
+                    <Stack
+                      direction="row"
+                      spacing={0.25}
+                      justifyContent="center"
+                    >
                       <Tooltip title="查看详情" arrow>
                         <IconButton
                           size="small"
@@ -3876,25 +6734,36 @@ export const CourseWorkspace: React.FC<{
                           </IconButton>
                         </Tooltip>
                       )}
-                      {canManage && (() => {
-                        const action = getCourseStatusAction(item);
-                        const changing = statusChangingCourseIds.has(item.id);
-                        return (
-                          <Tooltip title={`${action.label}课程`} arrow>
-                            <span>
-                              <IconButton
-                                size="small"
-                                color={action.label === "归档" ? "warning" : "success"}
-                                aria-label={`${action.label}课程 ${item.title}`}
-                                disabled={changing}
-                                onClick={() => onStatusChange(item, action.nextStatus)}
-                              >
-                                {changing ? <CircularProgress size={18} /> : courseStatusIcon(action.label)}
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        );
-                      })()}
+                      {canManage &&
+                        (() => {
+                          const action = getCourseStatusAction(item);
+                          const changing = statusChangingCourseIds.has(item.id);
+                          return (
+                            <Tooltip title={`${action.label}课程`} arrow>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color={
+                                    action.label === "归档"
+                                      ? "warning"
+                                      : "success"
+                                  }
+                                  aria-label={`${action.label}课程 ${item.title}`}
+                                  disabled={changing}
+                                  onClick={() =>
+                                    onStatusChange(item, action.nextStatus)
+                                  }
+                                >
+                                  {changing ? (
+                                    <CircularProgress size={18} />
+                                  ) : (
+                                    courseStatusIcon(action.label)
+                                  )}
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          );
+                        })()}
                     </Stack>
                   </TableCell>
                 </TableRow>
@@ -3914,10 +6783,16 @@ export const CourseWorkspace: React.FC<{
           page={coursePage}
           rowsPerPage={coursePageSize}
           onPageChange={(_, next) => setCoursePage(next)}
-          onRowsPerPageChange={(event) => { setCoursePageSize(Number(event.target.value)); setCoursePage(0); }}
+          onRowsPerPageChange={(event) => {
+            setCoursePageSize(Number(event.target.value));
+            setCoursePage(0);
+          }}
         />
       </Paper>
-      <CourseDetailDrawer open={Boolean(detailCourse)} onClose={() => setDetailCourse(null)}>
+      <CourseDetailDrawer
+        open={Boolean(detailCourse)}
+        onClose={() => setDetailCourse(null)}
+      >
         {detailCourse && (
           <CourseDetailWorkspace
             course={detailCourse}
@@ -4342,7 +7217,11 @@ const HandoffWorkspace: React.FC<{
   const salesStage = (item: AcademyEngagement) => {
     if (item.orderNo) return "DEAL";
     if (item.courseAssessment === "A") return "HOT";
-    if (item.invitationStatus === "DECLINED" || (item.invitationStatus === "CONFIRMED" && item.followUpStatus !== "DONE")) return "FOLLOW_UP";
+    if (
+      item.invitationStatus === "DECLINED" ||
+      (item.invitationStatus === "CONFIRMED" && item.followUpStatus !== "DONE")
+    )
+      return "FOLLOW_UP";
     if (item.invitationStatus === "CONFIRMED") return "CONFIRMED";
     if (item.invitationStatus === "INVITED") return "PENDING_CONFIRM";
     return "PENDING_INVITE";
@@ -4354,9 +7233,19 @@ const HandoffWorkspace: React.FC<{
     { key: "FOLLOW_UP", label: "待跟进", color: palette.amber },
     { key: "HOT", label: "重点客户", color: palette.red },
     { key: "DEAL", label: "已成交", color: palette.green },
-  ].map((definition) => ({ ...definition, count: items.filter((item) => salesStage(item) === definition.key).length }));
-  const stageMatches = (item: AcademyEngagement) => stage === "ALL" || salesStage(item) === stage;
-  const filtered = items.filter((item) => stageMatches(item) && `${item.participantName}${item.ownerUserName || ""}${item.orderNo || ""}`.toLowerCase().includes(search.toLowerCase()));
+  ].map((definition) => ({
+    ...definition,
+    count: items.filter((item) => salesStage(item) === definition.key).length,
+  }));
+  const stageMatches = (item: AcademyEngagement) =>
+    stage === "ALL" || salesStage(item) === stage;
+  const filtered = items.filter(
+    (item) =>
+      stageMatches(item) &&
+      `${item.participantName}${item.ownerUserName || ""}${item.orderNo || ""}`
+        .toLowerCase()
+        .includes(search.toLowerCase()),
+  );
   const paged = filtered.slice(page * pageSize, page * pageSize + pageSize);
   useEffect(() => setPage(0), [search, stage, selectedSessionId]);
   useEffect(() => {
@@ -4399,7 +7288,8 @@ const HandoffWorkspace: React.FC<{
           >
             {sessions.map((item) => (
               <MenuItem key={item.id} value={item.id}>
-                {item.title} · {new Date(item.startsAt).toLocaleDateString("zh-CN")}
+                {item.title} ·{" "}
+                {new Date(item.startsAt).toLocaleDateString("zh-CN")}
               </MenuItem>
             ))}
           </TextField>
@@ -4409,16 +7299,42 @@ const HandoffWorkspace: React.FC<{
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(3, 1fr)", xl: "repeat(6, 1fr)" },
+          gridTemplateColumns: {
+            xs: "repeat(2, 1fr)",
+            md: "repeat(3, 1fr)",
+            xl: "repeat(6, 1fr)",
+          },
           gap: 1.2,
         }}
       >
         {stageDefinitions.map((item) => (
-          <Paper component="button" type="button" key={item.key} variant="outlined" aria-pressed={stage === item.key} onClick={() => setStage((current) => current === item.key ? "ALL" : item.key)} sx={{ ...panelSx, p: 1.5, textAlign: "left", cursor: "pointer", borderColor: stage === item.key ? palette.blue : palette.line, bgcolor: stage === item.key ? palette.blueSoft : "#fff" }}>
+          <Paper
+            component="button"
+            type="button"
+            key={item.key}
+            variant="outlined"
+            aria-pressed={stage === item.key}
+            onClick={() =>
+              setStage((current) => (current === item.key ? "ALL" : item.key))
+            }
+            sx={{
+              ...panelSx,
+              p: 1.5,
+              textAlign: "left",
+              cursor: "pointer",
+              borderColor: stage === item.key ? palette.blue : palette.line,
+              bgcolor: stage === item.key ? palette.blueSoft : "#fff",
+            }}
+          >
             <Typography fontSize={12.5} color="text.secondary">
               {item.label}
             </Typography>
-            <Typography fontSize={26} fontWeight={950} color={item.color} sx={{ mt: 0.5 }}>
+            <Typography
+              fontSize={26}
+              fontWeight={950}
+              color={item.color}
+              sx={{ mt: 0.5 }}
+            >
               {item.count}
             </Typography>
           </Paper>
@@ -4426,8 +7342,33 @@ const HandoffWorkspace: React.FC<{
       </Box>
 
       <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
-        <Box sx={{ px: 1.5, py: 1.3, borderBottom: `1px solid ${palette.line}` }}>
-          <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} spacing={1}><SectionTitle title="客户推进表" helper="系统根据客户当前状态提示下一步；成交结果以正式订单为准。" /><TextField size="small" placeholder="搜索客户、负责人或订单号" value={search} onChange={(event) => setSearch(event.target.value)} InputProps={{ startAdornment: <SearchIcon sx={{ mr: 0.7, color: "#98A2B3", fontSize: 20 }} /> }} /></Stack>
+        <Box
+          sx={{ px: 1.5, py: 1.3, borderBottom: `1px solid ${palette.line}` }}
+        >
+          <Stack
+            direction={{ xs: "column", md: "row" }}
+            justifyContent="space-between"
+            alignItems={{ md: "center" }}
+            spacing={1}
+          >
+            <SectionTitle
+              title="客户推进表"
+              helper="系统根据客户当前状态提示下一步；成交结果以正式订单为准。"
+            />
+            <TextField
+              size="small"
+              placeholder="搜索客户、负责人或订单号"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <SearchIcon
+                    sx={{ mr: 0.7, color: "#98A2B3", fontSize: 20 }}
+                  />
+                ),
+              }}
+            />
+          </Stack>
         </Box>
         <TableContainer>
           <SystemDataTable tableId="academy-sales-customer-pipeline">
@@ -4447,9 +7388,22 @@ const HandoffWorkspace: React.FC<{
             <TableBody>
               {paged.map((item) => (
                 <TableRow key={item.id} hover>
-                  <TableCell sx={{ fontWeight: 800 }}>{item.participantName}</TableCell>
-                  <TableCell><Chip size="small" label={statusLabel[item.invitationStatus] || item.invitationStatus} /></TableCell>
-                  <TableCell>{statusLabel[item.attendanceStatus] || item.attendanceStatus}</TableCell>
+                  <TableCell sx={{ fontWeight: 800 }}>
+                    {item.participantName}
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      label={
+                        statusLabel[item.invitationStatus] ||
+                        item.invitationStatus
+                      }
+                    />
+                  </TableCell>
+                  <TableCell>
+                    {statusLabel[item.attendanceStatus] ||
+                      item.attendanceStatus}
+                  </TableCell>
                   <TableCell>
                     <Chip
                       size="small"
@@ -4471,33 +7425,80 @@ const HandoffWorkspace: React.FC<{
                     />
                   </TableCell>
                   <TableCell>{item.ownerUserName || "待分配"}</TableCell>
-                  <TableCell><Typography fontSize={12.5}>{item.notes || "暂无跟进记录"}</Typography><Typography fontSize={11.5} color="text.secondary">{item.notes ? `更新于 ${formatDate(item.updatedAt)}` : statusLabel[item.followUpStatus] || item.followUpStatus}</Typography></TableCell>
+                  <TableCell>
+                    <Typography fontSize={12.5}>
+                      {item.notes || "暂无跟进记录"}
+                    </Typography>
+                    <Typography fontSize={11.5} color="text.secondary">
+                      {item.notes
+                        ? `更新于 ${formatDate(item.updatedAt)}`
+                        : statusLabel[item.followUpStatus] ||
+                          item.followUpStatus}
+                    </Typography>
+                  </TableCell>
                   <TableCell>{formatDate(item.nextFollowUpAt)}</TableCell>
                   <TableCell>
                     {item.orderNo ? (
                       <Chip size="small" color="success" label={item.orderNo} />
                     ) : canManage ? (
-                      <Button size="small" disabled={!item.customerId} onClick={() => onLinkOrder(item)}>
+                      <Button
+                        size="small"
+                        disabled={!item.customerId}
+                        onClick={() => onLinkOrder(item)}
+                      >
                         关联订单
                       </Button>
                     ) : (
                       "待关联"
                     )}
                   </TableCell>
-                  <TableCell>{canManage && (item.orderNo ? <Chip size="small" color="success" label="已成交" /> : <Button size="small" variant={item.courseAssessment === "A" ? "contained" : "text"} onClick={() => onEdit(item)}>{nextAction(item)}</Button>)}</TableCell>
+                  <TableCell>
+                    {canManage &&
+                      (item.orderNo ? (
+                        <Chip size="small" color="success" label="已成交" />
+                      ) : (
+                        <Button
+                          size="small"
+                          variant={
+                            item.courseAssessment === "A" ? "contained" : "text"
+                          }
+                          onClick={() => onEdit(item)}
+                        >
+                          {nextAction(item)}
+                        </Button>
+                      ))}
+                  </TableCell>
                 </TableRow>
               ))}
               {!filtered.length && (
                 <TableRow>
                   <TableCell colSpan={9} align="center" sx={{ py: 7 }}>
-                    <Typography fontWeight={850}>当前条件下暂无客户</Typography><Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>{items.length ? "请调整推进阶段或搜索条件" : "点击右上角“添加邀约客户”建立本场客户名单"}</Typography>
+                    <Typography fontWeight={850}>当前条件下暂无客户</Typography>
+                    <Typography
+                      fontSize={12.5}
+                      color="text.secondary"
+                      sx={{ mt: 0.5 }}
+                    >
+                      {items.length
+                        ? "请调整推进阶段或搜索条件"
+                        : "点击右上角“添加邀约客户”建立本场客户名单"}
+                    </Typography>
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </SystemDataTable>
         </TableContainer>
-        <TablePagination count={filtered.length} page={page} rowsPerPage={pageSize} onPageChange={(_, next) => setPage(next)} onRowsPerPageChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} />
+        <TablePagination
+          count={filtered.length}
+          page={page}
+          rowsPerPage={pageSize}
+          onPageChange={(_, next) => setPage(next)}
+          onRowsPerPageChange={(event) => {
+            setPageSize(Number(event.target.value));
+            setPage(0);
+          }}
+        />
       </Paper>
     </>
   );
@@ -4517,14 +7518,33 @@ const LearnerConversionWorkspace: React.FC<{
   return (
     <Stack spacing={1.5}>
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
-        <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1}>
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          justifyContent="space-between"
+          alignItems={{ sm: "center" }}
+          spacing={1}
+        >
           <Box>
-          <Typography fontSize={18} fontWeight={950}>客户邀约与跟进</Typography>
-          <Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.4 }}>
-            选择本人有权查看的CRM客户，完成课程邀约、客户分层、持续跟进和正式订单关联。
-          </Typography>
+            <Typography fontSize={18} fontWeight={950}>
+              客户邀约与跟进
+            </Typography>
+            <Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.4 }}>
+              选择本人有权查看的CRM客户，完成课程邀约、客户分层、持续跟进和正式订单关联。
+            </Typography>
           </Box>
-          {props.canManage && <Button variant="contained" startIcon={<GroupsIcon />} disabled={!props.selectedSessionId || !props.canAddCustomer} title={props.canAddCustomer ? "" : "课程已开课或结束，仅可维护已有客户"} onClick={props.onAdd}>添加邀约客户</Button>}
+          {props.canManage && (
+            <Button
+              variant="contained"
+              startIcon={<GroupsIcon />}
+              disabled={!props.selectedSessionId || !props.canAddCustomer}
+              title={
+                props.canAddCustomer ? "" : "课程已开课或结束，仅可维护已有客户"
+              }
+              onClick={props.onAdd}
+            >
+              添加邀约客户
+            </Button>
+          )}
         </Stack>
       </Paper>
       <HandoffWorkspace

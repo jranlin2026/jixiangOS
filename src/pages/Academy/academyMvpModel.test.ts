@@ -87,7 +87,7 @@ assert.equal(
 assert.deepEqual(
   getMyAcademyTodos([detail], "user-me").map((item) => item.task.id),
   ["task-overdue", "task-later"],
-  "我的待办只返回当前员工未完成的任务，并按截止时间排序",
+  "待我处理只返回当前员工仍需操作的任务，已提交任务进入待验收，并按截止时间排序",
 );
 
 console.log("academy MVP model tests passed");

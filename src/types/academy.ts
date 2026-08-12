@@ -223,6 +223,7 @@ export interface AcademySessionTask {
 }
 
 export interface AcademyMyTask extends AcademySessionTask {
+  eventId?: string;
   session: Pick<AcademySession, "id" | "title" | "startsAt" | "endsAt" | "status">;
 }
 
