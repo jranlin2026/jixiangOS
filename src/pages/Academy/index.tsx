@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Autocomplete,
   Box,
   Button,
   Checkbox,
@@ -225,6 +224,8 @@ const statusLabel: Record<string, string> = {
   BLOCKED: "受阻",
   SKIPPED: "已跳过",
   CONFIRMED: "已确认",
+  INVITED: "已邀约",
+  REGISTERED: "已报名",
   DECLINED: "已拒绝",
   ATTENDED: "已到课",
   ABSENT: "未到课",
@@ -353,6 +354,7 @@ const Academy: React.FC = () => {
   const [customerResultTotal, setCustomerResultTotal] = useState(0);
   const [customerPage, setCustomerPage] = useState(0);
   const [customerPageSize, setCustomerPageSize] = useState(20);
+  const [customerLoadError, setCustomerLoadError] = useState("");
   const [courseAssets, setCourseAssets] = useState<Record<string, AcademyCourseAsset[]>>({});
   const [courseAssetsLoadingIds, setCourseAssetsLoadingIds] = useState<Set<string>>(new Set());
   const [courseAssetLoadErrors, setCourseAssetLoadErrors] = useState<Record<string, string>>({});
@@ -644,12 +646,24 @@ const Academy: React.FC = () => {
     if (!engagementOpen || engagementMode !== "sales" || !canEngagement) return;
     let active = true;
     setCustomerSearchLoading(true);
+    setCustomerLoadError("");
     const timer = window.setTimeout(() => {
       void customerApi.fetchCustomers({ page: customerPage + 1, pageSize: customerPageSize, search: customerSearch.trim() || undefined })
         .then((response) => {
           if (active && response.code === 0) {
             setCustomers(response.data.items);
             setCustomerResultTotal(response.data.pagination.total);
+          } else if (active) {
+            setCustomers([]);
+            setCustomerResultTotal(0);
+            setCustomerLoadError(response.message || "CRM客户加载失败，请重试");
+          }
+        })
+        .catch(() => {
+          if (active) {
+            setCustomers([]);
+            setCustomerResultTotal(0);
+            setCustomerLoadError("CRM客户加载失败，请重试");
           }
         })
         .finally(() => {
@@ -688,18 +702,26 @@ const Academy: React.FC = () => {
     page * pageSize,
     page * pageSize + pageSize,
   );
+  const engagementSessions = useMemo(
+    () => sessions.filter((item) => item.audience === "ALL_EMPLOYEES" && item.isInvitable && item.status !== "CANCELLED"),
+    [sessions],
+  );
   const invitableSessions = useMemo(
     () => sessions.filter((item) => item.audience === "ALL_EMPLOYEES" && item.isInvitable && ["PLANNED", "READY"].includes(item.status)),
     [sessions],
   );
   useEffect(() => {
     if (view !== "learners") return;
-    if (invitableSessions.some((item) => item.id === selectedSessionId)) return;
-    const nextId = invitableSessions[0]?.id || "";
+    if (engagementSessions.some((item) => item.id === selectedSessionId)) return;
+    const nextId = engagementSessions[0]?.id || "";
     setSelectedSessionId(nextId);
     if (nextId && !details[nextId]) void loadDetail(nextId);
-  }, [details, invitableSessions, loadDetail, selectedSessionId, view]);
+  }, [details, engagementSessions, loadDetail, selectedSessionId, view]);
   const selectedEngagements = selectedDetail?.engagements || [];
+  const existingInviteCustomerIds = useMemo(
+    () => new Set(selectedEngagements.map((item) => item.customerId).filter((id): id is string => Boolean(id))),
+    [selectedEngagements],
+  );
   const confirmed = selectedEngagements.filter(
     (item) => item.invitationStatus === "CONFIRMED",
   ).length;
@@ -1061,6 +1083,7 @@ const Academy: React.FC = () => {
       : engagementMode === "sales" && engagementEditingId
         ? await academyApi.quickFollowUp(engagementEditingId, {
             content: engagementForm.notes || "",
+            invitationStatus: engagementForm.invitationStatus,
             courseAssessment: engagementForm.courseAssessment,
             nextFollowUpAt: engagementForm.nextFollowUpAt,
           })
@@ -1078,7 +1101,6 @@ const Academy: React.FC = () => {
     const response = await academyApi.saveEngagementBatch({
       sessionId: selectedSessionId,
       customerIds: selectedInviteCustomers.map((customer) => customer.id),
-      invitationStatus: engagementForm.invitationStatus,
     });
     setSaving(false);
     if (response.code !== 0) return alert(response.message, "批量邀约失败");
@@ -1739,7 +1761,7 @@ const Academy: React.FC = () => {
         )}
         {view === "learners" && (
           <LearnerConversionWorkspace
-            sessions={invitableSessions}
+            sessions={engagementSessions}
             selectedSessionId={selectedSessionId}
             onSelectSession={(id) => {
               setSelectedSessionId(id);
@@ -1747,7 +1769,12 @@ const Academy: React.FC = () => {
             }}
             detail={selectedDetail}
             canManage={canEngagement}
+            canAddCustomer={invitableSessions.some((item) => item.id === selectedSessionId)}
             onAdd={() => {
+              if (!invitableSessions.some((item) => item.id === selectedSessionId)) {
+                void alert("当前课程已开课或结束，不能继续添加邀约客户，但仍可维护已有客户跟进。", "暂不能添加客户");
+                return;
+              }
               setEngagementMode("sales");
               setEngagementEditingId("");
               setEngagementForm({
@@ -2028,13 +2055,13 @@ const Academy: React.FC = () => {
         submitting={saving}
         markButtonClicksDirty={false}
         fullWidth
-        maxWidth="sm"
+        maxWidth={engagementMode === "sales" && !engagementEditingId ? "lg" : "sm"}
         resetKey={String(engagementOpen)}
       >
         {({ markDirty, requestClose }) => (
           <>
             <DialogCloseTitle onClose={() => void requestClose()}>
-              {engagementMode === "execution" ? "记录学员执行" : engagementEditingId ? "更新销售跟进" : "从 CRM 邀约客户"}
+              {engagementMode === "execution" ? "记录学员执行" : engagementEditingId ? "客户跟进" : "添加邀约客户"}
             </DialogCloseTitle>
             <DialogContent dividers>
               <Stack spacing={2}>
@@ -2089,37 +2116,21 @@ const Academy: React.FC = () => {
                   <>
                     {engagementEditingId ? (
                       <TextField label="CRM客户" value={engagementForm.participantName} disabled />
-                    ) : (
-                      <Autocomplete
-                        multiple
-                        options={customers}
-                        loading={customerSearchLoading}
-                        filterOptions={(options) => options}
-                        getOptionLabel={(customer) => `${customer.name} · ${customer.company || "未填写公司"} · ${customer.owner || "待分配"}`}
-                        isOptionEqualToValue={(option, value) => option.id === value.id}
-                        onInputChange={(_, value, reason) => {
-                          if (reason === "input" || reason === "clear") setCustomerSearch(value);
-                        }}
-                        value={selectedInviteCustomers}
-                        onChange={(_, selected) => {
-                          markDirty();
-                          setSelectedInviteCustomers(selected);
-                        }}
-                        renderInput={(params) => <TextField {...params} label="从我的客户添加 *" placeholder="搜索姓名、公司或手机号" helperText={`已选 ${selectedInviteCustomers.length} 人`} />}
-                        noOptionsText={customerSearch ? "未找到本人可见客户" : "请输入客户信息搜索"}
-                      />
-                    )}
-                    {!engagementEditingId && (
+                    ) : <Stack spacing={1.2}>
+                      <TextField size="small" label="搜索CRM客户" placeholder="输入客户姓名、公司或手机号" value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} InputProps={{ startAdornment: <SearchIcon sx={{ mr: 0.8, color: "#98A2B3" }} /> }} />
                       <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
                         <Button
                           size="small"
                           variant="outlined"
-                          disabled={!customers.length}
+                          disabled={!customers.length || customerSearchLoading}
                           onClick={() => {
                             markDirty();
                             setSelectedInviteCustomers((current) => {
                               const selectedById = new Map(current.map((customer) => [customer.id, customer]));
-                              customers.forEach((customer) => selectedById.set(customer.id, customer));
+                              customers
+                                .filter((customer) => !existingInviteCustomerIds.has(customer.id))
+                                .slice(0, Math.max(0, 100 - selectedById.size))
+                                .forEach((customer) => selectedById.set(customer.id, customer));
                               return Array.from(selectedById.values());
                             });
                           }}
@@ -2127,19 +2138,29 @@ const Academy: React.FC = () => {
                           全选当前页
                         </Button>
                         <Typography fontSize={12.5} color="text.secondary">
-                          共 {customerResultTotal} 位可见客户，跨页选择将保留
+                          已选 {selectedInviteCustomers.length}/100 位 · 共 {customerResultTotal} 位本人可见客户
                         </Typography>
                       </Stack>
-                    )}
-                    {!engagementEditingId && <Paper variant="outlined" sx={{ ...panelSx }}><TablePagination count={customerResultTotal} page={customerPage} rowsPerPage={customerPageSize} onPageChange={(_, next) => setCustomerPage(next)} onRowsPerPageChange={(event) => { setCustomerPageSize(Number(event.target.value)); setCustomerPage(0); }} /></Paper>}
-                    {!engagementEditingId ? (
-                      <TextField select label="初始邀约状态" value={engagementForm.invitationStatus} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, invitationStatus: event.target.value }); }}>
-                        <MenuItem value="PENDING">待邀约</MenuItem><MenuItem value="INVITED">已邀约</MenuItem><MenuItem value="CONFIRMED">已确认</MenuItem><MenuItem value="DECLINED">已拒绝</MenuItem>
-                      </TextField>
-                    ) : (
+                      <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
+                        <TableContainer sx={{ maxHeight: 390 }}><SystemDataTable tableId="academy-invite-customer-picker" sx={{ minWidth: 760 }}><TableHead><TableRow><TableCell padding="checkbox" /><TableCell>客户</TableCell><TableCell>公司</TableCell><TableCell>手机号</TableCell><TableCell>客户标签</TableCell><TableCell>销售负责人</TableCell><TableCell>状态</TableCell></TableRow></TableHead><TableBody>
+                          {customers.map((customer) => {
+                            const selected = selectedInviteCustomers.some((item) => item.id === customer.id);
+                            const alreadyAdded = existingInviteCustomerIds.has(customer.id);
+                            const selectionFull = !selected && selectedInviteCustomers.length >= 100;
+                            return <TableRow key={customer.id} hover={!alreadyAdded}><TableCell padding="checkbox"><Checkbox checked={selected || alreadyAdded} disabled={alreadyAdded || selectionFull} onChange={() => { markDirty(); setSelectedInviteCustomers((current) => selected ? current.filter((item) => item.id !== customer.id) : current.length < 100 ? [...current, customer] : current); }} inputProps={{ "aria-label": alreadyAdded ? `客户 ${customer.name} 已在名单` : `选择客户 ${customer.name}` }} /></TableCell><TableCell sx={{ fontWeight: 850 }}>{customer.name}</TableCell><TableCell>{customer.company || "未填写"}</TableCell><TableCell>{customer.phone || "未填写"}</TableCell><TableCell>{customer.tags?.slice(0, 2).join("、") || "暂无标签"}</TableCell><TableCell>{customer.owner || "待分配"}</TableCell><TableCell>{alreadyAdded ? <Chip size="small" label="已在名单" /> : "可添加"}</TableCell></TableRow>;
+                          })}
+                          {!customers.length && !customerSearchLoading && !customerLoadError && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}><Typography fontWeight={850}>未找到本人可见客户</Typography><Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>请调整姓名、公司或手机号搜索条件</Typography></TableCell></TableRow>}
+                          {customerSearchLoading && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}><CircularProgress size={24} /><Typography fontSize={12.5} color="text.secondary" sx={{ mt: 1 }}>正在加载CRM客户…</Typography></TableCell></TableRow>}
+                          {customerLoadError && !customerSearchLoading && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5, color: "error.main" }}>{customerLoadError}</TableCell></TableRow>}
+                        </TableBody></SystemDataTable></TableContainer>
+                        <TablePagination count={customerResultTotal} page={customerPage} rowsPerPage={customerPageSize} onPageChange={(_, next) => setCustomerPage(next)} onRowsPerPageChange={(event) => { setCustomerPageSize(Number(event.target.value)); setCustomerPage(0); }} />
+                      </Paper>
+                      <Typography fontSize={12} color="text.secondary">加入后统一进入“待邀约”，跨页选择会保留；单次最多添加100位，已有客户不会重复加入。</Typography>
+                    </Stack>}
+                    {engagementEditingId && (
                       <>
                         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
-                          <TextField select disabled label="邀约状态（只读）" value={engagementForm.invitationStatus}>
+                          <TextField select label="邀约状态" value={engagementForm.invitationStatus} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, invitationStatus: event.target.value }); }}>
                             <MenuItem value="PENDING">待邀约</MenuItem><MenuItem value="INVITED">已邀约</MenuItem><MenuItem value="CONFIRMED">已确认</MenuItem><MenuItem value="DECLINED">已拒绝</MenuItem>
                           </TextField>
                           <TextField select label="ABC分层" value={engagementForm.courseAssessment || ""} onChange={(event) => { markDirty(); setEngagementForm({ ...engagementForm, courseAssessment: event.target.value }); }}><MenuItem value="">待分层</MenuItem><MenuItem value="A">A类重点跟进</MenuItem><MenuItem value="B">B类建立计划</MenuItem><MenuItem value="C">C类持续培育</MenuItem></TextField>
@@ -3933,12 +3954,42 @@ const HandoffWorkspace: React.FC<{
   onEdit,
 }) => {
   const items = detail?.engagements || [];
-  const qualified = items.filter((item) =>
-    ["A", "B"].includes(item.courseAssessment || ""),
-  );
-  const hot = items.filter((item) => item.courseAssessment === "A");
-  const following = items.filter((item) => item.followUpStatus !== "DONE");
-  const done = items.filter((item) => item.followUpStatus === "DONE");
+  const [stage, setStage] = useState("ALL");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const salesStage = (item: AcademyEngagement) => {
+    if (item.orderNo) return "DEAL";
+    if (item.courseAssessment === "A") return "HOT";
+    if (item.invitationStatus === "DECLINED" || (item.invitationStatus === "CONFIRMED" && item.followUpStatus !== "DONE")) return "FOLLOW_UP";
+    if (item.invitationStatus === "CONFIRMED") return "CONFIRMED";
+    if (item.invitationStatus === "INVITED") return "PENDING_CONFIRM";
+    return "PENDING_INVITE";
+  };
+  const stageDefinitions = [
+    { key: "PENDING_INVITE", label: "待邀约", color: palette.blue },
+    { key: "PENDING_CONFIRM", label: "待确认", color: palette.amber },
+    { key: "CONFIRMED", label: "已确认", color: palette.green },
+    { key: "FOLLOW_UP", label: "待跟进", color: palette.amber },
+    { key: "HOT", label: "重点客户", color: palette.red },
+    { key: "DEAL", label: "已成交", color: palette.green },
+  ].map((definition) => ({ ...definition, count: items.filter((item) => salesStage(item) === definition.key).length }));
+  const stageMatches = (item: AcademyEngagement) => stage === "ALL" || salesStage(item) === stage;
+  const filtered = items.filter((item) => stageMatches(item) && `${item.participantName}${item.ownerUserName || ""}${item.orderNo || ""}`.toLowerCase().includes(search.toLowerCase()));
+  const paged = filtered.slice(page * pageSize, page * pageSize + pageSize);
+  useEffect(() => setPage(0), [search, stage, selectedSessionId]);
+  useEffect(() => {
+    const lastPage = Math.max(0, Math.ceil(filtered.length / pageSize) - 1);
+    if (page > lastPage) setPage(lastPage);
+  }, [filtered.length, page, pageSize]);
+  const nextAction = (item: AcademyEngagement) => {
+    if (item.orderNo) return "查看成交结果";
+    if (item.invitationStatus === "PENDING") return "发起邀约";
+    if (item.invitationStatus === "INVITED") return "记录邀约结果";
+    if (item.courseAssessment === "A") return "重点跟进";
+    if (item.invitationStatus === "CONFIRMED") return "跟进客户";
+    return "更新跟进";
+  };
 
   return (
     <>
@@ -3950,10 +4001,10 @@ const HandoffWorkspace: React.FC<{
         >
           <Box>
             <Typography fontWeight={900} fontSize={16}>
-              销售转化
+              选择课程安排
             </Typography>
             <Typography fontSize={12.5} color="text.secondary">
-              商学院只负责形成转化线索和交接入口，客户主档、订单和交付继续使用极享OS现有模块。
+              选择本次要邀约和跟进的课程，客户状态按该课程独立管理。
             </Typography>
           </Box>
           <Box flex={1} />
@@ -3977,22 +4028,17 @@ const HandoffWorkspace: React.FC<{
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
+          gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(3, 1fr)", xl: "repeat(6, 1fr)" },
           gap: 1.2,
         }}
       >
-        {[
-          { label: "待转化学员", value: qualified.length, color: palette.blue },
-          { label: "A类重点跟进", value: hot.length, color: palette.red },
-          { label: "跟进中", value: following.length, color: palette.amber },
-          { label: "已完成跟进", value: done.length, color: palette.green },
-        ].map((item) => (
-          <Paper key={item.label} variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+        {stageDefinitions.map((item) => (
+          <Paper component="button" type="button" key={item.key} variant="outlined" aria-pressed={stage === item.key} onClick={() => setStage((current) => current === item.key ? "ALL" : item.key)} sx={{ ...panelSx, p: 1.5, textAlign: "left", cursor: "pointer", borderColor: stage === item.key ? palette.blue : palette.line, bgcolor: stage === item.key ? palette.blueSoft : "#fff" }}>
             <Typography fontSize={12.5} color="text.secondary">
               {item.label}
             </Typography>
             <Typography fontSize={26} fontWeight={950} color={item.color} sx={{ mt: 0.5 }}>
-              {item.value}
+              {item.count}
             </Typography>
           </Paper>
         ))}
@@ -4000,41 +4046,29 @@ const HandoffWorkspace: React.FC<{
 
       <Paper variant="outlined" sx={{ ...panelSx, overflow: "hidden" }}>
         <Box sx={{ px: 1.5, py: 1.3, borderBottom: `1px solid ${palette.line}` }}>
-          <SectionTitle
-            title="课程转化清单"
-            helper="按课程分层推进销售跟进；正式成交结果以订单管理为准。"
-          />
+          <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} spacing={1}><SectionTitle title="客户推进表" helper="系统根据客户当前状态提示下一步；成交结果以正式订单为准。" /><TextField size="small" placeholder="搜索客户、负责人或订单号" value={search} onChange={(event) => setSearch(event.target.value)} InputProps={{ startAdornment: <SearchIcon sx={{ mr: 0.7, color: "#98A2B3", fontSize: 20 }} /> }} /></Stack>
         </Box>
         <TableContainer>
-          <SystemDataTable tableId="academy-conversion-handoff-list">
+          <SystemDataTable tableId="academy-sales-customer-pipeline">
             <TableHead>
               <TableRow>
-                <TableCell>学员</TableCell>
-                <TableCell>课程安排</TableCell>
-                <TableCell>CRM关联</TableCell>
-                <TableCell>课程分层</TableCell>
+                <TableCell>客户</TableCell>
+                <TableCell>邀约状态</TableCell>
+                <TableCell>课程结果</TableCell>
+                <TableCell>ABC分层</TableCell>
                 <TableCell>销售负责人</TableCell>
-                <TableCell>跟进状态</TableCell>
-                <TableCell>建议动作</TableCell>
+                <TableCell>最近跟进</TableCell>
+                <TableCell>下次跟进</TableCell>
                 <TableCell>正式订单</TableCell>
-                <TableCell>操作</TableCell>
+                <TableCell>下一步</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {items.map((item) => (
+              {paged.map((item) => (
                 <TableRow key={item.id} hover>
                   <TableCell sx={{ fontWeight: 800 }}>{item.participantName}</TableCell>
-                  <TableCell>{detail?.title || "-"}</TableCell>
-                  <TableCell>
-                    <Chip
-                      size="small"
-                      label={item.customerId ? "已关联客户" : "待关联客户"}
-                      sx={{
-                        bgcolor: item.customerId ? palette.greenSoft : palette.amberSoft,
-                        color: item.customerId ? palette.green : palette.amber,
-                      }}
-                    />
-                  </TableCell>
+                  <TableCell><Chip size="small" label={statusLabel[item.invitationStatus] || item.invitationStatus} /></TableCell>
+                  <TableCell>{statusLabel[item.attendanceStatus] || item.attendanceStatus}</TableCell>
                   <TableCell>
                     <Chip
                       size="small"
@@ -4056,14 +4090,8 @@ const HandoffWorkspace: React.FC<{
                     />
                   </TableCell>
                   <TableCell>{item.ownerUserName || "待分配"}</TableCell>
-                  <TableCell>{statusLabel[item.followUpStatus] || item.followUpStatus}</TableCell>
-                  <TableCell>
-                    {item.courseAssessment === "A"
-                      ? "24小时内重点跟进"
-                      : item.courseAssessment === "B"
-                        ? "建立销售跟进计划"
-                        : "进入长期培育"}
-                  </TableCell>
+                  <TableCell><Typography fontSize={12.5}>{item.notes || "暂无跟进记录"}</Typography><Typography fontSize={11.5} color="text.secondary">{item.notes ? `更新于 ${formatDate(item.updatedAt)}` : statusLabel[item.followUpStatus] || item.followUpStatus}</Typography></TableCell>
+                  <TableCell>{formatDate(item.nextFollowUpAt)}</TableCell>
                   <TableCell>
                     {item.orderNo ? (
                       <Chip size="small" color="success" label={item.orderNo} />
@@ -4075,19 +4103,20 @@ const HandoffWorkspace: React.FC<{
                       "待关联"
                     )}
                   </TableCell>
-                  <TableCell>{canManage && <Button size="small" onClick={() => onEdit(item)}>更新跟进</Button>}</TableCell>
+                  <TableCell>{canManage && (item.orderNo ? <Chip size="small" color="success" label="已成交" /> : <Button size="small" variant={item.courseAssessment === "A" ? "contained" : "text"} onClick={() => onEdit(item)}>{nextAction(item)}</Button>)}</TableCell>
                 </TableRow>
               ))}
-              {!items.length && (
+              {!filtered.length && (
                 <TableRow>
                   <TableCell colSpan={9} align="center" sx={{ py: 7 }}>
-                    当前课程安排暂无学员转化数据
+                    <Typography fontWeight={850}>当前条件下暂无客户</Typography><Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>{items.length ? "请调整推进阶段或搜索条件" : "点击右上角“添加邀约客户”建立本场客户名单"}</Typography>
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </SystemDataTable>
         </TableContainer>
+        <TablePagination count={filtered.length} page={page} rowsPerPage={pageSize} onPageChange={(_, next) => setPage(next)} onRowsPerPageChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} />
       </Paper>
     </>
   );
@@ -4099,6 +4128,7 @@ const LearnerConversionWorkspace: React.FC<{
   onSelectSession: (id: string) => void;
   detail?: AcademySessionDetail;
   canManage: boolean;
+  canAddCustomer: boolean;
   onAdd: () => void;
   onLinkOrder: (engagement: AcademyEngagement) => void;
   onEdit: (engagement: AcademyEngagement) => void;
@@ -4108,12 +4138,12 @@ const LearnerConversionWorkspace: React.FC<{
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
         <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1}>
           <Box>
-          <Typography fontSize={16} fontWeight={950}>邀约跟进</Typography>
+          <Typography fontSize={18} fontWeight={950}>客户邀约与跟进</Typography>
           <Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.4 }}>
-            销售只从本人有权查看的 CRM 客户中邀约，统一维护跟进计划和正式订单关联。
+            选择本人有权查看的CRM客户，完成课程邀约、客户分层、持续跟进和正式订单关联。
           </Typography>
           </Box>
-          {props.canManage && <Button variant="contained" startIcon={<GroupsIcon />} disabled={!props.selectedSessionId} onClick={props.onAdd}>从 CRM 邀约客户</Button>}
+          {props.canManage && <Button variant="contained" startIcon={<GroupsIcon />} disabled={!props.selectedSessionId || !props.canAddCustomer} title={props.canAddCustomer ? "" : "课程已开课或结束，仅可维护已有客户"} onClick={props.onAdd}>添加邀约客户</Button>}
         </Stack>
       </Paper>
       <HandoffWorkspace

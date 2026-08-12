@@ -20,6 +20,8 @@ import {
   Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import CloseIcon from "@mui/icons-material/Close";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import EventAvailableOutlinedIcon from "@mui/icons-material/EventAvailableOutlined";
@@ -80,6 +82,9 @@ const panelSx = {
 
 const formatTime = (value: string) =>
   new Date(value).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+
+const shortDate = (date: Date) =>
+  `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 
 const formatDateTime = (value?: string) =>
   value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "-";
@@ -154,6 +159,7 @@ export const Plans: React.FC<PlansProps> = ({
   onSaveReview,
   saving,
 }) => {
+  const [weekOffset, setWeekOffset] = useState(0);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [status, setStatus] = useState("ALL");
@@ -164,6 +170,32 @@ export const Plans: React.FC<PlansProps> = ({
   const [customerSearch, setCustomerSearch] = useState("");
   const [editingReview, setEditingReview] = useState(false);
   const [reviewDraft, setReviewDraft] = useState<SaveAcademyReviewInput | null>(null);
+
+  const { monday, sunday, weekSessions, weekDays } = useMemo(() => {
+    const mondayDate = new Date();
+    const weekday = mondayDate.getDay() || 7;
+    mondayDate.setDate(mondayDate.getDate() - weekday + 1 + weekOffset * 7);
+    mondayDate.setHours(0, 0, 0, 0);
+    const nextMonday = new Date(mondayDate);
+    nextMonday.setDate(mondayDate.getDate() + 7);
+    const sundayDate = new Date(mondayDate);
+    sundayDate.setDate(mondayDate.getDate() + 6);
+    return {
+      monday: mondayDate,
+      sunday: sundayDate,
+      weekSessions: sessions
+        .filter((item) => {
+          const startsAt = new Date(item.startsAt);
+          return startsAt >= mondayDate && startsAt < nextMonday;
+        })
+        .sort((left, right) => +new Date(left.startsAt) - +new Date(right.startsAt)),
+      weekDays: Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(mondayDate);
+        date.setDate(mondayDate.getDate() + index);
+        return date;
+      }),
+    };
+  }, [sessions, weekOffset]);
 
   useEffect(() => setPage(0), [search, status]);
   const filtered = sessions.filter((item) => {
@@ -238,6 +270,30 @@ export const Plans: React.FC<PlansProps> = ({
         </Box>
         {canCreate && <Button variant="contained" startIcon={<AddIcon />} onClick={() => onCreate()}>新建课程安排</Button>}
       </Stack>
+
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5, overflow: "hidden" }}>
+        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} spacing={1}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+            <Typography fontSize={16} fontWeight={950}>本周课程安排</Typography>
+            <Typography fontSize={12.5} color="text.secondary">{shortDate(monday)} ～ {shortDate(sunday)}</Typography>
+            <IconButton size="small" aria-label="上一周" onClick={() => setWeekOffset((value) => value - 1)} sx={{ border: `1px solid ${colors.line}`, borderRadius: 1 }}><ChevronLeftIcon fontSize="small" /></IconButton>
+            <Button size="small" variant="outlined" onClick={() => setWeekOffset(0)}>本周</Button>
+            <IconButton size="small" aria-label="下一周" onClick={() => setWeekOffset((value) => value + 1)} sx={{ border: `1px solid ${colors.line}`, borderRadius: 1 }}><ChevronRightIcon fontSize="small" /></IconButton>
+          </Stack>
+          <Typography fontSize={12.5} color="text.secondary">本周共 {weekSessions.length} 场</Typography>
+        </Stack>
+        <Box sx={{ mt: 1.3, overflowX: "auto" }}>
+          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(150px, 1fr))", minWidth: 1050, border: `1px solid ${colors.line}`, borderRadius: 1.2, overflow: "hidden" }}>
+            {weekDays.map((date, index) => {
+              const items = weekSessions.filter((item) => new Date(item.startsAt).toDateString() === date.toDateString());
+              return <Box key={date.toISOString()} sx={{ minHeight: 190, p: 1.1, bgcolor: items.length ? "#F4F8FF" : "#fff", borderRight: index < 6 ? `1px solid ${colors.line}` : 0 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center"><Stack direction="row" spacing={0.7}><Typography fontWeight={900} fontSize={13}>周{"一二三四五六日"[index]}</Typography><Typography fontSize={12} color="text.secondary">{String(date.getMonth() + 1).padStart(2, "0")}-{String(date.getDate()).padStart(2, "0")}</Typography></Stack>{canCreate && <IconButton size="small" aria-label="当天新增课程安排" onClick={() => onCreate(date)}><AddIcon fontSize="small" /></IconButton>}</Stack>
+                {items.length ? <Stack spacing={0.8} sx={{ mt: 1 }}>{items.map((item) => <Box key={item.id} role={item.canOpenDetail === false ? undefined : "button"} tabIndex={item.canOpenDetail === false ? undefined : 0} aria-label={item.canOpenDetail === false ? undefined : `查看课程安排 ${item.title}`} onClick={item.canOpenDetail === false ? undefined : () => openDetail(item)} onKeyDown={item.canOpenDetail === false ? undefined : (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDetail(item); } }} sx={{ p: 1, borderRadius: 1, bgcolor: "#fff", border: "1px solid #C9DBFF", cursor: item.canOpenDetail === false ? "default" : "pointer", "&:focus-visible": { outline: `2px solid ${colors.blue}` } }}><Typography fontSize={12.5} fontWeight={900} noWrap>{item.title}</Typography><Typography fontSize={11.5} color="text.secondary">{formatTime(item.startsAt)} · {deliveryModeLabel[item.deliveryMode] || item.deliveryMode}</Typography><Chip size="small" label={statusLabel[item.status] || item.status} sx={{ mt: 0.7 }} /></Box>)}</Stack> : <Typography fontSize={12} color="text.secondary" textAlign="center" sx={{ mt: 7 }}>暂无安排</Typography>}
+              </Box>;
+            })}
+          </Box>
+        </Box>
+      </Paper>
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 1.2 }}>
         {[

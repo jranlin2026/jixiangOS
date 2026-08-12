@@ -259,7 +259,7 @@ const businessAttachments = new Map<string, any>([
 ]);
 const service = createAcademyService(repository, {
   now: () => new Date("2026-08-08T09:00:00.000Z"),
-  resolveCustomer: async (id) => id === "cust-100" ? {
+  resolveCustomer: async (id) => ["cust-100", "cust-batch"].includes(id) ? {
     id,
     name: "CRM测试客户",
     ownerUserId: actor.id,
@@ -754,24 +754,42 @@ assert.equal(engagement.data?.attendanceStatus, "UNKNOWN", "销售邀约不能�
 assert.equal(engagement.data?.courseAssessment, null, "销售邀约不能直接写入课程评估");
 assert.equal(engagement.data?.participantName, "CRM测试客户", "学员名称必须来自服务端可信 CRM 数据");
 
+const duplicateSingleInvite = await service.saveEngagement({
+  sessionId: sessionResult.data!.id,
+  customerId: "cust-100",
+  invitationStatus: "PENDING",
+}, actor);
+assert.equal(duplicateSingleInvite.code, 409, "单条邀约接口也不得覆盖已有客户状态");
+assert.equal((await repository.findEngagementById(engagement.data!.id))?.invitationStatus, "CONFIRMED");
+
 const batchEngagements = await (service as any).saveEngagementBatch({
   sessionId: sessionResult.data!.id,
-  customerIds: ["cust-100", "cust-hidden", "cust-100"],
-  invitationStatus: "INVITED",
+  customerIds: ["cust-batch", "cust-hidden", "cust-batch"],
 }, actor);
 assert.equal(batchEngagements.code, 0);
 assert.equal(batchEngagements.data?.created.length, 1, "批量邀约应去重后创建当前销售可见客户");
+assert.equal(batchEngagements.data?.created[0]?.invitationStatus, "PENDING", "新加入名单的客户必须统一进入待邀约");
 assert.deepEqual(batchEngagements.data?.rejected, [{ customerId: "cust-hidden", message: "客户不存在或无权访问" }]);
+
+const duplicateBatch = await (service as any).saveEngagementBatch({
+  sessionId: sessionResult.data!.id,
+  customerIds: ["cust-100"],
+}, actor);
+assert.equal(duplicateBatch.data?.created.length, 0, "已有客户不得重复加入名单");
+assert.equal(duplicateBatch.data?.rejected[0]?.message, "客户已在本课程名单");
+assert.equal((await repository.findEngagementById(engagement.data!.id))?.invitationStatus, "CONFIRMED", "重复批量邀约不得重置已有邀约状态");
 
 const quickFollowUp = await (service as any).quickFollowUp(engagement.data!.id, {
   content: "客户对AI企业升级计划感兴趣",
+  invitationStatus: "INVITED",
   courseAssessment: "A",
   nextFollowUpAt: "2026-08-09T09:00:00.000Z",
 }, actor);
 assert.equal(quickFollowUp.code, 0);
 assert.equal(quickFollowUp.data?.courseAssessment, "A");
+assert.equal(quickFollowUp.data?.invitationStatus, "INVITED");
 assert.equal(quickFollowUp.data?.followUpStatus, "IN_PROGRESS");
-assert.match(quickFollowUp.data?.notes || "", /最新跟进已同步CRM/);
+assert.equal(quickFollowUp.data?.notes, "客户对AI企业升级计划感兴趣", "学院端应展示已同步CRM的最近跟进摘要");
 
 const failingCrmService = createAcademyService(repository, {
   now: () => new Date("2026-08-08T09:00:00.000Z"),
@@ -846,21 +864,11 @@ assert.equal(
 
 assert.equal((await service.changeSessionStatus(sessionResult.data!.id, "IN_PROGRESS", actor)).code, 0);
 
-const editedAfterHandoff = await service.saveEngagement(
-  {
-    sessionId: sessionResult.data!.id,
-    participantKey: "customer:cust-100",
-    customerId: "cust-100",
-    participantName: "测试客户",
-    invitationStatus: "CONFIRMED",
-    attendanceStatus: "ATTENDED",
-    interactionLevel: "HIGH",
-    courseAssessment: "A",
-    followUpStatus: "DONE",
-    notes: "完成二次回访",
-  },
-  actor,
-);
+const editedAfterHandoff = await (service as any).quickFollowUp(engagement.data!.id, {
+  content: "完成二次回访",
+  invitationStatus: "CONFIRMED",
+  courseAssessment: "A",
+}, actor);
 assert.equal(editedAfterHandoff.data?.orderId, "order-100");
 assert.equal(editedAfterHandoff.data?.handoffStatus, "ORDER_LINKED");
 assert.equal(editedAfterHandoff.code, 0, "课程开始后已有学员仍可继续维护销售跟进");
@@ -920,7 +928,7 @@ assert.equal(listedAssets.data?.length, 1);
 const detail = await service.getSessionDetail(sessionResult.data!.id, actor);
 assert.equal(detail.code, 0);
 assert.equal(detail.data?.tasks.length, 9);
-assert.equal(detail.data?.engagements.length, 1);
+assert.equal(detail.data?.engagements.length, 2);
 
 const viewer = {
   ...actor,
@@ -983,7 +991,7 @@ assert.equal(operatorDetail.data?.engagements[0]?.orderId, null, "课程运营�
 const dashboard = await service.getDashboard(actor);
 assert.equal(dashboard.code, 0);
 assert.equal(dashboard.data?.sessionsNeedingAttention, 0);
-assert.equal(dashboard.data?.pendingFollowUps, 2, "已关联订单不再计入待跟进，两条未成交首次邀约记录应保留待跟进");
+assert.equal(dashboard.data?.pendingFollowUps, 3, "已关联订单不再计入待跟进，三条未成交邀约记录应保留待跟进");
 
 const publicCalendar = await (service as any).listPublicCalendar({
   start: "2026-08-01T00:00:00.000Z",

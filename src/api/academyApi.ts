@@ -102,10 +102,10 @@ export const academyApi = {
   saveEngagement(input: SaveAcademyEngagementInput): Promise<ApiResponse<AcademyEngagement>> {
     return backendRequest('/academy/engagements', { method: 'PUT', body: JSON.stringify(input) });
   },
-  saveEngagementBatch(input: { sessionId: string; customerIds: string[]; invitationStatus?: string }): Promise<ApiResponse<{ created: AcademyEngagement[]; rejected: Array<{ customerId: string; message: string }> }>> {
+  saveEngagementBatch(input: { sessionId: string; customerIds: string[] }): Promise<ApiResponse<{ created: AcademyEngagement[]; rejected: Array<{ customerId: string; message: string }> }>> {
     return backendRequest('/academy/engagements/batch', { method: 'PUT', body: JSON.stringify(input) });
   },
-  quickFollowUp(id: string, input: { content: string; courseAssessment?: string; nextFollowUpAt?: string }): Promise<ApiResponse<AcademyEngagement>> {
+  quickFollowUp(id: string, input: { content: string; invitationStatus?: string; courseAssessment?: string; nextFollowUpAt?: string }): Promise<ApiResponse<AcademyEngagement>> {
     return backendRequest(`/academy/engagements/${encodeURIComponent(id)}/follow-up`, { method: 'POST', body: JSON.stringify(input) });
   },
   updateEngagementExecution(id: string, input: { attendanceStatus: string; interactionLevel?: string; courseAssessment?: string }): Promise<ApiResponse<AcademyEngagement>> {

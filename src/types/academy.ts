@@ -171,6 +171,7 @@ export interface AcademyEngagement {
   handedOffByName?: string;
   notes?: string;
   ownerUserName?: string;
+  updatedAt: string;
 }
 
 export interface AcademySessionReview {
@@ -248,6 +249,7 @@ export type SaveAcademyEngagementInput = Omit<
   | "handoffStatus"
   | "handedOffAt"
   | "handedOffByName"
+  | "updatedAt"
 >;
 export interface SaveAcademyCourseAssetInput {
   assetType: AcademyAssetType;

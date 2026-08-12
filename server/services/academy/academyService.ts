@@ -1248,6 +1248,7 @@ export function createAcademyService(
       if (!FOLLOW_UP_STATUSES.has(followUpStatus)) return invalid("请选择有效的跟进状态");
       const timestamp = now();
       const existing = await repository.findEngagementByKey(sessionId, participantKey);
+      if (existing) return invalid("客户已在本课程名单，请通过跟进功能更新状态", 409);
       if (!existing && (!["PLANNED", "READY"].includes(session.status) || session.audience !== "ALL_EMPLOYEES" || !session.isInvitable))
         return invalid("当前课程安排不接受新增邀约", 409);
       return success(
@@ -1259,21 +1260,21 @@ export function createAcademyService(
           leadId: leadId || null,
           participantName: participant.name,
           invitationStatus,
-          attendanceStatus: existing?.attendanceStatus || "UNKNOWN",
-          interactionLevel: existing?.interactionLevel || null,
-          courseAssessment: existing?.courseAssessment || null,
+          attendanceStatus: "UNKNOWN",
+          interactionLevel: null,
+          courseAssessment: null,
           followUpStatus,
           nextFollowUpAt,
-          orderId: existing?.orderId || null,
-          orderNo: existing?.orderNo || null,
-          handoffStatus: existing?.handoffStatus || "PENDING",
-          handedOffAt: existing?.handedOffAt || null,
-          handedOffById: existing?.handedOffById || null,
-          handedOffByName: existing?.handedOffByName || null,
+          orderId: null,
+          orderNo: null,
+          handoffStatus: "PENDING",
+          handedOffAt: null,
+          handedOffById: null,
+          handedOffByName: null,
           notes: raw.notes ? String(raw.notes) : null,
           ownerUserId: participant.ownerUserId || actor.id,
           ownerUserName: participant.ownerUserName || actor.name,
-          createdAt: existing?.createdAt || timestamp,
+          createdAt: timestamp,
           updatedAt: timestamp,
         }),
       );
@@ -1288,10 +1289,15 @@ export function createAcademyService(
       const created: AcademyEngagementRecord[] = [];
       const rejected: Array<{ customerId: string; message: string }> = [];
       for (const customerId of customerIds) {
+        const existing = await repository.findEngagementByKey(sessionId, `customer:${customerId}`);
+        if (existing) {
+          rejected.push({ customerId, message: "客户已在本课程名单" });
+          continue;
+        }
         const result = await this.saveEngagement({
           sessionId,
           customerId,
-          invitationStatus: String(raw.invitationStatus || "INVITED"),
+          invitationStatus: "PENDING",
         }, actor);
         if (result.code === 0 && result.data) created.push(result.data);
         else rejected.push({ customerId, message: result.message });
@@ -1314,6 +1320,8 @@ export function createAcademyService(
       if (nextFollowUpAt && Number.isNaN(nextFollowUpAt.getTime())) return invalid("下次跟进时间格式无效");
       const courseAssessment = String(raw.courseAssessment || current.courseAssessment || "").trim() || null;
       if (courseAssessment && !new Set(["A", "B", "C"]).has(courseAssessment)) return invalid("请选择有效的客户分层");
+      const invitationStatus = String(raw.invitationStatus || current.invitationStatus || "PENDING").trim();
+      if (!INVITATION_STATUSES.has(invitationStatus)) return invalid("请选择有效的邀约状态");
       const crmResult = await deps.addCustomerFollowUp(current.customerId, {
         content: `商学院｜${content}`,
         type: "跟进记录",
@@ -1321,10 +1329,11 @@ export function createAcademyService(
       if (crmResult.code !== 0) return failure<never>(crmResult.message, crmResult.code);
       return success(await repository.upsertEngagement({
         ...current,
+        invitationStatus,
         courseAssessment,
         nextFollowUpAt,
         followUpStatus: "IN_PROGRESS",
-        notes: "最新跟进已同步CRM",
+        notes: content,
         updatedAt: now(),
       }));
     },
