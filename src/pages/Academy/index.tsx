@@ -491,7 +491,8 @@ const Academy: React.FC = () => {
     calendarStart.setDate(calendarStart.getDate() - calendarWeekday + 1);
     calendarStart.setHours(0, 0, 0, 0);
     const calendarEnd = new Date(calendarStart);
-    calendarEnd.setDate(calendarStart.getDate() + 7);
+    calendarStart.setDate(calendarStart.getDate() - 42);
+    calendarEnd.setDate(calendarEnd.getDate() + 42);
     const [publicCalendarResponse, myTaskResponse] = await Promise.all([
       academyApi.getPublicCalendar({ start: calendarStart.toISOString(), end: calendarEnd.toISOString() }),
       academyApi.listMyTasks({ page: myTaskPage + 1, pageSize: myTaskPageSize, status: "OPEN" }),
@@ -805,6 +806,9 @@ const Academy: React.FC = () => {
       setSessions((current) => current.map((item) => (
         item.id === session.id ? { ...item, ...response.data } : item
       )));
+      setPublicCalendar((current) => current.map((item) => (
+        item.id === session.id ? { ...item, status: response.data.status } : item
+      )));
       await loadDetail(session.id);
     } finally {
       setSaving(false);
@@ -931,6 +935,17 @@ const Academy: React.FC = () => {
       const nextTask = { ...task, ...response.data, session: task.session };
       setWorkbenchTask(nextTask);
       setMyTasks((current) => current.map((item) => item.id === task.id ? nextTask : item));
+      setPublicCalendar((current) => current.map((session) => {
+        if (session.id !== task.session.id) return session;
+        const sessionTasks = session.tasks.map((item) => item.taskId === task.id ? { ...item, status: response.data.status } : item);
+        const done = sessionTasks.filter((item) => ["DONE", "SKIPPED"].includes(item.status)).length;
+        return {
+          ...session,
+          tasks: sessionTasks,
+          currentStep: sessionTasks.find((item) => !["DONE", "SKIPPED"].includes(item.status)),
+          progress: { done, total: sessionTasks.length, percent: sessionTasks.length ? Math.round(done / sessionTasks.length * 100) : 0 },
+        };
+      }));
       setWorkbenchTaskNote("");
     } catch {
       await alert("请检查网络连接后重试。", "任务更新失败");
@@ -1701,6 +1716,8 @@ const Academy: React.FC = () => {
           <Overview
             dashboard={dashboard}
             sessions={publicCalendar}
+            managedSessions={sessions}
+            canManageSessions={canSession}
             tasks={myTasks}
             taskTotal={myTaskTotal}
             taskPage={myTaskPage}
@@ -1712,6 +1729,7 @@ const Academy: React.FC = () => {
               setWorkbenchTaskNote("");
               void loadTaskEvidence(task.id);
             }}
+            onChangeSessionStatus={(session, status) => void changeSessionStatus(session, status)}
           />
         )}
         {view === "plans" && (
@@ -2331,6 +2349,8 @@ const Academy: React.FC = () => {
 const Overview: React.FC<{
   dashboard: AcademyDashboard;
   sessions: AcademyPublicCalendarItem[];
+  managedSessions: AcademySession[];
+  canManageSessions: boolean;
   tasks: AcademyMyTask[];
   taskTotal: number;
   taskPage: number;
@@ -2338,7 +2358,9 @@ const Overview: React.FC<{
   onTaskPageChange: (page: number) => void;
   onTaskPageSizeChange: (pageSize: number) => void;
   onOpenTask: (task: AcademyMyTask) => void;
-}> = ({ sessions, tasks, taskTotal, taskPage, taskPageSize, onTaskPageChange, onTaskPageSizeChange, onOpenTask }) => {
+  onChangeSessionStatus: (session: AcademySession, status: AcademySession["status"]) => void;
+}> = ({ sessions, managedSessions, canManageSessions, tasks, taskTotal, taskPage, taskPageSize, onTaskPageChange, onTaskPageSizeChange, onOpenTask, onChangeSessionStatus }) => {
+  const [selectedCourseId, setSelectedCourseId] = useState("");
   const monday = new Date();
   const weekday = monday.getDay() || 7;
   monday.setDate(monday.getDate() - weekday + 1);
@@ -2353,6 +2375,42 @@ const Overview: React.FC<{
     return { date, sessions: daySessions };
   });
   const todoTasks = tasks;
+  const activeCourses = sessions.filter((session) => session.status !== "COMPLETED" && session.status !== "CANCELLED");
+  useEffect(() => {
+    if (activeCourses.some((session) => session.id === selectedCourseId)) return;
+    setSelectedCourseId(activeCourses.find((session) => session.status === "IN_PROGRESS")?.id || activeCourses[0]?.id || "");
+  }, [activeCourses, selectedCourseId]);
+  const selectedCourse = activeCourses.find((session) => session.id === selectedCourseId) || null;
+  const selectedManagedCourse = managedSessions.find((session) => session.id === selectedCourseId) || null;
+  const statusAction = selectedManagedCourse && canManageSessions
+    ? selectedManagedCourse.status === "PLANNED"
+      ? { label: "确认待开课", status: "READY" as const }
+      : selectedManagedCourse.status === "READY"
+        ? { label: "开始课程", status: "IN_PROGRESS" as const }
+        : selectedManagedCourse.status === "IN_PROGRESS"
+          ? { label: "确认课程完成", status: "COMPLETED" as const }
+          : null
+    : null;
+  const openMyStep = (taskId?: string) => {
+    if (!taskId) return;
+    const loadedTask = tasks.find((item) => item.id === taskId);
+    if (loadedTask) return onOpenTask(loadedTask);
+    const task = selectedCourse?.tasks.find((item) => item.taskId === taskId);
+    if (!task || !selectedCourse) return;
+    onOpenTask({
+      id: taskId,
+      sessionId: selectedCourse.id,
+      templateKey: task.templateKey || "",
+      title: task.title,
+      category: "BEFORE",
+      isRequired: true,
+      status: task.status,
+      assigneeUserName: task.assigneeUserName,
+      dueAt: task.dueAt,
+      acceptanceCriteria: task.acceptanceCriteria,
+      session: { id: selectedCourse.id, title: selectedCourse.title, startsAt: selectedCourse.startsAt, endsAt: selectedCourse.endsAt, status: selectedCourse.status },
+    });
+  };
   return (
     <>
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
@@ -2413,8 +2471,16 @@ const Overview: React.FC<{
                 >{`${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`}</Typography>
               </Stack>
               {daySessions.length ? (
-                daySessions.map((session) => (
-                  <Stack key={session.id} spacing={0.55} sx={{ mt: 1.2 }}>
+                daySessions.map((session) => session.status === "COMPLETED" ? (
+                  <Stack key={session.id} spacing={0.55} sx={{ mt: 1.2, p: 1, width: "100%", textAlign: "left", border: `1px solid ${palette.line}`, borderRadius: 1, bgcolor: "#fff" }}>
+                    <Typography color={palette.green} fontWeight={900} fontSize={13}>• 已完结</Typography>
+                    <Typography fontSize={13}>{new Date(session.startsAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}–{new Date(session.endsAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</Typography>
+                    <Typography fontWeight={900} fontSize={13.5}>{session.title}</Typography>
+                    <Typography fontSize={12.5} color="text.secondary">主讲人：{session.lecturerUserName || "待确定"}</Typography>
+                    <Chip size="small" label="已完结" sx={{ alignSelf: "flex-start", height: 22, bgcolor: palette.greenSoft, color: palette.green, fontWeight: 800 }} />
+                  </Stack>
+                ) : (
+                  <Stack component="button" type="button" key={session.id} aria-pressed={selectedCourseId === session.id} aria-label={`查看课程进度 ${session.title}`} spacing={0.55} onClick={() => setSelectedCourseId(session.id)} sx={{ mt: 1.2, p: 1, width: "100%", textAlign: "left", border: `1px solid ${selectedCourseId === session.id ? palette.blue : palette.line}`, borderRadius: 1, bgcolor: selectedCourseId === session.id ? palette.blueSoft : "#fff", cursor: "pointer", "&:focus-visible": { outline: `2px solid ${palette.blue}` } }}>
                     <Typography
                       color={palette.blue}
                       fontWeight={900}
@@ -2452,6 +2518,7 @@ const Overview: React.FC<{
                         fontWeight: 800,
                       }}
                     />
+                    <Typography fontSize={11.5} color="text.secondary">进度 {session.progress.done}/{session.progress.total} · {session.progress.percent}%</Typography>
                   </Stack>
                 ))
               ) : (
@@ -2466,6 +2533,40 @@ const Overview: React.FC<{
             </Box>
           ))}
         </Box>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ ...panelSx, p: { xs: 1.4, md: 1.8 } }}>
+        <SectionTitle
+          title="课程执行接力"
+          helper={selectedCourse ? `${selectedCourse.title} · 已完成 ${selectedCourse.progress.done}/${selectedCourse.progress.total}` : "选择未完结课程，查看现在做到哪一步"}
+          action={activeCourses.length ? <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}><TextField select size="small" label="查看未完结课程" value={selectedCourseId} onChange={(event) => setSelectedCourseId(event.target.value)} sx={{ minWidth: 240 }}>{activeCourses.map((session) => <MenuItem key={session.id} value={session.id}>{session.title} · {new Date(session.startsAt).toLocaleDateString("zh-CN")}</MenuItem>)}</TextField>{selectedCourse && <Chip label={`${selectedCourse.progress.percent}%`} sx={{ bgcolor: palette.blueSoft, color: palette.blue, fontWeight: 950, fontSize: 16 }} />}</Stack> : undefined}
+        />
+        {selectedCourse ? <>
+          <LinearProgress variant="determinate" value={selectedCourse.progress.percent} sx={{ mt: 1.4, height: 8, borderRadius: 4 }} />
+          <Paper variant="outlined" sx={{ mt: 1.4, p: 1.3, bgcolor: palette.blueSoft, borderColor: "#C9DBFF" }}>
+            <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}>
+              <Box><Typography fontSize={12} color="text.secondary">当前步骤</Typography><Typography fontWeight={950}>{selectedCourse.currentStep?.timeLabel || "已完成"} · {selectedCourse.currentStep?.title || "全部流程已结束"}</Typography></Box>
+              <Box><Typography fontSize={12} color="text.secondary">当前接力人</Typography><Typography fontWeight={900}>{selectedCourse.currentStep?.assigneeUserName || "暂无待处理负责人"}</Typography></Box>
+              <Box><Typography fontSize={12} color="text.secondary">截止时间</Typography><Typography fontWeight={800}>{formatDate(selectedCourse.currentStep?.dueAt)}</Typography></Box>
+              {statusAction && <Button variant="contained" onClick={() => selectedManagedCourse && onChangeSessionStatus(selectedManagedCourse, statusAction.status)}>{statusAction.label}</Button>}
+            </Stack>
+          </Paper>
+          <Box sx={{ mt: 1.6, overflowX: "auto", pb: 0.5 }}>
+            <Box sx={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(selectedCourse.tasks.length, 1)}, minmax(125px, 1fr))`, minWidth: Math.max(selectedCourse.tasks.length * 125, 760), position: "relative", "&:before": { content: '\"\"', position: "absolute", top: 16, left: 30, right: 30, height: 2, bgcolor: palette.line } }}>
+              {selectedCourse.tasks.map((task) => {
+                const done = ["DONE", "SKIPPED"].includes(task.status);
+                const risky = ["BLOCKED", "REJECTED"].includes(task.status) || Boolean(task.dueAt && new Date(task.dueAt) < new Date() && !done);
+                return <Stack component={task.isMine ? "button" : "div"} type={task.isMine ? "button" : undefined} key={`${task.timeLabel}-${task.title}`} alignItems="center" spacing={0.55} onClick={task.isMine ? () => openMyStep(task.taskId) : undefined} sx={{ position: "relative", px: 0.6, py: 0, border: 0, bgcolor: "transparent", cursor: task.isMine ? "pointer" : "default", "&:focus-visible": { outline: `2px solid ${palette.blue}`, borderRadius: 1 } }}>
+                  <Box sx={{ width: 32, height: 32, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: done ? palette.green : risky ? palette.red : task.isMine ? palette.blue : "#fff", color: done || risky || task.isMine ? "#fff" : palette.blue, border: `2px solid ${done ? palette.green : risky ? palette.red : palette.blue}`, fontSize: 11, fontWeight: 950, zIndex: 1 }}>{done ? "✓" : task.timeLabel.replace("T", "") || "T"}</Box>
+                  <Typography fontSize={12} fontWeight={950} textAlign="center">{task.title}</Typography>
+                  <Typography fontSize={11} color="text.secondary" textAlign="center">{task.assigneeUserName || "待分配"}</Typography>
+                  <Chip size="small" label={task.isMine ? "我负责" : statusLabel[task.status] || task.status} sx={{ height: 21, bgcolor: task.isMine ? palette.blueSoft : undefined, color: task.isMine ? palette.blue : undefined, fontWeight: 800 }} />
+                </Stack>;
+              })}
+            </Box>
+          </Box>
+          <Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>蓝色“我负责”节点可直接打开处理；其他节点只显示负责人和进度。</Typography>
+        </> : <Box sx={{ py: 5, textAlign: "center" }}><Typography fontWeight={900}>当前没有未完结课程</Typography><Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.5 }}>新的课程安排创建后会显示在这里</Typography></Box>}
       </Paper>
 
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>

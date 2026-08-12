@@ -120,6 +120,29 @@ export interface AcademyPublicCalendarItem {
   deliveryMode: AcademyDeliveryMode;
   status: AcademySessionStatus;
   lecturerUserName?: string;
+  progress: { done: number; total: number; percent: number };
+  currentStep?: {
+    taskId?: string;
+    templateKey?: string;
+    acceptanceCriteria?: string;
+    timeLabel: string;
+    title: string;
+    assigneeUserName?: string;
+    dueAt?: string;
+    status: AcademyTaskStatus;
+    isMine: boolean;
+  };
+  tasks: Array<{
+    taskId?: string;
+    templateKey?: string;
+    acceptanceCriteria?: string;
+    timeLabel: string;
+    title: string;
+    assigneeUserName?: string;
+    dueAt?: string;
+    status: AcademyTaskStatus;
+    isMine: boolean;
+  }>;
 }
 
 export interface AcademySessionTask {

@@ -109,6 +109,7 @@ function createRepository(): AcademyRepository {
         deliveryMode: session.deliveryMode,
         status: session.status,
         lecturerUserName: session.lecturerUserName,
+        tasks: tasks.filter((task) => task.sessionId === session.id),
       })),
     findSessionById: async (id, scope) =>
       sessions.find((session) => session.id === id && sessionVisible(session, scope)) || null,
@@ -1002,10 +1003,20 @@ assert.ok(
   publicCalendar.data.some((item: any) => item.id === outsiderSession.data!.id),
   "全员周历必须包含范围外的商学院课程安排",
 );
+const actorCalendar = await (service as any).listPublicCalendar({
+  start: "2026-08-01T00:00:00.000Z",
+  end: "2026-08-31T23:59:59.999Z",
+}, actor);
+const ownPublicCourse = actorCalendar.data.find((item: any) => item.id === sessionResult.data!.id);
+assert.equal(ownPublicCourse.progress.total, 9, "全员工作台应显示课程SOP总进度");
+assert.equal(ownPublicCourse.tasks.length, 9, "全员工作台应显示每一步状态和负责人");
+assert.ok(ownPublicCourse.tasks.some((task: any) => task.isMine && task.taskId), "本人负责节点应提供安全任务入口");
+assert.ok(ownPublicCourse.tasks.filter((task: any) => !task.isMine).every((task: any) => !task.taskId), "不得向其他员工暴露任务操作ID");
+assert.ok(ownPublicCourse.tasks.every((task: any) => !("submissionNote" in task) && !("attachments" in task)), "全员进度不得泄露交付说明或附件");
 assert.deepEqual(
   Object.keys(publicCalendar.data[0]).sort(),
-  ["courseTitle", "deliveryMode", "endsAt", "id", "lecturerUserName", "startsAt", "status", "title"].sort(),
-  "全员周历只能返回不含任务、客户、会议链接和人员ID的安全投影",
+  ["courseTitle", "currentStep", "deliveryMode", "endsAt", "id", "lecturerUserName", "progress", "startsAt", "status", "tasks", "title"].sort(),
+  "全员周历只能返回安全的课程进度投影",
 );
 
 console.log("academy service tests passed");

@@ -229,8 +229,20 @@ assert.deepEqual(publicCalendarCall.select, {
   deliveryMode: true,
   status: true,
   lecturerUserName: true,
+  tasks: {
+    select: {
+      id: true,
+      templateKey: true,
+      title: true,
+      assigneeUserId: true,
+      assigneeUserName: true,
+      dueAt: true,
+      status: true,
+    },
+    orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+  },
   course: { select: { title: true } },
-}, "全员周历查询必须使用最小安全字段投影");
+}, "全员周历查询必须使用不含客户、附件和提交说明的安全进度投影");
 assert.equal(publicCalendarCall.where.status.not, "CANCELLED");
 
 await repository.listMyTasks("user-assignee", { page: 2, pageSize: 10, status: "OPEN" });

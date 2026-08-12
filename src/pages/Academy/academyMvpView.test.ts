@@ -12,6 +12,9 @@ assert.match(academy, /academyApi\.getPublicCalendar/, "全员周历应使用独
 assert.match(academy, /academyApi\.listMyTasks/, "我的待办应使用本人任务安全接口");
 assert.doesNotMatch(academy, /view === "overview"[\s\S]{0,300}loadDetail/, "工作台周历不应预取任何课程详情");
 assert.match(academy, /title="全员课程周历"/, "工作台应明确标记全员课程周历");
+assert.match(academy, /课程执行接力/, "工作台应集中展示所选课程的SOP执行进度");
+assert.match(academy, /当前接力人/, "工作台应明确当前步骤负责人");
+assert.match(academy, /我负责/, "工作台应突出当前员工负责的课程节点");
 assert.doesNotMatch(academy, /进入课程运营/, "工作台周历不应提供进入课程的按钮");
 assert.match(academy, /academyApi\.saveEngagementBatch/, "多选客户应使用原子批量邀约接口");
 assert.match(academy, /academyApi\.quickFollowUp/, "商学院快速跟进应由后端原子同步CRM");
@@ -24,9 +27,11 @@ assert.match(academy, /label="允许销售邀约"/, "新建课程安排应能明
 
 assert.doesNotMatch(plans, /viewMode/, "课程安排不应再让用户在周历和列表之间选择");
 assert.match(plans, /本周课程安排/, "课程安排页应在列表上方保留周历");
+assert.match(plans, /待开课安排/, "课程安排页应独立管理未来课程");
+assert.match(plans, /已完结课程/, "课程安排页应独立查看已完结课程结果");
 assert.match(plans, /weekDays\.map/, "课程安排周历应按一周七天展示");
 assert.doesNotMatch(plans, /<Tabs|<Tab /, "单场课程抽屉应改成一页连续阅读，不再分页签");
-assert.match(plans, /课程执行进度/, "详情顶部应先解释整场SOP执行进度");
+assert.doesNotMatch(plans, /员工在“我的工作台”完成本人任务，这里集中查看整场进度/, "课程安排详情不应再重复工作台执行进度");
 assert.match(plans, /课程数据/, "详情中部应集中展示课程经营数据");
 assert.match(plans, /复盘记录/, "详情底部应展示可编辑的复盘记录");
 assert.match(plans, /academy-arrangement-customer-progress[\s\S]*<TablePagination/, "客户推进表应使用统一分页");

@@ -35,11 +35,12 @@ assert.match(source, /anchor="right"/, '课程安排详情应使用右侧抽屉�
 assert.match(source, /requestedSessionId/, '外部工作台进入课程安排时应能直接打开目标抽屉');
 assert.match(source, /detailErrors[\s\S]*课程安排详情加载失败[\s\S]*重新加载/, '课程安排详情失败时应显示抽屉内错误和重试入口');
 assert.doesNotMatch(plansSource, /<Tabs|<Tab /, '课程安排抽屉应使用一页连续结构，不再拆分页签');
-['课程执行进度', '课程数据', '复盘记录'].forEach((label) => {
+['课程安排信息', '课程结果概览', '课程数据', '复盘记录'].forEach((label) => {
   assert.ok(plansSource.includes(label), `课程安排抽屉缺少${label}区块`);
 });
 assert.doesNotMatch(plansSource, /从我的客户添加|记录到课|快速跟进|关联订单/, '课程安排详情不应重复承载销售操作');
-assert.match(source, /完善SOP流程|确认开课|进入课程执行|填写复盘结果|查看复盘结果/, '课程安排应根据状态展示明确的下一步操作');
+assert.match(source, /查看未完结课程/, '工作台应能切换查看非本周未完结课程');
+assert.match(source, /确认待开课|开始课程|确认课程完成/, '工作台应提供课程状态推进闭环');
 assert.doesNotMatch(source, /进入场次执行/, '课程安排不应继续使用含义重复的“进入场次执行”');
 
 console.log('academy course form static tests passed');

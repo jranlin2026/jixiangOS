@@ -27,7 +27,7 @@ assert.doesNotMatch(academy, /<ProtectedFormDialog[^>]*detailOpen/, '场次执�
 assert.match(academy, /customerApi\s*\.\s*fetchCustomers/, '学员与转化必须从CRM客户主档选择客户');
 assert.match(academy, /academyApi\.saveEngagement/, '学员与转化必须可保存邀约记录');
 assert.doesNotMatch(academyPlans, /<Tabs|<Tab /, '课程安排抽屉不得继续拆成执行页签');
-assert.match(academyPlans, /课程执行进度[\s\S]*课程数据[\s\S]*复盘记录/, '课程安排抽屉应按进度、数据、复盘连续展示');
+assert.match(academyPlans, /课程安排信息[\s\S]*课程结果概览[\s\S]*课程数据[\s\S]*复盘记录/, '课程安排抽屉应按安排信息、完结数据、复盘连续展示');
 assert.match(academy, /academyApi\.saveReview/, '经营复盘必须可编辑并保存');
 assert.match(academy, /academyApi\.saveCourseAsset/, '课程资产必须保存到后端并关联课程版本');
 assert.match(academy, /BusinessAttachmentPicker/, '课程资产必须复用私有业务附件组件');

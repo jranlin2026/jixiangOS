@@ -337,6 +337,18 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
           deliveryMode: true,
           status: true,
           lecturerUserName: true,
+          tasks: {
+            select: {
+              id: true,
+              templateKey: true,
+              title: true,
+              assigneeUserId: true,
+              assigneeUserName: true,
+              dueAt: true,
+              status: true,
+            },
+            orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+          },
           course: { select: { title: true } },
         },
         orderBy: [{ startsAt: "asc" }, { title: "asc" }],
@@ -350,6 +362,7 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         deliveryMode: row.deliveryMode,
         status: row.status,
         lecturerUserName: row.lecturerUserName,
+        tasks: row.tasks,
       }));
     },
     async findSessionById(id, scope) {

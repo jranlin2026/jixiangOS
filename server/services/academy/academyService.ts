@@ -192,7 +192,7 @@ export type AcademyOrderReference = {
 export type AcademyPublicCalendarRecord = Pick<
   AcademySessionRecord,
   "id" | "title" | "startsAt" | "endsAt" | "deliveryMode" | "status" | "lecturerUserName"
-> & { courseTitle: string };
+> & { courseTitle: string; tasks: AcademySessionTaskRecord[] };
 
 export interface AcademyRepository {
   listCourseCategories(): Promise<AcademyCourseCategoryRecord[]>;
@@ -512,7 +512,7 @@ export function createAcademyService(
     async listLinkedTaskAttachmentIds(taskIds: string[]) {
       return repository.listLinkedTaskAttachmentIds(taskIds);
     },
-    async listPublicCalendar(raw: { start?: string; end?: string }, _actor: AuthenticatedUser) {
+    async listPublicCalendar(raw: { start?: string; end?: string }, actor: AuthenticatedUser) {
       const current = now();
       const day = current.getUTCDay() || 7;
       const defaultStart = new Date(current);
@@ -526,7 +526,56 @@ export function createAcademyService(
         return invalid("请选择有效的周历时间范围");
       if (end.getTime() - start.getTime() > 93 * 24 * 60 * 60 * 1000)
         return invalid("周历查询范围不能超过93天");
-      return success(await repository.listPublicCalendar({ start, end }));
+      const stepOrder = [
+        "COURSE_CONFIRMATION", "COURSE_DEVELOPMENT", "COURSE_PACKAGING",
+        "CUSTOMER_INVITATION", "PRECLASS_GATE", "COURSE_DELIVERY",
+        "CUSTOMER_SEGMENTATION", "DEAL_FOLLOW_UP", "COURSE_REVIEW",
+      ];
+      const stepLabel: Record<string, { timeLabel: string; title: string }> = {
+        COURSE_CONFIRMATION: { timeLabel: "T-5", title: "课程确定" },
+        COURSE_DEVELOPMENT: { timeLabel: "T-4", title: "课程研发" },
+        COURSE_PACKAGING: { timeLabel: "T-3", title: "课程包装" },
+        CUSTOMER_INVITATION: { timeLabel: "T-2", title: "客户邀约" },
+        PRECLASS_GATE: { timeLabel: "T-1", title: "开课关卡" },
+        COURSE_DELIVERY: { timeLabel: "T日", title: "课程执行" },
+        CUSTOMER_SEGMENTATION: { timeLabel: "T+0.5小时", title: "客户分层" },
+        DEAL_FOLLOW_UP: { timeLabel: "T+1", title: "成交跟进" },
+        COURSE_REVIEW: { timeLabel: "T+3", title: "复盘优化" },
+      };
+      const legacyKey: Record<string, string> = { PLANNING: "COURSE_CONFIRMATION", CONTENT: "COURSE_DEVELOPMENT", ASSETS: "COURSE_PACKAGING", INVITATION: "CUSTOMER_INVITATION", PRECHECK: "PRECLASS_GATE", DELIVERY: "COURSE_DELIVERY", SEGMENTATION: "CUSTOMER_SEGMENTATION", FOLLOW_UP: "DEAL_FOLLOW_UP", REVIEW: "COURSE_REVIEW" };
+      const rows = await repository.listPublicCalendar({ start, end });
+      return success(rows.map((session) => {
+        const sorted = [...session.tasks].sort((left, right) => {
+          const leftKey = legacyKey[left.templateKey] || left.templateKey;
+          const rightKey = legacyKey[right.templateKey] || right.templateKey;
+          return stepOrder.indexOf(leftKey) - stepOrder.indexOf(rightKey);
+        });
+        const done = sorted.filter((task) => ["DONE", "SKIPPED"].includes(task.status)).length;
+        const publicTasks = sorted.map((task) => ({
+          ...(task.assigneeUserId === actor.id ? { taskId: task.id } : {}),
+          ...(task.assigneeUserId === actor.id ? { templateKey: task.templateKey, acceptanceCriteria: task.acceptanceCriteria || undefined } : {}),
+          timeLabel: stepLabel[legacyKey[task.templateKey] || task.templateKey]?.timeLabel || "其他",
+          title: stepLabel[legacyKey[task.templateKey] || task.templateKey]?.title || task.title,
+          assigneeUserName: task.assigneeUserName || undefined,
+          dueAt: task.dueAt?.toISOString(),
+          status: task.status,
+          isMine: task.assigneeUserId === actor.id,
+        }));
+        const currentStep = publicTasks.find((task) => !["DONE", "SKIPPED"].includes(task.status));
+        return {
+          id: session.id,
+          title: session.title,
+          courseTitle: session.courseTitle,
+          startsAt: session.startsAt,
+          endsAt: session.endsAt,
+          deliveryMode: session.deliveryMode,
+          status: session.status,
+          lecturerUserName: session.lecturerUserName,
+          progress: { done, total: sorted.length, percent: sorted.length ? Math.round(done / sorted.length * 100) : 0 },
+          currentStep,
+          tasks: publicTasks,
+        };
+      }));
     },
     async listMyTasks(
       raw: { page?: number; pageSize?: number; status?: string },
