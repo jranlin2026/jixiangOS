@@ -1,6 +1,7 @@
 export type OkrScope = "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
 
 export type OkrCycleStatus = "DRAFT" | "ACTIVE" | "SCORING" | "CLOSED";
+export type OkrCycleType = "MONTH" | "QUARTER" | "CUSTOM";
 
 export type OkrObjectiveStatus =
   "DRAFT" | "PUBLISHED" | "COMPLETED" | "CANCELLED";
@@ -17,7 +18,9 @@ export interface OkrCycle {
   id: string;
   name: string;
   year: number;
-  quarter: number;
+  quarter?: number | null;
+  cycleType: OkrCycleType;
+  periodKey: string;
   startAt: string;
   endAt: string;
   checkInWeekday?: number;
@@ -166,7 +169,9 @@ export interface OkrDueCheckInItem {
 export interface CreateOkrCycleInput {
   name: string;
   year: number;
-  quarter: number;
+  quarter?: number;
+  month?: number;
+  cycleType: OkrCycleType;
   startAt: string;
   endAt: string;
   checkInWeekday: number;
@@ -181,6 +186,7 @@ export interface CreateOkrObjectiveInput {
   departmentId?: string;
   parentObjectiveId?: string;
   weight: number;
+  autoDistributeWeight?: boolean;
 }
 
 export interface ImportOkrObjectiveInput {
@@ -200,6 +206,7 @@ export interface CreateOkrKeyResultInput {
   unit?: string;
   weight: number;
   dueAt?: string;
+  autoDistributeWeight?: boolean;
 }
 
 export interface CreateOkrCheckInInput {

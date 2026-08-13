@@ -109,6 +109,15 @@ function progressFor(kr: any, value: number): number {
   );
 }
 
+function evenlyDistributedWeights(count: number) {
+  const totalCents = 10_000;
+  const base = Math.floor(totalCents / count);
+  const remainder = totalCents - base * count;
+  return Array.from({ length: count }, (_, index) =>
+    (base + (index < remainder ? 1 : 0)) / 100,
+  );
+}
+
 function healthFor(
   progress: number,
   confidence: number | null,
@@ -778,16 +787,36 @@ export function createOkrService({
         return failure<never>("无权管理OKR周期", 403);
       const name = text(raw?.name, 120);
       const year = Number(raw?.year);
-      const quarter = Number(raw?.quarter);
-      const startAt = date(raw?.startAt);
-      const endAt = date(raw?.endAt, true);
+      const cycleType = text(raw?.cycleType || "QUARTER", 24);
+      const quarter = raw?.quarter == null ? null : Number(raw.quarter);
+      const month = raw?.month == null ? null : Number(raw.month);
+      let startSource = text(raw?.startAt, 40);
+      let endSource = text(raw?.endAt, 40);
+      if (cycleType === "MONTH" && Number.isInteger(month) && month! >= 1 && month! <= 12) {
+        const endDay = new Date(Date.UTC(year, month!, 0)).getUTCDate();
+        startSource = `${year}-${String(month).padStart(2, "0")}-01`;
+        endSource = `${year}-${String(month).padStart(2, "0")}-${endDay}`;
+      }
+      if (cycleType === "QUARTER" && Number.isInteger(quarter) && [1, 2, 3, 4].includes(quarter!)) {
+        const startMonth = (quarter! - 1) * 3 + 1;
+        const endMonth = startMonth + 2;
+        const endDay = new Date(Date.UTC(year, endMonth, 0)).getUTCDate();
+        startSource = `${year}-${String(startMonth).padStart(2, "0")}-01`;
+        endSource = `${year}-${String(endMonth).padStart(2, "0")}-${endDay}`;
+      }
+      const startAt = date(startSource);
+      const endAt = date(endSource, true);
       const checkInWeekday = Number(raw?.checkInWeekday ?? 5);
       if (
         !name ||
         !Number.isInteger(year) ||
         year < 2000 ||
         year > 2200 ||
-        ![1, 2, 3, 4].includes(quarter) ||
+        !["MONTH", "QUARTER", "CUSTOM"].includes(cycleType) ||
+        (cycleType === "MONTH" &&
+          (!Number.isInteger(month) || month! < 1 || month! > 12)) ||
+        (cycleType === "QUARTER" &&
+          (!Number.isInteger(quarter) || ![1, 2, 3, 4].includes(quarter!))) ||
         !startAt ||
         !endAt ||
         startAt >= endAt ||
@@ -795,16 +824,24 @@ export function createOkrService({
         checkInWeekday < 0 ||
         checkInWeekday > 6
       ) {
-        return failure<never>("请填写有效的季度周期", 400);
+        return failure<never>("请填写有效的OKR周期", 400);
       }
-      if (await prisma.okrCycle.findFirst({ where: { year, quarter } }))
-        return failure<never>("该季度周期已存在", 409);
+      const periodKey =
+        cycleType === "MONTH"
+          ? `${year}-${String(month).padStart(2, "0")}`
+          : cycleType === "QUARTER"
+            ? `${year}-Q${quarter}`
+            : `${startSource.slice(0, 10)}_${endSource.slice(0, 10)}`;
+      if (await prisma.okrCycle.findFirst({ where: { cycleType, periodKey } }))
+        return failure<never>("该OKR周期已存在", 409);
       const row = await prisma.okrCycle.create({
         data: {
           id: randomUUID(),
           name,
           year,
-          quarter,
+          quarter: cycleType === "QUARTER" ? quarter : null,
+          cycleType,
+          periodKey,
           startAt,
           endAt,
           checkInWeekday,
@@ -900,6 +937,20 @@ export function createOkrService({
             updatedAt: now(),
           },
         });
+        if (raw?.autoDistributeWeight) {
+          const siblings = await tx.objective.findMany({
+            where: { cycleId: cycle.id, ownerId: owner.ownerId, status: "DRAFT" },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          });
+          const weights = evenlyDistributedWeights(siblings.length);
+          for (const [index, sibling] of siblings.entries()) {
+            await tx.objective.update({
+              where: { id: sibling.id },
+              data: { weight: weights[index], updatedAt: now() },
+            });
+          }
+          created.weight = weights[siblings.findIndex((item: any) => item.id === created.id)];
+        }
         await event(tx, {
           cycleId: cycle.id,
           objectiveId: created.id,
@@ -1093,6 +1144,20 @@ export function createOkrService({
             updatedAt: now(),
           },
         });
+        if (raw?.autoDistributeWeight) {
+          const siblings = await tx.keyResult.findMany({
+            where: { objectiveId },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          });
+          const weights = evenlyDistributedWeights(siblings.length);
+          for (const [index, sibling] of siblings.entries()) {
+            await tx.keyResult.update({
+              where: { id: sibling.id },
+              data: { weight: weights[index], updatedAt: now() },
+            });
+          }
+          created.weight = weights[siblings.findIndex((item: any) => item.id === created.id)];
+        }
         await event(tx, {
           cycleId: objective.cycleId,
           objectiveId,

@@ -391,6 +391,118 @@ test("plain end dates include the full last Shanghai day", async () => {
   assert.equal(result.data?.endAt.toISOString(), "2026-12-31T15:59:59.999Z");
 });
 
+test("supports monthly, quarterly and custom cycles without treating the same year as a conflict", async () => {
+  const { prisma } = memoryPrisma();
+  const service = createOkrService({ prisma });
+  const month = await service.createCycle(admin, {
+    cycleType: "MONTH",
+    year: 2026,
+    month: 8,
+    name: "2026年8月",
+    startAt: "2026-08-01",
+    endAt: "2026-08-31",
+    checkInWeekday: 5,
+  });
+  const quarter = await service.createCycle(admin, {
+    cycleType: "QUARTER",
+    year: 2026,
+    quarter: 3,
+    name: "2026年第三季度",
+    startAt: "2026-07-01",
+    endAt: "2026-09-30",
+    checkInWeekday: 5,
+  });
+  const duplicate = await service.createCycle(admin, {
+    cycleType: "MONTH",
+    year: 2026,
+    month: 8,
+    name: "八月备份",
+    startAt: "2026-08-01",
+    endAt: "2026-08-31",
+    checkInWeekday: 5,
+  });
+  assert.equal(month.code, 0);
+  assert.equal(month.data?.periodKey, "2026-08");
+  assert.equal(quarter.code, 0);
+  assert.equal(quarter.data?.periodKey, "2026-Q3");
+  assert.equal(duplicate.code, 409);
+});
+
+test("quick add keeps draft objective and KR weights evenly distributed", async () => {
+  const { prisma, db } = memoryPrisma();
+  const service = createOkrService({ prisma });
+  db.cycles.push({ id: "quick-cycle", status: "DRAFT" });
+
+  const firstObjective = await service.createObjective(admin, {
+    cycleId: "quick-cycle",
+    scope: "COMPANY",
+    title: "提升经营效率",
+    ownerId: admin.id,
+    weight: 100,
+    autoDistributeWeight: true,
+  });
+  const secondObjective = await service.createObjective(admin, {
+    cycleId: "quick-cycle",
+    scope: "COMPANY",
+    title: "提升客户价值",
+    ownerId: admin.id,
+    weight: 100,
+    autoDistributeWeight: true,
+  });
+  assert.equal(firstObjective.code, 0);
+  assert.equal(secondObjective.code, 0);
+  assert.deepEqual(db.objectives.map((item: any) => item.weight), [50, 50]);
+
+  const firstKr = await service.addKeyResult(admin, firstObjective.data!.id, {
+    title: "每周完成复盘",
+    ownerId: admin.id,
+    type: "PERCENTAGE",
+    direction: "INCREASE",
+    baselineValue: 0,
+    targetValue: 100,
+    currentValue: 0,
+    unit: "%",
+    weight: 100,
+    autoDistributeWeight: true,
+  });
+  const secondKr = await service.addKeyResult(admin, firstObjective.data!.id, {
+    title: "关键任务按期完成",
+    ownerId: admin.id,
+    type: "PERCENTAGE",
+    direction: "INCREASE",
+    baselineValue: 0,
+    targetValue: 100,
+    currentValue: 0,
+    unit: "%",
+    weight: 100,
+    autoDistributeWeight: true,
+  });
+  assert.equal(firstKr.code, 0);
+  assert.equal(secondKr.code, 0);
+  assert.deepEqual(
+    db.keyResults.filter((item: any) => item.objectiveId === firstObjective.data!.id).map((item: any) => item.weight),
+    [50, 50],
+  );
+  const thirdKr = await service.addKeyResult(admin, firstObjective.data!.id, {
+    title: "三项权重精度",
+    ownerId: admin.id,
+    type: "PERCENTAGE",
+    direction: "INCREASE",
+    baselineValue: 0,
+    targetValue: 100,
+    currentValue: 0,
+    unit: "%",
+    weight: 100,
+    autoDistributeWeight: true,
+  });
+  assert.equal(thirdKr.code, 0);
+  const weights = db.keyResults
+    .filter((item: any) => item.objectiveId === firstObjective.data!.id)
+    .map((item: any) => item.weight);
+  assert.deepEqual([...weights].sort((a, b) => b - a), [33.34, 33.33, 33.33]);
+  assert.equal(weights.reduce((sum: number, item: number) => sum + item, 0), 100);
+});
+
 test("does not allow a manual check-in to overwrite an automatically sourced metric value", async () => {
   const { prisma, db } = memoryPrisma();
   db.cycles.push({

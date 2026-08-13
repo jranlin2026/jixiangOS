@@ -67,11 +67,13 @@ import type {
   OkrScope,
 } from "../../types/okr";
 import {
+  createCycleDraft,
   createCurrentQuarterCycleDraft,
   getAllowedObjectiveScopes,
   getWorkbenchPeople,
   hasSubmittedObjectiveReview,
   isSystemMetricValueReadOnly,
+  updateCycleDraftPeriod,
 } from "./okrPageModel";
 import { submitOkrCheckIn } from "./okrPageActions";
 
@@ -280,6 +282,12 @@ const ObjectiveList: React.FC<{
   canBindObjective: (objective: OkrObjective) => boolean;
   canReviewObjective: (objective: OkrObjective) => boolean;
   onCreateKr: (objective: OkrObjective) => void;
+  quickKrObjectiveId: string;
+  quickKrTitle: string;
+  onQuickKrTitle: (title: string) => void;
+  onStartQuickKr: (objectiveId: string) => void;
+  onQuickCreateKr: (objective: OkrObjective) => void;
+  onCancelQuickKr: () => void;
   onEditObjective: (objective: OkrObjective) => void;
   onEditKr: (objective: OkrObjective, keyResult: OkrKeyResult) => void;
   onCheckIn: (keyResult: OkrKeyResult) => void;
@@ -301,6 +309,12 @@ const ObjectiveList: React.FC<{
   canBindObjective,
   canReviewObjective,
   onCreateKr,
+  quickKrObjectiveId,
+  quickKrTitle,
+  onQuickKrTitle,
+  onStartQuickKr,
+  onQuickCreateKr,
+  onCancelQuickKr,
   onEditObjective,
   onEditKr,
   onCheckIn,
@@ -367,13 +381,31 @@ const ObjectiveList: React.FC<{
                   </Stack>
                 </Box>
               ))}
+              {quickKrObjectiveId === objective.id && (
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ py: 1.25 }}>
+                  <TextField
+                    autoFocus
+                    fullWidth
+                    size="small"
+                    placeholder="输入关键结果，回车创建"
+                    value={quickKrTitle}
+                    onChange={(event) => onQuickKrTitle(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.nativeEvent.isComposing) onQuickCreateKr(objective);
+                      if (event.key === "Escape") onCancelQuickKr();
+                    }}
+                  />
+                  <Button variant="contained" onClick={() => onQuickCreateKr(objective)} disabled={!quickKrTitle.trim()}>创建KR</Button>
+                  <Button onClick={() => onCreateKr(objective)}>更多设置</Button>
+                </Stack>
+              )}
             </Box>
             <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1, bgcolor: moduleTokens.subtle }}>
               <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
                 <Typography variant="caption" color="text.secondary">{objective.status === "DRAFT" ? "草稿目标，可继续完善关键结果" : `${objective.keyResults?.length || 0} 个关键结果`}</Typography>
                 <Stack direction="row" spacing={0.5}>
                   {canManageObjective(objective) && objective.status === "DRAFT" && <Button size="small" onClick={() => onEditObjective(objective)}>编辑目标</Button>}
-                  {canManageObjective(objective) && objective.status === "DRAFT" && <Button size="small" startIcon={<AddIcon />} onClick={() => onCreateKr(objective)}>添加 Key Result</Button>}
+                  {canManageObjective(objective) && objective.status === "DRAFT" && <Button size="small" startIcon={<AddIcon />} onClick={() => onStartQuickKr(objective.id)}>添加 Key Result</Button>}
                   {canReviewObjective(objective) && objective.status === "PUBLISHED" && <Button size="small" onClick={() => onReview(objective)}>评分复盘</Button>}
                 </Stack>
               </Stack>
@@ -473,6 +505,10 @@ const OkrCenter: React.FC = () => {
   const [cycleOpen, setCycleOpen] = useState(false);
   const [cycleManagerOpen, setCycleManagerOpen] = useState(false);
   const [objectiveOpen, setObjectiveOpen] = useState(false);
+  const [quickObjectiveOpen, setQuickObjectiveOpen] = useState(false);
+  const [quickObjectiveTitle, setQuickObjectiveTitle] = useState("");
+  const [quickKrObjectiveId, setQuickKrObjectiveId] = useState("");
+  const [quickKrTitle, setQuickKrTitle] = useState("");
   const [editingObjective, setEditingObjective] = useState<OkrObjective | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importSourceCycleId, setImportSourceCycleId] = useState("");
@@ -503,6 +539,7 @@ const OkrCenter: React.FC = () => {
   const dueRequestId = React.useRef(0);
   const cycleRequestId = React.useRef(0);
   const peopleRequestId = React.useRef(0);
+  const quickCreateInFlight = React.useRef(false);
   const [cycleForm, setCycleForm] = useState<CreateOkrCycleInput>(() =>
     createCurrentQuarterCycleDraft(),
   );
@@ -764,6 +801,59 @@ const OkrCenter: React.FC = () => {
     await loadObjectives();
   };
 
+  const quickCreateObjective = async () => {
+    const title = quickObjectiveTitle.trim();
+    const draftCycle = cycleOptions.find((cycle) => cycle.id === cycleId && cycle.status === "DRAFT");
+    if (!title || !draftCycle || quickCreateInFlight.current) return;
+    quickCreateInFlight.current = true;
+    setSubmitting(true);
+    const response = await okrApi.createObjective({
+      cycleId: draftCycle.id,
+      scope: "INDIVIDUAL",
+      title,
+      ownerId: selectedOwnerId || currentUser?.id || "",
+      weight: 100,
+      autoDistributeWeight: true,
+    });
+    setSubmitting(false);
+    quickCreateInFlight.current = false;
+    if (response.code !== 0) {
+      setMessage({ tone: "error", text: response.message });
+      return;
+    }
+    setQuickObjectiveTitle("");
+    setQuickObjectiveOpen(false);
+    await loadObjectives();
+  };
+
+  const quickCreateKr = async (objective: OkrObjective) => {
+    const title = quickKrTitle.trim();
+    if (!title || quickCreateInFlight.current) return;
+    quickCreateInFlight.current = true;
+    setSubmitting(true);
+    const response = await okrApi.createKeyResult(objective.id, {
+      title,
+      ownerId: objective.ownerId || currentUser?.id || "",
+      type: "PERCENTAGE",
+      direction: "INCREASE",
+      baselineValue: 0,
+      targetValue: 100,
+      currentValue: 0,
+      unit: "%",
+      weight: 100,
+      autoDistributeWeight: true,
+    });
+    setSubmitting(false);
+    quickCreateInFlight.current = false;
+    if (response.code !== 0) {
+      setMessage({ tone: "error", text: response.message });
+      return;
+    }
+    setQuickKrObjectiveId("");
+    setQuickKrTitle("");
+    await loadObjectives();
+  };
+
   const openImportObjective = () => {
     const sourceCycle = cycleOptions.find((cycle) => cycle.id !== cycleId);
     setImportSourceCycleId(sourceCycle?.id || "");
@@ -941,12 +1031,13 @@ const OkrCenter: React.FC = () => {
     setObjectiveForm({
       cycleId: draftCycle?.id || "",
       scope: allowedScopes[0] || "INDIVIDUAL",
-      title: "",
+      title: quickObjectiveTitle.trim(),
       description: "",
       ownerId: selectedOwnerId || currentUser?.id || "",
       weight: 100,
     });
     setEditingObjective(null);
+    setQuickObjectiveOpen(false);
     setObjectiveOpen(true);
   };
   const editObjective = (objective: OkrObjective) => {
@@ -963,7 +1054,7 @@ const OkrCenter: React.FC = () => {
   };
   const openKr = (objective: OkrObjective) => {
     setKrForm({
-      title: "",
+      title: quickKrObjectiveId === objective.id ? quickKrTitle.trim() : "",
       ownerId: objective.ownerId || currentUser?.id || "",
       type: "NUMERIC",
       direction: "INCREASE",
@@ -975,6 +1066,7 @@ const OkrCenter: React.FC = () => {
       dueAt: "",
     });
     setEditingKr(null);
+    setQuickKrObjectiveId("");
     setKrObjective(objective);
   };
   const editKr = (objective: OkrObjective, keyResult: OkrKeyResult) => {
@@ -1215,6 +1307,15 @@ const OkrCenter: React.FC = () => {
             canBindObjective={canBindObjective}
             canReviewObjective={canReviewObjective}
             onCreateKr={openKr}
+            quickKrObjectiveId={quickKrObjectiveId}
+            quickKrTitle={quickKrTitle}
+            onQuickKrTitle={setQuickKrTitle}
+            onStartQuickKr={(objectiveId) => {
+              setQuickKrObjectiveId(objectiveId);
+              setQuickKrTitle("");
+            }}
+            onQuickCreateKr={(objective) => void quickCreateKr(objective)}
+            onCancelQuickKr={() => { setQuickKrObjectiveId(""); setQuickKrTitle(""); }}
             onEditObjective={editObjective}
             onEditKr={editKr}
             onCheckIn={openCheckIn}
@@ -1223,10 +1324,29 @@ const OkrCenter: React.FC = () => {
             onRefreshMetric={(keyResult) => void refreshMetric(keyResult)}
             onReview={(objective) => { setReviewObjective(objective); setReviewForm({ score: String(Number(objective.progress || 0) / 100), summary: "", lessons: "" }); }}
           />
-          {canCreate && (
+          {canCreate && selectedCycle?.status === "DRAFT" && (
             <Paper variant="outlined" sx={{ p: 1, borderStyle: "dashed", borderColor: moduleTokens.line }}>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                <Button startIcon={<AddIcon />} onClick={openObjective}>添加 Objective</Button>
+                {quickObjectiveOpen ? (
+                  <>
+                    <TextField
+                      autoFocus
+                      fullWidth
+                      size="small"
+                      placeholder="输入目标，回车创建"
+                      value={quickObjectiveTitle}
+                      onChange={(event) => setQuickObjectiveTitle(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.nativeEvent.isComposing) void quickCreateObjective();
+                        if (event.key === "Escape") setQuickObjectiveOpen(false);
+                      }}
+                    />
+                    <Button variant="contained" onClick={() => void quickCreateObjective()} disabled={!quickObjectiveTitle.trim() || submitting}>创建目标</Button>
+                    <Button onClick={openObjective}>更多设置</Button>
+                  </>
+                ) : (
+                  <Button startIcon={<AddIcon />} onClick={() => { setQuickObjectiveOpen(true); setQuickObjectiveTitle(""); }}>添加 Objective</Button>
+                )}
                 <Button startIcon={<ContentCopyOutlinedIcon />} onClick={openImportObjective} disabled={selectedCycle?.status !== "DRAFT" || cycleOptions.length < 2}>从其他周期导入</Button>
               </Stack>
             </Paper>
@@ -1338,7 +1458,7 @@ const OkrCenter: React.FC = () => {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        {cycle.year} / Q{cycle.quarter}
+                        {cycle.cycleType === "MONTH" ? "月度" : cycle.cycleType === "CUSTOM" ? "自定义" : `Q${cycle.quarter}`}
                       </TableCell>
                       <TableCell>
                         {formatDate(cycle.startAt)} — {formatDate(cycle.endAt)}
@@ -1462,6 +1582,18 @@ const OkrCenter: React.FC = () => {
               新建OKR周期
             </Typography>
             <TextField
+              select
+              label="周期类型"
+              value={cycleForm.cycleType}
+              onChange={(event) =>
+                setCycleForm(createCycleDraft(event.target.value as CreateOkrCycleInput["cycleType"]))
+              }
+            >
+              <MenuItem value="MONTH">月度</MenuItem>
+              <MenuItem value="QUARTER">季度</MenuItem>
+              <MenuItem value="CUSTOM">自定义</MenuItem>
+            </TextField>
+            <TextField
               label="周期名称"
               value={cycleForm.name}
               onChange={(event) =>
@@ -1475,22 +1607,16 @@ const OkrCenter: React.FC = () => {
                 label="年度"
                 value={cycleForm.year}
                 onChange={(event) =>
-                  setCycleForm({
-                    ...cycleForm,
-                    year: Number(event.target.value),
-                  })
+                  setCycleForm(updateCycleDraftPeriod(cycleForm, { year: Number(event.target.value) }))
                 }
               />
-              <TextField
+              {cycleForm.cycleType === "QUARTER" && <TextField
                 fullWidth
                 select
                 label="季度"
                 value={cycleForm.quarter}
                 onChange={(event) =>
-                  setCycleForm({
-                    ...cycleForm,
-                    quarter: Number(event.target.value),
-                  })
+                  setCycleForm(updateCycleDraftPeriod(cycleForm, { quarter: Number(event.target.value) }))
                 }
               >
                 {[1, 2, 3, 4].map((quarter) => (
@@ -1498,7 +1624,15 @@ const OkrCenter: React.FC = () => {
                     Q{quarter}
                   </MenuItem>
                 ))}
-              </TextField>
+              </TextField>}
+              {cycleForm.cycleType === "MONTH" && <TextField
+                fullWidth
+                type="number"
+                label="月份"
+                inputProps={{ min: 1, max: 12 }}
+                value={cycleForm.month || ""}
+                onChange={(event) => setCycleForm(updateCycleDraftPeriod(cycleForm, { month: Number(event.target.value) }))}
+              />}
             </Stack>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
               <TextField
@@ -1506,6 +1640,7 @@ const OkrCenter: React.FC = () => {
                 type="date"
                 label="开始日期"
                 value={cycleForm.startAt}
+                disabled={cycleForm.cycleType !== "CUSTOM"}
                 onChange={(event) =>
                   setCycleForm({ ...cycleForm, startAt: event.target.value })
                 }
@@ -1516,6 +1651,7 @@ const OkrCenter: React.FC = () => {
                 type="date"
                 label="结束日期"
                 value={cycleForm.endAt}
+                disabled={cycleForm.cycleType !== "CUSTOM"}
                 onChange={(event) =>
                   setCycleForm({ ...cycleForm, endAt: event.target.value })
                 }

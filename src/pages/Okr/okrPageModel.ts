@@ -1,4 +1,14 @@
 type WorkbenchPerson = { id: string; name: string };
+type CycleDraft = {
+  name: string;
+  year: number;
+  month?: number;
+  quarter?: number;
+  cycleType: 'MONTH' | 'QUARTER' | 'CUSTOM';
+  startAt: string;
+  endAt: string;
+  checkInWeekday: number;
+};
 
 export interface OkrObjectiveScopeAccess {
   canCreate: boolean;
@@ -55,20 +65,54 @@ const shanghaiParts = (date: Date) => Object.fromEntries(
 
 const dateInput = (year: number, month: number, day: number) => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
-export const createCurrentQuarterCycleDraft = (now = new Date()) => {
+export const createCycleDraft = (
+  cycleType: 'MONTH' | 'QUARTER' | 'CUSTOM',
+  now = new Date(),
+): CycleDraft => {
   const { year, month } = shanghaiParts(now);
   const quarter = Math.floor((month - 1) / 3) + 1;
+  if (cycleType === 'MONTH') {
+    const endDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return {
+      name: `${year}年${month}月`,
+      year,
+      month,
+      cycleType,
+      startAt: dateInput(year, month, 1),
+      endAt: dateInput(year, month, endDay),
+      checkInWeekday: 5,
+    };
+  }
   const startMonth = (quarter - 1) * 3 + 1;
   const endMonth = startMonth + 2;
   const endDay = new Date(Date.UTC(year, endMonth, 0)).getUTCDate();
-  return {
+  const quarterDraft = {
     name: `${year}年第${['一', '二', '三', '四'][quarter - 1]}季度`,
     year,
     quarter,
+    cycleType: 'QUARTER' as const,
     startAt: dateInput(year, startMonth, 1),
     endAt: dateInput(year, endMonth, endDay),
     checkInWeekday: 5,
   };
+  return cycleType === 'CUSTOM'
+    ? { ...quarterDraft, cycleType, quarter: undefined, name: `${year}年自定义周期` }
+    : quarterDraft;
+};
+
+export const createCurrentQuarterCycleDraft = (now = new Date()) =>
+  createCycleDraft('QUARTER', now);
+
+export const updateCycleDraftPeriod = (
+  draft: CycleDraft,
+  period: { year?: number; month?: number; quarter?: number },
+) => {
+  const year = period.year ?? draft.year;
+  const month = period.month ?? ('month' in draft ? draft.month : 1);
+  const quarter = period.quarter ?? draft.quarter ?? 1;
+  const anchorMonth = draft.cycleType === 'MONTH' ? month : (quarter - 1) * 3 + 1;
+  const anchor = new Date(`${year}-${String(anchorMonth).padStart(2, '0')}-15T12:00:00+08:00`);
+  return createCycleDraft(draft.cycleType, anchor);
 };
 
 const shanghaiDayOrdinal = (date: Date) => {
