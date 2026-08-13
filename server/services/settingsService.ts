@@ -106,6 +106,57 @@ function isNormalizedRoleNameConflict(error: unknown): boolean {
 }
 
 export function createSettingsService(prisma: SettingsPrisma) {
+  const resolveActiveDepartmentParent = async (value: unknown) => {
+    const parentId = nullableText(value);
+    if (!parentId) return success(null);
+    const parent = await prisma.department.findUnique({ where: { id: parentId } });
+    if (!parent) return failure('上级部门不存在，请刷新部门列表后重试');
+    if (!parent.isActive) return failure('上级部门已停用，请选择其他部门');
+    return success(parent);
+  };
+
+  const wouldCreateDepartmentCycle = async (departmentId: string, parentId: string): Promise<boolean> => {
+    const departments = await prisma.department.findMany();
+    const parentById = new Map(departments.map((department) => [department.id, department.parentId]));
+    const visited = new Set<string>();
+    let currentId: string | null | undefined = parentId;
+    while (currentId && !visited.has(currentId)) {
+      if (currentId === departmentId) return true;
+      visited.add(currentId);
+      currentId = parentById.get(currentId);
+    }
+    return false;
+  };
+
+  const resolveActiveDepartmentManager = async (
+    value: unknown,
+    target: { departmentId?: string; parentId?: string | null },
+  ) => {
+    const managerId = nullableText(value);
+    if (!managerId) return success(null);
+    const manager = await prisma.user.findUnique({ where: { id: managerId } });
+    if (!manager) return failure('部门负责人不存在，请刷新员工列表后重试');
+    if (!manager.isActive) return failure('部门负责人账号已停用，请选择其他员工');
+    if ((manager.employmentStatus || 'active') !== 'active') return failure('部门负责人已离职，请选择其他员工');
+    if (!manager.departmentId) return failure('部门负责人未归属组织，请先完善员工部门');
+
+    const departments = await prisma.department.findMany();
+    const parentById = new Map(departments.map((department) => [department.id, department.parentId]));
+    if (target.departmentId && target.parentId !== undefined) {
+      parentById.set(target.departmentId, target.parentId);
+    }
+    const allowedDepartmentIds = new Set<string>();
+    let currentId: string | null | undefined = target.departmentId || target.parentId;
+    while (currentId && !allowedDepartmentIds.has(currentId)) {
+      allowedDepartmentIds.add(currentId);
+      currentId = parentById.get(currentId);
+    }
+    if (!allowedDepartmentIds.has(manager.departmentId)) {
+      return failure('部门负责人不属于本部门或上级部门');
+    }
+    return success(manager);
+  };
+
   const resolveActivePosition = async (value: unknown): Promise<ReturnType<typeof success<Position | null>>> => {
     const positionId = nullableText(value);
     if (!positionId) return success(null);
@@ -626,14 +677,19 @@ export function createSettingsService(prisma: SettingsPrisma) {
       const name = String(data.name || '').trim();
       const code = String(data.code || name || compactId('department')).trim();
       if (!name) return failure('部门名称不能为空');
+      const parentResult = await resolveActiveDepartmentParent(data.parentId);
+      if (parentResult.code !== 0) return parentResult;
+      const parentId = nullableText(data.parentId);
+      const managerResult = await resolveActiveDepartmentManager(data.managerId, { parentId });
+      if (managerResult.code !== 0) return managerResult;
       const row = await prisma.department.create({
         data: {
           id: compactId('dept'),
           name,
           code,
           description: data.description || null,
-          parentId: data.parentId || null,
-          managerId: data.managerId || null,
+          parentId,
+          managerId: nullableText(data.managerId),
           memberCount: Number(data.memberCount || 0),
           sortOrder: Number(data.sortOrder || 0),
           isActive: data.isActive ?? true,
@@ -645,14 +701,30 @@ export function createSettingsService(prisma: SettingsPrisma) {
     },
 
     async updateDepartment(id: string, data: Record<string, any>) {
+      const department = await prisma.department.findUnique({ where: { id } });
+      if (!department) return success(null);
+      const nextParentId = data.parentId !== undefined ? nullableText(data.parentId) : department.parentId;
+      if (data.parentId !== undefined) {
+        if (nextParentId === id) return failure('上级部门不能选择自己');
+        const parentResult = await resolveActiveDepartmentParent(nextParentId);
+        if (parentResult.code !== 0) return parentResult;
+        if (nextParentId && await wouldCreateDepartmentCycle(id, nextParentId)) {
+          return failure('上级部门不能选择当前部门的下级部门');
+        }
+      }
+      if (data.managerId !== undefined || data.parentId !== undefined) {
+        const nextManagerId = data.managerId !== undefined ? data.managerId : department.managerId;
+        const managerResult = await resolveActiveDepartmentManager(nextManagerId, { departmentId: id, parentId: nextParentId });
+        if (managerResult.code !== 0) return managerResult;
+      }
       const row = await prisma.department.update({
         where: { id },
         data: {
           name: data.name !== undefined ? String(data.name).trim() : undefined,
           code: data.code !== undefined ? String(data.code).trim() : undefined,
           description: data.description !== undefined ? data.description || null : undefined,
-          parentId: data.parentId !== undefined ? data.parentId || null : undefined,
-          managerId: data.managerId !== undefined ? data.managerId || null : undefined,
+          parentId: data.parentId !== undefined ? nextParentId : undefined,
+          managerId: data.managerId !== undefined ? nullableText(data.managerId) : undefined,
           memberCount: data.memberCount !== undefined ? Number(data.memberCount) : undefined,
           sortOrder: data.sortOrder !== undefined ? Number(data.sortOrder) : undefined,
           isActive: data.isActive,

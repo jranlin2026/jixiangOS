@@ -73,6 +73,52 @@ const users: any[] = [
     createdAt: now,
     updatedAt: now,
   },
+  {
+    id: 'user-inactive-manager',
+    name: 'Inactive Manager',
+    account: 'inactive_manager',
+    email: 'inactive_manager@company.com',
+    phone: '',
+    role: 'Sales',
+    avatar: null,
+    departmentId: 'dept-sales',
+    positionId: null,
+    positionName: 'Sales Manager',
+    roleId: 'role-sales',
+    passwordHash: null,
+    passwordSalt: null,
+    passwordUpdatedAt: null,
+    lastLoginAt: null,
+    isActive: false,
+    employmentStatus: 'active',
+    leftAt: null,
+    leftBy: null,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'user-left-manager',
+    name: 'Left Manager',
+    account: 'left_manager',
+    email: 'left_manager@company.com',
+    phone: '',
+    role: 'Sales',
+    avatar: null,
+    departmentId: 'dept-sales',
+    positionId: null,
+    positionName: 'Sales Manager',
+    roleId: 'role-sales',
+    passwordHash: null,
+    passwordSalt: null,
+    passwordUpdatedAt: null,
+    lastLoginAt: null,
+    isActive: true,
+    employmentStatus: 'left',
+    leftAt: now,
+    leftBy: 'user-admin',
+    createdAt: now,
+    updatedAt: now,
+  },
 ];
 
 const departments: any[] = [
@@ -513,6 +559,81 @@ const createdDepartment = await service.createDepartment({
 assert.equal(createdDepartment.code, 0);
 const createdDepartmentData = createdDepartment.data as any;
 assert.equal(createdDepartmentData.parentId, 'dept-general');
+
+const missingParentDepartment = await service.createDepartment({
+  name: 'Missing Parent Department',
+  code: 'MISSING_PARENT',
+  parentId: 'dept-missing',
+  isActive: true,
+} as any);
+assert.notEqual(missingParentDepartment.code, 0);
+assert.match(missingParentDepartment.message || '', /上级部门不存在/);
+
+departments.push({
+  id: 'dept-inactive-parent',
+  name: 'Inactive Parent',
+  code: 'INACTIVE_PARENT',
+  description: null,
+  parentId: null,
+  managerId: null,
+  memberCount: 0,
+  sortOrder: 10,
+  isActive: false,
+  createdAt: now,
+  updatedAt: now,
+});
+const inactiveParentDepartment = await service.createDepartment({
+  name: 'Inactive Parent Child',
+  code: 'INACTIVE_PARENT_CHILD',
+  parentId: 'dept-inactive-parent',
+  isActive: true,
+} as any);
+assert.notEqual(inactiveParentDepartment.code, 0);
+assert.match(inactiveParentDepartment.message || '', /上级部门已停用/);
+
+const selfParentDepartment = await service.updateDepartment('dept-sales', { parentId: 'dept-sales' });
+assert.notEqual(selfParentDepartment.code, 0);
+assert.match(selfParentDepartment.message || '', /不能选择自己/);
+
+const cycleParentDepartment = await service.updateDepartment('dept-sales', { parentId: 'dept-sales-one' });
+assert.notEqual(cycleParentDepartment.code, 0);
+assert.match(cycleParentDepartment.message || '', /下级部门/);
+
+const createdDepartmentManager = await service.createDepartment({
+  name: 'Managed Department',
+  code: 'MANAGED_DEPARTMENT',
+  parentId: 'dept-sales',
+  managerId: 'user-sales',
+  isActive: true,
+} as any);
+assert.equal(createdDepartmentManager.code, 0);
+assert.equal((createdDepartmentManager.data as any).managerId, 'user-sales');
+
+const missingDepartmentManager = await service.updateDepartment('dept-sales', { managerId: 'user-missing-manager' });
+assert.notEqual(missingDepartmentManager.code, 0);
+assert.match(missingDepartmentManager.message || '', /负责人不存在/);
+
+const inactiveDepartmentManager = await service.updateDepartment('dept-sales', { managerId: 'user-inactive-manager' });
+assert.notEqual(inactiveDepartmentManager.code, 0);
+assert.match(inactiveDepartmentManager.message || '', /账号已停用/);
+
+const leftDepartmentManager = await service.updateDepartment('dept-sales', { managerId: 'user-left-manager' });
+assert.notEqual(leftDepartmentManager.code, 0);
+assert.match(leftDepartmentManager.message || '', /已离职/);
+
+const crossDepartmentManager = await service.updateDepartment('dept-sales', { managerId: 'user-admin' });
+assert.notEqual(crossDepartmentManager.code, 0);
+assert.match(crossDepartmentManager.message || '', /不属于本部门或上级部门/);
+
+const updatedDepartmentManager = await service.updateDepartment('dept-sales', { managerId: 'user-sales' });
+assert.equal(updatedDepartmentManager.code, 0);
+assert.equal((updatedDepartmentManager.data as any).managerId, 'user-sales');
+
+const inheritedDepartmentManager = await service.updateDepartment('dept-sales-one', { managerId: 'user-sales' });
+assert.equal(inheritedDepartmentManager.code, 0);
+assert.equal((inheritedDepartmentManager.data as any).managerId, 'user-sales');
+
+await service.deleteDepartment((createdDepartmentManager.data as any).id);
 
 const updatedDepartment = await service.updateDepartment(createdDepartmentData.id, { name: 'Updated Department', sortOrder: 4 });
 const updatedDepartmentData = updatedDepartment.data as any;

@@ -20,6 +20,7 @@ export const CORE_DATA_SCOPE_DOMAINS: DataScopeDomain[] = [
   'recoveryOrders',
   'recoveryOrderApplications',
   'academy',
+  'okr',
 ];
 
 export type RoleDataScopeRow = {
@@ -38,6 +39,7 @@ const CORE_DATA_SCOPE_ROWS: RoleDataScopeRow[] = [
   { domain: 'recoveryOrders', label: '售后挽回订单数据', description: '控制售后挽回订单列表、分账、导出和统计的数据范围', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EXPORT, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, PERMISSION_KEYS.RECOVERY_SETTLEMENT_EXPORT] },
   { domain: 'recoveryOrderApplications', label: '售后挽回订单审核台数据', description: '控制售后挽回审核台能看到哪些挽回订单；审核列表权限控制入口，审核操作权限控制通过、退回和驳回', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW] },
   { domain: 'academy', label: '商学院数据', description: '控制课程资产、排期、场次执行、学员邀约、转化交接和经营复盘的数据范围', permissionKeys: [PERMISSION_KEYS.ACADEMY_VIEW, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE, PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE] },
+  { domain: 'okr', label: '目标数据', description: '控制本人、团队、部门和公司目标的数据范围', permissionKeys: [PERMISSION_KEYS.OKR_SELF_READ, PERMISSION_KEYS.OKR_TEAM_READ, PERMISSION_KEYS.OKR_CREATE, PERMISSION_KEYS.OKR_CHECK_IN, PERMISSION_KEYS.OKR_DEPARTMENT_MANAGE, PERMISSION_KEYS.OKR_COMPANY_MANAGE, PERMISSION_KEYS.OKR_CYCLE_MANAGE, PERMISSION_KEYS.OKR_SCORE_CLOSE, PERMISSION_KEYS.OKR_METRIC_BIND] },
 ];
 
 export function getCoreDataScopeRows(): RoleDataScopeRow[] {
@@ -161,6 +163,20 @@ const CORE_ROLE_PERMISSION_TREE: RolePermissionNode[] = [
           { label: '老板驾驶舱', key: PERMISSION_KEYS.BRAIN_DASHBOARD },
         ],
       },
+    ],
+  },
+  {
+    label: '目标管理',
+    children: [
+      { label: '查看本人目标', key: PERMISSION_KEYS.OKR_SELF_READ },
+      { label: '查看团队目标', key: PERMISSION_KEYS.OKR_TEAM_READ },
+      { label: '创建目标', key: PERMISSION_KEYS.OKR_CREATE },
+      { label: '提交检视', key: PERMISSION_KEYS.OKR_CHECK_IN },
+      { label: '管理部门目标', key: PERMISSION_KEYS.OKR_DEPARTMENT_MANAGE },
+      { label: '管理公司目标', key: PERMISSION_KEYS.OKR_COMPANY_MANAGE },
+      { label: '管理周期', key: PERMISSION_KEYS.OKR_CYCLE_MANAGE },
+      { label: '评分与关闭', key: PERMISSION_KEYS.OKR_SCORE_CLOSE },
+      { label: '绑定经营指标', key: PERMISSION_KEYS.OKR_METRIC_BIND },
     ],
   },
   {

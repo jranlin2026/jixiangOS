@@ -993,6 +993,7 @@ model EmployeeTask {
 
   template TaskTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
   evidence TaskEvidence[]
+  okrLinks OkrTaskLink[]
 
   @@unique([templateId, employeeId, workDate], map: "employee_tasks_template_employee_workDate_key")
   @@index([employeeId, workDate, status], map: "employee_tasks_employee_workDate_status_idx")
@@ -1665,4 +1666,233 @@ model CustomerMergeLedgerEntry {
   @@unique([ledgerId, domain, recordId])
   @@index([domain, recordId])
   @@map("customer_merge_ledger_entries")
+}
+
+model OkrCycle {
+  id             String    @id @db.VarChar(64)
+  name           String    @db.VarChar(120)
+  year           Int
+  quarter        Int
+  startAt        DateTime
+  endAt          DateTime
+  checkInWeekday Int       @default(5)
+  status         String    @default("DRAFT") @db.VarChar(24)
+  activatedAt    DateTime?
+  closedAt       DateTime?
+  createdById    String    @db.VarChar(64)
+  createdByName  String    @db.VarChar(100)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  objectives Objective[]
+  events     OkrEvent[]
+
+  @@unique([year, quarter])
+  @@index([status, startAt, id])
+  @@map("okr_cycles")
+}
+
+model Objective {
+  id                     String    @id @db.VarChar(64)
+  cycleId                String    @db.VarChar(64)
+  scope                  String    @db.VarChar(24)
+  title                  String    @db.VarChar(200)
+  description            String?   @db.Text
+  parentObjectiveId      String?   @db.VarChar(64)
+  ownerId                String    @db.VarChar(64)
+  ownerName              String    @db.VarChar(100)
+  departmentId           String?   @db.VarChar(64)
+  departmentNameSnapshot String?   @db.VarChar(100)
+  positionId             String?   @db.VarChar(64)
+  positionNameSnapshot   String?   @db.VarChar(100)
+  weight                 Decimal   @db.Decimal(7, 2)
+  progress               Decimal   @default(0) @db.Decimal(7, 2)
+  health                 String    @default("ON_TRACK") @db.VarChar(24)
+  status                 String    @default("DRAFT") @db.VarChar(24)
+  publishedAt            DateTime?
+  publishedById          String?   @db.VarChar(64)
+  publishedByName        String?   @db.VarChar(100)
+  completedAt            DateTime?
+  createdById            String    @db.VarChar(64)
+  createdByName          String    @db.VarChar(100)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  cycle      OkrCycle    @relation(fields: [cycleId], references: [id], onDelete: Restrict)
+  parent     Objective?  @relation("ObjectiveAlignment", fields: [parentObjectiveId], references: [id], onDelete: Restrict)
+  children   Objective[] @relation("ObjectiveAlignment")
+  keyResults KeyResult[]
+  reviews    OkrReview[]
+  events     OkrEvent[]
+
+  @@index([cycleId, status, updatedAt, id], map: "okr_objectives_cycleId_status_updatedAt_id_idx")
+  @@index([ownerId, cycleId, updatedAt, id], map: "okr_objectives_ownerId_cycleId_updatedAt_id_idx")
+  @@index([departmentId, cycleId, updatedAt, id], map: "okr_objectives_departmentId_cycleId_updatedAt_id_idx")
+  @@index([parentObjectiveId])
+  @@map("okr_objectives")
+}
+
+model KeyResult {
+  id                     String    @id @db.VarChar(64)
+  objectiveId            String    @db.VarChar(64)
+  title                  String    @db.VarChar(200)
+  description            String?   @db.Text
+  ownerId                String    @db.VarChar(64)
+  ownerName              String    @db.VarChar(100)
+  departmentId           String?   @db.VarChar(64)
+  departmentNameSnapshot String?   @db.VarChar(100)
+  positionId             String?   @db.VarChar(64)
+  positionNameSnapshot   String?   @db.VarChar(100)
+  type                   String    @db.VarChar(24)
+  direction              String    @db.VarChar(24)
+  baselineValue          Decimal   @db.Decimal(18, 4)
+  targetValue            Decimal   @db.Decimal(18, 4)
+  currentValue           Decimal   @db.Decimal(18, 4)
+  unit                   String?   @db.VarChar(40)
+  weight                 Decimal   @db.Decimal(7, 2)
+  progress               Decimal   @default(0) @db.Decimal(7, 2)
+  health                 String    @default("ON_TRACK") @db.VarChar(24)
+  source                 String    @default("MANUAL") @db.VarChar(24)
+  dueAt                  DateTime?
+  lastCheckInAt          DateTime?
+  createdById            String    @db.VarChar(64)
+  createdByName          String    @db.VarChar(100)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  objective     Objective         @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  checkIns      OkrCheckIn[]
+  taskLinks     OkrTaskLink[]
+  metricBinding OkrMetricBinding?
+  events        OkrEvent[]
+
+  @@index([objectiveId, updatedAt])
+  @@index([ownerId, lastCheckInAt])
+  @@index([ownerId, dueAt, id])
+  @@index([health, dueAt])
+  @@map("okr_key_results")
+}
+
+model OkrCheckIn {
+  id            String   @id @db.VarChar(64)
+  keyResultId   String   @db.VarChar(64)
+  actorId       String   @db.VarChar(64)
+  actorName     String   @db.VarChar(100)
+  previousValue Decimal  @db.Decimal(18, 4)
+  currentValue  Decimal  @db.Decimal(18, 4)
+  progress      Decimal  @db.Decimal(7, 2)
+  confidence    Int?
+  health        String   @db.VarChar(24)
+  blocker       String?  @db.Text
+  nextAction    String?  @db.Text
+  evidence      Json?
+  createdAt     DateTime @default(now())
+
+  keyResult KeyResult @relation(fields: [keyResultId], references: [id], onDelete: Cascade)
+
+  @@index([keyResultId, createdAt])
+  @@index([actorId, createdAt])
+  @@map("okr_check_ins")
+}
+
+model OkrReview {
+  id           String   @id @db.VarChar(64)
+  objectiveId  String   @db.VarChar(64)
+  reviewerId   String   @db.VarChar(64)
+  reviewerName String   @db.VarChar(100)
+  reviewerType String   @db.VarChar(24)
+  score        Decimal  @db.Decimal(5, 4)
+  summary      String   @db.Text
+  lessons      String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  objective Objective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+
+  @@unique([objectiveId, reviewerId, reviewerType])
+  @@index([reviewerId, createdAt])
+  @@map("okr_reviews")
+}
+
+model OkrTaskLink {
+  id           String   @id @db.VarChar(64)
+  keyResultId  String   @db.VarChar(64)
+  taskId       String   @db.VarChar(64)
+  taskTitle    String   @db.VarChar(200)
+  linkedById   String   @db.VarChar(64)
+  linkedByName String   @db.VarChar(100)
+  createdAt    DateTime @default(now())
+
+  keyResult KeyResult    @relation(fields: [keyResultId], references: [id], onDelete: Cascade)
+  task      EmployeeTask @relation(fields: [taskId], references: [id], onDelete: Restrict)
+
+  @@unique([keyResultId, taskId])
+  @@index([taskId])
+  @@map("okr_task_links")
+}
+
+model OkrMetricBinding {
+  id            String   @id @db.VarChar(64)
+  keyResultId   String   @unique @db.VarChar(64)
+  metricCode    String   @db.VarChar(64)
+  metricVersion Int      @default(1)
+  scopeType     String   @db.VarChar(24)
+  scopeId       String?  @db.VarChar(64)
+  createdById   String   @db.VarChar(64)
+  createdByName String   @db.VarChar(100)
+  nextRefreshAt DateTime?
+  leaseOwner    String?  @db.VarChar(128)
+  leaseEpoch    Int      @default(0)
+  leaseExpiresAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  keyResult KeyResult           @relation(fields: [keyResultId], references: [id], onDelete: Cascade)
+  snapshots OkrMetricSnapshot[]
+
+  @@index([metricCode, scopeType, scopeId])
+  @@index([nextRefreshAt, leaseExpiresAt, id])
+  @@map("okr_metric_bindings")
+}
+
+model OkrMetricSnapshot {
+  id            String   @id @db.VarChar(64)
+  bindingId     String   @db.VarChar(64)
+  refreshSlot   String   @db.VarChar(40)
+  value         Decimal  @db.Decimal(18, 4)
+  sourceCount   Int?
+  qualityStatus String   @default("OK") @db.VarChar(24)
+  detail        Json?
+  rangeStartAt  DateTime
+  rangeEndAt    DateTime
+  measuredAt    DateTime
+  createdAt     DateTime @default(now())
+
+  binding OkrMetricBinding @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+
+  @@index([bindingId, measuredAt])
+  @@unique([bindingId, refreshSlot])
+  @@map("okr_metric_snapshots")
+}
+
+model OkrEvent {
+  id          String   @id @db.VarChar(64)
+  cycleId     String   @db.VarChar(64)
+  objectiveId String?  @db.VarChar(64)
+  keyResultId String?  @db.VarChar(64)
+  actorId     String   @db.VarChar(64)
+  actorName   String   @db.VarChar(100)
+  action      String   @db.VarChar(64)
+  fromState   String?  @db.VarChar(24)
+  toState     String?  @db.VarChar(24)
+  detail      Json?
+  createdAt   DateTime @default(now())
+
+  cycle     OkrCycle   @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  objective Objective? @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  keyResult KeyResult? @relation(fields: [keyResultId], references: [id], onDelete: Cascade)
+
+  @@index([cycleId, createdAt])
+  @@index([objectiveId, createdAt])
+  @@index([keyResultId, createdAt])
+  @@map("okr_events")
 }

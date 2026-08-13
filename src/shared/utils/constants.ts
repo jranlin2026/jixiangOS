@@ -22,6 +22,7 @@ export const ROUTES = {
   ACADEMY: '/academy',
   ENABLEMENT: '/enablement',
   TASKS: '/tasks',
+  OKR: '/okr',
   CO_CREATION: '/co-creation',
   NOTIFICATIONS: '/notifications',
   SETTINGS: '/settings',

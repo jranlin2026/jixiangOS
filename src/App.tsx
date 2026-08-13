@@ -7,6 +7,7 @@ import { initializeMockData } from './api';
 import ProtectedRoute from './shared/auth/ProtectedRoute';
 import { PERMISSION_KEYS } from './shared/utils/permissions';
 import { ACADEMY_ACCESS_PERMISSION_KEYS } from './shared/utils/academyAccess';
+import { OKR_ACCESS_PERMISSION_KEYS } from './shared/utils/okrAccess';
 import useAuthStore from './store/useAuthStore';
 import StorageSyncFailureNotice from './shared/components/StorageSyncFailureNotice';
 import { systemSetupApi, type SystemSetupStatus } from './api/systemSetupApi';
@@ -28,6 +29,7 @@ const AIAssistant = React.lazy(() => import('./pages/AIAssistant'));
 const Academy = React.lazy(() => import('./pages/Academy'));
 const Enablement = React.lazy(() => import('./pages/Enablement'));
 const Tasks = React.lazy(() => import('./pages/Tasks'));
+const Okr = React.lazy(() => import('./pages/Okr'));
 const CoCreation = React.lazy(() => import('./pages/CoCreation'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Notifications = React.lazy(() => import('./pages/Notifications'));
@@ -262,6 +264,9 @@ const App: React.FC = () => {
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.TASK_SELF, PERMISSION_KEYS.TASK_TEAM]} />}>
             <Route path={ROUTES.TASKS} element={<Suspense fallback={<PageLoader />}><Tasks /></Suspense>} />
+          </Route>
+          <Route element={<ProtectedRoute permissionKeys={[...OKR_ACCESS_PERMISSION_KEYS]} />}>
+            <Route path={ROUTES.OKR} element={<Suspense fallback={<PageLoader />}><Okr /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[
             PERMISSION_KEYS.CO_CREATION_SUBMIT,

@@ -16,6 +16,8 @@ const configLabels: Record<string, { label: string; suffix?: string }> = {
   dueSoonMinutes: { label: '到期前提醒', suffix: '分钟' },
   overdueReminderMinutes: { label: '逾期后再次提醒', suffix: '分钟' },
   escalateNextWorkday: { label: '下一工作日仍未完成时升级主管' },
+  checkInReminderMinutes: { label: '周检视提前提醒', suffix: '分钟' },
+  riskEscalationMinutes: { label: '风险升级主管', suffix: '分钟' },
 };
 
 export default function NotificationSettings() {

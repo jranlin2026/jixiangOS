@@ -7,7 +7,10 @@ import type { Role } from '../../types/role';
 
 const rolePermissionSource = readFileSync(new URL('./RolePermission.tsx', import.meta.url), 'utf8');
 assert.doesNotMatch(rolePermissionSource, /仅本部门|本部门及所有下级部门/);
-assert.match(rolePermissionSource, /CUSTOMER_SCOPE_OPTIONS[\s\S]*value: 'self'[\s\S]*value: 'department'[\s\S]*value: 'all'/);
+assert.match(rolePermissionSource, /dataScopeOptions[\s\S]*value: 'self', label: '本人'[\s\S]*value: 'department', label: '本部门及下级部门'[\s\S]*value: 'all', label: '全公司'/);
+assert.match(rolePermissionSource, /CUSTOMER_SCOPE_OPTIONS[\s\S]*value: 'self', label: '本人'[\s\S]*value: 'department', label: '本部门及下级部门'[\s\S]*value: 'all', label: '全公司'/);
+assert.match(rolePermissionSource, /corePermissionNode\('企业AI大脑'\)/, '角色页必须实际挂载企业AI大脑权限树');
+assert.match(rolePermissionSource, /corePermissionNode\('目标管理'\)/, '角色页必须实际挂载目标管理权限树');
 
 const roleNames = [
   { id: 'role-sales', name: '销售经理' },
@@ -30,6 +33,7 @@ assert.deepEqual(sparseFinanceScopes, {
   recoveryOrders: 'all',
   recoveryOrderApplications: 'all',
   academy: 'self',
+  okr: 'self',
   assets: 'self',
 });
 assert.deepEqual(
@@ -51,6 +55,7 @@ assert.deepEqual(sparseSalesManagerScopes, {
   recoveryOrders: 'department',
   recoveryOrderApplications: 'department',
   academy: 'department',
+  okr: 'department',
   assets: 'all',
 });
 assert.deepEqual(

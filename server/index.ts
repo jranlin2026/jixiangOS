@@ -107,6 +107,10 @@ import { createAcademyService } from './services/academy/academyService';
 import { createPrismaAcademyRepository } from './services/academy/prismaAcademyRepository';
 import { buildDataVisibilityScopeForUser } from '../src/shared/utils/dataVisibility';
 import { createEnterpriseBrainRouter } from './routes/enterpriseBrainRoutes';
+import { createOkrRouter } from './routes/okrRoutes';
+import { createOkrService } from './services/okr/okrService';
+import { createBusinessCockpitOkrMetricProvider, createOkrMetricService } from './services/okr/okrMetricService';
+import { createOkrMetricWorker } from './services/okr/okrMetricWorker';
 import { createPositionStandardService } from './services/enterpriseBrain/positionStandardService';
 import { createPrismaPositionStandardRepository } from './services/enterpriseBrain/prismaPositionStandardRepository';
 import { createEnterpriseTaskService } from './services/enterpriseBrain/taskService';
@@ -412,6 +416,16 @@ const enterpriseCockpitService = createEnterpriseCockpitService({
   rolloutPositionIds: ['pos-sales-consultant', 'pos-sales-manager', 'pos-sales-director'],
   rolloutLabel: '销售体系试运行范围',
 });
+const okrService = createOkrService({ prisma, notifications: notificationWorkflow });
+const okrMetricService = createOkrMetricService({
+  prisma,
+  provider: createBusinessCockpitOkrMetricProvider(businessCockpitService),
+});
+const okrMetricWorker = createOkrMetricWorker({
+  prisma,
+  service: okrMetricService,
+  onError: () => console.error('OKR_METRIC_WORKER_FAILED'),
+});
 const requireAuthenticated = createRequireAuth(authService);
 const requireOrganizationReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS);
 const requireDashboardAccess = createRequireAuth(authService, PERMISSION_KEYS.DASHBOARD);
@@ -655,6 +669,7 @@ app.use('/api/enterprise-brain', createEnterpriseBrainRouter({
   ai: enterpriseAiService,
   cockpit: enterpriseCockpitService,
 }));
+app.use('/api/okr', createOkrRouter({ service: okrService, metrics: okrMetricService, requireAuth: requireStorageAccess }));
 app.use('/api/co-creation', createCoCreationRouter({ service: coCreationService, requireAuth: requireCoCreationAccess }));
 app.use('/api/browser-agent', createBrowserAgentRouter({
   service: browserLeadIntakeService,
@@ -2416,6 +2431,7 @@ async function startServer() {
   customerBatchWorker.start();
   businessImportWorker.start();
   notificationWorker.start();
+  okrMetricWorker.start();
   void businessAttachmentService.cleanupExpiredAcademyTaskEvidence().catch(() => undefined);
   const taskEvidenceCleanupTimer = setInterval(() => {
     void businessAttachmentService.cleanupExpiredAcademyTaskEvidence().catch(() => undefined);
@@ -2428,6 +2444,7 @@ async function startServer() {
     await customerBatchWorker.stop();
     await businessImportWorker.stop();
     await notificationWorker.stop();
+    await okrMetricWorker.stop();
     clearInterval(taskEvidenceCleanupTimer);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await prisma.$disconnect();
