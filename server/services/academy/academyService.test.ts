@@ -38,6 +38,7 @@ function createRepository(): AcademyRepository {
     || scope.unrestricted
     || scope.visibleUserIds.includes(session.createdById)
     || scope.visibleUserIds.includes(session.facilitatorUserId)
+    || scope.visibleUserIds.includes(session.taskReviewerUserId)
     || scope.visibleUserIds.includes(session.lecturerUserId)
     || (session.collaboratorUserIds || []).some((id: string) => scope.visibleUserIds.includes(id))
     || scope.visibleUserIds.includes(courses.find((course) => course.id === session.courseId)?.ownerUserId)
@@ -173,7 +174,10 @@ function createRepository(): AcademyRepository {
       const mine = tasks.filter((task) => {
         const session = sessions.find((item) => item.id === task.sessionId);
         if (!session) return false;
-        if (status === "REVIEW") return task.status === "SUBMITTED" && sessionVisible(session, scope);
+        const activeCategory = ["PLANNED", "READY"].includes(session.status)
+          ? "BEFORE"
+          : session.status === "IN_PROGRESS" ? "DURING" : session.status === "POST_COURSE" ? "AFTER" : null;
+        if (status === "REVIEW") return task.status === "SUBMITTED" && task.category === activeCategory && (scope ? sessionVisible(session, scope) : session.taskReviewerUserId === userId);
         if (status === "HISTORY") {
           return (
             (task.assigneeUserId === userId && ["SUBMITTED", "DONE", "SKIPPED"].includes(task.status)) ||
@@ -181,7 +185,7 @@ function createRepository(): AcademyRepository {
           );
         }
         if (task.assigneeUserId !== userId || session.status === "CANCELLED") return false;
-        if (status === "OPEN") return !["DONE", "SKIPPED", "SUBMITTED"].includes(task.status);
+        if (status === "OPEN") return task.category === activeCategory && !["DONE", "SKIPPED", "SUBMITTED"].includes(task.status);
         return !status || task.status === status;
       }).map((task) => {
         const session = sessions.find((item) => item.id === task.sessionId)!;
@@ -193,6 +197,8 @@ function createRepository(): AcademyRepository {
             startsAt: session.startsAt,
             endsAt: session.endsAt,
             status: session.status,
+            taskReviewerUserId: session.taskReviewerUserId,
+            taskReviewerUserName: session.taskReviewerUserName,
           },
         };
       });
@@ -202,8 +208,8 @@ function createRepository(): AcademyRepository {
       const session = sessions.find((item) => item.id === task.sessionId);
       return task.id === id && session && sessionVisible(session, scope);
     }) || null,
-    updateTaskStatus: async (id, expectedStatus, update) => {
-      const task = tasks.find((item) => item.id === id && item.status === expectedStatus && sessions.find((session) => session.id === item.sessionId)?.status !== "CANCELLED");
+    updateTaskStatus: async (id, expectedStatus, update, allowedSessionStatuses) => {
+      const task = tasks.find((item) => item.id === id && item.status === expectedStatus && allowedSessionStatuses.includes(sessions.find((session) => session.id === item.sessionId)?.status));
       if (!task) return null;
       Object.assign(task, update);
       return task;
@@ -695,6 +701,9 @@ assert.equal((await service.updateCourse(courseResult.data!.id, { ...courseResul
 const taskAuthorizationSession = await repository.createSession({
   ...sessionResult.data!,
   id: "task-authorization-session",
+  status: "IN_PROGRESS",
+  taskReviewerUserId: actor.id,
+  taskReviewerUserName: actor.name,
 } as any, [{
   ...sessionResult.data!.tasks.find((task: any) => task.templateKey === "COURSE_DELIVERY")!,
   id: "task-authorization-task",
@@ -1199,10 +1208,65 @@ assert.ok(
   "全员进度不得泄露其他负责人的交付说明或附件",
 );
 assert.ok(ownPublicCourse.tasks.every((task: any) => !("attachments" in task)), "全员周历不得直接返回任务附件");
+assert.ok(
+  ownPublicCourse.tasks.every((task: any) => ["BEFORE", "DURING", "AFTER"].includes(task.category)),
+  "全员工作台必须返回课前、课中、课后阶段，不能把所有任务拍平成一条线",
+);
 assert.deepEqual(
   Object.keys(publicCalendar.data[0]).sort(),
   ["courseTitle", "currentStep", "deliveryMode", "endsAt", "id", "lecturerUserName", "progress", "startsAt", "status", "tasks", "title"].sort(),
   "全员周历只能返回安全的课程进度投影",
 );
+
+const phaseTemplate = await service.saveSopTemplate({
+  name: "课程三阶段测试流程",
+  steps: [
+    { stepKey: "PHASE_BEFORE", title: "课前确认", category: "BEFORE", assigneeRole: "PROJECT_OWNER", dueAnchor: "STARTS_AT", completionMode: "CONFIRM", requiresReview: false, isRequired: true },
+    { stepKey: "PHASE_DURING", title: "课中执行", category: "DURING", assigneeRole: "LECTURER", dueAnchor: "ENDS_AT", completionMode: "CONFIRM", requiresReview: false, isRequired: true },
+    { stepKey: "PHASE_AFTER", title: "课后跟进", category: "AFTER", assigneeRole: "PROJECT_OWNER", dueAnchor: "ENDS_AT", completionMode: "CONFIRM", requiresReview: true, isRequired: true },
+  ],
+}, actor);
+assert.equal(phaseTemplate.code, 0);
+const phaseSession = await service.createSession({
+  courseId: courseResult.data!.id,
+  sopTemplateId: phaseTemplate.data!.id,
+  title: "课程阶段主链路测试",
+  startsAt: "2026-08-21T09:00:00.000Z",
+  endsAt: "2026-08-21T10:00:00.000Z",
+  venue: "测试直播间",
+  capacity: 10,
+  projectOwnerUserId: actor.id,
+  lecturerUserId: "user-lecturer",
+  reviewOwnerUserId: "user-review",
+  taskReviewerUserId: "user-review",
+}, actor);
+assert.equal(phaseSession.code, 0);
+const beforePhaseTask = phaseSession.data!.tasks.find((task: any) => task.category === "BEFORE")!;
+const duringPhaseTask = phaseSession.data!.tasks.find((task: any) => task.category === "DURING")!;
+const afterPhaseTask = phaseSession.data!.tasks.find((task: any) => task.category === "AFTER")!;
+const lecturerActor = { ...actor, id: "user-lecturer", name: "课程讲师", permissions: [] };
+const reviewerActor = {
+  ...actor,
+  id: "user-review",
+  name: "独立任务验收人",
+  role: "普通员工",
+  roleId: "role-employee",
+  permissions: [],
+};
+assert.equal((await service.updateTask(duringPhaseTask.id, { status: "IN_PROGRESS" }, lecturerActor)).code, 409, "开课前不能提前处理课中任务");
+assert.equal((await service.updateTask(beforePhaseTask.id, { status: "SUBMITTED" }, actor)).code, 0);
+assert.equal((await service.changeSessionStatus(phaseSession.data!.id, "READY", actor)).code, 0, "只需完成必做课前任务即可确认待开课");
+assert.equal((await service.updateTask(afterPhaseTask.id, { status: "IN_PROGRESS" }, actor)).code, 409, "课程结束前不能提前处理课后任务");
+assert.equal((await service.changeSessionStatus(phaseSession.data!.id, "IN_PROGRESS", actor)).code, 0);
+assert.equal((await service.updateTask(duringPhaseTask.id, { status: "SUBMITTED" }, lecturerActor)).code, 0);
+assert.equal((await service.changeSessionStatus(phaseSession.data!.id, "POST_COURSE", actor)).code, 0, "课中必做任务完成后应进入课后跟进，而不是直接完结");
+assert.equal((await service.updateTask(afterPhaseTask.id, { status: "IN_PROGRESS" }, actor)).code, 0);
+assert.equal((await service.updateTask(afterPhaseTask.id, { status: "SUBMITTED", submissionNote: "复盘完成" }, actor)).code, 0);
+const reviewerQueue = await (service as any).listMyTasks({ page: 1, pageSize: 10, status: "REVIEW" }, reviewerActor);
+assert.equal(reviewerQueue.data.items.some((task: any) => task.id === afterPhaseTask.id), true, "指定验收人登录后必须在待我验收看到任务，不依赖课程管理员权限");
+assert.equal((await service.listTaskAttachments(afterPhaseTask.id, reviewerActor)).code, 0, "指定验收人必须能读取待验收任务的交付附件");
+assert.equal((await service.updateTask(afterPhaseTask.id, { status: "DONE", reviewNote: "管理员不应代验收" }, actor)).code, 403, "非本次指定验收人不得验收任务");
+assert.equal((await service.updateTask(afterPhaseTask.id, { status: "DONE", reviewNote: "验收通过" }, reviewerActor)).code, 0, "本次指定验收人可以完成验收");
+assert.equal((await service.changeSessionStatus(phaseSession.data!.id, "COMPLETED", actor)).code, 0, "课后必做任务完成后才能完结课程");
 
 console.log("academy service tests passed");

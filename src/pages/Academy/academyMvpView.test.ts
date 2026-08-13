@@ -18,6 +18,11 @@ assert.doesNotMatch(academy, /view === "overview"[\s\S]{0,300}loadDetail/, "工�
 assert.match(academy, /title="全员课程周历"/, "工作台应明确标记全员课程周历");
 assert.match(academy, /课程执行接力/, "工作台应集中展示所选课程的SOP执行进度");
 assert.match(academy, /当前接力人/, "工作台应明确当前步骤负责人");
+assert.match(academy, /课前准备[\s\S]*课程执行[\s\S]*课后跟进/, "课程执行接力必须按课前、课中、课后三阶段展示");
+assert.match(academy, /任务验收人 \*/, "课程安排必须明确指定本次任务验收人");
+assert.match(academy, /结束授课，进入课后跟进/, "课程授课结束后必须进入课后跟进阶段，不能直接完结");
+assert.match(academy, /statusGateCategory[\s\S]*task\.category === statusGateCategory[\s\S]*task\.isRequired/, "状态推进必须只检查当前阶段的必做任务，不能被未来步骤阻塞");
+assert.match(academy, /disabled=\{incompleteRequiredTasks\.length > 0\}/, "课前、课中和课后阶段均应在前端禁用不满足门禁的状态推进按钮");
 assert.match(academy, /我负责/, "工作台应突出当前员工负责的课程节点");
 assert.doesNotMatch(academy, /进入课程运营/, "工作台周历不应提供进入课程的按钮");
 assert.match(academy, /academyApi\.saveEngagementBatch/, "多选客户应使用原子批量邀约接口");

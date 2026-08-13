@@ -117,6 +117,7 @@ const sessionScopeWhere = (scope: AcademyAccessScope) =>
         OR: [
           { createdById: { in: scope.visibleUserIds } },
           { facilitatorUserId: { in: scope.visibleUserIds } },
+          { taskReviewerUserId: { in: scope.visibleUserIds } },
           { lecturerUserId: { in: scope.visibleUserIds } },
           { tasks: { some: { assigneeUserId: { in: scope.visibleUserIds } } } },
           ...scope.visibleUserIds.map((userId) => ({
@@ -415,11 +416,14 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
           deliveryMode: true,
           status: true,
           lecturerUserName: true,
+          taskReviewerUserName: true,
           tasks: {
             select: {
               id: true,
               templateKey: true,
               title: true,
+              category: true,
+              isRequired: true,
               assigneeUserId: true,
               assigneeUserName: true,
               dueAt: true,
@@ -443,6 +447,7 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         deliveryMode: row.deliveryMode,
         status: row.status,
         lecturerUserName: row.lecturerUserName,
+        taskReviewerUserName: row.taskReviewerUserName,
         tasks: row.tasks,
       }));
     },
@@ -574,12 +579,29 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         };
       }
       const where = status === "REVIEW"
-        ? { status: "SUBMITTED", session: sessionScopeWhere(scope || { unrestricted: false, visibleUserIds: [] }) }
+        ? {
+            status: "SUBMITTED",
+            session: scope
+              ? sessionScopeWhere(scope)
+              : { taskReviewerUserId: userId, status: { not: "CANCELLED" } },
+            OR: [
+              { category: "BEFORE", session: { status: { in: ["PLANNED", "READY"] } } },
+              { category: "DURING", session: { status: "IN_PROGRESS" } },
+              { category: "AFTER", session: { status: "POST_COURSE" } },
+            ],
+          }
         : {
               assigneeUserId: userId,
               session: { status: { not: "CANCELLED" } },
               ...(status === "OPEN"
-                ? { status: { notIn: ["DONE", "SKIPPED", "SUBMITTED"] } }
+                ? {
+                    status: { notIn: ["DONE", "SKIPPED", "SUBMITTED"] },
+                    OR: [
+                      { category: "BEFORE", session: { status: { in: ["PLANNED", "READY"] } } },
+                      { category: "DURING", session: { status: "IN_PROGRESS" } },
+                      { category: "AFTER", session: { status: "POST_COURSE" } },
+                    ],
+                  }
                 : status ? { status } : {}),
             };
       const select = {
@@ -616,7 +638,15 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         createdAt: true,
         updatedAt: true,
         session: {
-          select: { id: true, title: true, startsAt: true, endsAt: true, status: true },
+          select: {
+            id: true,
+            title: true,
+            startsAt: true,
+            endsAt: true,
+            status: true,
+            taskReviewerUserId: true,
+            taskReviewerUserName: true,
+          },
         },
       };
       const [items, total] = await prisma.$transaction([
@@ -638,10 +668,14 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
           })
         : prisma.academySessionTask.findUnique({ where: { id } });
     },
-    async updateTaskStatus(id, expectedStatus, update) {
+    async updateTaskStatus(id, expectedStatus, update, allowedSessionStatuses) {
       return prisma.$transaction(async (tx: any) => {
         const changed = await tx.academySessionTask.updateMany({
-          where: { id, status: expectedStatus, session: { status: { not: "CANCELLED" } } },
+          where: {
+            id,
+            status: expectedStatus,
+            session: { status: { in: allowedSessionStatuses } },
+          },
           data: update,
         });
         if (!changed.count) return null;

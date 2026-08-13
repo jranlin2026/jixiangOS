@@ -60,6 +60,7 @@ const statusLabel: Record<string, string> = {
   PLANNED: "已排期",
   READY: "待开课",
   IN_PROGRESS: "进行中",
+  POST_COURSE: "课后跟进",
   COMPLETED: "已完成",
   CANCELLED: "已取消",
   PENDING: "待处理",
@@ -136,9 +137,14 @@ export const getArrangementNextAction = (
     };
   if (session.status === "IN_PROGRESS")
     return {
-      label: "结束课程",
-      nextStatus: "COMPLETED" as AcademySessionStatus,
-      tab: 2,
+      label: "结束授课，进入课后跟进",
+      nextStatus: "POST_COURSE" as AcademySessionStatus,
+      tab: 0,
+    };
+  if (session.status === "POST_COURSE")
+    return {
+      label: "推进课后任务",
+      tab: 0,
     };
   if (session.status === "COMPLETED")
     return detail?.review
@@ -257,7 +263,7 @@ export const Plans: React.FC<PlansProps> = ({
         : bucket === "CANCELLED"
           ? item.status === "CANCELLED"
           : bucket === "IN_PROGRESS"
-            ? item.status === "IN_PROGRESS"
+            ? ["IN_PROGRESS", "POST_COURSE"].includes(item.status)
             : ["PLANNED", "READY"].includes(item.status);
     return matchesSearch && matchesBucket;
   });
@@ -494,13 +500,13 @@ export const Plans: React.FC<PlansProps> = ({
                           item.canOpenDetail !== false &&
                           (item.status === "COMPLETED" ||
                             item.status === "CANCELLED" ||
-                            item.status === "IN_PROGRESS" ||
+                            ["IN_PROGRESS", "POST_COURSE"].includes(item.status) ||
                             canCreate);
                         const handleOpen = () => {
                           if (!canOpen) return;
                           if (["COMPLETED", "CANCELLED"].includes(item.status))
                             openDetail(item);
-                          else if (item.status === "IN_PROGRESS")
+                          else if (["IN_PROGRESS", "POST_COURSE"].includes(item.status))
                             onOpenWorkbench(item.id);
                           else if (canCreate) onEdit(item);
                         };
@@ -511,7 +517,7 @@ export const Plans: React.FC<PlansProps> = ({
                             tabIndex={canOpen ? 0 : undefined}
                             aria-label={
                               canOpen
-                                ? `${item.status === "COMPLETED" ? "查看课程结果" : item.status === "CANCELLED" ? "查看取消归档" : item.status === "IN_PROGRESS" ? "进入课程工作台" : "编辑课程安排"} ${item.title}`
+                                ? `${item.status === "COMPLETED" ? "查看课程结果" : item.status === "CANCELLED" ? "查看取消归档" : ["IN_PROGRESS", "POST_COURSE"].includes(item.status) ? "进入课程工作台" : "编辑课程安排"} ${item.title}`
                                 : undefined
                             }
                             onClick={canOpen ? handleOpen : undefined}
@@ -598,7 +604,7 @@ export const Plans: React.FC<PlansProps> = ({
             key: "IN_PROGRESS",
             label: "进行中课程",
             helper: "进入工作台推进课程任务",
-            count: sessions.filter((item) => item.status === "IN_PROGRESS")
+            count: sessions.filter((item) => ["IN_PROGRESS", "POST_COURSE"].includes(item.status))
               .length,
           },
           {
@@ -867,7 +873,7 @@ export const Plans: React.FC<PlansProps> = ({
                               开始课程
                             </Button>
                           )}
-                          {item.status === "IN_PROGRESS" && (
+                          {["IN_PROGRESS", "POST_COURSE"].includes(item.status) && (
                             <Button
                               size="small"
                               startIcon={<DashboardOutlinedIcon />}
@@ -882,9 +888,9 @@ export const Plans: React.FC<PlansProps> = ({
                               variant="contained"
                               color="success"
                               startIcon={<StopCircleOutlinedIcon />}
-                              onClick={() => onChangeStatus(item, "COMPLETED")}
+                              onClick={() => onChangeStatus(item, "POST_COURSE")}
                             >
-                              结束课程
+                              结束授课
                             </Button>
                           )}
                           {(canCreate ||

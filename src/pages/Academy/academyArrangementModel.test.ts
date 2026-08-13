@@ -54,8 +54,13 @@ const readyDetail = {
 };
 assert.equal(
   getArrangementNextAction({ ...session, status: "IN_PROGRESS" }, readyDetail).label,
-  "结束课程",
-  "进行中课程必须提供明确的结束操作",
+  "结束授课，进入课后跟进",
+  "进行中课程必须明确进入课后跟进，不能直接完结",
+);
+assert.equal(
+  getArrangementNextAction({ ...session, status: "POST_COURSE" }, readyDetail).label,
+  "推进课后任务",
+  "授课结束后必须继续推进课后任务",
 );
 assert.deepEqual(
   getArrangementNextAction(session, readyDetail),

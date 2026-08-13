@@ -2,7 +2,7 @@ import type { BusinessAttachment } from './businessAttachment';
 
 export type AcademyCourseStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 export type AcademySessionStatus =
-  "PLANNED" | "READY" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+  "PLANNED" | "READY" | "IN_PROGRESS" | "POST_COURSE" | "COMPLETED" | "CANCELLED";
 export type AcademyDeliveryMode = "OFFLINE" | "LIVE" | "ONLINE";
 export type AcademyTaskStatus =
   | "PENDING"
@@ -125,6 +125,8 @@ export interface AcademySession {
   canOpenDetail?: boolean;
   facilitatorUserId?: string;
   facilitatorUserName?: string;
+  taskReviewerUserId?: string;
+  taskReviewerUserName?: string;
   lecturerUserId?: string;
   lecturerUserName?: string;
   collaboratorUserIds?: string[];
@@ -157,6 +159,9 @@ export interface AcademyPublicCalendarItem {
     acceptanceCriteria?: string;
     completionMode?: AcademyTaskCompletionMode;
     requiresReview?: boolean;
+    category: "BEFORE" | "DURING" | "AFTER";
+    isRequired: boolean;
+    reviewerUserName?: string;
     stepNumber: number;
     title: string;
     assigneeUserName?: string;
@@ -175,6 +180,9 @@ export interface AcademyPublicCalendarItem {
     acceptanceCriteria?: string;
     completionMode?: AcademyTaskCompletionMode;
     requiresReview?: boolean;
+    category: "BEFORE" | "DURING" | "AFTER";
+    isRequired: boolean;
+    reviewerUserName?: string;
     stepNumber: number;
     title: string;
     assigneeUserName?: string;
@@ -211,6 +219,7 @@ export interface AcademySessionTask {
   sortOrder?: number;
   completionMode?: AcademyTaskCompletionMode;
   requiresReview?: boolean;
+  reviewerUserName?: string;
   submissionNote?: string;
   submittedAt?: string;
   submittedByName?: string;
@@ -224,7 +233,7 @@ export interface AcademySessionTask {
 
 export interface AcademyMyTask extends AcademySessionTask {
   eventId?: string;
-  session: Pick<AcademySession, "id" | "title" | "startsAt" | "endsAt" | "status">;
+  session: Pick<AcademySession, "id" | "title" | "startsAt" | "endsAt" | "status" | "taskReviewerUserId" | "taskReviewerUserName">;
 }
 
 export interface AcademyEngagement {
@@ -310,6 +319,7 @@ export type CreateAcademySessionInput = Pick<
   | "audience"
   | "isInvitable"
   | "facilitatorUserId"
+  | "taskReviewerUserId"
   | "lecturerUserId"
   | "collaboratorUserIds"
   | "projectOwnerUserId"

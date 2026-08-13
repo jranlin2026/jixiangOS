@@ -1159,6 +1159,8 @@ model AcademySession {
   isHistoricalBackfill Boolean @default(false)
   facilitatorUserId   String?  @db.VarChar(64)
   facilitatorUserName String?  @db.VarChar(100)
+  taskReviewerUserId   String?  @db.VarChar(64)
+  taskReviewerUserName String?  @db.VarChar(100)
   lecturerUserId      String?  @db.VarChar(64)
   lecturerUserName    String?  @db.VarChar(100)
   collaboratorUserIds Json?
@@ -1177,6 +1179,7 @@ model AcademySession {
   @@index([startsAt, status])
   @@index([courseId, startsAt])
   @@index([facilitatorUserId, startsAt])
+  @@index([taskReviewerUserId, startsAt])
   @@index([deliveryMode, startsAt])
   @@map("academy_sessions")
 }
