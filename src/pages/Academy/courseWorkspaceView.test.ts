@@ -19,7 +19,7 @@ assert.equal(typeof CourseDetailDrawer, "function", "课程详情应使用右侧
 const academySource = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
 assert.match(
   academySource,
-  /<CourseDetailDrawer open=\{Boolean\(detailCourse\)\}/,
+  /<CourseDetailDrawer\s+open=\{Boolean\(detailCourse\)\}/,
   "课程列表工作台应常驻并挂载右侧详情抽屉",
 );
 assert.doesNotMatch(
