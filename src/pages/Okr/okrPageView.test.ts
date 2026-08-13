@@ -15,6 +15,10 @@ assert.match(source, /objectives\.map/, '目标工作台应以目标卡片展示
 assert.match(source, /okrApi\.createCycle/, '周期设置应调用OKR周期命令');
 assert.match(source, /okrApi\.createObjective/, '维护者应能创建目标');
 assert.match(source, /okrApi\.createKeyResult/, '维护者应能在目标下创建关键结果');
+assert.match(source, /输入目标，回车创建/, '添加Objective应在当前页直接输入');
+assert.match(source, /输入关键结果，回车创建/, '添加KR应在目标内直接输入');
+assert.match(source, /autoDistributeWeight: true/, '快捷创建应由后端自动均分草稿权重');
+assert.match(source, /<MenuItem value="MONTH">月度<\/MenuItem>/, '周期创建应允许选择月度');
 assert.match(source, /submitOkrCheckIn/, '周检视必须使用提交并刷新流程');
 assert.match(source, /PERMISSION_KEYS\.OKR_/, '权限判断必须复用共享权限常量');
 assert.match(source, /okrApi\.listDirectoryUsers/, '负责人选择必须使用OKR权限裁剪目录');

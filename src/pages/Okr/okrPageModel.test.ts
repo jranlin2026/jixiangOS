@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import {
   createCurrentQuarterCycleDraft,
+  createCycleDraft,
   getAllowedObjectiveScopes,
   getWorkbenchPeople,
   hasSubmittedObjectiveReview,
   isKeyResultCheckInDue,
   isSystemMetricValueReadOnly,
+  updateCycleDraftPeriod,
 } from './okrPageModel';
 
 assert.deepEqual(
@@ -16,6 +18,11 @@ assert.deepEqual(
   ).map((item) => item.id),
   ['me'],
   '普通员工的目标工作台只显示本人',
+);
+assert.equal(
+  updateCycleDraftPeriod(createCycleDraft('MONTH', new Date('2026-08-13T10:00:00+08:00')), { month: 9 }).endAt,
+  '2026-09-30',
+  '更换月份时应同步更新名称和起止日期',
 );
 
 assert.deepEqual(
@@ -30,8 +37,13 @@ assert.deepEqual(
 
 assert.deepEqual(
   createCurrentQuarterCycleDraft(new Date('2026-08-13T10:00:00+08:00')),
-  { name: '2026年第三季度', year: 2026, quarter: 3, startAt: '2026-07-01', endAt: '2026-09-30', checkInWeekday: 5 },
+  { name: '2026年第三季度', year: 2026, quarter: 3, cycleType: 'QUARTER', startAt: '2026-07-01', endAt: '2026-09-30', checkInWeekday: 5 },
   '新建周期应默认当前季度及起止日期',
+);
+assert.deepEqual(
+  createCycleDraft('MONTH', new Date('2026-08-13T10:00:00+08:00')),
+  { name: '2026年8月', year: 2026, month: 8, cycleType: 'MONTH', startAt: '2026-08-01', endAt: '2026-08-31', checkInWeekday: 5 },
+  '月度周期应自动带出当月起止日期',
 );
 
 assert.equal(isKeyResultCheckInDue({ lastCheckInAt: null }, new Date('2026-08-13T10:00:00+08:00')), true);

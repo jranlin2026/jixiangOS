@@ -1672,7 +1672,9 @@ model OkrCycle {
   id             String    @id @db.VarChar(64)
   name           String    @db.VarChar(120)
   year           Int
-  quarter        Int
+  quarter        Int?
+  cycleType      String    @default("QUARTER") @db.VarChar(24)
+  periodKey      String    @db.VarChar(64)
   startAt        DateTime
   endAt          DateTime
   checkInWeekday Int       @default(5)
@@ -1687,7 +1689,7 @@ model OkrCycle {
   objectives Objective[]
   events     OkrEvent[]
 
-  @@unique([year, quarter])
+  @@unique([cycleType, periodKey])
   @@index([status, startAt, id])
   @@map("okr_cycles")
 }
