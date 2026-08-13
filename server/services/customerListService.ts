@@ -585,7 +585,7 @@ export function createCustomerListService(
         SELECT id, domain, recordId, data, updatedAt
         FROM business_records
         WHERE ${combinedWhere}
-        ORDER BY COALESCE(eventAt, createdAt) DESC, createdAt DESC
+        ORDER BY createdAt DESC, id DESC
         LIMIT ${pageSize} OFFSET ${offset}
       `;
       const totalPages = Math.ceil(total / pageSize);

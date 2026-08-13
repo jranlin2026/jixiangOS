@@ -13,6 +13,15 @@ const systemDataTable = readFileSync(join(root, 'src/shared/components/SystemDat
 
 assert.match(app, /ROUTES\.ACADEMY/, '商学院必须有独立受权路由');
 assert.match(sidebar, /label: '极享商学院'[\s\S]*path: ROUTES\.ACADEMY/, '商学院必须是左侧一级菜单');
+assert.match(
+  app,
+  /<ProtectedRoute permissionKeys=\{\[\.\.\.ACADEMY_ACCESS_PERMISSION_KEYS\]\}[\s\S]*?<Route path=\{`\$\{ROUTES\.ACADEMY\}\/\*`\}/,
+  '商学院路由必须校验任一商学院功能权限',
+);
+const academySidebarBlock = sidebar.match(/\{\s*label: '极享商学院',[\s\S]*?\n  \},/)?.[0] || '';
+assert.ok(academySidebarBlock, '必须找到极享商学院菜单配置');
+assert.doesNotMatch(academySidebarBlock, /publicForAuthenticated:\s*true/, '商学院菜单不得绕过角色权限向所有登录用户开放');
+assert.match(academySidebarBlock, /permissionKeys: \[\.\.\.ACADEMY_ACCESS_PERMISSION_KEYS\]/, '商学院菜单和路由必须复用同一权限集合');
 assert.doesNotMatch(enablement, /AcademyCenter|极享商学院/, '企业标准中心不得再承载商学院业务入口');
 ['我的工作台', '课程库', '课程安排', '邀约跟进'].forEach((label) => {
   assert.ok(academy.includes(label), `商学院缺少${label}页面入口`);

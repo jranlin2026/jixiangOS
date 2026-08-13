@@ -589,6 +589,16 @@ for (const sql of capturedQueries) {
   assert.doesNotMatch(sql, /AND owner IN/);
 }
 assert.match(capturedQueries[1], /LIMIT[\s\S]*OFFSET[\s\S]*1 0$/);
+assert.match(
+  capturedQueries[1],
+  /ORDER BY createdAt DESC, id DESC[\s\S]*LIMIT[\s\S]*OFFSET/,
+  '客户列表必须按不可变创建时间倒序，并用记录 ID 稳定分页顺序',
+);
+assert.doesNotMatch(
+  capturedQueries[1],
+  /ORDER BY COALESCE\(eventAt, createdAt\)/,
+  '客户后续业务事件不得改变默认创建顺序',
+);
 
 const filterCases: Array<[CustomerFilters, string]> = [[{ tagIds: ['t-agent', 't-private'], tagMatch: 'any' }, ' OR '], [{ tagIds: ['t-agent', 't-private'], tagMatch: 'all' }, ' AND '], [{ withoutTags: true }, 'JSON_LENGTH']];
 for (const [filters, joiner] of filterCases) {

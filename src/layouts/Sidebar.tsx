@@ -39,6 +39,7 @@ import { ROUTES } from '../shared/utils/constants';
 import { hasPermission, PERMISSION_KEYS } from '../shared/utils/permissions';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
+import { ACADEMY_ACCESS_PERMISSION_KEYS } from '../shared/utils/academyAccess';
 import useAuthStore from '../store/useAuthStore';
 import ChangePasswordDialog from '../shared/components/ChangePasswordDialog';
 import NotificationBell from '../shared/components/NotificationBell';
@@ -69,7 +70,6 @@ interface NavItem {
   permissionKey: string;
   permissionKeys?: string[];
   children?: NavChildItem[];
-  publicForAuthenticated?: boolean;
 }
 
 interface NavChildItem {
@@ -185,15 +185,7 @@ const navItems: NavItem[] = [
     icon: <SchoolIcon />,
     path: ROUTES.ACADEMY,
     permissionKey: PERMISSION_KEYS.ACADEMY,
-    publicForAuthenticated: true,
-    permissionKeys: [
-      PERMISSION_KEYS.ACADEMY_VIEW,
-      PERMISSION_KEYS.ACADEMY_PLAN_MANAGE,
-      PERMISSION_KEYS.ACADEMY_COURSE_MANAGE,
-      PERMISSION_KEYS.ACADEMY_SESSION_MANAGE,
-      PERMISSION_KEYS.ACADEMY_ENGAGEMENT_MANAGE,
-      PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE,
-    ],
+    permissionKeys: [...ACADEMY_ACCESS_PERMISSION_KEYS],
   },
   {
     label: '企业标准中心',
@@ -299,8 +291,6 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
       && child.permissionKeys.some((permissionKey) => hasPermission(currentUser, permissionKey))
     )),
   })).filter((item) => (
-    item.publicForAuthenticated
-    ||
     (item.permissionKeys || [item.permissionKey]).some((permissionKey) => hasPermission(currentUser, permissionKey))
     || Boolean(item.children?.length)
   )), [currentUser]);

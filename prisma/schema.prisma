@@ -549,6 +549,7 @@ model BusinessRecord {
   @@index([domain])
   @@index([domain, status])
   @@index([domain, eventAt, createdAt])
+  @@index([domain, createdAt, id], map: "business_records_domain_createdAt_id_idx")
   @@index([status])
   @@index([owner])
   @@index([customerId])

@@ -6,6 +6,7 @@ import { ROUTES } from './shared/utils/constants';
 import { initializeMockData } from './api';
 import ProtectedRoute from './shared/auth/ProtectedRoute';
 import { PERMISSION_KEYS } from './shared/utils/permissions';
+import { ACADEMY_ACCESS_PERMISSION_KEYS } from './shared/utils/academyAccess';
 import useAuthStore from './store/useAuthStore';
 import StorageSyncFailureNotice from './shared/components/StorageSyncFailureNotice';
 import { systemSetupApi, type SystemSetupStatus } from './api/systemSetupApi';
@@ -246,7 +247,9 @@ const App: React.FC = () => {
           <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AI_ASSISTANT, PERMISSION_KEYS.AI_POSITION_ASSISTANT]} />}>
             <Route path={ROUTES.AI_ASSISTANT} element={<Suspense fallback={<PageLoader />}><AIAssistant /></Suspense>} />
           </Route>
-          <Route path={`${ROUTES.ACADEMY}/*`} element={<Suspense fallback={<PageLoader />}><Academy /></Suspense>} />
+          <Route element={<ProtectedRoute permissionKeys={[...ACADEMY_ACCESS_PERMISSION_KEYS]} />}>
+            <Route path={`${ROUTES.ACADEMY}/*`} element={<Suspense fallback={<PageLoader />}><Academy /></Suspense>} />
+          </Route>
           <Route element={<ProtectedRoute permissionKeys={[
             PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE,
             PERMISSION_KEYS.ENABLEMENT_REVIEW,
