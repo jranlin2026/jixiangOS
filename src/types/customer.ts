@@ -192,6 +192,9 @@ export interface CustomerLifecycleConfig {
   transitions: Record<string, string[]>;
 }
 
+/** 客户列表排序 */
+export type CustomerListSort = 'created_at' | 'recent_activity' | 'platform_payment';
+
 /** 客户筛选参数 */
 export interface CustomerFilters {
   search?: string;
@@ -210,6 +213,7 @@ export interface CustomerFilters {
   withoutTags?: boolean;
   missingTagGroupId?: ID;
   tag?: string; // one-release compatibility for the old free-text URL
+  sortBy?: CustomerListSort;
   page?: number;
   pageSize?: number;
 }

@@ -29,6 +29,7 @@ import type { Role } from '../types/role';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../shared/utils/customerTagPolicy';
 import { PERMISSION_KEYS } from '../shared/utils/permissions';
 import { hydrateCustomerFirstSalesOwner, resolveFirstSalesOwner } from '../shared/utils/customerOwnership';
+import { sortCustomersForList } from '../shared/utils/customerListSort';
 
 function ensureInit(): void {
   initializeMockData();
@@ -602,6 +603,8 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
     const q = filters.tag.toLowerCase();
     filtered = filtered.filter((c) => (c.tags || []).some((tag) => tag.toLowerCase() === q));
   }
+
+  filtered = sortCustomersForList(filtered, filters?.sortBy || 'created_at');
 
   const page = filters?.page || 1;
   const pageSize = filters?.pageSize || DEFAULT_PAGE_SIZE;

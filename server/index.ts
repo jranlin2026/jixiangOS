@@ -911,6 +911,7 @@ app.get('/api/customers', requireCustomerReadAccess, async (req: AuthenticatedRe
     tagMatch,
     withoutTags: withoutTagsRaw === 'true',
     missingTagGroupId: queryParam(req.query.missingTagGroupId) || undefined,
+    sortBy: queryParam(req.query.sortBy) as any,
     page: Number(queryParam(req.query.page)),
     pageSize: Number(queryParam(req.query.pageSize)),
   }, req.currentUser);

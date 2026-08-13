@@ -29,7 +29,7 @@ const useCustomerStore = create<CustomerState>((set, get) => ({
   current: null,
   loading: false,
   error: null,
-  filters: { page: 1, pageSize: 10 },
+  filters: { page: 1, pageSize: 10, sortBy: 'created_at' },
   pagination: defaultPagination,
 
   fetchItems: async (filters?: CustomerFilters) => {
@@ -129,9 +129,10 @@ const useCustomerStore = create<CustomerState>((set, get) => ({
     filters: {
       page: 1,
       pageSize: state.filters.pageSize || state.pagination.pageSize || defaultPagination.pageSize,
+      sortBy: 'created_at',
     },
   })),
-  reset: () => set({ items: [], current: null, loading: false, error: null, filters: { page: 1, pageSize: 10 }, pagination: defaultPagination }),
+  reset: () => set({ items: [], current: null, loading: false, error: null, filters: { page: 1, pageSize: 10, sortBy: 'created_at' }, pagination: defaultPagination }),
 }));
 
 export default useCustomerStore;

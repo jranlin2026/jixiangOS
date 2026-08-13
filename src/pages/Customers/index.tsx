@@ -847,6 +847,18 @@ const Customers: React.FC = () => {
           scope={customerScope}
           onApply={handleLeadSourceFilterApply}
         />
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>排序</InputLabel>
+          <Select
+            value={filters.sortBy || 'created_at'}
+            label="排序"
+            onChange={(e) => handleFilterChange('sortBy', e.target.value)}
+          >
+            <MenuItem value="created_at">最新创建</MenuItem>
+            <MenuItem value="recent_activity">最近动态</MenuItem>
+            <MenuItem value="platform_payment">平台付款时间</MenuItem>
+          </Select>
+        </FormControl>
         <Box sx={{ flexGrow: 1, minWidth: { xs: '100%', md: 16 } }} />
         <Button
           variant="outlined"

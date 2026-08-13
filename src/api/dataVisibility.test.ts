@@ -186,7 +186,7 @@ assert.deepEqual(
   ['user-sales-a', 'user-sales-b', 'user-sales-child', 'user-manager'],
 );
 resetData('user-manager');
-assert.deepEqual(managerScope.customers, ['cust-a', 'cust-b']);
+assert.deepEqual(managerScope.customers, ['cust-b', 'cust-a'], '客户默认按最新创建排序，时间相同时按 ID 倒序');
 assert.deepEqual(managerScope.publicCustomers, ['cust-public']);
 assert.deepEqual(managerScope.leads, ['lead-input-a', 'lead-assigned-a', 'lead-b']);
 assert.deepEqual(managerScope.orders, ['order-a', 'order-b']);
@@ -212,7 +212,7 @@ assert.equal(aaScope.stats.monthAmount, 600);
 
 resetData('user-admin');
 const adminScope = await idsForCurrentUser();
-assert.deepEqual(adminScope.customers, ['cust-a', 'cust-b', 'cust-other']);
+assert.deepEqual(adminScope.customers, ['cust-other', 'cust-b', 'cust-a']);
 assert.deepEqual(adminScope.publicCustomers, ['cust-public']);
 assert.deepEqual(adminScope.leads, ['lead-input-a', 'lead-assigned-a', 'lead-b', 'lead-other']);
 assert.deepEqual(adminScope.orders, ['order-a', 'order-b', 'order-other']);
@@ -221,7 +221,7 @@ assert.equal(adminScope.stats.monthAmount, 600);
 
 resetData('user-system-admin');
 const systemAdminScope = await idsForCurrentUser();
-assert.deepEqual(systemAdminScope.customers, ['cust-a', 'cust-b', 'cust-other']);
+assert.deepEqual(systemAdminScope.customers, ['cust-other', 'cust-b', 'cust-a']);
 assert.deepEqual(systemAdminScope.publicCustomers, ['cust-public']);
 assert.deepEqual(systemAdminScope.leads, ['lead-input-a', 'lead-assigned-a', 'lead-b', 'lead-other']);
 assert.deepEqual(systemAdminScope.orders, ['order-a', 'order-b', 'order-other']);

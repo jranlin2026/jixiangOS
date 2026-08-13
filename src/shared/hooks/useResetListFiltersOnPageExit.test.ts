@@ -11,7 +11,7 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 
 test('global list stores clear business filters while preserving page size', () => {
   const cases = [
-    { store: useCustomerStore, pageSize: 50, expected: { page: 1, pageSize: 50 } },
+    { store: useCustomerStore, pageSize: 50, expected: { page: 1, pageSize: 50, sortBy: 'created_at' } },
     { store: useLeadStore, pageSize: 30, expected: { page: 1, pageSize: 30 } },
     {
       store: useOrderStore,

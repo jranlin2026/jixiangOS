@@ -14,13 +14,14 @@ test('resetListFilters clears customer filters but preserves page size', () => {
       owner: 'employee-1',
       leadSource: '抖音',
       sourceName: '直播间01',
+      sortBy: 'platform_payment',
       tagIds: ['tag-1'],
     },
   });
 
   useCustomerStore.getState().resetListFilters();
 
-  assert.deepEqual(useCustomerStore.getState().filters, { page: 1, pageSize: 50 });
+  assert.deepEqual(useCustomerStore.getState().filters, { page: 1, pageSize: 50, sortBy: 'created_at' });
 });
 
 test('customer list uses the shared page-exit filter reset hook', () => {

@@ -47,7 +47,7 @@ const users = await customerApi.fetchPublicPoolPreviousOwnerUsers();
 assert.deepEqual(users.data.map((user) => user.name).sort(), ['销售甲']);
 
 const fallbackCustomers = await customerApi.fetchCustomers({ lifecycleStatusCode: 'public_pool', owner: '销售甲' });
-assert.deepEqual(fallbackCustomers.data.items.map((customer) => customer.id), ['fallback', 'followed']);
+assert.deepEqual(fallbackCustomers.data.items.map((customer) => customer.id), ['followed', 'fallback'], '默认最新创建在时间相同时按 ID 倒序稳定排列');
 
 const followedCustomers = await customerApi.fetchCustomers({ lifecycleStatusCode: 'public_pool', owner: '销售乙' });
 assert.deepEqual(followedCustomers.data.items.map((customer) => customer.id), []);

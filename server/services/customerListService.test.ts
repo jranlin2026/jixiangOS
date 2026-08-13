@@ -591,7 +591,7 @@ for (const sql of capturedQueries) {
 assert.match(capturedQueries[1], /LIMIT[\s\S]*OFFSET[\s\S]*1 0$/);
 assert.match(
   capturedQueries[1],
-  /ORDER BY createdAt DESC, id DESC[\s\S]*LIMIT[\s\S]*OFFSET/,
+  /ORDER BY[\s\S]*LIMIT[\s\S]*OFFSET[\s\S]*createdAt DESC, id DESC/,
   '客户列表必须按不可变创建时间倒序，并用记录 ID 稳定分页顺序',
 );
 assert.doesNotMatch(
@@ -599,6 +599,35 @@ assert.doesNotMatch(
   /ORDER BY COALESCE\(eventAt, createdAt\)/,
   '客户后续业务事件不得改变默认创建顺序',
 );
+
+capturedQueries.length = 0;
+executingFilters = { sortBy: 'recent_activity' };
+await listService.list(executingFilters, salesActor);
+assert.match(
+  capturedQueries[1],
+  /ORDER BY[\s\S]*eventAt DESC, createdAt DESC, id DESC/,
+  '最近动态必须按业务事件时间倒序，并用创建时间和 ID 保证稳定分页',
+);
+
+capturedQueries.length = 0;
+executingFilters = { sortBy: 'platform_payment' };
+await listService.list(executingFilters, salesActor);
+assert.match(
+  capturedQueries[1],
+  /CASE[\s\S]*JSON_EXTRACT\(data, '\$\.sourcePaymentAt'\) IS NULL[\s\S]*JSON_TYPE\(JSON_EXTRACT\(data, '\$\.sourcePaymentAt'\)\) = 'NULL'[\s\S]*THEN 1 ELSE 0[\s\S]*END ASC/,
+  '平台付款时间为空的客户必须统一排在有付款时间客户之后',
+);
+assert.match(
+  capturedQueries[1],
+  /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.sourcePaymentAt'\)\) DESC,[\s\S]*id DESC/,
+  '有付款时间的客户必须按平台付款时间倒序并稳定分页',
+);
+
+capturedQueries.length = 0;
+const invalidSort = await listService.list({ sortBy: 'unknown' as any }, salesActor);
+assert.equal(invalidSort.code, 400);
+assert.match(invalidSort.message, /不支持的客户排序方式/);
+assert.equal(capturedQueries.length, 0, '非法排序参数必须在执行数据库查询前被拒绝');
 
 const filterCases: Array<[CustomerFilters, string]> = [[{ tagIds: ['t-agent', 't-private'], tagMatch: 'any' }, ' OR '], [{ tagIds: ['t-agent', 't-private'], tagMatch: 'all' }, ' AND '], [{ withoutTags: true }, 'JSON_LENGTH']];
 for (const [filters, joiner] of filterCases) {

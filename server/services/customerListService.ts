@@ -13,6 +13,7 @@ import type {
   CustomerActivityAttachment,
   CustomerCreateInput,
   CustomerFilters,
+  CustomerListSort,
   CustomerLeadSourceFacet,
   CustomerTagFacet,
 } from '../../src/types/customer';
@@ -89,6 +90,35 @@ function toPositiveInt(value: unknown, fallback: number): number {
   const next = Number(value);
   if (!Number.isFinite(next) || next < 1) return fallback;
   return Math.floor(next);
+}
+
+const CUSTOMER_LIST_SORTS = new Set<CustomerListSort>(['created_at', 'recent_activity', 'platform_payment']);
+
+function normalizeCustomerListSort(value: unknown): CustomerListSort | null {
+  if (value === undefined || value === null || value === '') return 'created_at';
+  return typeof value === 'string' && CUSTOMER_LIST_SORTS.has(value as CustomerListSort)
+    ? value as CustomerListSort
+    : null;
+}
+
+function buildCustomerOrderBy(sortBy: CustomerListSort): Prisma.Sql {
+  if (sortBy === 'recent_activity') {
+    return Prisma.sql`eventAt DESC, createdAt DESC, id DESC`;
+  }
+  if (sortBy === 'platform_payment') {
+    const paymentAt = jsonText('$.sourcePaymentAt');
+    return Prisma.sql`
+      CASE
+        WHEN JSON_EXTRACT(data, '$.sourcePaymentAt') IS NULL
+          OR JSON_TYPE(JSON_EXTRACT(data, '$.sourcePaymentAt')) = 'NULL'
+          OR NULLIF(${paymentAt}, '') IS NULL
+        THEN 1 ELSE 0
+      END ASC,
+      ${paymentAt} DESC,
+      id DESC
+    `;
+  }
+  return Prisma.sql`createdAt DESC, id DESC`;
 }
 
 function customerFromRow(row: CustomerRow): Customer {
@@ -561,6 +591,8 @@ export function createCustomerListService(
     },
 
     async list(filters: CustomerFilters = {}, currentUser?: AuthenticatedUser | null) {
+      const sortBy = normalizeCustomerListSort(filters.sortBy);
+      if (!sortBy) return failure<PaginatedResponse<Customer>>('不支持的客户排序方式', 400);
       const page = toPositiveInt(filters.page, 1);
       const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
       const offset = (page - 1) * pageSize;
@@ -575,6 +607,7 @@ export function createCustomerListService(
       }
       const where = buildCustomerWhere(filters, catalog);
       const combinedWhere = Prisma.sql`${where} AND ${visibility.where}`;
+      const orderBy = buildCustomerOrderBy(sortBy);
       const countRows = await prisma.$queryRaw<Array<{ total: bigint | number }>>`
         SELECT COUNT(*) AS total
         FROM business_records
@@ -585,7 +618,7 @@ export function createCustomerListService(
         SELECT id, domain, recordId, data, updatedAt
         FROM business_records
         WHERE ${combinedWhere}
-        ORDER BY createdAt DESC, id DESC
+        ORDER BY ${orderBy}
         LIMIT ${pageSize} OFFSET ${offset}
       `;
       const totalPages = Math.ceil(total / pageSize);
