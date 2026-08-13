@@ -170,7 +170,7 @@ const emptyCourse: CreateAcademyCourseInput = {
 const emptySopStep = (index: number): AcademySopTemplateStep => ({
   id: "",
   templateId: "",
-  stepKey: `STEP_${index + 1}`,
+  stepKey: `STEP_${index + 1}_${crypto.randomUUID().slice(0, 8)}`,
   title: "",
   category: "BEFORE",
   sortOrder: index + 1,
@@ -203,6 +203,7 @@ const emptySession: CreateAcademySessionInput = {
   lecturerUserId: "",
   collaboratorUserIds: [],
   projectOwnerUserId: "",
+  taskReviewerUserId: "",
   contentOwnerUserId: "",
   materialOwnerUserId: "",
   reviewOwnerUserId: "",
@@ -245,8 +246,9 @@ const statusLabel: Record<string, string> = {
   ACTIVE: "已发布",
   ARCHIVED: "已归档",
   PLANNED: "已排期",
-  READY: "已就绪",
-  IN_PROGRESS: "进行中",
+  READY: "待开课",
+  IN_PROGRESS: "授课中",
+  POST_COURSE: "课后跟进",
   COMPLETED: "已完成",
   CANCELLED: "已取消",
   PENDING: "待处理",
@@ -489,6 +491,7 @@ const Academy: React.FC = () => {
     ]
   > = [
     ["projectOwnerUserId", "项目负责人 *", "ALWAYS"],
+    ["taskReviewerUserId", "任务验收人 *", "ALWAYS"],
     ["contentOwnerUserId", "课程内容负责人 *", "CONTENT_OWNER"],
     ["materialOwnerUserId", "素材负责人 *", "MATERIAL_OWNER"],
     ["lecturerUserId", "主讲人 *", "LECTURER"],
@@ -1189,6 +1192,13 @@ const Academy: React.FC = () => {
       );
       if (!approved) return;
     }
+    if (status === "POST_COURSE") {
+      const approved = await confirm(
+        `确定“${session.title}”已经结束授课吗？确认后将进入课后跟进，课后负责人可以开始处理任务。`,
+        "结束授课",
+      );
+      if (!approved) return;
+    }
     setSaving(true);
     try {
       const response = await academyApi.changeSessionStatus(session.id, status);
@@ -1305,6 +1315,8 @@ const Academy: React.FC = () => {
       isInvitable: session.isInvitable !== false,
       facilitatorUserId: session.facilitatorUserId || "",
       projectOwnerUserId: session.facilitatorUserId || "",
+      taskReviewerUserId:
+        session.taskReviewerUserId || session.facilitatorUserId || "",
       lecturerUserId: session.lecturerUserId || ownerFor("LECTURER"),
       contentOwnerUserId: ownerFor("CONTENT_OWNER"),
       materialOwnerUserId: ownerFor("MATERIAL_OWNER"),
@@ -2012,7 +2024,7 @@ const Academy: React.FC = () => {
                                   提交验收
                                 </Button>
                               )}
-                            {canSession && task.status === "SUBMITTED" && (
+                            {detail.taskReviewerUserId === currentUser?.id && task.status === "SUBMITTED" && (
                               <>
                                 <Button
                                   size="small"
@@ -2393,7 +2405,7 @@ const Academy: React.FC = () => {
             taskPage={myTaskPage}
             taskPageSize={myTaskPageSize}
             taskView={myTaskView}
-            canReviewTasks={canSession}
+            canReviewTasks
             onTaskViewChange={(value) => {
               setMyTaskView(value);
               setMyTaskPage(0);
@@ -2692,7 +2704,7 @@ const Academy: React.FC = () => {
             {workbenchTask.status === "SUBMITTED" && (
               <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
                 <Typography color="text.secondary">
-                  已提交，等待项目负责人确认。
+                  已提交，等待{workbenchTask.session.taskReviewerUserName || "任务验收人"}验收。
                 </Typography>
                 <Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>
                   本次完成说明
@@ -2702,7 +2714,9 @@ const Academy: React.FC = () => {
                 </Typography>
               </Paper>
             )}
-            {!workbenchTask.eventId && workbenchTask.status === "SUBMITTED" && canSession && (
+            {!workbenchTask.eventId &&
+              workbenchTask.status === "SUBMITTED" &&
+              workbenchTask.session.taskReviewerUserId === currentUser?.id && (
               <>
                 <TextField
                   multiline
@@ -3410,7 +3424,7 @@ const Academy: React.FC = () => {
                 </Paper>
                 {sopEditing.steps.map((step, index) => (
                   <Paper
-                    key={`${step.stepKey}-${index}`}
+                    key={step.id || step.stepKey}
                     variant="outlined"
                     sx={{ ...panelSx, p: 1.5 }}
                   >
@@ -3470,9 +3484,6 @@ const Academy: React.FC = () => {
                           steps[index] = {
                             ...step,
                             title: event.target.value,
-                            stepKey: step.id
-                              ? step.stepKey
-                              : `STEP_${index + 1}_${event.target.value.trim().replace(/\s+/g, "_").slice(0, 16) || index + 1}`,
                           };
                           setSopEditing({ ...sopEditing, steps });
                         }}
@@ -4865,6 +4876,7 @@ const Overview: React.FC<{
       return;
     setSelectedCourseId(
       activeCourses.find((session) => session.status === "IN_PROGRESS")?.id ||
+        activeCourses.find((session) => session.status === "POST_COURSE")?.id ||
         activeCourses[0]?.id ||
         "",
     );
@@ -4880,9 +4892,26 @@ const Overview: React.FC<{
         : selectedManagedCourse.status === "READY"
           ? { label: "开始课程", status: "IN_PROGRESS" as const }
           : selectedManagedCourse.status === "IN_PROGRESS"
-            ? { label: "确认课程完成", status: "COMPLETED" as const }
-            : null
+            ? { label: "结束授课，进入课后跟进", status: "POST_COURSE" as const }
+            : selectedManagedCourse.status === "POST_COURSE"
+              ? { label: "确认课程完结", status: "COMPLETED" as const }
+              : null
       : null;
+  const statusGateCategory = selectedManagedCourse?.status === "PLANNED"
+    ? "BEFORE"
+    : selectedManagedCourse?.status === "IN_PROGRESS"
+      ? "DURING"
+      : selectedManagedCourse?.status === "POST_COURSE"
+        ? "AFTER"
+        : null;
+  const incompleteRequiredTasks = statusGateCategory
+    ? selectedCourse?.tasks.filter(
+        (task) =>
+          task.category === statusGateCategory &&
+          task.isRequired &&
+          task.status !== "DONE",
+      ) || []
+    : [];
   const openMyStep = (taskId?: string) => {
     if (!taskId) return;
     const loadedTask = tasks.find((item) => item.id === taskId);
@@ -4894,8 +4923,9 @@ const Overview: React.FC<{
       sessionId: selectedCourse.id,
       templateKey: task.templateKey || "",
       title: task.title,
-      category: "BEFORE",
+      category: task.category,
       isRequired: true,
+      reviewerUserName: task.reviewerUserName,
       status: task.status,
       assigneeUserName: task.assigneeUserName,
       dueAt: task.dueAt,
@@ -5215,27 +5245,38 @@ const Overview: React.FC<{
                     {formatDate(selectedCourse.currentStep?.dueAt)}
                   </Typography>
                 </Box>
+                <Box>
+                  <Typography fontSize={12} color="text.secondary">
+                    验收人
+                  </Typography>
+                  <Typography fontWeight={800}>
+                    {selectedCourse.currentStep?.requiresReview
+                      ? selectedCourse.currentStep.reviewerUserName || "待指定"
+                      : "无需验收"}
+                  </Typography>
+                </Box>
               </Stack>
             </Paper>
-            <Box sx={{ mt: 1.6, overflowX: "auto", pb: 0.5 }}>
-              <Box
-                sx={{
-                  display: "grid",
-                  gridTemplateColumns: `repeat(${Math.max(selectedCourse.tasks.length, 1)}, minmax(125px, 1fr))`,
-                  minWidth: Math.max(selectedCourse.tasks.length * 125, 760),
-                  position: "relative",
-                  "&:before": {
-                    content: '\"\"',
-                    position: "absolute",
-                    top: 16,
-                    left: 30,
-                    right: 30,
-                    height: 2,
-                    bgcolor: palette.line,
-                  },
-                }}
-              >
-                {selectedCourse.tasks.map((task) => {
+            <Stack spacing={1.2} sx={{ mt: 1.6 }}>
+              {([
+                ["BEFORE", "课前准备"],
+                ["DURING", "课程执行"],
+                ["AFTER", "课后跟进"],
+              ] as const).map(([category, label]) => {
+                const phaseTasks = selectedCourse.tasks.filter((task) => task.category === category);
+                const phaseActive =
+                  (["PLANNED", "READY"].includes(selectedCourse.status) && category === "BEFORE") ||
+                  (selectedCourse.status === "IN_PROGRESS" && category === "DURING") ||
+                  (selectedCourse.status === "POST_COURSE" && category === "AFTER");
+                return (
+                  <Paper key={category} variant="outlined" sx={{ p: 1.2, opacity: phaseActive ? 1 : 0.72 }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Typography fontWeight={950}>{label}</Typography>
+                      <Chip size="small" label={phaseActive ? "当前阶段" : !phaseTasks.length ? "无任务" : phaseTasks.every((task) => task.isRequired ? task.status === "DONE" : ["DONE", "SKIPPED"].includes(task.status)) ? "已完成" : "未开始"} />
+                    </Stack>
+                    <Box sx={{ mt: 1, overflowX: "auto", pb: 0.5 }}>
+                      <Box sx={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(phaseTasks.length, 1)}, minmax(145px, 1fr))`, minWidth: Math.max(phaseTasks.length * 145, 320) }}>
+                {phaseTasks.map((task) => {
                   const done = ["DONE", "SKIPPED"].includes(task.status);
                   const risky =
                     ["BLOCKED", "REJECTED"].includes(task.status) ||
@@ -5244,13 +5285,13 @@ const Overview: React.FC<{
                     );
                   return (
                     <Stack
-                      component={task.isMine ? "button" : "div"}
-                      type={task.isMine ? "button" : undefined}
+                      component={task.isMine && phaseActive ? "button" : "div"}
+                      type={task.isMine && phaseActive ? "button" : undefined}
                       key={`${task.stepNumber}-${task.title}`}
                       alignItems="center"
                       spacing={0.55}
                       onClick={
-                        task.isMine ? () => openMyStep(task.taskId) : undefined
+                        task.isMine && phaseActive ? () => openMyStep(task.taskId) : undefined
                       }
                       sx={{
                         position: "relative",
@@ -5258,7 +5299,7 @@ const Overview: React.FC<{
                         py: 0,
                         border: 0,
                         bgcolor: "transparent",
-                        cursor: task.isMine ? "pointer" : "default",
+                        cursor: task.isMine && phaseActive ? "pointer" : "default",
                         "&:focus-visible": {
                           outline: `2px solid ${palette.blue}`,
                           borderRadius: 1,
@@ -5309,7 +5350,7 @@ const Overview: React.FC<{
                         size="small"
                         label={
                           task.isMine
-                            ? "我负责"
+                            ? phaseActive ? "我负责" : "等待阶段开始"
                             : statusLabel[task.status] || task.status
                         }
                         sx={{
@@ -5322,8 +5363,12 @@ const Overview: React.FC<{
                     </Stack>
                   );
                 })}
-              </Box>
-            </Box>
+                      </Box>
+                    </Box>
+                  </Paper>
+                );
+              })}
+            </Stack>
             <Typography fontSize={12} color="text.secondary" sx={{ mt: 1 }}>
               {selectedCourse.currentStep?.isMine
                 ? "当前轮到你处理，点击蓝色“我负责”节点即可完成。"
@@ -5342,20 +5387,14 @@ const Overview: React.FC<{
                   <Box>
                     <Typography fontWeight={900}>课程状态</Typography>
                     <Typography fontSize={12.5} color="text.secondary">
-                      {selectedManagedCourse?.status === "PLANNED" &&
-                      selectedCourse.progress.done <
-                        selectedCourse.progress.total
-                        ? "完成全部必做课前任务后，才可确认待开课。"
+                      {incompleteRequiredTasks.length
+                        ? `还有 ${incompleteRequiredTasks.length} 项必做${statusGateCategory === "BEFORE" ? "课前" : statusGateCategory === "DURING" ? "课中" : "课后"}任务未完成，完成后才可执行“${statusAction.label}”。`
                         : `课程任务已到当前阶段，可执行“${statusAction.label}”。`}
                     </Typography>
                   </Box>
                   <Button
                     variant="contained"
-                    disabled={
-                      selectedManagedCourse?.status === "PLANNED" &&
-                      selectedCourse.progress.done <
-                        selectedCourse.progress.total
-                    }
+                    disabled={incompleteRequiredTasks.length > 0}
                     onClick={() =>
                       selectedManagedCourse &&
                       onChangeSessionStatus(

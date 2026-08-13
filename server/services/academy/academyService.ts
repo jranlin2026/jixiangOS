@@ -7,7 +7,7 @@ import { failure, success } from "../../api/response";
 
 export type AcademyCourseStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 export type AcademySessionStatus =
-  "PLANNED" | "READY" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+  "PLANNED" | "READY" | "IN_PROGRESS" | "POST_COURSE" | "COMPLETED" | "CANCELLED";
 export type AcademyDeliveryMode = "OFFLINE" | "LIVE" | "ONLINE";
 export type AcademyTaskStatus =
   | "PENDING"
@@ -121,6 +121,8 @@ export type AcademySessionRecord = {
   isInvitable: boolean;
   facilitatorUserId?: string | null;
   facilitatorUserName?: string | null;
+  taskReviewerUserId?: string | null;
+  taskReviewerUserName?: string | null;
   lecturerUserId?: string | null;
   lecturerUserName?: string | null;
   collaboratorUserIds?: string[] | null;
@@ -170,7 +172,7 @@ export type AcademySessionTaskRecord = {
 };
 
 export type AcademyMyTaskRecord = AcademySessionTaskRecord & {
-  session: Pick<AcademySessionRecord, "id" | "title" | "startsAt" | "endsAt" | "status">;
+  session: Pick<AcademySessionRecord, "id" | "title" | "startsAt" | "endsAt" | "status" | "taskReviewerUserId" | "taskReviewerUserName">;
 };
 
 export type AcademyEngagementRecord = {
@@ -234,7 +236,7 @@ export type AcademyOrderReference = {
 
 export type AcademyPublicCalendarRecord = Pick<
   AcademySessionRecord,
-  "id" | "title" | "startsAt" | "endsAt" | "deliveryMode" | "status" | "lecturerUserName"
+  "id" | "title" | "startsAt" | "endsAt" | "deliveryMode" | "status" | "lecturerUserName" | "taskReviewerUserName"
 > & { courseTitle: string; tasks: AcademySessionTaskRecord[] };
 
 export interface AcademyRepository {
@@ -309,6 +311,7 @@ export interface AcademyRepository {
     id: string,
     expectedStatus: AcademyTaskStatus,
     update: Partial<AcademySessionTaskRecord>,
+    allowedSessionStatuses: AcademySessionStatus[],
   ): Promise<AcademySessionTaskRecord | null>;
   listTaskAttachments(taskId: string): Promise<BusinessAttachment[]>;
   listTaskAttachmentsByTaskIds(taskIds: string[]): Promise<Map<string, BusinessAttachment[]>>;
@@ -344,7 +347,8 @@ const STATUS_TRANSITIONS: Record<AcademySessionStatus, AcademySessionStatus[]> =
   {
     PLANNED: ["READY", "CANCELLED"],
     READY: ["IN_PROGRESS", "CANCELLED"],
-    IN_PROGRESS: ["COMPLETED"],
+    IN_PROGRESS: ["POST_COURSE"],
+    POST_COURSE: ["COMPLETED"],
     COMPLETED: [],
     CANCELLED: [],
   };
@@ -477,6 +481,8 @@ export function createAcademyService(
         return true;
       }
       if (task.assigneeUserId === input.actor.id) return isLinked;
+      const session = await repository.findSessionById(task.sessionId);
+      if (session?.taskReviewerUserId === input.actor.id) return isLinked;
       if (!hasPermission(input.actor, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, "read")) return false;
       const scoped = await repository.findTaskById(input.taskId, await resolveScope(input.actor));
       return Boolean(scoped) && isLinked;
@@ -517,12 +523,22 @@ export function createAcademyService(
           ...(task.assigneeUserId === actor.id ? { templateKey: task.templateKey, acceptanceCriteria: task.acceptanceCriteria || undefined, completionMode: task.completionMode || "NOTE", requiresReview: task.requiresReview === true, note: task.note || undefined, submissionNote: task.submissionNote || undefined, completedAt: task.completedAt?.toISOString(), reviewedAt: task.reviewedAt?.toISOString(), submittedAt: task.submittedAt?.toISOString() } : {}),
           stepNumber: Number(task.sortOrder || 0) || index + 1,
           title: task.title.replace(/^T(?:[+-][^\s]+|日)?\s*/, ""),
+          category: task.category,
+          isRequired: task.isRequired,
+          reviewerUserName: task.requiresReview ? session.taskReviewerUserName || undefined : undefined,
           assigneeUserName: task.assigneeUserName || undefined,
           dueAt: task.dueAt?.toISOString(),
           status: task.status,
           isMine: task.assigneeUserId === actor.id,
         }));
-        const currentStep = publicTasks.find((task) => !["DONE", "SKIPPED"].includes(task.status));
+        const activeCategory = session.status === "PLANNED" || session.status === "READY"
+          ? "BEFORE"
+          : session.status === "IN_PROGRESS"
+            ? "DURING"
+            : session.status === "POST_COURSE"
+              ? "AFTER"
+              : null;
+        const currentStep = publicTasks.find((task) => task.category === activeCategory && !["DONE", "SKIPPED"].includes(task.status));
         return {
           id: session.id,
           title: session.title,
@@ -545,14 +561,11 @@ export function createAcademyService(
       const page = Math.max(1, Number(raw.page) || 1);
       const pageSize = Math.min(100, Math.max(1, Number(raw.pageSize) || 10));
       const requestedStatus = String(raw.status || "OPEN").trim().toUpperCase();
-      if (requestedStatus === "REVIEW" && !hasPermission(actor, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, "write")) {
-        return success({ items: [], total: 0, page, pageSize });
-      }
       const result = await repository.listMyTasks(actor.id, {
         page,
         pageSize,
         status: requestedStatus === "ALL" ? undefined : requestedStatus,
-      }, requestedStatus === "REVIEW" ? await resolveScope(actor) : undefined);
+      });
       return success({
         ...result,
         items:
@@ -1077,6 +1090,7 @@ export function createAcademyService(
       const contentOwnerUserId = String(raw.contentOwnerUserId || "").trim();
       const materialOwnerUserId = String(raw.materialOwnerUserId || "").trim();
       const reviewOwnerUserId = String(raw.reviewOwnerUserId || "").trim();
+      const taskReviewerUserId = String(raw.taskReviewerUserId || projectOwnerUserId).trim();
       const [contentOwner, materialOwner, reviewOwner] = await Promise.all([
         contentOwnerUserId ? repository.findActiveUserById(contentOwnerUserId) : Promise.resolve(null),
         materialOwnerUserId ? repository.findActiveUserById(materialOwnerUserId) : Promise.resolve(null),
@@ -1085,6 +1099,8 @@ export function createAcademyService(
       if (requiredRoles.has("CONTENT_OWNER") && !contentOwner) return invalid("请选择有效的课程内容负责人");
       if (requiredRoles.has("MATERIAL_OWNER") && !materialOwner) return invalid("请选择有效的素材负责人");
       if (requiredRoles.has("REVIEW_OWNER") && !reviewOwner) return invalid("请选择有效的复盘负责人");
+      const taskReviewer = await repository.findActiveUserById(taskReviewerUserId);
+      if (!taskReviewer) return invalid("请选择有效的任务验收人");
       const lecturerUserId = String(raw.lecturerUserId || "").trim();
       const lecturer = lecturerUserId
         ? await repository.findActiveUserById(lecturerUserId)
@@ -1140,6 +1156,8 @@ export function createAcademyService(
         isInvitable: audience === "ALL_EMPLOYEES" && raw.isInvitable !== false,
         facilitatorUserId: projectOwner.id,
         facilitatorUserName: projectOwner.name,
+        taskReviewerUserId: taskReviewer.id,
+        taskReviewerUserName: taskReviewer.name,
         lecturerUserId: lecturer?.id || null,
         lecturerUserName: lecturer?.name || null,
         collaboratorUserIds,
@@ -1206,12 +1224,15 @@ export function createAcademyService(
       if (deliveryMode === "ONLINE" && !meetingUrl) return invalid("请填写会议链接");
       const projectOwnerUserId = String(raw.projectOwnerUserId || raw.facilitatorUserId || current.facilitatorUserId || "").trim();
       const lecturerUserId = String(raw.lecturerUserId || current.lecturerUserId || "").trim();
-      const [projectOwner, lecturer] = await Promise.all([
+      const taskReviewerUserId = String(raw.taskReviewerUserId || current.taskReviewerUserId || current.facilitatorUserId || "").trim();
+      const [projectOwner, lecturer, taskReviewer] = await Promise.all([
         repository.findActiveUserById(projectOwnerUserId),
         lecturerUserId ? repository.findActiveUserById(lecturerUserId) : Promise.resolve(null),
+        repository.findActiveUserById(taskReviewerUserId),
       ]);
       if (!projectOwner) return invalid("请选择有效的项目负责人");
       if (lecturerUserId && !lecturer) return invalid("请选择有效的主讲人");
+      if (!taskReviewer) return invalid("请选择有效的任务验收人");
       const tasks = await repository.listSessionTasks(id);
       const ownerIds: Record<AcademyTaskAssigneeRole, string> = {
         PROJECT_OWNER: projectOwner.id,
@@ -1253,6 +1274,7 @@ export function createAcademyService(
         meetingUrl: meetingUrl || null, capacity, facilitatorUserId: projectOwner.id,
         facilitatorUserName: projectOwner.name, lecturerUserId: lecturer?.id || null,
         lecturerUserName: lecturer?.name || null,
+        taskReviewerUserId: taskReviewer.id, taskReviewerUserName: taskReviewer.name,
         inviteTarget: targets.inviteTarget!, registrationTarget: targets.registrationTarget!,
         attendanceTarget: targets.attendanceTarget!, consultationTarget: targets.consultationTarget!,
         dealTarget: targets.dealTarget!, targetRevenue, audience,
@@ -1270,16 +1292,21 @@ export function createAcademyService(
       if (!session) return invalid("课程场次不存在", 404);
       if (!STATUS_TRANSITIONS[session.status].includes(nextStatus))
         return invalid("当前状态不允许执行该操作", 409);
-      if (nextStatus === "READY") {
+      if (["READY", "POST_COURSE", "COMPLETED"].includes(nextStatus)) {
         const tasks = await repository.listSessionTasks(id);
+        const requiredCategory = nextStatus === "READY"
+          ? "BEFORE"
+          : nextStatus === "POST_COURSE"
+            ? "DURING"
+            : "AFTER";
         const pending = tasks.filter(
           (task) =>
-            task.category === "BEFORE" &&
+            task.category === requiredCategory &&
             task.isRequired &&
             task.status !== "DONE",
         );
         if (pending.length)
-          return invalid(`还有${pending.length}项必做准备未完成`, 409);
+          return invalid(`还有${pending.length}项必做${requiredCategory === "BEFORE" ? "课前" : requiredCategory === "DURING" ? "课中" : "课后"}任务未完成`, 409);
       }
       const updated = await repository.updateSessionStatus(
         id,
@@ -1318,14 +1345,26 @@ export function createAcademyService(
       if (!TASK_STATUS_TRANSITIONS[current.status].includes(raw.status))
         return invalid("当前执行项状态不允许执行该操作", 409);
       const isAssignee = current.assigneeUserId === actor.id;
-      if (!isAssignee && !canManageAllTasks)
+      const session = await repository.findSessionById(current.sessionId);
+      if (!session) return invalid("课程安排不存在", 404);
+      const isReviewer = session.taskReviewerUserId === actor.id;
+      if (!isAssignee && !isReviewer && !canManageAllTasks)
         return invalid("执行项不存在", 404);
       const assigneeAction = isAssignee && ["IN_PROGRESS", "SUBMITTED"].includes(raw.status);
-      const managerReviewAction = canManageAllTasks
+      const managerReviewAction = isReviewer
         && current.status === "SUBMITTED"
         && ["DONE", "REJECTED"].includes(raw.status);
       if (!assigneeAction && !managerReviewAction)
-        return invalid(isAssignee ? "任务负责人只能开始、重新处理并提交本人任务" : "课程运营管理员只能验收已提交的任务", 403);
+        return invalid(isAssignee ? "任务负责人只能开始、重新处理并提交本人任务" : "只有本次课程指定验收人可以验收已提交任务", 403);
+      const activeCategory = session.status === "PLANNED" || session.status === "READY"
+        ? "BEFORE"
+        : session.status === "IN_PROGRESS"
+          ? "DURING"
+          : session.status === "POST_COURSE"
+            ? "AFTER"
+            : null;
+      if (current.category !== activeCategory)
+        return invalid(`当前课程阶段不能处理${current.category === "BEFORE" ? "课前" : current.category === "DURING" ? "课中" : "课后"}任务`, 409);
       const completionMode = current.completionMode || (TASKS_REQUIRING_EVIDENCE.has(current.templateKey) ? "ATTACHMENT" : "NOTE");
       if (raw.status === "SUBMITTED" && ["NOTE", "ATTACHMENT", "CHECKLIST"].includes(completionMode) && !String(raw.submissionNote || raw.note || "").trim())
         return invalid(completionMode === "CHECKLIST" ? "请确认检查结果并填写说明" : "请填写完成说明");
@@ -1338,6 +1377,11 @@ export function createAcademyService(
         return invalid("驳回验收时必须填写原因");
       const timestamp = now();
       const nextStatus = raw.status === "SUBMITTED" && !current.requiresReview ? "DONE" : raw.status;
+      const allowedSessionStatuses: AcademySessionStatus[] = current.category === "BEFORE"
+        ? ["PLANNED", "READY"]
+        : current.category === "DURING"
+          ? ["IN_PROGRESS"]
+          : ["POST_COURSE"];
       const updated = await repository.updateTaskStatus(id, current.status, {
         status: nextStatus,
         note: raw.note?.trim() || null,
@@ -1368,7 +1412,7 @@ export function createAcademyService(
         completedById: nextStatus === "DONE" ? actor.id : null,
         completedByName: nextStatus === "DONE" ? actor.name : null,
         updatedAt: timestamp,
-      });
+      }, allowedSessionStatuses);
       return updated ? success(updated) : invalid("执行项不存在", 404);
     },
     async listTaskAttachments(id: string, actor: AuthenticatedUser) {
@@ -1376,7 +1420,10 @@ export function createAcademyService(
       if (!current) return invalid("执行项不存在", 404);
       const canManage = hasPermission(actor, PERMISSION_KEYS.ACADEMY_SESSION_MANAGE, "read");
       const scopedTask = canManage ? await repository.findTaskById(id, await resolveScope(actor)) : null;
-      const canRead = current.assigneeUserId === actor.id || Boolean(scopedTask);
+      const session = await repository.findSessionById(current.sessionId);
+      const canRead = current.assigneeUserId === actor.id
+        || session?.taskReviewerUserId === actor.id
+        || Boolean(scopedTask);
       if (!canRead) return invalid("执行项不存在", 404);
       return success(await repository.listTaskAttachments(id));
     },

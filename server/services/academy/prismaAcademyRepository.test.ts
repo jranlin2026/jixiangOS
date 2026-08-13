@@ -287,11 +287,14 @@ assert.deepEqual(publicCalendarCall.select, {
   deliveryMode: true,
   status: true,
   lecturerUserName: true,
+  taskReviewerUserName: true,
   tasks: {
     select: {
       id: true,
       templateKey: true,
       title: true,
+      category: true,
+      isRequired: true,
       assigneeUserId: true,
       assigneeUserName: true,
       dueAt: true,
@@ -308,7 +311,16 @@ assert.equal(publicCalendarCall.where.status.not, "CANCELLED");
 
 await repository.listMyTasks("user-assignee", { page: 2, pageSize: 10, status: "OPEN" });
 const myTaskCall = calls.find((call) => call.model === "task" && call.method === "findMany")?.args;
-assert.deepEqual(myTaskCall.where, { assigneeUserId: "user-assignee", session: { status: { not: "CANCELLED" } }, status: { notIn: ["DONE", "SKIPPED", "SUBMITTED"] } });
+assert.deepEqual(myTaskCall.where, {
+  assigneeUserId: "user-assignee",
+  session: { status: { not: "CANCELLED" } },
+  status: { notIn: ["DONE", "SKIPPED", "SUBMITTED"] },
+  OR: [
+    { category: "BEFORE", session: { status: { in: ["PLANNED", "READY"] } } },
+    { category: "DURING", session: { status: "IN_PROGRESS" } },
+    { category: "AFTER", session: { status: "POST_COURSE" } },
+  ],
+});
 assert.equal(myTaskCall.skip, 10);
 assert.equal(myTaskCall.take, 10);
 assert.equal(myTaskCall.select.completionMode, true);
@@ -323,6 +335,8 @@ assert.deepEqual(myTaskCall.select.session.select, {
   startsAt: true,
   endsAt: true,
   status: true,
+  taskReviewerUserId: true,
+  taskReviewerUserName: true,
 }, "本人任务投影只能带上打开待办所必需的课程安排上下文");
 
 calls.length = 0;
@@ -340,9 +354,9 @@ assert.deepEqual(historyTaskCall.where, {
 }, "处理记录必须读取不可覆盖的本人任务与验收事件");
 
 calls.length = 0;
-await repository.updateTaskStatus("task-conditional", "PENDING", { status: "SUBMITTED" });
+await repository.updateTaskStatus("task-conditional", "PENDING", { status: "SUBMITTED" }, ["PLANNED", "READY"]);
 const conditionalTaskUpdate = calls.find((call) => call.model === "transactionTask" && call.method === "updateMany")?.args;
-assert.deepEqual(conditionalTaskUpdate.where, { id: "task-conditional", status: "PENDING", session: { status: { not: "CANCELLED" } } }, "任务提交必须原子校验旧状态且课程未取消");
+assert.deepEqual(conditionalTaskUpdate.where, { id: "task-conditional", status: "PENDING", session: { status: { in: ["PLANNED", "READY"] } } }, "任务提交必须原子校验旧状态和课程当前阶段");
 assert.ok(calls.some((call) => call.model === "transactionBusinessRecord" && call.method === "create"), "每次任务状态变化必须写入不可覆盖的操作事件");
 
 transactionSessionRow = { id: "session-1", status: "PLANNED", collaboratorUserIds: [], capacity: 10 };

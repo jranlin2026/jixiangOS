@@ -22,4 +22,15 @@ assert.match(source, /closeSopSettings/, "模板抽屉必须保护未保存编�
 assert.match(source, /课程执行流程 \*/, "新建课程安排必须明确选择本次流程");
 assert.doesNotMatch(source, /保存后将生成固定|固定九节点/, "页面不得继续承诺写死流程");
 
+assert.match(
+  source,
+  /key=\{step\.id \|\| step\.stepKey\}/,
+  "步骤卡必须使用不随输入内容变化的稳定标识，避免每输入一字就失去焦点",
+);
+assert.doesNotMatch(
+  source,
+  /title: event\.target\.value,[\s\S]{0,180}stepKey:/,
+  "修改步骤名称时不得同时改变步骤标识",
+);
+
 console.log("academy SOP template static tests passed");
