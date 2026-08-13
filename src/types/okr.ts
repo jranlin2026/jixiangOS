@@ -46,6 +46,7 @@ export interface OkrKeyResult {
   id: string;
   objectiveId: string;
   title: string;
+  description?: string | null;
   ownerId: string;
   ownerName: string;
   type: OkrKeyResultType;
@@ -126,6 +127,9 @@ export interface OkrObjective {
   progress: number;
   keyResults: OkrKeyResult[];
   reviews?: OkrReview[];
+  capabilities?: {
+    canManage: boolean;
+  };
   createdAt?: string;
   updatedAt?: string;
 }
@@ -179,8 +183,14 @@ export interface CreateOkrObjectiveInput {
   weight: number;
 }
 
+export interface ImportOkrObjectiveInput {
+  sourceObjectiveId: string;
+  targetCycleId: string;
+}
+
 export interface CreateOkrKeyResultInput {
   title: string;
+  description?: string;
   ownerId?: string;
   type: OkrKeyResultType;
   direction: OkrDirection;
@@ -212,5 +222,6 @@ export interface OkrObjectiveListInput {
   scope?: OkrScope;
   health?: OkrHealth;
   owner?: "mine" | "team";
+  ownerId?: string;
   search?: string;
 }

@@ -20,6 +20,7 @@ function query(req: AuthenticatedRequest) {
     scope: String(req.query.scope || "").trim(),
     status: String(req.query.status || "").trim(),
     owner: String(req.query.owner || "").trim(),
+    ownerId: String(req.query.ownerId || "").trim(),
     health: String(req.query.health || "").trim(),
     search: String(req.query.search || "").trim(),
   };
@@ -38,7 +39,7 @@ export function createOkrRouter({
   router.use(requireAuth);
 
   router.get("/directory/users", async (req: AuthenticatedRequest, res) => {
-    const result = await service.listAssignableUsers(req.currentUser! as any);
+    const result = await service.listAssignableUsers(req.currentUser! as any, query(req));
     res.status(statusFor(result.code)).json(result);
   });
 
@@ -104,6 +105,13 @@ export function createOkrRouter({
     );
     res.status(statusFor(result.code, 201)).json(result);
   });
+  router.post("/objectives/import", async (req: AuthenticatedRequest, res) => {
+    const result = await service.importObjective(
+      req.currentUser! as any,
+      req.body || {},
+    );
+    res.status(statusFor(result.code, 201)).json(result);
+  });
   router.get("/objectives/:id", async (req: AuthenticatedRequest, res) => {
     const result = await service.getObjective(
       req.currentUser! as any,
@@ -128,6 +136,17 @@ export function createOkrRouter({
         req.body || {},
       );
       res.status(statusFor(result.code, 201)).json(result);
+    },
+  );
+  router.patch(
+    "/key-results/:id",
+    async (req: AuthenticatedRequest, res) => {
+      const result = await service.updateKeyResult(
+        req.currentUser! as any,
+        String(req.params.id || ""),
+        req.body || {},
+      );
+      res.status(statusFor(result.code)).json(result);
     },
   );
   router.post(

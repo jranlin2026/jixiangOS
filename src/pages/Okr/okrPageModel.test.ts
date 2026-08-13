@@ -2,16 +2,30 @@ import assert from 'node:assert/strict';
 import {
   createCurrentQuarterCycleDraft,
   getAllowedObjectiveScopes,
-  getVisibleOkrTabs,
+  getWorkbenchPeople,
   hasSubmittedObjectiveReview,
   isKeyResultCheckInDue,
   isSystemMetricValueReadOnly,
 } from './okrPageModel';
 
 assert.deepEqual(
-  getVisibleOkrTabs({ canReadTeam: false, canCheckIn: true, canManageCycles: false }).map((item) => item.label),
-  ['OKR总览', '我的OKR', '周检视'],
-  '普通员工只能看到本人工作所需页签',
+  getWorkbenchPeople(
+    { id: 'me', name: '我' },
+    [{ id: 'me', name: '我' }, { id: 'staff', name: '员工' }],
+    false,
+  ).map((item) => item.id),
+  ['me'],
+  '普通员工的目标工作台只显示本人',
+);
+
+assert.deepEqual(
+  getWorkbenchPeople(
+    { id: 'me', name: '我' },
+    [{ id: 'staff', name: '员工' }, { id: 'me', name: '我' }],
+    true,
+  ).map((item) => item.id),
+  ['me', 'staff'],
+  '团队负责人先显示本人，再显示授权范围内成员',
 );
 
 assert.deepEqual(
@@ -54,16 +68,4 @@ assert.deepEqual(
   '只有公司目标管理员能看到公司层级',
 );
 
-assert.deepEqual(
-  getVisibleOkrTabs({ canReadTeam: true, canCheckIn: true, canManageCycles: false }).map((item) => item.label),
-  ['OKR总览', '我的OKR', '团队OKR', '周检视'],
-  '团队负责人应看到团队OKR',
-);
-
-assert.deepEqual(
-  getVisibleOkrTabs({ canReadTeam: true, canCheckIn: true, canManageCycles: true }).map((item) => item.label),
-  ['OKR总览', '我的OKR', '团队OKR', '周检视', '周期设置'],
-  '周期管理员应看到周期设置',
-);
-
-console.log('okr permission tabs test passed');
+console.log('okr target workbench model test passed');

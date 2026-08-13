@@ -1,10 +1,4 @@
-export type OkrPageTab = 'overview' | 'mine' | 'team' | 'checkins' | 'cycles';
-
-export interface OkrPageAccess {
-  canReadTeam: boolean;
-  canCheckIn: boolean;
-  canManageCycles: boolean;
-}
+type WorkbenchPerson = { id: string; name: string };
 
 export interface OkrObjectiveScopeAccess {
   canCreate: boolean;
@@ -31,13 +25,18 @@ export const hasSubmittedObjectiveReview = (
   )),
 );
 
-export const getVisibleOkrTabs = (access: OkrPageAccess): Array<{ value: OkrPageTab; label: string }> => [
-  { value: 'overview', label: 'OKR总览' },
-  { value: 'mine', label: '我的OKR' },
-  ...(access.canReadTeam ? [{ value: 'team' as const, label: '团队OKR' }] : []),
-  ...(access.canCheckIn ? [{ value: 'checkins' as const, label: '周检视' }] : []),
-  ...(access.canManageCycles ? [{ value: 'cycles' as const, label: '周期设置' }] : []),
-];
+export const getWorkbenchPeople = <T extends WorkbenchPerson>(
+  currentUser: T | null | undefined,
+  directory: readonly T[],
+  canReadTeam: boolean,
+): T[] => {
+  if (!currentUser) return [];
+  if (!canReadTeam) return [currentUser];
+  return [
+    currentUser,
+    ...directory.filter((person) => person.id !== currentUser.id),
+  ];
+};
 
 export const getAllowedObjectiveScopes = (access: OkrObjectiveScopeAccess) => [
   ...(access.canManageCompany ? ['COMPANY' as const] : []),

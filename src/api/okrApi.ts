@@ -5,6 +5,7 @@ import type {
   CreateOkrCycleInput,
   CreateOkrKeyResultInput,
   CreateOkrObjectiveInput,
+  ImportOkrObjectiveInput,
   OkrCheckIn,
   OkrCycle,
   OkrCycleStatus,
@@ -39,8 +40,8 @@ export const okrApi = {
   }): Promise<ApiResponse<OkrPage<OkrCycle>>> {
     return backendRequest(`${base}/cycles?${query(input)}`);
   },
-  listDirectoryUsers(): Promise<ApiResponse<OkrDirectoryUser[]>> {
-    return backendRequest(`${base}/directory/users`);
+  listDirectoryUsers(input: { page: number; pageSize: number; search?: string }): Promise<ApiResponse<OkrPage<OkrDirectoryUser>>> {
+    return backendRequest(`${base}/directory/users?${query(input)}`);
   },
   listAlignmentObjectives(input: {
     cycleId: string;
@@ -94,6 +95,23 @@ export const okrApi = {
       body: JSON.stringify(input),
     });
   },
+  updateObjective(
+    id: string,
+    input: Partial<Pick<CreateOkrObjectiveInput, "title" | "description" | "weight">>,
+  ): Promise<ApiResponse<OkrObjective>> {
+    return backendRequest(`${base}/objectives/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+  importObjective(
+    input: ImportOkrObjectiveInput,
+  ): Promise<ApiResponse<OkrObjective>> {
+    return backendRequest(`${base}/objectives/import`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
   createKeyResult(
     objectiveId: string,
     input: CreateOkrKeyResultInput,
@@ -102,6 +120,15 @@ export const okrApi = {
       `${base}/objectives/${encodeURIComponent(objectiveId)}/key-results`,
       { method: "POST", body: JSON.stringify(input) },
     );
+  },
+  updateKeyResult(
+    id: string,
+    input: Partial<CreateOkrKeyResultInput>,
+  ): Promise<ApiResponse<OkrKeyResult>> {
+    return backendRequest(`${base}/key-results/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
   },
   createCheckIn(
     keyResultId: string,

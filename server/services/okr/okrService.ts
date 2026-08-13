@@ -520,7 +520,7 @@ export function createOkrService({
       return success(link, "任务已关联KR");
     },
 
-    async listAssignableUsers(actor: OkrActor) {
+    async listAssignableUsers(actor: OkrActor, raw: any = {}) {
       if (!canReadOkr(actor))
         return failure<never>("无权读取OKR负责人目录", 403);
       const access = await scopeFor(actor);
@@ -528,6 +528,11 @@ export function createOkrService({
       if (access.scope === "self") where.id = actor.id;
       if (access.scope === "department")
         where.departmentId = { in: access.departmentIds };
+      const search = text(raw?.search, 100);
+      if (search) where.name = { contains: search };
+      const page = Math.max(1, Number(raw?.page) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(raw?.pageSize) || 20));
+      const total = await prisma.user.count({ where });
       const users = await prisma.user.findMany({
         where,
         select: {
@@ -538,6 +543,8 @@ export function createOkrService({
           positionName: true,
         },
         orderBy: [{ name: "asc" }, { id: "asc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
       });
       const departmentIds = [
         ...new Set(users.map((user: any) => user.departmentId).filter(Boolean)),
@@ -551,8 +558,8 @@ export function createOkrService({
       const departmentNames = new Map(
         departments.map((department: any) => [department.id, department.name]),
       );
-      return success(
-        users.map((user: any) => ({
+      return success({
+        items: users.map((user: any) => ({
           id: user.id,
           name: user.name,
           departmentId: user.departmentId || undefined,
@@ -562,7 +569,10 @@ export function createOkrService({
           positionId: user.positionId || undefined,
           positionName: user.positionName || undefined,
         })),
-      );
+        total,
+        page,
+        pageSize,
+      });
     },
 
     async listAlignmentObjectives(actor: OkrActor, raw: any = {}) {
@@ -666,6 +676,29 @@ export function createOkrService({
           { ownerId: { not: actor.id } },
         ];
       }
+      const ownerId = text(raw?.ownerId, 64);
+      if (ownerId) {
+        const visibleOwner = await prisma.user.findUnique({
+          where: { id: ownerId },
+        });
+        if (
+          !visibleOwner ||
+          !(await canUseAssignee(actor, {
+            ownerId: visibleOwner.id,
+            departmentId: visibleOwner.departmentId || null,
+          }))
+        )
+          return success({ items: [], total: 0, page, pageSize });
+        where.AND = [
+          ...(where.AND || []),
+          {
+            OR: [
+              { ownerId },
+              { keyResults: { some: { ownerId } } },
+            ],
+          },
+        ];
+      }
       const [items, total] = await Promise.all([
         prisma.objective.findMany({
           where,
@@ -676,7 +709,13 @@ export function createOkrService({
         }),
         prisma.objective.count({ where }),
       ]);
-      return success({ items, total, page, pageSize });
+      const itemsWithCapabilities = await Promise.all(
+        items.map(async (item: any) => ({
+          ...item,
+          capabilities: { canManage: await canManageObjective(actor, item) },
+        })),
+      );
+      return success({ items: itemsWithCapabilities, total, page, pageSize });
     },
 
     async getObjective(actor: OkrActor, objectiveId: string) {
@@ -874,6 +913,103 @@ export function createOkrService({
       return success(row, "目标已创建");
     },
 
+    async importObjective(actor: OkrActor, raw: any) {
+      if (
+        !allowed(actor, KEYS.CREATE, "write") &&
+        !allowed(actor, KEYS.COMPANY_MANAGE, "write") &&
+        !allowed(actor, KEYS.DEPARTMENT_MANAGE, "write")
+      )
+        return failure<never>("无权导入目标", 403);
+      const source = await loadObjective(text(raw?.sourceObjectiveId, 64));
+      if (!source || !(await canViewObjective(actor, source)))
+        return failure<never>("源目标不存在或无权查看", 404);
+      const targetCycleId = text(raw?.targetCycleId, 64);
+      const targetCycle = await prisma.okrCycle.findUnique({
+        where: { id: targetCycleId },
+      });
+      if (!targetCycle) return failure<never>("目标周期不存在", 404);
+      if (targetCycle.status !== "DRAFT")
+        return failure<never>("只能导入到草稿周期", 409);
+      if (source.cycleId === targetCycleId)
+        return failure<never>("请选择其他周期的目标", 400);
+      if (!(await canManageObjective(actor, source)))
+        return failure<never>("无权复用该目标", 403);
+      const objectiveOwner = await directorySnapshot(prisma, source.ownerId);
+      if (!objectiveOwner || !(await canUseAssignee(actor, objectiveOwner)))
+        return failure<never>("目标负责人已离职或不在当前授权范围", 409);
+      const keyResultOwners = new Map<string, any>();
+      for (const keyResult of source.keyResults || []) {
+        const owner = await directorySnapshot(prisma, keyResult.ownerId);
+        if (!owner || !(await canUseAssignee(actor, owner)))
+          return failure<never>(`KR负责人已离职或不在当前授权范围：${keyResult.title}`, 409);
+        keyResultOwners.set(keyResult.id, owner);
+      }
+      const imported = await prisma.$transaction(async (tx: PrismaLike) => {
+        const lockedCycle = await lockCycle(tx, targetCycleId);
+        if (lockedCycle?.status !== "DRAFT") return null;
+        const objectiveId = randomUUID();
+        const objective = await tx.objective.create({
+          data: {
+            id: objectiveId,
+            cycleId: targetCycleId,
+            scope: source.scope,
+            title: source.title,
+            description: source.description || null,
+            parentObjectiveId: null,
+            weight: source.weight,
+            status: "DRAFT",
+            health: "ON_TRACK",
+            progress: 0,
+            ...objectiveOwner,
+            createdById: actor.id,
+            createdByName: actor.name,
+            createdAt: now(),
+            updatedAt: now(),
+          },
+        });
+        for (const keyResult of source.keyResults || []) {
+          const owner = keyResultOwners.get(keyResult.id);
+          await tx.keyResult.create({
+            data: {
+              id: randomUUID(),
+              objectiveId,
+              title: keyResult.title,
+              description: keyResult.description || null,
+              ...owner,
+              type: keyResult.type,
+              direction: keyResult.direction,
+              baselineValue: keyResult.baselineValue,
+              targetValue: keyResult.targetValue,
+              currentValue: keyResult.baselineValue,
+              unit: keyResult.unit || null,
+              weight: keyResult.weight,
+              source: "MANUAL",
+              health: "ON_TRACK",
+              progress: 0,
+              dueAt: null,
+              lastCheckInAt: null,
+              createdById: actor.id,
+              createdByName: actor.name,
+              createdAt: now(),
+              updatedAt: now(),
+            },
+          });
+        }
+        await event(tx, {
+          cycleId: targetCycleId,
+          objectiveId,
+          actor,
+          action: "IMPORT_OBJECTIVE",
+          toState: "DRAFT",
+          detail: { sourceObjectiveId: source.id, sourceCycleId: source.cycleId },
+        });
+        return objective;
+      });
+      if (!imported)
+        return failure<never>("周期状态已变化，不能再导入目标", 409);
+      return success(imported, "目标及KR定义已导入");
+    },
+
     async addKeyResult(actor: OkrActor, objectiveId: string, raw: any) {
       const objective = await loadObjective(objectiveId);
       if (!objective) return failure<never>("目标不存在", 404);
@@ -969,6 +1105,71 @@ export function createOkrService({
       if (!row)
         return failure<never>("目标或周期状态已变化，不能再创建KR", 409);
       return success(row, "KR已创建");
+    },
+
+    async updateKeyResult(actor: OkrActor, keyResultId: string, raw: any) {
+      const access = await loadAccessibleKeyResult(actor, keyResultId);
+      if (!access) return failure<never>("KR不存在或无权操作", 404);
+      if (!(await canManageObjective(actor, access.objective)))
+        return failure<never>("无权修改该KR", 403);
+      const cycle = await prisma.okrCycle.findUnique({
+        where: { id: access.objective.cycleId },
+      });
+      if (cycle?.status !== "DRAFT" || access.objective.status !== "DRAFT")
+        return failure<never>("目标已发布，不能修改KR定义", 409);
+      const data: any = {};
+      if (raw?.title !== undefined) data.title = text(raw.title, 200);
+      if (raw?.description !== undefined)
+        data.description = text(raw.description, 10000) || null;
+      if (raw?.baselineValue !== undefined)
+        data.baselineValue = finite(raw.baselineValue);
+      if (raw?.targetValue !== undefined)
+        data.targetValue = finite(raw.targetValue);
+      if (raw?.unit !== undefined) data.unit = text(raw.unit, 40) || null;
+      if (raw?.weight !== undefined) data.weight = finite(raw.weight);
+      if (raw?.dueAt !== undefined)
+        data.dueAt = raw.dueAt ? date(raw.dueAt, true) : null;
+      const baselineValue = data.baselineValue ?? access.keyResult.baselineValue;
+      const targetValue = data.targetValue ?? access.keyResult.targetValue;
+      if (
+        (!data.title && raw?.title !== undefined) ||
+        baselineValue === null ||
+        targetValue === null ||
+        targetValue === baselineValue ||
+        (data.weight !== undefined &&
+          (data.weight === null || data.weight <= 0 || data.weight > 100)) ||
+        (access.keyResult.direction === "INCREASE" && targetValue < baselineValue) ||
+        (access.keyResult.direction === "DECREASE" && targetValue > baselineValue)
+      )
+        return failure<never>("KR定义不正确", 400);
+      if (data.baselineValue !== undefined) data.currentValue = data.baselineValue;
+      data.progress = progressFor(
+        { ...access.keyResult, baselineValue, targetValue },
+        data.currentValue ?? access.keyResult.currentValue,
+      );
+      const updated = await prisma.$transaction(async (tx: PrismaLike) => {
+        const lockedCycle = await lockCycle(tx, access.objective.cycleId);
+        const draftObjective = await tx.objective.findFirst({
+          where: { id: access.objective.id, status: "DRAFT" },
+        });
+        if (lockedCycle?.status !== "DRAFT" || !draftObjective) return null;
+        const row = await tx.keyResult.update({
+          where: { id: keyResultId },
+          data: { ...data, updatedAt: now() },
+        });
+        await event(tx, {
+          cycleId: access.objective.cycleId,
+          objectiveId: access.objective.id,
+          keyResultId,
+          actor,
+          action: "UPDATE_KEY_RESULT",
+          detail: data,
+        });
+        return row;
+      });
+      if (!updated)
+        return failure<never>("周期状态已变化，不能再修改KR", 409);
+      return success(updated, "KR已更新");
     },
 
     async transitionCycle(

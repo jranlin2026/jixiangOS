@@ -279,8 +279,10 @@ function memoryPrisma() {
     user: {
       findUnique: async ({ where }: any) =>
         db.users.find((item: any) => match(item, where)) || null,
-      findMany: async ({ where = {}, orderBy }: any = {}) =>
-        model(db.users).findMany({ where, orderBy }),
+      findMany: async ({ where = {}, orderBy, skip, take }: any = {}) =>
+        model(db.users).findMany({ where, orderBy, skip, take }),
+      count: async ({ where = {} }: any = {}) =>
+        model(db.users).count({ where }),
     },
     department: {
       findUnique: async ({ where }: any) =>
@@ -584,6 +586,229 @@ test("objective filters implement health, search, mine and team semantics inside
     team.data?.items.map((item: any) => item.id),
     ["team-risk"],
   );
+});
+
+test("target workbench can switch to one visible employee without leaking objectives outside actor scope", async () => {
+  const { prisma, db } = memoryPrisma();
+  const at = new Date("2026-08-13T02:00:00.000Z");
+  db.objectives.push(
+    {
+      id: "employee-owned",
+      cycleId: "q3",
+      scope: "INDIVIDUAL",
+      ownerId: employee.id,
+      ownerName: employee.name,
+      departmentId: "dept-sales",
+      title: "员工本人目标",
+      status: "PUBLISHED",
+      updatedAt: at,
+    },
+    {
+      id: "employee-kr-only",
+      cycleId: "q3",
+      scope: "DEPARTMENT",
+      ownerId: salesManager.id,
+      ownerName: salesManager.name,
+      departmentId: "dept-sales",
+      title: "员工承接的团队目标",
+      status: "PUBLISHED",
+      updatedAt: at,
+    },
+    {
+      id: "outside-owned",
+      cycleId: "q3",
+      scope: "INDIVIDUAL",
+      ownerId: "delivery-user",
+      ownerName: "交付员工",
+      departmentId: "dept-outsider",
+      title: "范围外员工目标",
+      status: "PUBLISHED",
+      updatedAt: at,
+    },
+  );
+  db.keyResults.push({
+    id: "employee-team-kr",
+    objectiveId: "employee-kr-only",
+    ownerId: employee.id,
+    title: "员工承接KR",
+  });
+  const service = createOkrService({ prisma });
+
+  const selected = await service.listObjectives(salesManager, {
+    ownerId: employee.id,
+    page: 1,
+    pageSize: 20,
+  });
+  const outside = await service.listObjectives(salesManager, {
+    ownerId: "delivery-user",
+    page: 1,
+    pageSize: 20,
+  });
+
+  assert.deepEqual(
+    selected.data?.items.map((item: any) => item.id).sort(),
+    ["employee-kr-only", "employee-owned"],
+  );
+  assert.deepEqual(outside.data?.items, []);
+});
+
+test("imports a prior objective and its KR definitions into a draft cycle with progress reset", async () => {
+  const { prisma, db } = memoryPrisma();
+  db.cycles.push(
+    { id: "source-cycle", status: "CLOSED" },
+    { id: "target-cycle", status: "DRAFT" },
+  );
+  db.objectives.push({
+    id: "source-objective",
+    cycleId: "source-cycle",
+    scope: "INDIVIDUAL",
+    title: "复用增长目标",
+    description: "上一周期有效目标",
+    ownerId: salesManager.id,
+    ownerName: salesManager.name,
+    departmentId: "dept-sales",
+    weight: 100,
+    status: "COMPLETED",
+    health: "ON_TRACK",
+    progress: 88,
+  });
+  db.keyResults.push({
+    id: "source-kr",
+    objectiveId: "source-objective",
+    title: "成交额达到100万",
+    description: "以平台实收为准",
+    ownerId: employee.id,
+    ownerName: employee.name,
+    departmentId: "dept-sales",
+    type: "NUMERIC",
+    direction: "INCREASE",
+    baselineValue: 20,
+    targetValue: 100,
+    currentValue: 90,
+    unit: "万元",
+    weight: 100,
+    source: "SYSTEM_METRIC",
+    health: "AT_RISK",
+    progress: 88,
+  });
+  const service = createOkrService({ prisma });
+
+  const importingManager = {
+    ...salesManager,
+    permissions: [
+      ...salesManager.permissions,
+      permission("目标管理/创建目标"),
+    ],
+  };
+  const imported = await service.importObjective(importingManager, {
+    sourceObjectiveId: "source-objective",
+    targetCycleId: "target-cycle",
+  });
+
+  assert.equal(imported.code, 0);
+  assert.equal(imported.data?.cycleId, "target-cycle");
+  assert.equal(imported.data?.status, "DRAFT");
+  assert.equal(imported.data?.progress, 0);
+  const clonedKr = db.keyResults.find(
+    (item: any) => item.objectiveId === imported.data?.id,
+  );
+  assert.equal(clonedKr.currentValue, 20);
+  assert.equal(clonedKr.progress, 0);
+  assert.equal(clonedKr.source, "MANUAL");
+  assert.equal(clonedKr.description, "以平台实收为准");
+  assert.equal(clonedKr.createdById, importingManager.id);
+});
+
+test("rejects importing a historical objective when a former owner is outside the current directory", async () => {
+  const { prisma, db } = memoryPrisma();
+  db.cycles.push(
+    { id: "source-cycle", status: "CLOSED" },
+    { id: "target-cycle", status: "DRAFT" },
+  );
+  db.objectives.push({
+    id: "former-owner-objective",
+    cycleId: "source-cycle",
+    scope: "INDIVIDUAL",
+    title: "离职员工目标",
+    ownerId: "former-user",
+    ownerName: "离职员工",
+    departmentId: "dept-sales",
+    weight: 100,
+    status: "COMPLETED",
+    keyResults: [],
+  });
+  const importingManager = {
+    ...salesManager,
+    permissions: [...salesManager.permissions, permission("目标管理/创建目标")],
+  };
+  const service = createOkrService({ prisma });
+
+  const imported = await service.importObjective(importingManager, {
+    sourceObjectiveId: "former-owner-objective",
+    targetCycleId: "target-cycle",
+  });
+
+  assert.equal(imported.code, 409);
+  assert.equal(db.objectives.length, 1);
+});
+
+test("draft objective and KR definitions remain editable from the target workbench", async () => {
+  const { prisma, db } = memoryPrisma();
+  db.cycles.push({ id: "draft-cycle", status: "DRAFT" });
+  db.objectives.push({
+    id: "draft-objective",
+    cycleId: "draft-cycle",
+    scope: "INDIVIDUAL",
+    title: "旧目标",
+    description: null,
+    ownerId: employee.id,
+    ownerName: employee.name,
+    departmentId: "dept-sales",
+    weight: 100,
+    status: "DRAFT",
+  });
+  db.keyResults.push({
+    id: "draft-kr",
+    objectiveId: "draft-objective",
+    title: "旧KR",
+    description: null,
+    ownerId: employee.id,
+    ownerName: employee.name,
+    departmentId: "dept-sales",
+    type: "NUMERIC",
+    direction: "INCREASE",
+    baselineValue: 0,
+    targetValue: 100,
+    currentValue: 0,
+    unit: "万元",
+    weight: 100,
+    source: "MANUAL",
+  });
+  const editor = {
+    ...employee,
+    permissions: [
+      ...employee.permissions,
+      permission("目标管理/创建目标"),
+    ],
+  };
+  const service = createOkrService({ prisma });
+
+  const objective = await service.updateObjective(editor, "draft-objective", {
+    title: "新目标",
+    description: "为什么做",
+    weight: 80,
+  });
+  const keyResult = await service.updateKeyResult(editor, "draft-kr", {
+    title: "新KR",
+    description: "验收口径",
+    targetValue: 120,
+    weight: 80,
+  });
+
+  assert.equal(objective.data?.title, "新目标");
+  assert.equal(keyResult.data?.title, "新KR");
+  assert.equal(keyResult.data?.description, "验收口径");
+  assert.equal(keyResult.data?.targetValue, 120);
 });
 
 test("mine objectives include a KR assigned to the actor even when another person owns the objective", async () => {
@@ -1085,29 +1310,32 @@ test("assignable user directory returns only minimal active users in actor scope
   );
   const service = createOkrService({ prisma });
 
-  const self = await service.listAssignableUsers(employee);
-  const team = await service.listAssignableUsers(salesManager);
+  const self = await service.listAssignableUsers(employee, { page: 1, pageSize: 10 });
+  const team = await service.listAssignableUsers(salesManager, { page: 1, pageSize: 10 });
 
-  assert.deepEqual(self.data, [
-    {
-      id: employee.id,
-      name: employee.name,
-      departmentId: "dept-sales",
-      departmentName: "销售部",
-      positionId: "position-sales",
-      positionName: "销售顾问",
-    },
-  ]);
+  assert.deepEqual(self.data, {
+    items: [{
+        id: employee.id,
+        name: employee.name,
+        departmentId: "dept-sales",
+        departmentName: "销售部",
+        positionId: "position-sales",
+        positionName: "销售顾问",
+      }],
+    total: 1,
+    page: 1,
+    pageSize: 10,
+  });
   assert.deepEqual(
-    team.data?.map((item: any) => item.id),
+    team.data?.items.map((item: any) => item.id),
     [employee.id, salesManager.id],
   );
   assert.equal(
-    Object.prototype.hasOwnProperty.call(team.data![0], "email"),
+    Object.prototype.hasOwnProperty.call(team.data!.items[0], "email"),
     false,
   );
   assert.equal(
-    team.data?.some(
+    team.data?.items.some(
       (item: any) => item.id === "delivery-user" || item.id === "left-sales",
     ),
     false,

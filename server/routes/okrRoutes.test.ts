@@ -13,9 +13,9 @@ const actor: any = {
 const calls: any[] = [];
 const ok = (data: any) => ({ code: 0, data, message: "success" });
 const service: any = {
-  listAssignableUsers: async (current: any) => (
-    calls.push(["directory", current.id]),
-    ok([{ id: "u1", name: "员工甲" }])
+  listAssignableUsers: async (current: any, query: any) => (
+    calls.push(["directory", current.id, query]),
+    ok({ items: [{ id: "u1", name: "员工甲" }], total: 1, page: 2, pageSize: 10 })
   ),
   listAlignmentObjectives: async (current: any, query: any) => (
     calls.push(["alignment-directory", current.id, query]),
@@ -45,6 +45,10 @@ const service: any = {
     calls.push(["create-objective", current.id, body]),
     ok({ id: "objective-1" })
   ),
+  importObjective: async (current: any, body: any) => (
+    calls.push(["import-objective", current.id, body]),
+    ok({ id: "objective-imported" })
+  ),
   getObjective: async (current: any, id: string) => (
     calls.push(["get-objective", current.id, id]),
     ok({ id })
@@ -56,6 +60,10 @@ const service: any = {
   addKeyResult: async (current: any, id: string, body: any) => (
     calls.push(["add-kr", current.id, id, body]),
     ok({ id: "kr-1" })
+  ),
+  updateKeyResult: async (current: any, id: string, body: any) => (
+    calls.push(["update-kr", current.id, id, body]),
+    ok({ id, ...body })
   ),
   checkIn: async (current: any, id: string, body: any) => (
     calls.push(["check-in", current.id, id, body]),
@@ -109,6 +117,7 @@ try {
     scope: "",
     status: "ACTIVE",
     owner: "",
+    ownerId: "",
     health: "",
     search: "",
   });
@@ -145,6 +154,24 @@ try {
     "回款",
   );
 
+  const importedObjective = await fetch(`${base}/objectives/import`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sourceObjectiveId: "objective-old",
+      targetCycleId: "cycle-1",
+    }),
+  });
+  assert.equal(importedObjective.status, 201);
+  assert.deepEqual(
+    calls.find((call) => call[0] === "import-objective"),
+    [
+      "import-objective",
+      actor.id,
+      { sourceObjectiveId: "objective-old", targetCycleId: "cycle-1" },
+    ],
+  );
+
   const dueCheckIns = await fetch(
     `${base}/check-ins/due?cycleId=cycle-1&page=2&pageSize=10`,
   );
@@ -161,16 +188,35 @@ try {
         scope: "",
         status: "",
         owner: "",
+        ownerId: "",
         health: "",
         search: "",
       },
     ],
   );
 
-  const directory = await fetch(`${base}/directory/users`);
+  const directory = await fetch(`${base}/directory/users?page=2&pageSize=10&search=sales`);
   assert.equal(directory.status, 200);
-  assert.deepEqual((await directory.json()).data, [
-    { id: "u1", name: "员工甲" },
+  assert.deepEqual((await directory.json()).data, {
+    items: [{ id: "u1", name: "员工甲" }],
+    total: 1,
+    page: 2,
+    pageSize: 10,
+  });
+  assert.deepEqual(calls.find((call) => call[0] === "directory"), [
+    "directory",
+    "u1",
+    {
+      page: 2,
+      pageSize: 10,
+      cycleId: "",
+      scope: "",
+      status: "",
+      owner: "",
+      ownerId: "",
+      health: "",
+      search: "sales",
+    },
   ]);
 
   const alignmentDirectory = await fetch(
@@ -195,6 +241,17 @@ try {
   assert.deepEqual(
     calls.find((call) => call[0] === "check-in"),
     ["check-in", actor.id, "kr-1", { currentValue: 50 }],
+  );
+
+  const updatedKr = await fetch(`${base}/key-results/kr-1`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "新KR", targetValue: 120 }),
+  });
+  assert.equal(updatedKr.status, 200);
+  assert.deepEqual(
+    calls.find((call) => call[0] === "update-kr"),
+    ["update-kr", actor.id, "kr-1", { title: "新KR", targetValue: 120 }],
   );
 
   const taskLinks = await fetch(`${base}/key-results/kr-1/tasks`);

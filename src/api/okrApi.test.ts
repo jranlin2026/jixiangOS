@@ -35,8 +35,9 @@ await okrApi.listObjectives({
   cycleId: "cycle-1",
   owner: "team",
   search: "增长",
+  ownerId: "user-2",
 });
-await okrApi.listDirectoryUsers();
+await okrApi.listDirectoryUsers({ page: 2, pageSize: 10, search: "销售" });
 await okrApi.listAlignmentObjectives({
   cycleId: "cycle-1",
   childScope: "INDIVIDUAL",
@@ -46,15 +47,21 @@ await okrApi.listMetrics();
 await okrApi.bindMetric("kr-1", "FORMAL_ORDER_PAID_AMOUNT");
 await okrApi.refreshMetric("kr-1");
 await okrApi.listDueCheckIns({ page: 2, pageSize: 10, cycleId: "cycle-1" });
+await okrApi.importObjective({
+  sourceObjectiveId: "objective-old",
+  targetCycleId: "cycle-draft",
+});
+await okrApi.updateObjective("objective-1", { title: "新目标", weight: 80 });
+await okrApi.updateKeyResult("kr-1", { title: "新KR", targetValue: 120 });
 
 assert.equal(
   requests[0]?.url,
-  "/api/okr/objectives?page=3&pageSize=20&cycleId=cycle-1&owner=team&search=%E5%A2%9E%E9%95%BF",
+  "/api/okr/objectives?page=3&pageSize=20&cycleId=cycle-1&owner=team&search=%E5%A2%9E%E9%95%BF&ownerId=user-2",
   "OKR列表必须把统一分页、周期、范围和搜索条件传给服务端",
 );
 assert.equal(
   requests[1]?.url,
-  "/api/okr/directory/users",
+  "/api/okr/directory/users?page=2&pageSize=10&search=%E9%94%80%E5%94%AE",
   "负责人必须使用OKR数据范围裁剪的目录接口",
 );
 assert.equal(
@@ -80,5 +87,18 @@ assert.equal(
   "/api/okr/check-ins/due?page=2&pageSize=10&cycleId=cycle-1",
   "周检视必须服务端筛选后统一分页",
 );
+assert.equal(requests[8]?.url, "/api/okr/objectives/import");
+assert.equal(requests[8]?.init?.method, "POST");
+assert.equal(
+  requests[8]?.init?.body,
+  JSON.stringify({
+    sourceObjectiveId: "objective-old",
+    targetCycleId: "cycle-draft",
+  }),
+);
+assert.equal(requests[9]?.url, "/api/okr/objectives/objective-1");
+assert.equal(requests[9]?.init?.method, "PATCH");
+assert.equal(requests[10]?.url, "/api/okr/key-results/kr-1");
+assert.equal(requests[10]?.init?.method, "PATCH");
 
 console.log("okr api pagination test passed");

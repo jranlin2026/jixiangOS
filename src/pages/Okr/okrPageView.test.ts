@@ -4,9 +4,14 @@ import { readFileSync } from 'node:fs';
 const source = readFileSync(new URL('./index.tsx', import.meta.url), 'utf8');
 
 assert.match(source, /<ModulePage/, '目标管理应复用系统模块页面语言');
-assert.match(source, /<ModuleTabs/, '目标管理页签应复用系统页签');
+assert.doesNotMatch(source, /<ModuleTabs/, '目标工作台不再使用总览、我的、团队、周检视、周期五个主页签');
+assert.match(source, /我的目标/, '目标工作台左侧应提供本人入口');
+assert.match(source, /团队成员/, '有权限的管理者应能在同一工作台切换团队成员');
+assert.match(source, /本周待检视/, '周检视应作为目标工作台内的行动入口');
+assert.match(source, /周期管理/, '周期管理应降级为管理入口而非普通主页签');
+assert.match(source, /从其他周期导入/, '目标工作台应预留跨周期复用目标的清晰入口');
 assert.match(source, /<TablePagination/, '目标列表必须使用系统统一分页');
-assert.match(source, /mobile[\s\S]*<Stack[\s\S]*objectives\.map/, '移动端应以卡片展示同一批目标结果');
+assert.match(source, /objectives\.map/, '目标工作台应以目标卡片展示同一批分页结果');
 assert.match(source, /okrApi\.createCycle/, '周期设置应调用OKR周期命令');
 assert.match(source, /okrApi\.createObjective/, '维护者应能创建目标');
 assert.match(source, /okrApi\.createKeyResult/, '维护者应能在目标下创建关键结果');

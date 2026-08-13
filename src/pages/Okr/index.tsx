@@ -1,16 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Avatar,
+  Badge,
   Box,
   Button,
   Chip,
   DialogActions,
   DialogContent,
+  Divider,
+  IconButton,
+  InputAdornment,
   LinearProgress,
   MenuItem,
   Paper,
   Stack,
-  Tab,
   Table,
   TableBody,
   TableCell,
@@ -19,6 +23,7 @@ import {
   TableRow,
   TextField,
   Typography,
+  Tooltip,
   useMediaQuery,
   useTheme,
 } from "@mui/material";
@@ -26,13 +31,16 @@ import AddIcon from "@mui/icons-material/Add";
 import FlagOutlinedIcon from "@mui/icons-material/FlagOutlined";
 import TrackChangesOutlinedIcon from "@mui/icons-material/TrackChangesOutlined";
 import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
+import SearchIcon from "@mui/icons-material/Search";
+import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
+import AssignmentTurnedInOutlinedIcon from "@mui/icons-material/AssignmentTurnedInOutlined";
+import ContentCopyOutlinedIcon from "@mui/icons-material/ContentCopyOutlined";
 import { okrApi } from "../../api/okrApi";
 import useAuthStore from "../../store/useAuthStore";
 import { hasPermission, PERMISSION_KEYS } from "../../shared/utils/permissions";
 import {
   ModuleHeader,
   ModulePage,
-  ModuleTabs,
   ModuleToolbar,
   moduleDialogSx,
   moduleTablePaperSx,
@@ -61,10 +69,9 @@ import type {
 import {
   createCurrentQuarterCycleDraft,
   getAllowedObjectiveScopes,
-  getVisibleOkrTabs,
+  getWorkbenchPeople,
   hasSubmittedObjectiveReview,
   isSystemMetricValueReadOnly,
-  type OkrPageTab,
 } from "./okrPageModel";
 import { submitOkrCheckIn } from "./okrPageActions";
 
@@ -265,12 +272,17 @@ const ObjectiveList: React.FC<{
   page: number;
   pageSize: number;
   mobile: boolean;
+  currentUserId?: string;
+  canCheckIn: boolean;
   onPage: (page: number) => void;
   onPageSize: (pageSize: number) => void;
   canManageObjective: (objective: OkrObjective) => boolean;
   canBindObjective: (objective: OkrObjective) => boolean;
   canReviewObjective: (objective: OkrObjective) => boolean;
   onCreateKr: (objective: OkrObjective) => void;
+  onEditObjective: (objective: OkrObjective) => void;
+  onEditKr: (objective: OkrObjective, keyResult: OkrKeyResult) => void;
+  onCheckIn: (keyResult: OkrKeyResult) => void;
   onLinkTask: (keyResult: OkrKeyResult) => void;
   onBindMetric: (keyResult: OkrKeyResult) => void;
   onRefreshMetric: (keyResult: OkrKeyResult) => void;
@@ -281,12 +293,17 @@ const ObjectiveList: React.FC<{
   page,
   pageSize,
   mobile,
+  currentUserId,
+  canCheckIn,
   onPage,
   onPageSize,
   canManageObjective,
   canBindObjective,
   canReviewObjective,
   onCreateKr,
+  onEditObjective,
+  onEditKr,
+  onCheckIn,
   onLinkTask,
   onBindMetric,
   onRefreshMetric,
@@ -294,199 +311,77 @@ const ObjectiveList: React.FC<{
 }) => (
   <>
     {!objectives.length ? (
-      <Alert severity="info">当前筛选下暂无目标。</Alert>
-    ) : mobile ? (
+      <Paper variant="outlined" sx={{ py: 7, px: 2, textAlign: "center", borderColor: moduleTokens.line }}>
+        <FlagOutlinedIcon sx={{ fontSize: 40, color: "text.disabled" }} />
+        <Typography sx={{ mt: 1, fontWeight: 800 }}>这个周期还没有目标</Typography>
+        <Typography variant="body2" color="text.secondary">从一个清晰的 Objective 开始，再用可衡量的 KR 承接。</Typography>
+      </Paper>
+    ) : (
       <Stack spacing={1.5}>
-        {objectives.map((objective) => (
-          <Paper
-            key={objective.id}
-            variant="outlined"
-            sx={{ p: 2, borderColor: moduleTokens.line }}
-          >
-            <ObjectiveSummary objective={objective} />
-            <Box sx={{ my: 1.5 }}>
-              <Progress value={objective.progress} />
+        {objectives.map((objective, objectiveIndex) => (
+          <Paper key={objective.id} variant="outlined" sx={{ borderColor: moduleTokens.line, borderRadius: 2, overflow: "hidden" }}>
+            <Box sx={{ p: { xs: 1.5, md: 2 } }}>
+              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1.5}>
+                <Stack direction="row" spacing={1.25} alignItems="flex-start" sx={{ minWidth: 0 }}>
+                  <Chip label={`O${objectiveIndex + 1}`} size="small" color="primary" sx={{ mt: 0.25, fontWeight: 900 }} />
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography sx={{ fontWeight: 900, fontSize: { xs: 16, md: 18 } }}>{objective.title}</Typography>
+                    <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" sx={{ mt: 0.5 }}>
+                      <Chip size="small" variant="outlined" label={scopeLabel[objective.scope]} />
+                      <Typography variant="caption" color="text.secondary">负责人：{objective.ownerName}</Typography>
+                      {objective.parent && <Typography variant="caption" color="primary.main">对齐：{objective.parent.title}</Typography>}
+                    </Stack>
+                  </Box>
+                </Stack>
+                <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="flex-end">
+                  <Chip size="small" color={healthMap[objective.health].color} label={healthMap[objective.health].label} />
+                  <Box sx={{ minWidth: 130 }}><Progress value={objective.progress} /></Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>权重 {objective.weight}%</Typography>
+                </Stack>
+              </Stack>
             </Box>
-            <Stack spacing={1}>
-              {(objective.keyResults || []).map((keyResult) => (
-                <Paper
-                  key={keyResult.id}
-                  variant="outlined"
-                  sx={{ p: 1.25, bgcolor: moduleTokens.subtle }}
-                >
-                  <Stack direction="row" justifyContent="space-between" gap={1}>
-                    <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                      {keyResult.title}
-                    </Typography>
-                    <Stack direction="row">
-                      {canManageObjective(objective) && (
-                        <Button
-                          size="small"
-                          onClick={() => onLinkTask(keyResult)}
-                        >
-                          关联任务
-                        </Button>
+            <Divider />
+            <Box sx={{ px: { xs: 1.5, md: 2 } }}>
+              {(objective.keyResults || []).map((keyResult, krIndex) => (
+                <Box key={keyResult.id} sx={{ py: 1.5, borderBottom: krIndex < objective.keyResults.length - 1 ? `1px solid ${moduleTokens.line}` : "none" }}>
+                  <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" gap={1}>
+                    <Stack direction="row" spacing={1} sx={{ minWidth: 0 }}>
+                      <Chip label={`KR${krIndex + 1}`} size="small" variant="outlined" color="primary" sx={{ fontWeight: 800 }} />
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 800 }}>{keyResult.title}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {keyResult.ownerName} · 当前 {keyResult.currentValue}{keyResult.unit || ""} / 目标 {keyResult.targetValue}{keyResult.unit || ""} · 权重 {keyResult.weight}%
+                        </Typography>
+                        {!mobile && <KeyResultContext keyResult={keyResult} />}
+                      </Box>
+                    </Stack>
+                    <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end" flexWrap="wrap">
+                      <Box sx={{ minWidth: 120 }}><Progress value={keyResult.progress} /></Box>
+                      {canCheckIn && keyResult.ownerId === currentUserId && objective.status === "PUBLISHED" && (
+                        <Button size="small" onClick={() => onCheckIn(keyResult)}>检视</Button>
                       )}
-                      {canBindObjective(objective) &&
-                        (keyResult.metricBinding
-                          ? objective.status === "PUBLISHED" && (
-                              <Button
-                                size="small"
-                                onClick={() => onRefreshMetric(keyResult)}
-                              >
-                                刷新指标
-                              </Button>
-                            )
-                          : objective.status === "DRAFT" && (
-                              <Button
-                                size="small"
-                                onClick={() => onBindMetric(keyResult)}
-                              >
-                                绑定指标
-                              </Button>
-                            ))}
+                      {canManageObjective(objective) && objective.status === "DRAFT" && <Button size="small" onClick={() => onEditKr(objective, keyResult)}>编辑KR</Button>}
+                      {canManageObjective(objective) && <Button size="small" onClick={() => onLinkTask(keyResult)}>关联任务</Button>}
+                      {canBindObjective(objective) && (keyResult.metricBinding ? objective.status === "PUBLISHED" && <Button size="small" onClick={() => onRefreshMetric(keyResult)}>刷新指标</Button> : objective.status === "DRAFT" && <Button size="small" onClick={() => onBindMetric(keyResult)}>绑定指标</Button>)}
                     </Stack>
                   </Stack>
-                  <KeyResultContext keyResult={keyResult} />
-                </Paper>
+                </Box>
               ))}
-            </Stack>
-            <Stack
-              direction="row"
-              justifyContent="space-between"
-              alignItems="center"
-            >
-              <Typography variant="body2">
-                关键结果 {objective.keyResults?.length || 0} 项
-              </Typography>
-              {canManageObjective(objective) &&
-                objective.status === "DRAFT" && (
-                  <Button size="small" onClick={() => onCreateKr(objective)}>
-                    新增KR
-                  </Button>
-                )}
-              {canReviewObjective(objective) &&
-                objective.status === "PUBLISHED" && (
-                  <Button size="small" onClick={() => onReview(objective)}>
-                    评分复盘
-                  </Button>
-                )}
-            </Stack>
+            </Box>
+            <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1, bgcolor: moduleTokens.subtle }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+                <Typography variant="caption" color="text.secondary">{objective.status === "DRAFT" ? "草稿目标，可继续完善关键结果" : `${objective.keyResults?.length || 0} 个关键结果`}</Typography>
+                <Stack direction="row" spacing={0.5}>
+                  {canManageObjective(objective) && objective.status === "DRAFT" && <Button size="small" onClick={() => onEditObjective(objective)}>编辑目标</Button>}
+                  {canManageObjective(objective) && objective.status === "DRAFT" && <Button size="small" startIcon={<AddIcon />} onClick={() => onCreateKr(objective)}>添加 Key Result</Button>}
+                  {canReviewObjective(objective) && objective.status === "PUBLISHED" && <Button size="small" onClick={() => onReview(objective)}>评分复盘</Button>}
+                </Stack>
+              </Stack>
+              <ObjectiveReviewSummary objective={objective} />
+            </Box>
           </Paper>
         ))}
       </Stack>
-    ) : (
-      <TableContainer component={Paper} sx={moduleTablePaperSx}>
-        <Table size="small" sx={moduleTableSx}>
-          <TableHead>
-            <TableRow>
-              <TableCell>目标</TableCell>
-              <TableCell>层级</TableCell>
-              <TableCell>负责人</TableCell>
-              <TableCell>关键结果</TableCell>
-              <TableCell>进度</TableCell>
-              <TableCell>风险</TableCell>
-              <TableCell align="right">操作</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {objectives.map((objective) => (
-              <TableRow hover key={objective.id}>
-                <TableCell>
-                  <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                    {objective.title}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {objective.cycleName || "当前周期"}
-                  </Typography>
-                  <ObjectiveReviewSummary objective={objective} />
-                </TableCell>
-                <TableCell>{scopeLabel[objective.scope]}</TableCell>
-                <TableCell>
-                  {objective.ownerName}
-                  <br />
-                  <Typography variant="caption" color="text.secondary">
-                    {objective.departmentNameSnapshot || "未归属部门"}
-                  </Typography>
-                </TableCell>
-                <TableCell>
-                  <Stack spacing={1}>
-                    {(objective.keyResults || []).map((keyResult) => (
-                      <Box key={keyResult.id}>
-                        <Stack
-                          direction="row"
-                          justifyContent="space-between"
-                          gap={1}
-                        >
-                          <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                            {keyResult.title}
-                          </Typography>
-                          <Stack direction="row">
-                            {canManageObjective(objective) && (
-                              <Button
-                                size="small"
-                                onClick={() => onLinkTask(keyResult)}
-                              >
-                                关联任务
-                              </Button>
-                            )}
-                            {canBindObjective(objective) &&
-                              (keyResult.metricBinding
-                                ? objective.status === "PUBLISHED" && (
-                                    <Button
-                                      size="small"
-                                      onClick={() => onRefreshMetric(keyResult)}
-                                    >
-                                      刷新指标
-                                    </Button>
-                                  )
-                                : objective.status === "DRAFT" && (
-                                    <Button
-                                      size="small"
-                                      onClick={() => onBindMetric(keyResult)}
-                                    >
-                                      绑定指标
-                                    </Button>
-                                  ))}
-                          </Stack>
-                        </Stack>
-                        <KeyResultContext keyResult={keyResult} />
-                      </Box>
-                    ))}
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Progress value={objective.progress} />
-                </TableCell>
-                <TableCell>
-                  <Chip
-                    size="small"
-                    color={healthMap[objective.health].color}
-                    label={healthMap[objective.health].label}
-                  />
-                </TableCell>
-                <TableCell align="right">
-                  {canManageObjective(objective) &&
-                    objective.status === "DRAFT" && (
-                      <Button
-                        size="small"
-                        onClick={() => onCreateKr(objective)}
-                      >
-                        新增KR
-                      </Button>
-                    )}
-                  {canReviewObjective(objective) &&
-                    objective.status === "PUBLISHED" && (
-                      <Button size="small" onClick={() => onReview(objective)}>
-                        评分复盘
-                      </Button>
-                    )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
     )}
     <TablePagination
       count={total}
@@ -503,7 +398,6 @@ const OkrCenter: React.FC = () => {
   const theme = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down("md"));
   const currentUser = useAuthStore((state) => state.currentUser);
-  const canReadTeam = hasPermission(currentUser, PERMISSION_KEYS.OKR_TEAM_READ);
   const canCreate =
     hasPermission(currentUser, PERMISSION_KEYS.OKR_CREATE, "write") ||
     hasPermission(
@@ -542,11 +436,11 @@ const OkrCenter: React.FC = () => {
     PERMISSION_KEYS.OKR_METRIC_BIND,
     "write",
   );
-  const tabs = useMemo(
-    () => getVisibleOkrTabs({ canReadTeam, canCheckIn, canManageCycles }),
-    [canCheckIn, canManageCycles, canReadTeam],
-  );
-  const [tab, setTab] = useState<OkrPageTab>("overview");
+  const canReadTeam =
+    hasPermission(currentUser, PERMISSION_KEYS.OKR_TEAM_READ) ||
+    canManageDepartment ||
+    canManageCompany ||
+    canScoreClose;
   const [cycles, setCycles] = useState<OkrCycle[]>([]);
   const [cycleOptions, setCycleOptions] = useState<OkrCycle[]>([]);
   const [cycleTotal, setCycleTotal] = useState(0);
@@ -555,6 +449,8 @@ const OkrCenter: React.FC = () => {
   const [cycleId, setCycleId] = useState("");
   const [health, setHealth] = useState<OkrHealth | "">("");
   const [search, setSearch] = useState("");
+  const [peopleSearch, setPeopleSearch] = useState("");
+  const [selectedOwnerId, setSelectedOwnerId] = useState(currentUser?.id || "");
   const [objectives, setObjectives] = useState<OkrObjective[]>([]);
   const [objectiveTotal, setObjectiveTotal] = useState(0);
   const [dueCheckIns, setDueCheckIns] = useState<OkrDueCheckInItem[]>([]);
@@ -568,12 +464,25 @@ const OkrCenter: React.FC = () => {
     text: string;
   } | null>(null);
   const [users, setUsers] = useState<OkrDirectoryUser[]>([]);
+  const [peopleTotal, setPeopleTotal] = useState(0);
+  const [peoplePage, setPeoplePage] = useState(0);
+  const [peoplePageSize, setPeoplePageSize] = useState(10);
   const [alignmentObjectives, setAlignmentObjectives] = useState<
     OkrAlignmentObjective[]
   >([]);
   const [cycleOpen, setCycleOpen] = useState(false);
+  const [cycleManagerOpen, setCycleManagerOpen] = useState(false);
   const [objectiveOpen, setObjectiveOpen] = useState(false);
+  const [editingObjective, setEditingObjective] = useState<OkrObjective | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importSourceCycleId, setImportSourceCycleId] = useState("");
+  const [importSourceObjectiveId, setImportSourceObjectiveId] = useState("");
+  const [importCandidates, setImportCandidates] = useState<OkrObjective[]>([]);
+  const [importTotal, setImportTotal] = useState(0);
+  const [importPage, setImportPage] = useState(0);
+  const [importPageSize, setImportPageSize] = useState(10);
   const [krObjective, setKrObjective] = useState<OkrObjective | null>(null);
+  const [editingKr, setEditingKr] = useState<OkrKeyResult | null>(null);
   const [checkInKr, setCheckInKr] = useState<OkrKeyResult | null>(null);
   const [linkTaskKr, setLinkTaskKr] = useState<OkrKeyResult | null>(null);
   const [taskId, setTaskId] = useState("");
@@ -592,6 +501,8 @@ const OkrCenter: React.FC = () => {
   });
   const objectiveRequestId = React.useRef(0);
   const dueRequestId = React.useRef(0);
+  const cycleRequestId = React.useRef(0);
+  const peopleRequestId = React.useRef(0);
   const [cycleForm, setCycleForm] = useState<CreateOkrCycleInput>(() =>
     createCurrentQuarterCycleDraft(),
   );
@@ -625,10 +536,12 @@ const OkrCenter: React.FC = () => {
   });
 
   const loadCycles = useCallback(async () => {
+    const requestId = ++cycleRequestId.current;
     const [pageResponse, optionsResponse] = await Promise.all([
       okrApi.listCycles({ page: cyclePage + 1, pageSize: cyclePageSize }),
       okrApi.listCycles({ page: 1, pageSize: 100 }),
     ]);
+    if (requestId !== cycleRequestId.current) return;
     if (pageResponse.code !== 0 || optionsResponse.code !== 0) {
       setMessage({
         tone: "error",
@@ -657,14 +570,7 @@ const OkrCenter: React.FC = () => {
     );
   }, [cyclePage, cyclePageSize]);
 
-  const objectiveOwner =
-    tab === "team"
-      ? ("team" as const)
-      : tab === "mine"
-        ? ("mine" as const)
-        : undefined;
   const loadObjectives = useCallback(async () => {
-    if (tab === "cycles" || tab === "checkins") return;
     const requestId = ++objectiveRequestId.current;
     setLoading(true);
     const response = await okrApi.listObjectives({
@@ -672,7 +578,7 @@ const OkrCenter: React.FC = () => {
       pageSize,
       cycleId: cycleId || undefined,
       health: health || undefined,
-      owner: objectiveOwner,
+      ownerId: selectedOwnerId || currentUser?.id || undefined,
       search: search.trim() || undefined,
     });
     if (requestId !== objectiveRequestId.current) return;
@@ -686,10 +592,10 @@ const OkrCenter: React.FC = () => {
       setObjectiveTotal(data.total);
     } else setMessage({ tone: "error", text: response.message });
     setLoading(false);
-  }, [cycleId, health, objectiveOwner, page, pageSize, search, tab]);
+  }, [cycleId, currentUser?.id, health, page, pageSize, search, selectedOwnerId]);
 
   const loadDueCheckIns = useCallback(async () => {
-    if (tab !== "checkins" || !cycleId) return;
+    if (!cycleId || !canCheckIn) return;
     const requestId = ++dueRequestId.current;
     setLoading(true);
     const response = await okrApi.listDueCheckIns({
@@ -708,7 +614,7 @@ const OkrCenter: React.FC = () => {
       setDueCheckInTotal(data.total);
     } else setMessage({ tone: "error", text: response.message });
     setLoading(false);
-  }, [cycleId, page, pageSize, tab]);
+  }, [canCheckIn, cycleId, page, pageSize]);
 
   useEffect(() => {
     void loadCycles();
@@ -721,13 +627,24 @@ const OkrCenter: React.FC = () => {
   }, [loadDueCheckIns]);
   useEffect(() => {
     setPage(0);
-  }, [cycleId, health, pageSize, search, tab]);
+  }, [cycleId, health, pageSize, search, selectedOwnerId]);
   useEffect(() => {
-    if (!canCreate) return;
-    okrApi.listDirectoryUsers().then((response) => {
-      if (response.code === 0) setUsers(response.data);
+    if (!canCreate && !canReadTeam) return;
+    const requestId = ++peopleRequestId.current;
+    okrApi.listDirectoryUsers({
+      page: peoplePage + 1,
+      pageSize: peoplePageSize,
+      search: peopleSearch.trim() || undefined,
+    }).then((response) => {
+      if (requestId !== peopleRequestId.current || response.code !== 0) return;
+      const data = normalizePage<OkrDirectoryUser>(response.data, peoplePage + 1, peoplePageSize);
+      setUsers(data.items);
+      setPeopleTotal(data.total);
     });
-  }, [canCreate]);
+  }, [canCreate, canReadTeam, peoplePage, peoplePageSize, peopleSearch]);
+  useEffect(() => {
+    setPeoplePage(0);
+  }, [peoplePageSize, peopleSearch]);
   useEffect(() => {
     if (!canBindMetric) return;
     okrApi.listMetrics().then((response) => {
@@ -757,10 +674,6 @@ const OkrCenter: React.FC = () => {
       active = false;
     };
   }, [objectiveForm.cycleId, objectiveForm.scope, objectiveOpen]);
-  useEffect(() => {
-    if (!tabs.some((item) => item.value === tab)) setTab("overview");
-  }, [tab, tabs]);
-
   const stats = useMemo(() => {
     const count = objectives.length || 1;
     return {
@@ -789,6 +702,25 @@ const OkrCenter: React.FC = () => {
         : users,
     [currentUser, users],
   );
+  const workbenchPeople = useMemo(
+    () =>
+      getWorkbenchPeople(
+        currentUser
+          ? ({
+              id: currentUser.id,
+              name: currentUser.name,
+              departmentId: currentUser.departmentId,
+              positionName: currentUser.positionName,
+            } as OkrDirectoryUser)
+          : null,
+        ownerOptions,
+        canReadTeam,
+      ),
+    [canReadTeam, currentUser, ownerOptions, peopleSearch],
+  );
+  const selectedPerson =
+    ownerOptions.find((person) => person.id === selectedOwnerId) ||
+    workbenchPeople[0];
   const allowedScopes = useMemo(
     () =>
       getAllowedObjectiveScopes({
@@ -814,28 +746,85 @@ const OkrCenter: React.FC = () => {
 
   const saveObjective = async () => {
     setSubmitting(true);
-    const response = await okrApi.createObjective(objectiveForm);
+    const response = editingObjective
+      ? await okrApi.updateObjective(editingObjective.id, {
+          title: objectiveForm.title,
+          description: objectiveForm.description,
+          weight: objectiveForm.weight,
+        })
+      : await okrApi.createObjective(objectiveForm);
     setSubmitting(false);
     if (response.code !== 0) {
       setMessage({ tone: "error", text: response.message });
       return;
     }
     setObjectiveOpen(false);
-    setMessage({ tone: "success", text: "目标已创建，请继续补充KR。" });
+    setEditingObjective(null);
+    setMessage({ tone: "success", text: editingObjective ? "目标已更新。" : "目标已创建，请继续补充KR。" });
+    await loadObjectives();
+  };
+
+  const openImportObjective = () => {
+    const sourceCycle = cycleOptions.find((cycle) => cycle.id !== cycleId);
+    setImportSourceCycleId(sourceCycle?.id || "");
+    setImportSourceObjectiveId("");
+    setImportCandidates([]);
+    setImportTotal(0);
+    setImportPage(0);
+    setImportOpen(true);
+  };
+
+  useEffect(() => {
+    if (!importOpen || !importSourceCycleId) return;
+    let active = true;
+    okrApi
+      .listObjectives({
+        page: importPage + 1,
+        pageSize: importPageSize,
+        cycleId: importSourceCycleId,
+        ownerId: selectedOwnerId || currentUser?.id || undefined,
+      })
+      .then((response) => {
+        if (!active || response.code !== 0) return;
+        const data = normalizePage<OkrObjective>(response.data, importPage + 1, importPageSize);
+        setImportCandidates(data.items);
+        setImportTotal(data.total);
+        setImportSourceObjectiveId((current) => current || data.items[0]?.id || "");
+      });
+    return () => { active = false; };
+  }, [currentUser?.id, importOpen, importPage, importPageSize, importSourceCycleId, selectedOwnerId]);
+
+  const importObjective = async () => {
+    if (!importSourceObjectiveId || !cycleId) return;
+    setSubmitting(true);
+    const response = await okrApi.importObjective({
+      sourceObjectiveId: importSourceObjectiveId,
+      targetCycleId: cycleId,
+    });
+    setSubmitting(false);
+    if (response.code !== 0) {
+      setMessage({ tone: "error", text: response.message });
+      return;
+    }
+    setImportOpen(false);
+    setMessage({ tone: "success", text: "目标和KR定义已导入，进度已重置。" });
     await loadObjectives();
   };
 
   const saveKr = async () => {
     if (!krObjective) return;
     setSubmitting(true);
-    const response = await okrApi.createKeyResult(krObjective.id, krForm);
+    const response = editingKr
+      ? await okrApi.updateKeyResult(editingKr.id, krForm)
+      : await okrApi.createKeyResult(krObjective.id, krForm);
     setSubmitting(false);
     if (response.code !== 0) {
       setMessage({ tone: "error", text: response.message });
       return;
     }
     setKrObjective(null);
-    setMessage({ tone: "success", text: "KR已创建。" });
+    setEditingKr(null);
+    setMessage({ tone: "success", text: editingKr ? "KR已更新。" : "KR已创建。" });
     await loadObjectives();
   };
 
@@ -855,7 +844,9 @@ const OkrCenter: React.FC = () => {
     const result = await submitOkrCheckIn(
       {
         createCheckIn: okrApi.createCheckIn,
-        reload: tab === "checkins" ? loadDueCheckIns : loadObjectives,
+        reload: async () => {
+          await Promise.all([loadObjectives(), loadDueCheckIns()]);
+        },
       },
       checkInKr.id,
       input,
@@ -952,8 +943,21 @@ const OkrCenter: React.FC = () => {
       scope: allowedScopes[0] || "INDIVIDUAL",
       title: "",
       description: "",
-      ownerId: currentUser?.id || "",
+      ownerId: selectedOwnerId || currentUser?.id || "",
       weight: 100,
+    });
+    setEditingObjective(null);
+    setObjectiveOpen(true);
+  };
+  const editObjective = (objective: OkrObjective) => {
+    setEditingObjective(objective);
+    setObjectiveForm({
+      cycleId: objective.cycleId,
+      scope: objective.scope,
+      title: objective.title,
+      description: objective.description || "",
+      ownerId: objective.ownerId,
+      weight: objective.weight,
     });
     setObjectiveOpen(true);
   };
@@ -970,6 +974,24 @@ const OkrCenter: React.FC = () => {
       weight: 100,
       dueAt: "",
     });
+    setEditingKr(null);
+    setKrObjective(objective);
+  };
+  const editKr = (objective: OkrObjective, keyResult: OkrKeyResult) => {
+    setEditingKr(keyResult);
+    setKrForm({
+      title: keyResult.title,
+      description: keyResult.description || "",
+      ownerId: keyResult.ownerId,
+      type: keyResult.type,
+      direction: keyResult.direction,
+      baselineValue: keyResult.baselineValue,
+      targetValue: keyResult.targetValue,
+      currentValue: keyResult.currentValue,
+      unit: keyResult.unit || "",
+      weight: keyResult.weight,
+      dueAt: keyResult.dueAt ? keyResult.dueAt.slice(0, 10) : "",
+    });
     setKrObjective(objective);
   };
   const openCheckIn = (kr: OkrKeyResult) => {
@@ -984,19 +1006,16 @@ const OkrCenter: React.FC = () => {
     setCheckInKr(kr);
   };
 
-  const activeCycle = cycleOptions.find(
-    (cycle) => cycle.id === cycleId && cycle.status === "ACTIVE",
-  );
   const selectedCycle = cycleOptions.find((cycle) => cycle.id === cycleId);
   const canManageObjective = (objective: OkrObjective) =>
-    canManageCompany ||
+    objective.capabilities?.canManage ?? (canManageCompany ||
     (canManageDepartment &&
       objective.scope !== "COMPANY" &&
       (!currentUser?.departmentId ||
         objective.departmentId === currentUser.departmentId)) ||
     (canCreate &&
       objective.scope === "INDIVIDUAL" &&
-      objective.ownerId === currentUser?.id);
+      objective.ownerId === currentUser?.id));
   const canBindObjective = (objective: OkrObjective) =>
     canBindMetric && canManageObjective(objective);
   const canReviewObjective = (objective: OkrObjective) =>
@@ -1011,8 +1030,8 @@ const OkrCenter: React.FC = () => {
   return (
     <ModulePage sx={{ p: { xs: 2, md: 3 } }}>
       <ModuleHeader
-        title="目标管理"
-        description="公司目标向下对齐，关键结果按周检视，用真实经营结果验证进展。"
+        title="目标工作台"
+        description="在一个页面查看自己和团队的目标，让KR、经营进度、周检视与复盘围绕目标发生。"
         actions={
           canCreate ? (
             <Button
@@ -1032,269 +1051,194 @@ const OkrCenter: React.FC = () => {
         message={message?.text || ""}
         onClose={() => setMessage(null)}
       />
-      <ModuleTabs
-        value={tab}
-        onChange={(_, value) => setTab(value)}
-        variant="scrollable"
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", md: "230px minmax(0, 1fr)" },
+          gap: 2,
+          alignItems: "start",
+        }}
       >
-        {tabs.map((item) => (
-          <Tab key={item.value} value={item.value} label={item.label} />
-        ))}
-      </ModuleTabs>
-
-      {tab !== "cycles" && (
-        <>
-          <ModuleToolbar>
-            <TextField
-              select
-              size="small"
-              label="OKR周期"
-              value={cycleId}
-              onChange={(event) => setCycleId(event.target.value)}
-              sx={{ minWidth: 190 }}
-            >
-              {cycleOptions.map((cycle) => (
-                <MenuItem key={cycle.id} value={cycle.id}>
-                  {cycle.name}
-                </MenuItem>
-              ))}
-            </TextField>
-            {(tab === "overview" || tab === "mine" || tab === "team") && (
-              <>
+        <Paper
+          variant="outlined"
+          sx={{
+            borderColor: moduleTokens.line,
+            borderRadius: 2,
+            position: { md: "sticky" },
+            top: { md: 16 },
+            overflow: "hidden",
+          }}
+        >
+          {mobile ? (
+            <Box sx={{ p: 1.5 }}>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="搜索员工"
+                value={peopleSearch}
+                onChange={(event) => setPeopleSearch(event.target.value)}
+                sx={{ mb: 1 }}
+                InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+              />
+              <TextField fullWidth select size="small" label="查看谁的目标" value={selectedOwnerId} onChange={(event) => setSelectedOwnerId(event.target.value)}>
+                {getWorkbenchPeople(
+                  currentUser ? ({ id: currentUser.id, name: currentUser.name } as OkrDirectoryUser) : null,
+                  ownerOptions,
+                  canReadTeam,
+                ).map((person) => (
+                  <MenuItem key={person.id} value={person.id}>{person.id === currentUser?.id ? `我的目标 · ${person.name}` : `${person.name} · ${person.positionName || person.departmentName || "团队成员"}`}</MenuItem>
+                ))}
+              </TextField>
+            </Box>
+          ) : (
+            <>
+              <Box sx={{ p: 1.5 }}>
                 <TextField
-                  select
+                  fullWidth
                   size="small"
-                  label="风险状态"
-                  value={health}
-                  onChange={(event) =>
-                    setHealth(event.target.value as OkrHealth | "")
-                  }
-                  sx={{ minWidth: 140 }}
-                >
-                  <MenuItem value="">全部状态</MenuItem>
-                  {Object.entries(healthMap).map(([value, item]) => (
-                    <MenuItem key={value} value={value}>
-                      {item.label}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                <TextField
-                  size="small"
-                  label="搜索目标"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  sx={{ minWidth: { xs: "100%", md: 220 } }}
+                  placeholder="搜索员工"
+                  value={peopleSearch}
+                  onChange={(event) => setPeopleSearch(event.target.value)}
+                  InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
                 />
+              </Box>
+              <Divider />
+              <Box sx={{ p: 1, maxHeight: "calc(100vh - 250px)", overflowY: "auto" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ px: 1, fontWeight: 800 }}>
+              我的目标
+            </Typography>
+            {workbenchPeople.filter((person) => person.id === currentUser?.id).map((person) => (
+              <Button
+                key={person.id}
+                fullWidth
+                onClick={() => setSelectedOwnerId(person.id)}
+                sx={{ mt: 0.5, justifyContent: "flex-start", px: 1, py: 1, bgcolor: selectedOwnerId === person.id ? `${moduleTokens.blue}12` : "transparent" }}
+                startIcon={<Avatar sx={{ width: 28, height: 28, fontSize: 13 }}>{person.name.slice(0, 1)}</Avatar>}
+              >
+                {person.name}
+              </Button>
+            ))}
+            {canReadTeam && (
+              <>
+                <Typography variant="caption" color="text.secondary" sx={{ px: 1, pt: 1.5, display: "block", fontWeight: 800 }}>
+                  团队成员
+                </Typography>
+                {workbenchPeople.filter((person) => person.id !== currentUser?.id).map((person) => (
+                  <Button
+                    key={person.id}
+                    fullWidth
+                    onClick={() => setSelectedOwnerId(person.id)}
+                    sx={{ mt: 0.5, justifyContent: "flex-start", px: 1, py: 1, bgcolor: selectedOwnerId === person.id ? `${moduleTokens.blue}12` : "transparent" }}
+                    startIcon={<Avatar sx={{ width: 28, height: 28, fontSize: 13, bgcolor: moduleTokens.subtle, color: "text.primary" }}>{person.name.slice(0, 1)}</Avatar>}
+                  >
+                    <Box sx={{ minWidth: 0, textAlign: "left" }}>
+                      <Typography variant="body2" noWrap>{person.name}</Typography>
+                      <Typography variant="caption" color="text.secondary" noWrap>{person.positionName || person.departmentName || "团队成员"}</Typography>
+                    </Box>
+                  </Button>
+                ))}
               </>
             )}
-          </ModuleToolbar>
-        </>
-      )}
+              </Box>
+            </>
+          )}
+          {canReadTeam && (
+            <TablePagination
+              count={peopleTotal}
+              page={peoplePage}
+              rowsPerPage={peoplePageSize}
+              onPageChange={(_, next) => setPeoplePage(next)}
+              onRowsPerPageChange={(event) => {
+                setPeoplePage(0);
+                setPeoplePageSize(Number(event.target.value));
+              }}
+            />
+          )}
+        </Paper>
 
-      {tab === "overview" && (
-        <>
-          <Box
-            sx={{
-              display: "grid",
-              gridTemplateColumns: { xs: "1fr 1fr", lg: "repeat(4, 1fr)" },
-              gap: 2,
-              mb: 2,
-            }}
-          >
-            <MetricCard
-              label="目标总数"
-              value={stats.total}
-              helper="当前筛选范围"
-              tone={moduleTokens.blue}
-              icon={<FlagOutlinedIcon />}
-            />
-            <MetricCard
-              label="平均进度"
-              value={`${stats.progress}%`}
-              helper="当前页目标"
-              tone={moduleTokens.green}
-              icon={<TrackChangesOutlinedIcon />}
-            />
-            <MetricCard
-              label="风险目标"
-              value={stats.risk}
-              helper="需要管理者关注"
-              tone={moduleTokens.red}
-              icon={<WarningAmberOutlinedIcon />}
-            />
-            <MetricCard
-              label="待首次检视"
-              value={stats.checkInDue}
-              helper="尚无检视记录的KR"
-              tone={moduleTokens.amber}
-              icon={<TrackChangesOutlinedIcon />}
-            />
+        <Stack spacing={2} sx={{ minWidth: 0 }}>
+          <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2 }, borderColor: moduleTokens.line, borderRadius: 2 }}>
+            <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", sm: "center" }} gap={1.5}>
+              <Stack direction="row" spacing={1.25} alignItems="center">
+                <Avatar sx={{ width: 40, height: 40 }}>{(selectedPerson?.name || currentUser?.name || "我").slice(0, 1)}</Avatar>
+                <Box>
+                  <Typography sx={{ fontWeight: 900 }}>{selectedPerson?.name || currentUser?.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">{selectedPerson?.positionName || selectedPerson?.departmentName || "目标负责人"}</Typography>
+                </Box>
+              </Stack>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                <TextField select size="small" label="目标周期" value={cycleId} onChange={(event) => setCycleId(event.target.value)} sx={{ minWidth: 190 }}>
+                  {cycleOptions.map((cycle) => <MenuItem key={cycle.id} value={cycle.id}>{cycle.name}</MenuItem>)}
+                </TextField>
+                {canCheckIn && selectedOwnerId === currentUser?.id && (
+                  <Badge badgeContent={dueCheckInTotal} color="error">
+                    <Button variant="outlined" startIcon={<AssignmentTurnedInOutlinedIcon />} onClick={() => dueCheckIns[0] && openCheckIn(dueCheckIns[0].keyResult)} disabled={!dueCheckIns.length}>
+                      本周待检视
+                    </Button>
+                  </Badge>
+                )}
+                {canManageCycles && (
+                  <Tooltip title="周期管理">
+                    <IconButton onClick={() => setCycleManagerOpen(true)}><SettingsOutlinedIcon /></IconButton>
+                  </Tooltip>
+                )}
+              </Stack>
+            </Stack>
+          </Paper>
+
+          <ModuleToolbar>
+            <TextField select size="small" label="风险状态" value={health} onChange={(event) => setHealth(event.target.value as OkrHealth | "")} sx={{ minWidth: 140 }}>
+              <MenuItem value="">全部状态</MenuItem>
+              {Object.entries(healthMap).map(([value, item]) => <MenuItem key={value} value={value}>{item.label}</MenuItem>)}
+            </TextField>
+            <TextField size="small" label="搜索目标" value={search} onChange={(event) => setSearch(event.target.value)} sx={{ minWidth: { xs: "100%", md: 220 } }} />
+          </ModuleToolbar>
+
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", lg: "repeat(4, 1fr)" }, gap: 1.5 }}>
+            <MetricCard label="目标总数" value={stats.total} helper="当前人员与周期" tone={moduleTokens.blue} icon={<FlagOutlinedIcon />} />
+            <MetricCard label="本页平均进度" value={`${stats.progress}%`} helper="当前页目标" tone={moduleTokens.green} icon={<TrackChangesOutlinedIcon />} />
+            <MetricCard label="本页风险目标" value={stats.risk} helper="当前页需关注" tone={moduleTokens.red} icon={<WarningAmberOutlinedIcon />} />
+            <MetricCard label="本页尚未检视" value={stats.checkInDue} helper="当前页KR" tone={moduleTokens.amber} icon={<TrackChangesOutlinedIcon />} />
           </Box>
+
           <ObjectiveList
             objectives={objectives}
             total={objectiveTotal}
             page={page}
             pageSize={pageSize}
             mobile={mobile}
+            currentUserId={currentUser?.id}
+            canCheckIn={canCheckIn}
             onPage={setPage}
             onPageSize={setPageSize}
             canManageObjective={canManageObjective}
             canBindObjective={canBindObjective}
             canReviewObjective={canReviewObjective}
             onCreateKr={openKr}
-            onLinkTask={(keyResult) => {
-              setLinkTaskKr(keyResult);
-              setTaskId("");
-            }}
-            onBindMetric={(keyResult) => {
-              setMetricKr(keyResult);
-              setMetricCode("");
-            }}
+            onEditObjective={editObjective}
+            onEditKr={editKr}
+            onCheckIn={openCheckIn}
+            onLinkTask={(keyResult) => { setLinkTaskKr(keyResult); setTaskId(""); }}
+            onBindMetric={(keyResult) => { setMetricKr(keyResult); setMetricCode(""); }}
             onRefreshMetric={(keyResult) => void refreshMetric(keyResult)}
-            onReview={(objective) => {
-              setReviewObjective(objective);
-              setReviewForm({
-                score: String(Number(objective.progress || 0) / 100),
-                summary: "",
-                lessons: "",
-              });
-            }}
+            onReview={(objective) => { setReviewObjective(objective); setReviewForm({ score: String(Number(objective.progress || 0) / 100), summary: "", lessons: "" }); }}
           />
-        </>
-      )}
-
-      {(tab === "mine" || tab === "team") && (
-        <ObjectiveList
-          objectives={objectives}
-          total={objectiveTotal}
-          page={page}
-          pageSize={pageSize}
-          mobile={mobile}
-          onPage={setPage}
-          onPageSize={setPageSize}
-          canManageObjective={canManageObjective}
-          canBindObjective={canBindObjective}
-          canReviewObjective={canReviewObjective}
-          onCreateKr={openKr}
-          onLinkTask={(keyResult) => {
-            setLinkTaskKr(keyResult);
-            setTaskId("");
-          }}
-          onBindMetric={(keyResult) => {
-            setMetricKr(keyResult);
-            setMetricCode("");
-          }}
-          onRefreshMetric={(keyResult) => void refreshMetric(keyResult)}
-          onReview={(objective) => {
-            setReviewObjective(objective);
-            setReviewForm({
-              score: String(Number(objective.progress || 0) / 100),
-              summary: "",
-              lessons: "",
-            });
-          }}
-        />
-      )}
-
-      {tab === "checkins" && (
-        <>
-          {!activeCycle ? (
-            <Alert severity="info">请选择进行中的OKR周期后提交周检视。</Alert>
-          ) : !dueCheckIns.length ? (
-            <Alert severity="success">
-              当前周期暂无待检视KR，本周已全部完成。
-            </Alert>
-          ) : mobile ? (
-            <Stack spacing={1.5}>
-              {dueCheckIns.map(({ objective, keyResult }) => (
-                <Paper key={keyResult.id} variant="outlined" sx={{ p: 2 }}>
-                  <ObjectiveSummary objective={objective} showOwner={false} />
-                  <Typography sx={{ fontWeight: 800, mt: 1.5 }}>
-                    KR：{keyResult.title}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    当前 {keyResult.currentValue} {keyResult.unit || ""} · 目标{" "}
-                    {keyResult.targetValue} {keyResult.unit || ""}
-                  </Typography>
-                  <KeyResultContext keyResult={keyResult} />
-                  <Box sx={{ my: 1 }}>
-                    <Progress value={keyResult.progress} />
-                  </Box>
-                  <Button
-                    fullWidth
-                    variant="outlined"
-                    onClick={() => openCheckIn(keyResult)}
-                  >
-                    提交本周检视
-                  </Button>
-                </Paper>
-              ))}
-            </Stack>
-          ) : (
-            <TableContainer component={Paper} sx={moduleTablePaperSx}>
-              <Table size="small" sx={moduleTableSx}>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>目标 / KR</TableCell>
-                    <TableCell>负责人</TableCell>
-                    <TableCell>当前 / 目标</TableCell>
-                    <TableCell>进度</TableCell>
-                    <TableCell>最近检视</TableCell>
-                    <TableCell align="right">操作</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {dueCheckIns.map(({ objective, keyResult }) => (
-                    <TableRow hover key={keyResult.id}>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                          {objective.title}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          KR：{keyResult.title}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{keyResult.ownerName}</TableCell>
-                      <TableCell>
-                        {keyResult.currentValue} / {keyResult.targetValue}{" "}
-                        {keyResult.unit || ""}
-                      </TableCell>
-                      <TableCell>
-                        <Progress value={keyResult.progress} />
-                      </TableCell>
-                      <TableCell>
-                        {latestCheckIn(keyResult)
-                          ? formatDate(latestCheckIn(keyResult)?.createdAt)
-                          : "暂无"}
-                      </TableCell>
-                      <TableCell align="right">
-                        <Button
-                          size="small"
-                          onClick={() => openCheckIn(keyResult)}
-                        >
-                          检视
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+          {canCreate && (
+            <Paper variant="outlined" sx={{ p: 1, borderStyle: "dashed", borderColor: moduleTokens.line }}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                <Button startIcon={<AddIcon />} onClick={openObjective}>添加 Objective</Button>
+                <Button startIcon={<ContentCopyOutlinedIcon />} onClick={openImportObjective} disabled={selectedCycle?.status !== "DRAFT" || cycleOptions.length < 2}>从其他周期导入</Button>
+              </Stack>
+            </Paper>
           )}
-          <TablePagination
-            count={dueCheckInTotal}
-            page={page}
-            rowsPerPage={pageSize}
-            onPageChange={(_, next) => setPage(next)}
-            onRowsPerPageChange={(event) =>
-              setPageSize(Number(event.target.value))
-            }
-            sx={{ mt: 1 }}
-          />
-        </>
-      )}
+        </Stack>
+      </Box>
 
-      {tab === "cycles" && (
+      <ProtectedFormDialog open={cycleManagerOpen} onClose={() => setCycleManagerOpen(false)} fullWidth maxWidth="lg" sx={moduleDialogSx}>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Typography variant="h6" sx={{ fontWeight: 900 }}>周期管理</Typography>
+            <Alert severity="info">周期启用后目标定义将锁定；修改必须留下调整记录。</Alert>
         <Stack spacing={2}>
           <Stack
             direction={{ xs: "column", sm: "row" }}
@@ -1454,11 +1398,48 @@ const OkrCenter: React.FC = () => {
             rowsPerPage={cyclePageSize}
             onPageChange={(_, next) => setCyclePage(next)}
             onRowsPerPageChange={(event) =>
-              setCyclePageSize(Number(event.target.value))
+              {
+                setCyclePage(0);
+                setCyclePageSize(Number(event.target.value));
+              }
             }
           />
         </Stack>
-      )}
+          </Stack>
+        </DialogContent>
+        <DialogActions><Button onClick={() => setCycleManagerOpen(false)}>关闭</Button></DialogActions>
+      </ProtectedFormDialog>
+
+      <ProtectedFormDialog open={importOpen} onClose={() => setImportOpen(false)} submitting={submitting} resetKey={String(importOpen)} fullWidth maxWidth="sm" sx={moduleDialogSx}>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Typography variant="h6" sx={{ fontWeight: 900 }}>从其他周期导入</Typography>
+            <Alert severity="info">复制目标和KR定义到当前草稿周期；历史进度、检视记录和经营指标绑定不会复制。</Alert>
+            <TextField select label="来源周期" value={importSourceCycleId} onChange={(event) => { setImportSourceCycleId(event.target.value); setImportSourceObjectiveId(""); setImportPage(0); }}>
+              {cycleOptions.filter((cycle) => cycle.id !== cycleId).map((cycle) => <MenuItem key={cycle.id} value={cycle.id}>{cycle.name}</MenuItem>)}
+            </TextField>
+            <TextField select label="选择目标" value={importSourceObjectiveId} onChange={(event) => setImportSourceObjectiveId(event.target.value)} disabled={!importCandidates.length}>
+              {importCandidates.map((objective) => <MenuItem key={objective.id} value={objective.id}>{objective.title} · {objective.ownerName}</MenuItem>)}
+            </TextField>
+            {!importCandidates.length && importSourceCycleId && <Alert severity="warning">该人员在来源周期没有可导入的目标。</Alert>}
+            <TablePagination
+              count={importTotal}
+              page={importPage}
+              rowsPerPage={importPageSize}
+              onPageChange={(_, next) => { setImportPage(next); setImportSourceObjectiveId(""); }}
+              onRowsPerPageChange={(event) => {
+                setImportPage(0);
+                setImportPageSize(Number(event.target.value));
+                setImportSourceObjectiveId("");
+              }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setImportOpen(false)}>取消</Button>
+          <Button variant="contained" onClick={() => void importObjective()} disabled={submitting || !importSourceObjectiveId || selectedCycle?.status !== "DRAFT"}>确认导入</Button>
+        </DialogActions>
+      </ProtectedFormDialog>
 
       {loading && (
         <LinearProgress
@@ -1591,7 +1572,7 @@ const OkrCenter: React.FC = () => {
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 900 }}>
-              新建目标
+              {editingObjective ? "编辑目标" : "新建目标"}
             </Typography>
             {!cycleOptions.some((cycle) => cycle.status === "DRAFT") && (
               <Alert severity="warning">
@@ -1602,6 +1583,7 @@ const OkrCenter: React.FC = () => {
               select
               label="OKR周期"
               value={objectiveForm.cycleId}
+              disabled={Boolean(editingObjective)}
               onChange={(event) =>
                 setObjectiveForm({
                   ...objectiveForm,
@@ -1622,6 +1604,7 @@ const OkrCenter: React.FC = () => {
               select
               label="目标层级"
               value={objectiveForm.scope}
+              disabled={Boolean(editingObjective)}
               onChange={(event) =>
                 setObjectiveForm({
                   ...objectiveForm,
@@ -1662,6 +1645,7 @@ const OkrCenter: React.FC = () => {
               select
               label="负责人"
               value={objectiveForm.ownerId || ""}
+              disabled={Boolean(editingObjective)}
               onChange={(event) =>
                 setObjectiveForm({
                   ...objectiveForm,
@@ -1676,7 +1660,7 @@ const OkrCenter: React.FC = () => {
                 </MenuItem>
               ))}
             </TextField>
-            {objectiveForm.scope !== "COMPANY" && (
+              {!editingObjective && objectiveForm.scope !== "COMPANY" && (
               <TextField
                 select
                 label="向上对齐目标（选填）"
@@ -1721,7 +1705,7 @@ const OkrCenter: React.FC = () => {
               !objectiveForm.ownerId
             }
           >
-            创建
+            {editingObjective ? "保存修改" : "创建"}
           </Button>
         </DialogActions>
       </ProtectedFormDialog>
@@ -1738,7 +1722,7 @@ const OkrCenter: React.FC = () => {
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 900 }}>
-              新增关键结果
+              {editingKr ? "编辑关键结果" : "新增关键结果"}
             </Typography>
             <Alert severity="info">{krObjective?.title}</Alert>
             <TextField
@@ -1749,9 +1733,17 @@ const OkrCenter: React.FC = () => {
               }
             />
             <TextField
+              label="KR说明 / 验收口径"
+              multiline
+              minRows={2}
+              value={krForm.description || ""}
+              onChange={(event) => setKrForm({ ...krForm, description: event.target.value })}
+            />
+            <TextField
               select
               label="负责人"
               value={krForm.ownerId || ""}
+              disabled={Boolean(editingKr)}
               onChange={(event) =>
                 setKrForm({ ...krForm, ownerId: event.target.value })
               }
@@ -1769,6 +1761,7 @@ const OkrCenter: React.FC = () => {
                 select
                 label="指标类型"
                 value={krForm.type}
+                disabled={Boolean(editingKr)}
                 onChange={(event) =>
                   setKrForm({
                     ...krForm,
@@ -1785,6 +1778,7 @@ const OkrCenter: React.FC = () => {
                 select
                 label="变化方向"
                 value={krForm.direction}
+                disabled={Boolean(editingKr)}
                 onChange={(event) =>
                   setKrForm({
                     ...krForm,
@@ -1862,7 +1856,7 @@ const OkrCenter: React.FC = () => {
             onClick={() => void saveKr()}
             disabled={submitting || !krForm.title.trim() || !krForm.ownerId}
           >
-            创建KR
+            {editingKr ? "保存修改" : "创建KR"}
           </Button>
         </DialogActions>
       </ProtectedFormDialog>
