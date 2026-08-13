@@ -48,9 +48,11 @@ export type CustomerPermissionMigrationManifestAuthenticator =
   & CustomerPermissionMigrationManifestVerifier;
 
 export const ROLE_PERMISSION_ACTION_BASELINE_KEY = 'aaos_role_permission_action_baseline_version';
-export const ROLE_PERMISSION_ACTION_BASELINE_VERSION = 8;
+export const ROLE_PERMISSION_ACTION_BASELINE_VERSION = 9;
 const DEFAULT_ROLE_PERMISSION_BASELINE_VERSION = 4;
 const CORE_PERMISSION_TREE_BASELINE_VERSION = 5;
+const ENTERPRISE_BRAIN_PERMISSION_BASELINE_VERSION = 8;
+const OKR_PERMISSION_BASELINE_VERSION = 9;
 
 export function toSafeCustomerPermissionMigrationErrorCode(error: unknown): string {
   const message = error instanceof Error ? error.message : '';
@@ -308,6 +310,35 @@ export function mergeEnterpriseBrainRoleBaseline(role: Role): Role {
     { module: PERMISSION_KEYS.BRAIN_DASHBOARD, actions: ['read'] },
   ] : [];
   return { ...role, permissions: sanitizeRolePermissions([...(role.permissions || []), ...employeePermissions, ...leaderPermissions]) };
+}
+
+function mergeOkrRoleBaseline(role: Role): Role {
+  if (role.code === 'super_admin') return role;
+  const normalizedCode = String(role.code || '').trim().toLowerCase();
+  const isLeader = normalizedCode === 'sales_manager'
+    || normalizedCode === 'sales_director'
+    || role.name === '销售经理'
+    || role.name === '销售总监';
+  const employeePermissions: Permission[] = [
+    { module: PERMISSION_KEYS.OKR_SELF_READ, actions: ['read'] },
+    { module: PERMISSION_KEYS.OKR_CREATE, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.OKR_CHECK_IN, actions: ['read', 'write'] },
+  ];
+  const leaderPermissions: Permission[] = isLeader ? [
+    { module: PERMISSION_KEYS.OKR_TEAM_READ, actions: ['read'] },
+    { module: PERMISSION_KEYS.OKR_DEPARTMENT_MANAGE, actions: ['read', 'write'] },
+  ] : [];
+  const currentOkrScope = role.dataScopes?.okr;
+  return {
+    ...role,
+    permissions: sanitizeRolePermissions([...(role.permissions || []), ...employeePermissions, ...leaderPermissions]),
+    dataScopes: {
+      ...(role.dataScopes || {}),
+      okr: currentOkrScope === 'self' || currentOkrScope === 'department' || currentOkrScope === 'all'
+        ? currentOkrScope
+        : isLeader ? 'department' : 'self',
+    },
+  };
 }
 
 function migrateLegacyRecoveryReviewListPermission(role: Role): Role {
@@ -583,7 +614,13 @@ async function migrateRoleRows(store: RoleMigrationStore, baselineVersion: numbe
     const corePermissionMigrated = baselineVersion < CORE_PERMISSION_TREE_BASELINE_VERSION
       ? migrateCorePermissionTreeRole(defaultRoleMigrated)
       : defaultRoleMigrated;
-    const migrated = mergeRoleWithDefaultAccess(mergeEnterpriseBrainRoleBaseline(corePermissionMigrated));
+    const enterpriseBrainMigrated = baselineVersion < ENTERPRISE_BRAIN_PERMISSION_BASELINE_VERSION
+      ? mergeEnterpriseBrainRoleBaseline(corePermissionMigrated)
+      : corePermissionMigrated;
+    const okrMigrated = baselineVersion < OKR_PERMISSION_BASELINE_VERSION
+      ? mergeOkrRoleBaseline(enterpriseBrainMigrated)
+      : enterpriseBrainMigrated;
+    const migrated = mergeRoleWithDefaultAccess(okrMigrated);
     const permissionsChanged = permissionsSignature(current.permissions) !== permissionsSignature(migrated.permissions);
     const scopesChanged = dataScopesSignature(current.dataScopes) !== dataScopesSignature(migrated.dataScopes);
 

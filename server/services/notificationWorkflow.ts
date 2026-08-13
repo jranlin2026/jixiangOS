@@ -26,6 +26,11 @@ const DEFAULT_TODO_RULE = {
   escalateNextWorkday: true,
 };
 
+const DEFAULT_OKR_RULE = {
+  checkInReminderMinutes: 24 * 60,
+  riskEscalationMinutes: 24 * 60,
+};
+
 function minutesAfter(value: Date, minutes: number) {
   return new Date(value.getTime() + minutes * 60_000);
 }
@@ -316,6 +321,103 @@ export function createNotificationWorkflow(publisher: NotificationPublisher) {
     resolveTodo(client: WorkflowClient, todoId: string, reason: string) {
       return publisher.resolveBusiness(client as any, { businessType: 'customer_todo', businessId: todoId, reason });
     },
+
+    async assignOkr(client: WorkflowClient, input: {
+      cycleId: string;
+      objectiveId: string;
+      title: string;
+      assignee: Recipient;
+      publishedAt: Date;
+      checkInAt?: Date | null;
+      manager?: Recipient | null;
+    }) {
+      const rule = await loadRule(client, 'OKR_WORKFLOW', DEFAULT_OKR_RULE);
+      if (!rule.enabled) return;
+      const version = input.publishedAt.toISOString();
+      const content = `目标“${input.title || input.objectiveId}”已发布，请按周期推进并检视。`;
+      await publisher.publish(client as any, {
+        eventType: 'OKR_ASSIGNED', businessType: 'okr_objective', businessId: input.objectiveId,
+        recipientId: input.assignee.id, recipientName: input.assignee.name,
+        title: '你收到一项目标', content, severity: 'S2', actionUrl: '/okr', requiresAck: false,
+        dedupeKey: `okr.assigned:${input.cycleId}:${input.objectiveId}:${input.assignee.id}:${version}`,
+        channels: rule.channels, metadata: { cycleId: input.cycleId, objectiveVersion: version },
+      });
+      if (input.checkInAt) {
+        const reminderAt = minutesAfter(input.checkInAt, -rule.config.checkInReminderMinutes);
+        if (reminderAt > input.publishedAt) {
+          await publisher.schedule(client as any, {
+            eventType: 'OKR_CHECK_IN_DUE_SOON', businessType: 'okr_objective', businessId: input.objectiveId,
+            recipientId: input.assignee.id, recipientName: input.assignee.name,
+            title: '目标即将到检视时间', content: `请检视目标“${input.title || input.objectiveId}”的进展与风险。`,
+            severity: 'S2', actionUrl: '/okr', requiresAck: false,
+            dedupeKey: `okr.check-in:${input.cycleId}:${input.objectiveId}:${input.assignee.id}:${input.checkInAt.toISOString()}`,
+            channels: rule.channels, scheduledAt: reminderAt,
+            metadata: { cycleId: input.cycleId, checkInAt: input.checkInAt.toISOString() },
+          });
+        }
+      }
+    },
+
+    async scheduleOkrCheckIn(client: WorkflowClient, input: {
+      cycleId: string;
+      objectiveId: string;
+      title: string;
+      assignee: Recipient;
+      scheduledFrom: Date;
+      checkInAt?: Date | null;
+    }) {
+      if (!input.checkInAt) return;
+      const rule = await loadRule(client, 'OKR_WORKFLOW', DEFAULT_OKR_RULE);
+      if (!rule.enabled) return;
+      const reminderAt = minutesAfter(input.checkInAt, -rule.config.checkInReminderMinutes);
+      if (reminderAt <= input.scheduledFrom) return;
+      await publisher.schedule(client as any, {
+        eventType: 'OKR_CHECK_IN_DUE_SOON', businessType: 'okr_objective', businessId: input.objectiveId,
+        recipientId: input.assignee.id, recipientName: input.assignee.name,
+        title: '目标即将到检视时间', content: `请检视目标“${input.title || input.objectiveId}”的进展与风险。`,
+        severity: 'S2', actionUrl: '/okr', requiresAck: false,
+        dedupeKey: `okr.check-in:${input.cycleId}:${input.objectiveId}:${input.assignee.id}:${input.checkInAt.toISOString()}`,
+        channels: rule.channels, scheduledAt: reminderAt,
+        metadata: { cycleId: input.cycleId, checkInAt: input.checkInAt.toISOString() },
+      });
+    },
+
+    async riskOkr(client: WorkflowClient, input: {
+      cycleId: string;
+      objectiveId: string;
+      title: string;
+      assignee: Recipient;
+      riskAt: Date;
+      manager?: Recipient | null;
+    }) {
+      const rule = await loadRule(client, 'OKR_WORKFLOW', DEFAULT_OKR_RULE);
+      if (!rule.enabled) return;
+      const version = input.riskAt.toISOString();
+      await publisher.publish(client as any, {
+        eventType: 'OKR_AT_RISK', businessType: 'okr_objective', businessId: input.objectiveId,
+        recipientId: input.assignee.id, recipientName: input.assignee.name,
+        title: '目标出现风险', content: `目标“${input.title || input.objectiveId}”已标记为有风险，请及时处理。`,
+        severity: 'S1', actionUrl: '/okr', requiresAck: false,
+        dedupeKey: `okr.risk:${input.cycleId}:${input.objectiveId}:${input.assignee.id}:${version}`,
+        channels: rule.channels, metadata: { cycleId: input.cycleId, riskVersion: version },
+      });
+      if (input.manager && input.manager.id !== input.assignee.id) {
+        await publisher.schedule(client as any, {
+          eventType: 'OKR_RISK_ESCALATION', businessType: 'okr_objective', businessId: input.objectiveId,
+          recipientId: input.manager.id, recipientName: input.manager.name,
+          title: '成员目标风险待处理', content: `${input.assignee.name}的目标“${input.title || input.objectiveId}”仍处于风险状态。`,
+          severity: 'S1', actionUrl: '/okr', requiresAck: false,
+          dedupeKey: `okr.risk-escalation:${input.cycleId}:${input.objectiveId}:${input.manager.id}:${version}`,
+          channels: rule.channels, escalationLevel: 1,
+          scheduledAt: minutesAfter(input.riskAt, rule.config.riskEscalationMinutes),
+          metadata: { cycleId: input.cycleId, riskVersion: version },
+        });
+      }
+    },
+
+    resolveOkr(client: WorkflowClient, objectiveId: string, reason: string) {
+      return publisher.resolveBusiness(client as any, { businessType: 'okr_objective', businessId: objectiveId, reason });
+    },
   };
 }
 
@@ -323,4 +425,5 @@ export type NotificationWorkflow = ReturnType<typeof createNotificationWorkflow>
 export const notificationRuleDefaults = {
   LEAD_WORKFLOW: DEFAULT_LEAD_RULE,
   CUSTOMER_TODO_WORKFLOW: DEFAULT_TODO_RULE,
+  OKR_WORKFLOW: DEFAULT_OKR_RULE,
 };

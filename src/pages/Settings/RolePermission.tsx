@@ -129,6 +129,8 @@ const PERMISSION_TREE: RolePermissionNode[] = [
       { label: '经营复盘', key: PERMISSION_KEYS.ACADEMY_REVIEW_MANAGE },
     ],
   },
+  corePermissionNode('企业AI大脑'),
+  corePermissionNode('目标管理'),
   corePermissionNode('系统设置'),
 ];
 
@@ -142,6 +144,7 @@ const defaultDataScopes: NormalizedRoleDataScopes = {
   recoveryOrders: 'self',
   recoveryOrderApplications: 'self',
   academy: 'self',
+  okr: 'self',
   assets: 'self',
 };
 const emptyForm: RoleForm = {
@@ -155,14 +158,14 @@ const emptyForm: RoleForm = {
 
 const dataScopeOptions: Array<{ value: DataScopeLevel; label: string }> = [
   { value: 'self', label: '本人' },
-  { value: 'department', label: '本部门' },
-  { value: 'all', label: '全部' },
+  { value: 'department', label: '本部门及下级部门' },
+  { value: 'all', label: '全公司' },
 ];
 
 const CUSTOMER_SCOPE_OPTIONS = [
   { value: 'self', label: '本人' },
-  { value: 'department', label: '本部门' },
-  { value: 'all', label: '全部' },
+  { value: 'department', label: '本部门及下级部门' },
+  { value: 'all', label: '全公司' },
 ] as const;
 
 const dataScopeRows: Array<{ domain: DataScopeDomain; label: string; description: string; permissionKeys: string[] }> = [

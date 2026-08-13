@@ -19,7 +19,7 @@ import { getStorageData, setStorageData } from '../../api/mock/storage';
 import { normalizePositionDepartmentScope } from './positionApplicability';
 
 const now = '2026-06-01T00:00:00.000Z';
-const ORGANIZATION_SCHEMA_VERSION = 13;
+const ORGANIZATION_SCHEMA_VERSION = 14;
 const NON_CUSTOMER_DATA_SCOPE_DOMAINS: NonCustomerDataScopeDomain[] = [
   'leads',
   'orders',
@@ -28,6 +28,7 @@ const NON_CUSTOMER_DATA_SCOPE_DOMAINS: NonCustomerDataScopeDomain[] = [
   'recoveryOrders',
   'recoveryOrderApplications',
   'academy',
+  'okr',
   'assets',
 ];
 const DATA_SCOPE_LEVELS: DataScopeLevel[] = ['self', 'department', 'all'];
@@ -76,6 +77,18 @@ const CO_CREATION_EMPLOYEE_PERMISSION: Permission = {
   actions: ['read', 'write'],
 };
 
+const OKR_EMPLOYEE_PERMISSIONS: Permission[] = [
+  { module: PERMISSION_KEYS.OKR_SELF_READ, actions: ['read'] },
+  { module: PERMISSION_KEYS.OKR_CREATE, actions: ['read', 'write'] },
+  { module: PERMISSION_KEYS.OKR_CHECK_IN, actions: ['read', 'write'] },
+];
+
+const OKR_DEPARTMENT_MANAGER_PERMISSIONS: Permission[] = [
+  ...OKR_EMPLOYEE_PERMISSIONS,
+  { module: PERMISSION_KEYS.OKR_TEAM_READ, actions: ['read'] },
+  { module: PERMISSION_KEYS.OKR_DEPARTMENT_MANAGE, actions: ['read', 'write'] },
+];
+
 export const DEFAULT_ROLES: Role[] = [
   {
     id: 'role-super-admin',
@@ -83,7 +96,7 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'super_admin',
     departmentId: 'dept-general',
     permissions: [{ module: '全部', actions: ['read', 'write', 'delete', 'admin'] }],
-    dataScopes: { leads: 'all', customers: 'all', orders: 'all', orderApplications: 'all', assets: 'all' },
+    dataScopes: { leads: 'all', customers: 'all', orders: 'all', orderApplications: 'all', okr: 'all', assets: 'all' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -120,11 +133,12 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.REVIEW_TEAM, actions: ['read'] },
       { module: PERMISSION_KEYS.AI_POSITION_ASSISTANT, actions: ['read'] },
       { module: PERMISSION_KEYS.BRAIN_DASHBOARD, actions: ['read'] },
+      ...OKR_DEPARTMENT_MANAGER_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       { module: PERMISSION_KEYS.CO_CREATION_SUPERVISE, actions: ['read', 'write'] },
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
-    dataScopes: { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department', assets: 'department' },
+    dataScopes: { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department', okr: 'department', assets: 'department' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -152,10 +166,11 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.TASK_SELF, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.REVIEW_SELF, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.AI_POSITION_ASSISTANT, actions: ['read'] },
+      ...OKR_EMPLOYEE_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', okr: 'self', assets: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -174,11 +189,12 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
       { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
+      ...OKR_EMPLOYEE_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS.filter((permission) => permission.module !== PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH),
       { module: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, actions: ['read', 'write'] },
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', okr: 'self', assets: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -196,10 +212,11 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
       { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
+      ...OKR_EMPLOYEE_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', okr: 'self', assets: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -216,10 +233,11 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
+      ...OKR_EMPLOYEE_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', okr: 'self', assets: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -244,10 +262,11 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDERS, actions: ['read'] },
       { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
       { module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read', 'write'] },
+      ...OKR_EMPLOYEE_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'all', orderApplications: 'all', assets: 'self' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'all', orderApplications: 'all', okr: 'self', assets: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -272,11 +291,12 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ASSETS, actions: ['read', 'write'] },
+      ...OKR_EMPLOYEE_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       { module: PERMISSION_KEYS.CO_CREATION_DECIDE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.CO_CREATION_VALIDATE, actions: ['read', 'write'] },
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'all' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', okr: 'self', assets: 'all' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -326,6 +346,7 @@ function buildDataScopes(
   assets: DataScopeLevel = customerScopeAsStandardScope(customers),
   deliveries: DataScopeLevel = orders,
   academy: DataScopeLevel = customerScopeAsStandardScope(customers),
+  okr: DataScopeLevel = customerScopeAsStandardScope(customers),
 ): NormalizedRoleDataScopes {
   return {
     leads,
@@ -336,6 +357,7 @@ function buildDataScopes(
     recoveryOrders,
     recoveryOrderApplications,
     academy,
+    okr,
     assets,
   };
 }
@@ -345,7 +367,7 @@ function defaultRoleDataScopes(code?: string): NormalizedRoleDataScopes {
   if (normalizedCode === 'super_admin') {
     return buildDataScopes('all', 'all', 'all', 'all');
   }
-  if (normalizedCode === 'sales_manager') {
+  if (normalizedCode === 'sales_manager' || normalizedCode === 'sales_director') {
     return buildDataScopes('department', 'department', 'department', 'department');
   }
   if (normalizedCode === 'finance_specialist') {
@@ -423,7 +445,8 @@ function ensureDefaultRoleRequiredPermissions(
   permissions: Role['permissions'] = [],
   code?: string,
 ): Role['permissions'] {
-  if (normalizeCode(code) !== 'finance_specialist') return permissions;
+  const normalizedCode = normalizeCode(code);
+  if (normalizedCode !== 'finance_specialist') return permissions;
   const required = new Map<string, string[]>([
     [PERMISSION_KEYS.ORDER_REVIEW_LIST, ['read']],
     [PERMISSION_KEYS.ORDER_REVIEW, ['read', 'write']],

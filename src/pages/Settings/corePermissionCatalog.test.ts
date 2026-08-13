@@ -39,6 +39,7 @@ assert.deepEqual(coreLabels, [
   '售后服务',
   '财务中心',
   '企业AI大脑',
+  '目标管理',
   '系统设置',
 ]);
 
@@ -57,6 +58,15 @@ assert.deepEqual(coreLabels, [
   PERMISSION_KEYS.TASK_SELF,
   PERMISSION_KEYS.AI_POSITION_ASSISTANT,
   PERMISSION_KEYS.BRAIN_DASHBOARD,
+  PERMISSION_KEYS.OKR_SELF_READ,
+  PERMISSION_KEYS.OKR_TEAM_READ,
+  PERMISSION_KEYS.OKR_CREATE,
+  PERMISSION_KEYS.OKR_CHECK_IN,
+  PERMISSION_KEYS.OKR_DEPARTMENT_MANAGE,
+  PERMISSION_KEYS.OKR_COMPANY_MANAGE,
+  PERMISSION_KEYS.OKR_CYCLE_MANAGE,
+  PERMISSION_KEYS.OKR_SCORE_CLOSE,
+  PERMISSION_KEYS.OKR_METRIC_BIND,
 ].forEach((permissionKey) => {
   assert.equal(coreLeafKeys.has(permissionKey), true, `${permissionKey} 必须出现在正式模块权限树中`);
 });
@@ -70,6 +80,7 @@ assert.deepEqual(CORE_DATA_SCOPE_DOMAINS, [
   'recoveryOrders',
   'recoveryOrderApplications',
   'academy',
+  'okr',
 ]);
 
 console.log('core permission catalog tests passed');

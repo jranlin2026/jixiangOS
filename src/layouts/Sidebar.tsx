@@ -28,6 +28,7 @@ import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SchoolIcon from '@mui/icons-material/School';
 import TaskAltIcon from '@mui/icons-material/TaskAlt';
+import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import TipsAndUpdatesIcon from '@mui/icons-material/TipsAndUpdates';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HomeIcon from '@mui/icons-material/Home';
@@ -40,6 +41,7 @@ import { hasPermission, PERMISSION_KEYS } from '../shared/utils/permissions';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { ACADEMY_ACCESS_PERMISSION_KEYS } from '../shared/utils/academyAccess';
+import { OKR_ACCESS_PERMISSION_KEYS } from '../shared/utils/okrAccess';
 import useAuthStore from '../store/useAuthStore';
 import ChangePasswordDialog from '../shared/components/ChangePasswordDialog';
 import NotificationBell from '../shared/components/NotificationBell';
@@ -202,6 +204,13 @@ const navItems: NavItem[] = [
     ],
   },
   { label: '员工任务中心', icon: <TaskAltIcon />, path: ROUTES.TASKS, permissionKey: PERMISSION_KEYS.TASK_SELF, permissionKeys: [PERMISSION_KEYS.TASK_SELF, PERMISSION_KEYS.TASK_TEAM] },
+  {
+    label: '目标管理',
+    icon: <AccountTreeOutlinedIcon />,
+    path: ROUTES.OKR,
+    permissionKey: PERMISSION_KEYS.OKR,
+    permissionKeys: [...OKR_ACCESS_PERMISSION_KEYS],
+  },
   {
     label: 'AI共创中心',
     icon: <TipsAndUpdatesIcon />,

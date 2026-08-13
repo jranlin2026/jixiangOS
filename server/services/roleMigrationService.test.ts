@@ -209,16 +209,73 @@ assert.deepEqual(
   currentStoredRole.permissions.find((permission: any) => permission.module === PERMISSION_KEYS.CUSTOMER_ASSIGN)?.actions,
   ['read', 'write'],
 );
+assert.ok(roleHasPermission(mapPrismaRole(currentStoredRole), PERMISSION_KEYS.OKR_SELF_READ));
+assert.ok(roleHasPermission(mapPrismaRole(currentStoredRole), PERMISSION_KEYS.OKR_CREATE, 'write'));
+assert.ok(roleHasPermission(mapPrismaRole(currentStoredRole), PERMISSION_KEYS.OKR_CHECK_IN, 'write'));
+assert.equal(currentStoredRole.dataScopes.okr, 'self');
 
 currentStoredRole = {
   ...currentStoredRole,
-  permissions: currentStoredRole.permissions.filter((permission: any) => permission.module !== PERMISSION_KEYS.CUSTOMER_ASSIGN),
+  permissions: currentStoredRole.permissions.filter((permission: any) => (
+    permission.module !== PERMISSION_KEYS.CUSTOMER_ASSIGN
+    && permission.module !== PERMISSION_KEYS.OKR_SELF_READ
+    && permission.module !== PERMISSION_KEYS.OKR_CREATE
+    && permission.module !== PERMISSION_KEYS.OKR_CHECK_IN
+  )),
 };
+assert.equal(roleHasPermission(mergeRoleWithDefaultAccess(mapPrismaRole(currentStoredRole)), PERMISSION_KEYS.OKR_SELF_READ), false, '运行时读取不得复活管理员已撤销的目标权限');
 transactionalRoleUpdates.length = 0;
 const postAdminEditCount = await migrateDefaultRoleAccess(transactionClient as any);
 assert.equal(postAdminEditCount, 0, '迁移标记存在后不得覆盖管理员后续移除的默认角色权限');
 assert.equal(markerWrites.length, 1);
 assert.equal(transactionalRoleUpdates.length, 0);
+
+const managerBaselineMarkers = new Map<string, unknown>();
+let managerStoredRole = {
+  ...legacyRole,
+  id: 'role-sales-manager',
+  name: '销售经理',
+  code: 'sales_manager',
+  permissions: [],
+  dataScopes: {} as Record<string, string>,
+};
+await migrateDefaultRoleAccess({
+  role: {
+    findMany: async () => [managerStoredRole],
+    update: async (input: any) => {
+      managerStoredRole = { ...managerStoredRole, ...input.data };
+      return managerStoredRole;
+    },
+  },
+  appStorage: {
+    findUnique: async () => null,
+    upsert: async (input: any) => {
+      managerBaselineMarkers.set(input.where.key, input.create.value);
+      return input.create;
+    },
+  },
+} as any);
+assert.ok(roleHasPermission(mapPrismaRole(managerStoredRole), PERMISSION_KEYS.OKR_TEAM_READ));
+assert.ok(roleHasPermission(mapPrismaRole(managerStoredRole), PERMISSION_KEYS.OKR_DEPARTMENT_MANAGE, 'write'));
+assert.equal(managerStoredRole.dataScopes.okr, 'department');
+
+let managerWithExplicitScope = {
+  ...managerStoredRole,
+  id: 'role-sales-director',
+  name: '销售总监',
+  code: 'sales_director',
+  dataScopes: { ...managerStoredRole.dataScopes, okr: 'all' },
+};
+await migrateDefaultRoleAccess({
+  role: {
+    findMany: async () => [managerWithExplicitScope],
+    update: async (input: any) => {
+      managerWithExplicitScope = { ...managerWithExplicitScope, ...input.data };
+      return managerWithExplicitScope;
+    },
+  },
+} as any);
+assert.equal(managerWithExplicitScope.dataScopes.okr, 'all', '一次性初始化不得覆盖管理员已显式配置的目标数据范围');
 
 const customRoleUpdates: any[] = [];
 const customReadOnlyRole = {
@@ -237,7 +294,14 @@ const customRoleCount = await migrateDefaultRoleAccess({
     },
   },
 } as any);
-assert.equal(customRoleCount, 0, '一次性基线不得为自定义角色扩权');
+assert.equal(customRoleCount, 1, '现存自定义普通角色也必须一次性初始化个人目标权限');
+const migratedCustomPermissions = customRoleUpdates[0].data.permissions;
+assert.ok(migratedCustomPermissions.some((permission: any) => permission.module === PERMISSION_KEYS.OKR_SELF_READ));
+assert.ok(migratedCustomPermissions.some((permission: any) => permission.module === PERMISSION_KEYS.OKR_CREATE));
+assert.ok(migratedCustomPermissions.some((permission: any) => permission.module === PERMISSION_KEYS.OKR_CHECK_IN));
+assert.equal(migratedCustomPermissions.some((permission: any) => permission.module === PERMISSION_KEYS.OKR_TEAM_READ), false);
+assert.equal(migratedCustomPermissions.some((permission: any) => permission.module === PERMISSION_KEYS.CUSTOMER_ASSIGN), false, 'OKR 初始化不得顺带继承默认销售权限');
+assert.equal(customRoleUpdates[0].data.dataScopes.okr, 'self');
 
 const combinedReviewRoleUpdates: any[] = [];
 const legacyCombinedReviewRole = {
@@ -291,7 +355,7 @@ assert.deepEqual(
   ['read', 'write'],
   '旧版订单审核台合并权限必须保留原有审核操作能力',
 );
-assert.equal(customRoleUpdates.length, 0);
+assert.equal(customRoleUpdates.length, 1);
 assert.equal(
   customReadOnlyRole.permissions.some((permission: any) => permission.module === PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM),
   false,

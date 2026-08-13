@@ -10,6 +10,7 @@ type ManagementPrisma = Pick<PrismaClient, 'notificationRule' | 'notificationDel
 const RULE_LABELS: Record<string, { label: string; description: string }> = {
   LEAD_WORKFLOW: { label: '线索分配与首次跟进', description: '新线索确认、首次跟进以及主管升级规则' },
   CUSTOMER_TODO_WORKFLOW: { label: '客户待办', description: '待办临期、到期、逾期以及主管升级规则' },
+  OKR_WORKFLOW: { label: '目标管理', description: '周检视提前提醒、风险即时提醒以及主管升级规则' },
 };
 
 function channels(value: unknown) {

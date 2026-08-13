@@ -58,6 +58,7 @@ assert.deepEqual(omittedScopes, {
   recoveryOrders: 'self',
   recoveryOrderApplications: 'self',
   academy: 'self',
+  okr: 'self',
   assets: 'self',
 });
 assert.deepEqual(
@@ -83,6 +84,7 @@ assert.deepEqual(
     recoveryOrders: 'all',
     recoveryOrderApplications: 'department',
     academy: 'self',
+    okr: 'self',
     assets: 'all',
   },
 );
