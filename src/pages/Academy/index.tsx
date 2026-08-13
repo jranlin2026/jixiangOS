@@ -106,7 +106,10 @@ import {
 } from "../../shared/components/ModuleShell";
 import { Plans } from "./AcademyPlans";
 import {
+  getAcademyPriorityTask,
   getAcademyPrivateLoadPlan,
+  getAcademyWorkbenchSummary,
+  getCoursePhaseProgress,
   taskRequiresEvidence,
 } from "./academyMvpModel";
 import {
@@ -265,6 +268,15 @@ const statusLabel: Record<string, string> = {
   ABSENT: "未到课",
   UNKNOWN: "未确认",
 };
+const taskStatusLabel: Record<string, string> = {
+  PENDING: "待处理",
+  IN_PROGRESS: "处理中",
+  SUBMITTED: "待验收",
+  DONE: "已完成",
+  REJECTED: "验收驳回",
+  BLOCKED: "受阻",
+  SKIPPED: "已关闭",
+};
 const statusColor = (status: string) =>
   status === "DONE" || status === "COMPLETED" || status === "ACTIVE"
     ? "success"
@@ -356,6 +368,9 @@ const Academy: React.FC = () => {
   >([]);
   const [myTasks, setMyTasks] = useState<AcademyMyTask[]>([]);
   const [myTaskTotal, setMyTaskTotal] = useState(0);
+  const [openTaskTotal, setOpenTaskTotal] = useState(0);
+  const [reviewTaskTotal, setReviewTaskTotal] = useState(0);
+  const [priorityTasks, setPriorityTasks] = useState<AcademyMyTask[]>([]);
   const [myTaskPage, setMyTaskPage] = useState(0);
   const [myTaskPageSize, setMyTaskPageSize] = useState(10);
   const [myTaskView, setMyTaskView] = useState<"OPEN" | "REVIEW" | "HISTORY">(
@@ -615,16 +630,33 @@ const Academy: React.FC = () => {
     const calendarEnd = new Date(calendarStart);
     calendarStart.setDate(calendarStart.getDate() - 42);
     calendarEnd.setDate(calendarEnd.getDate() + 42);
-    const [publicCalendarResponse, myTaskResponse] = await Promise.all([
+    const currentTaskRequest = academyApi.listMyTasks({
+      page: myTaskPage + 1,
+      pageSize: myTaskPageSize,
+      status: myTaskView,
+    });
+    const openTaskRequest = academyApi.listMyTasks({
+      page: 1,
+      pageSize: 100,
+      status: "OPEN",
+    });
+    const reviewTaskRequest =
+      myTaskView === "REVIEW"
+        ? currentTaskRequest
+        : academyApi.listMyTasks({ page: 1, pageSize: 1, status: "REVIEW" });
+    const [
+      publicCalendarResponse,
+      myTaskResponse,
+      openTaskResponse,
+      reviewTaskResponse,
+    ] = await Promise.all([
       academyApi.getPublicCalendar({
         start: calendarStart.toISOString(),
         end: calendarEnd.toISOString(),
       }),
-      academyApi.listMyTasks({
-        page: myTaskPage + 1,
-        pageSize: myTaskPageSize,
-        status: myTaskView,
-      }),
+      currentTaskRequest,
+      openTaskRequest,
+      reviewTaskRequest,
     ]);
     if (publicCalendarResponse.code === 0)
       setPublicCalendar(publicCalendarResponse.data);
@@ -632,6 +664,32 @@ const Academy: React.FC = () => {
       setMyTasks(myTaskResponse.data.items);
       setMyTaskTotal(myTaskResponse.data.total);
     }
+    if (openTaskResponse.code === 0) {
+      setOpenTaskTotal(openTaskResponse.data.total);
+      const remainingOpenTaskPages = Math.max(
+        0,
+        Math.ceil(openTaskResponse.data.total / 100) - 1,
+      );
+      const remainingOpenTaskResponses = remainingOpenTaskPages
+        ? await Promise.all(
+            Array.from({ length: remainingOpenTaskPages }, (_, index) =>
+              academyApi.listMyTasks({
+                page: index + 2,
+                pageSize: 100,
+                status: "OPEN",
+              }),
+            ),
+          )
+        : [];
+      setPriorityTasks([
+        ...openTaskResponse.data.items,
+        ...remainingOpenTaskResponses.flatMap((response) =>
+          response.code === 0 ? response.data.items : [],
+        ),
+      ]);
+    }
+    if (reviewTaskResponse.code === 0)
+      setReviewTaskTotal(reviewTaskResponse.data.total);
     const privateLoadPlan = getAcademyPrivateLoadPlan({
       plan: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_PLAN_MANAGE),
       course: hasPermission(currentUser, PERMISSION_KEYS.ACADEMY_COURSE_MANAGE),
@@ -2395,12 +2453,14 @@ const Academy: React.FC = () => {
         {loading && <LinearProgress />}
 
         {view === "overview" && (
-          <Overview
-            dashboard={dashboard}
+          <WorkbenchOverview
             sessions={publicCalendar}
             managedSessions={sessions}
             canManageSessions={canSession}
             tasks={myTasks}
+            openTaskTotal={openTaskTotal}
+            reviewTaskTotal={reviewTaskTotal}
+            priorityTasks={priorityTasks}
             taskTotal={myTaskTotal}
             taskPage={myTaskPage}
             taskPageSize={myTaskPageSize}
@@ -4804,7 +4864,363 @@ const Academy: React.FC = () => {
   );
 };
 
-const Overview: React.FC<{
+const WorkbenchOverview: React.FC<{
+  sessions: AcademyPublicCalendarItem[];
+  managedSessions: AcademySession[];
+  canManageSessions: boolean;
+  tasks: AcademyMyTask[];
+  priorityTasks: AcademyMyTask[];
+  openTaskTotal: number;
+  reviewTaskTotal: number;
+  taskTotal: number;
+  taskPage: number;
+  taskPageSize: number;
+  taskView: "OPEN" | "REVIEW" | "HISTORY";
+  canReviewTasks: boolean;
+  onTaskViewChange: (value: "OPEN" | "REVIEW" | "HISTORY") => void;
+  onTaskPageChange: (page: number) => void;
+  onTaskPageSizeChange: (pageSize: number) => void;
+  onOpenTask: (task: AcademyMyTask) => void;
+  onChangeSessionStatus: (
+    session: AcademySession,
+    status: AcademySession["status"],
+  ) => void;
+  requestedSessionId?: string;
+  onRequestedSessionConsumed: () => void;
+}> = ({
+  sessions,
+  managedSessions,
+  canManageSessions,
+  tasks,
+  priorityTasks,
+  openTaskTotal,
+  reviewTaskTotal,
+  taskTotal,
+  taskPage,
+  taskPageSize,
+  taskView,
+  canReviewTasks,
+  onTaskViewChange,
+  onTaskPageChange,
+  onTaskPageSizeChange,
+  onOpenTask,
+  onChangeSessionStatus,
+  requestedSessionId,
+  onRequestedSessionConsumed,
+}) => {
+  const [selectedCourseId, setSelectedCourseId] = useState("");
+  const [flowOpen, setFlowOpen] = useState(false);
+  const now = new Date();
+  const monday = new Date(now);
+  const weekday = monday.getDay() || 7;
+  monday.setDate(monday.getDate() - weekday + 1);
+  monday.setHours(0, 0, 0, 0);
+  const weekDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + index);
+    return {
+      date,
+      sessions: sessions.filter(
+        (session) =>
+          new Date(session.startsAt).toDateString() === date.toDateString(),
+      ),
+    };
+  });
+  const activeCourses = sessions.filter(
+    (session) => !["COMPLETED", "CANCELLED"].includes(session.status),
+  );
+  useEffect(() => {
+    if (
+      !requestedSessionId ||
+      !activeCourses.some((session) => session.id === requestedSessionId)
+    )
+      return;
+    setSelectedCourseId(requestedSessionId);
+    onRequestedSessionConsumed();
+  }, [activeCourses, onRequestedSessionConsumed, requestedSessionId]);
+  useEffect(() => {
+    if (activeCourses.some((session) => session.id === selectedCourseId)) return;
+    setSelectedCourseId(
+      activeCourses.find((session) => session.status === "IN_PROGRESS")?.id ||
+        activeCourses.find((session) => session.status === "POST_COURSE")?.id ||
+        activeCourses[0]?.id ||
+        "",
+    );
+  }, [activeCourses, selectedCourseId]);
+
+  const selectedCourse =
+    activeCourses.find((session) => session.id === selectedCourseId) || null;
+  const selectedManagedCourse =
+    managedSessions.find((session) => session.id === selectedCourseId) || null;
+  const priorityTask = getAcademyPriorityTask(priorityTasks, now);
+  const summary = getAcademyWorkbenchSummary({
+    openTaskTotal,
+    reviewTaskTotal,
+    sessions,
+    now,
+  });
+  const phaseProgress = selectedCourse
+    ? getCoursePhaseProgress(selectedCourse)
+    : [];
+  const currentPhase = selectedCourse
+    ? ["PLANNED", "READY"].includes(selectedCourse.status)
+      ? "BEFORE"
+      : selectedCourse.status === "IN_PROGRESS"
+        ? "DURING"
+        : "AFTER"
+    : null;
+  const statusAction =
+    selectedManagedCourse && canManageSessions
+      ? selectedManagedCourse.status === "PLANNED"
+        ? { label: "确认待开课", status: "READY" as const, category: "BEFORE" as const }
+        : selectedManagedCourse.status === "READY"
+          ? { label: "开始课程", status: "IN_PROGRESS" as const, category: null }
+          : selectedManagedCourse.status === "IN_PROGRESS"
+            ? { label: "结束授课，进入课后跟进", status: "POST_COURSE" as const, category: "DURING" as const }
+            : selectedManagedCourse.status === "POST_COURSE"
+              ? { label: "确认课程完结", status: "COMPLETED" as const, category: "AFTER" as const }
+              : null
+      : null;
+  const incompleteRequiredTasks = statusAction?.category
+    ? selectedCourse?.tasks.filter(
+        (task) =>
+          task.category === statusAction.category &&
+          task.isRequired &&
+          task.status !== "DONE",
+      ) || []
+    : [];
+  const phaseLabel: Record<string, string> = {
+    BEFORE: "课前准备",
+    DURING: "课程执行",
+    AFTER: "课后跟进",
+  };
+  const isOverdue = (value?: string) => Boolean(value && new Date(value) < now);
+
+  return (
+    <>
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+        <SectionTitle title="工作台概览" helper="先看今天最重要的任务和正在执行的课程" />
+        <Box
+          sx={{
+            mt: 1.25,
+            display: "grid",
+            gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
+            gap: 1,
+          }}
+        >
+          {([
+            ["待我处理", summary.openTaskTotal, palette.blue, <TaskAltIcon fontSize="small" />],
+            ["待我验收", summary.reviewTaskTotal, palette.purple, <EventAvailableOutlinedIcon fontSize="small" />],
+            ["今日课程", summary.todayCourseTotal, palette.amber, <CalendarMonthIcon fontSize="small" />],
+            ["授课中", summary.activeCourseTotal, palette.green, <AutoStoriesIcon fontSize="small" />],
+          ] as Array<[string, number, string, React.ReactNode]>).map(([label, value, color, icon]) => (
+            <Paper key={String(label)} variant="outlined" sx={{ p: 1.25, borderColor: palette.line }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Box>
+                  <Typography fontSize={12.5} color="text.secondary">{label}</Typography>
+                  <Typography fontSize={24} fontWeight={950} color={String(color)}>{value}</Typography>
+                </Box>
+                <Box sx={{ color }}>{icon}</Box>
+              </Stack>
+            </Paper>
+          ))}
+        </Box>
+      </Paper>
+
+      <Paper
+        variant="outlined"
+        sx={{
+          ...panelSx,
+          p: { xs: 1.5, md: 1.8 },
+          borderColor: priorityTask ? "#B9D2FF" : palette.line,
+          background: priorityTask ? "linear-gradient(135deg, #F7FAFF 0%, #FFFFFF 75%)" : "#fff",
+        }}
+      >
+        <SectionTitle
+          title="我的下一步"
+          helper={priorityTask ? "系统已按驳回、受阻、逾期和截止时间排好优先级" : "当前没有需要你处理的课程任务"}
+        />
+        {priorityTask ? (
+          <Stack
+            direction={{ xs: "column", md: "row" }}
+            justifyContent="space-between"
+            alignItems={{ md: "center" }}
+            spacing={1.5}
+            sx={{ mt: 1.4 }}
+          >
+            <Box sx={{ minWidth: 0 }}>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                <Chip size="small" label={phaseLabel[priorityTask.category]} sx={{ bgcolor: palette.blueSoft, color: palette.blue }} />
+                {isOverdue(priorityTask.dueAt) && <Chip size="small" label="已逾期" sx={{ bgcolor: palette.redSoft, color: palette.red }} />}
+                <Typography fontSize={13} color="text.secondary">{priorityTask.session.title}</Typography>
+              </Stack>
+              <Typography sx={{ mt: 0.8, fontSize: 19, fontWeight: 950, color: palette.ink }}>
+                {priorityTask.title}
+              </Typography>
+              <Typography sx={{ mt: 0.45 }} fontSize={13} color="text.secondary">
+                完成标准：{priorityTask.acceptanceCriteria || "按任务要求完成并确认"}
+              </Typography>
+              <Typography fontSize={12.5} color={isOverdue(priorityTask.dueAt) ? palette.red : "text.secondary"}>
+                截止时间：{formatDate(priorityTask.dueAt)} · 验收人：{priorityTask.requiresReview ? priorityTask.session.taskReviewerUserName || priorityTask.reviewerUserName || "待指定" : "无需验收"}
+              </Typography>
+            </Box>
+            <Button variant="contained" size="large" onClick={() => onOpenTask(priorityTask)} sx={{ minWidth: 116 }}>
+              {priorityTask.status === "REJECTED" ? "重新处理" : "去完成"}
+            </Button>
+          </Stack>
+        ) : (
+          <Box sx={{ py: 2.5, textAlign: "center" }}>
+            <Typography fontWeight={900}>今天没有待办，工作已清空</Typography>
+          </Box>
+        )}
+      </Paper>
+
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}>
+          <Box>
+            <Typography fontWeight={900} fontSize={16}>本周课程计划</Typography>
+            <Typography fontSize={12.5} color="text.secondary">
+              {monday.toLocaleDateString("zh-CN")} ～ {weekDays[6].date.toLocaleDateString("zh-CN")} · 全员可见 · 只读
+            </Typography>
+          </Box>
+          <Chip size="small" label="全员课程周历" sx={{ alignSelf: { sm: "center" }, bgcolor: palette.blueSoft, color: palette.blue }} />
+        </Stack>
+        <Box
+          title="全员课程周历"
+          sx={{
+            mt: 1.2,
+            display: "grid",
+            gridTemplateColumns: "repeat(7, minmax(128px, 1fr))",
+            overflowX: "auto",
+            border: `1px solid ${palette.line}`,
+            borderRadius: 1.2,
+          }}
+        >
+          {weekDays.map(({ date, sessions: daySessions }, index) => (
+            <Box key={date.toISOString()} sx={{ minHeight: 126, p: 1, minWidth: 128, borderRight: index < 6 ? `1px solid ${palette.line}` : 0, bgcolor: date.toDateString() === now.toDateString() ? "#F5F9FF" : "#fff" }}>
+              <Typography fontSize={12.5} fontWeight={900}>
+                周{"一二三四五六日"[index]} <Box component="span" color="text.secondary">{String(date.getMonth() + 1).padStart(2, "0")}-{String(date.getDate()).padStart(2, "0")}</Box>
+              </Typography>
+              <Box sx={{ maxHeight: 112, overflowY: "auto", pr: 0.3 }}>
+                {daySessions.map((session) => (
+                  <Box key={session.id} sx={{ mt: 0.8, pl: 0.8, borderLeft: `3px solid ${session.status === "COMPLETED" ? palette.green : palette.blue}` }}>
+                    <Typography fontSize={11.5} color="text.secondary">
+                      {new Date(session.startsAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
+                    </Typography>
+                    <Typography fontSize={12.5} fontWeight={850} title={session.title}>{session.title}</Typography>
+                  </Box>
+                ))}
+              </Box>
+              {!daySessions.length && <Typography fontSize={12} color="#A0A8B8" sx={{ mt: 3.5, textAlign: "center" }}>暂无安排</Typography>}
+            </Box>
+          ))}
+        </Box>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ ...panelSx, p: { xs: 1.5, md: 1.8 } }}>
+        <SectionTitle
+          title="课程阶段进度"
+          helper={selectedCourse ? `${selectedCourse.title} · ${selectedCourse.progress.done}/${selectedCourse.progress.total} 已完成` : "当前没有未完结课程"}
+          action={activeCourses.length ? (
+            <TextField select size="small" label="查看未完结课程" value={selectedCourseId} onChange={(event) => setSelectedCourseId(event.target.value)} sx={{ minWidth: 240 }}>
+              {activeCourses.map((session) => <MenuItem key={session.id} value={session.id}>{session.title} · {new Date(session.startsAt).toLocaleDateString("zh-CN")}</MenuItem>)}
+            </TextField>
+          ) : undefined}
+        />
+        {selectedCourse ? (
+          <>
+            <Box sx={{ mt: 1.4, display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1 }}>
+              {phaseProgress.map((phase) => {
+                const active = phase.category === currentPhase;
+                return (
+                  <Paper key={phase.category} variant="outlined" sx={{ p: 1.25, borderColor: active ? palette.blue : palette.line, bgcolor: active ? palette.blueSoft : "#fff" }}>
+                    <Stack direction="row" justifyContent="space-between">
+                      <Typography fontWeight={900}>{phase.label}</Typography>
+                      <Typography fontWeight={950} color={active ? palette.blue : palette.ink}>{phase.done}/{phase.total}</Typography>
+                    </Stack>
+                    <LinearProgress variant="determinate" value={phase.percent} sx={{ mt: 1, height: 6, borderRadius: 3 }} />
+                    <Typography fontSize={11.5} color="text.secondary" sx={{ mt: 0.6 }}>{active ? "当前阶段" : phase.total === 0 ? "无任务" : phase.done === phase.total ? "已完成" : "待推进"}</Typography>
+                  </Paper>
+                );
+              })}
+            </Box>
+            <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} spacing={1.2} sx={{ mt: 1.3, p: 1.25, borderRadius: 1.2, bgcolor: palette.soft }}>
+              <Box>
+                <Typography fontSize={12} color="text.secondary">当前步骤</Typography>
+                <Typography fontWeight={950}>{selectedCourse.currentStep?.title || "当前阶段任务已完成"}</Typography>
+                <Typography fontSize={12.5} color="text.secondary">
+                  当前接力人：{selectedCourse.currentStep?.assigneeUserName || "暂无"} · 截止：{formatDate(selectedCourse.currentStep?.dueAt)}
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                <Button variant="outlined" onClick={() => setFlowOpen(true)}>查看全部流程</Button>
+                {statusAction && (
+                  <Button variant="contained" disabled={incompleteRequiredTasks.length > 0} onClick={() => onChangeSessionStatus(selectedManagedCourse!, statusAction.status)}>
+                    {statusAction.label}
+                  </Button>
+                )}
+              </Stack>
+            </Stack>
+            {statusAction && incompleteRequiredTasks.length > 0 && (
+              <Alert severity="info" sx={{ mt: 1 }}>
+                还有 {incompleteRequiredTasks.length} 项本阶段必做任务未完成，完成后才能“{statusAction.label}”。
+              </Alert>
+            )}
+          </>
+        ) : (
+          <Box sx={{ py: 3, textAlign: "center" }}><Typography color="text.secondary">新的课程安排创建后会显示在这里</Typography></Box>
+        )}
+      </Paper>
+
+      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
+        <SectionTitle title="我的课程任务" helper={taskView === "OPEN" ? `${taskTotal} 项等你处理` : taskView === "REVIEW" ? `${taskTotal} 项等你验收` : `${taskTotal} 条处理记录`} />
+        <Tabs value={taskView} onChange={(_, value) => onTaskViewChange(value)} sx={{ mt: 0.5, minHeight: 42 }}>
+          <Tab value="OPEN" label="待我处理" />
+          {canReviewTasks && <Tab value="REVIEW" label="待我验收" />}
+          <Tab value="HISTORY" label="处理记录" />
+        </Tabs>
+        <TableContainer sx={{ mt: 1 }}>
+          <SystemDataTable tableId="academy-overview-execution-tasks">
+            <TableHead><TableRow><TableCell>任务内容</TableCell><TableCell>所属课程</TableCell><TableCell>阶段</TableCell><TableCell>截止时间</TableCell><TableCell>状态</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
+            <TableBody>
+              {tasks.map((task) => (
+                <TableRow key={task.eventId || task.id} hover>
+                  <TableCell sx={{ fontWeight: 750 }}>{task.title}</TableCell>
+                  <TableCell>{task.session.title}</TableCell>
+                  <TableCell>{phaseLabel[task.category]}</TableCell>
+                  <TableCell sx={{ color: isOverdue(task.dueAt) && taskView === "OPEN" ? palette.red : undefined }}>{formatDate(task.dueAt)}</TableCell>
+                  <TableCell><Chip size="small" label={taskStatusLabel[task.status] || task.status} sx={{ height: 22, bgcolor: task.status === "BLOCKED" || task.status === "REJECTED" ? palette.redSoft : palette.blueSoft, color: task.status === "BLOCKED" || task.status === "REJECTED" ? palette.red : palette.blue }} /></TableCell>
+                  <TableCell align="right"><Button size="small" onClick={() => onOpenTask(task)}>{taskView === "OPEN" ? "去处理" : taskView === "REVIEW" ? "去验收" : "查看结果"}</Button></TableCell>
+                </TableRow>
+              ))}
+              {!tasks.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 4 }}>{taskView === "OPEN" ? "当前没有待处理任务" : taskView === "REVIEW" ? "当前没有待验收任务" : "暂无处理记录"}</TableCell></TableRow>}
+            </TableBody>
+          </SystemDataTable>
+        </TableContainer>
+        <TablePagination count={taskTotal} page={taskPage} rowsPerPage={taskPageSize} onPageChange={(_, next) => onTaskPageChange(next)} onRowsPerPageChange={(event) => onTaskPageSizeChange(Number(event.target.value))} />
+      </Paper>
+
+      <Drawer anchor="right" open={flowOpen} onClose={() => setFlowOpen(false)} PaperProps={{ role: "dialog", "aria-modal": true, "aria-label": "完整课程流程", sx: { width: { xs: "100%", sm: 620 }, maxWidth: "100vw" } }}>
+        <DialogCloseTitle onClose={() => setFlowOpen(false)}>完整课程流程</DialogCloseTitle>
+        <Box sx={{ p: 2 }}>
+          <Typography color="text.secondary" fontSize={13}>{selectedCourse?.title} · 仅用于查看整场进度，任务统一从“我的课程任务”处理。</Typography>
+          <Stack spacing={1} sx={{ mt: 1.5 }}>
+            {selectedCourse?.tasks.map((task) => (
+              <Paper key={`${task.stepNumber}-${task.title}`} variant="outlined" sx={{ p: 1.2 }}>
+                <Stack direction="row" justifyContent="space-between" spacing={1}>
+                  <Box><Typography fontWeight={900}>{task.stepNumber}. {task.title}</Typography><Typography fontSize={12.5} color="text.secondary">{phaseLabel[task.category]} · 负责人：{task.assigneeUserName || "待分配"}</Typography></Box>
+                  <Chip size="small" label={taskStatusLabel[task.status] || task.status} />
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        </Box>
+      </Drawer>
+    </>
+  );
+};
+
+const LegacyOverview: React.FC<{
   dashboard: AcademyDashboard;
   sessions: AcademyPublicCalendarItem[];
   managedSessions: AcademySession[];

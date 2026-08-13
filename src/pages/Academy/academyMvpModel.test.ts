@@ -5,6 +5,9 @@ import type {
   AcademySessionTask,
 } from "../../types/academy";
 import {
+  getAcademyPriorityTask,
+  getAcademyWorkbenchSummary,
+  getCoursePhaseProgress,
   getAcademyTaskStep,
   getAcademyPrivateLoadPlan,
   getMyAcademyTodos,
@@ -88,6 +91,54 @@ assert.deepEqual(
   getMyAcademyTodos([detail], "user-me").map((item) => item.task.id),
   ["task-overdue", "task-later"],
   "待我处理只返回当前员工仍需操作的任务，已提交任务进入待验收，并按截止时间排序",
+);
+
+const workbenchTasks = [
+  {
+    ...task("task-today", "TODAY_TASK", "PENDING", "2026-08-18T09:00:00.000Z"),
+    session,
+  },
+  {
+    ...task("task-late", "LATE_TASK", "REJECTED", "2026-08-17T09:00:00.000Z"),
+    session,
+  },
+];
+
+assert.equal(
+  getAcademyPriorityTask(workbenchTasks, new Date("2026-08-18T08:00:00.000Z"))?.id,
+  "task-late",
+  "我的下一步应优先显示已逾期或被驳回的本人任务",
+);
+
+assert.deepEqual(
+  getAcademyWorkbenchSummary({
+    openTaskTotal: 2,
+    reviewTaskTotal: 1,
+    sessions: [
+      { startsAt: "2026-08-18T01:00:00.000Z", status: "READY" },
+      { startsAt: session.startsAt, status: "IN_PROGRESS" },
+    ],
+    now: new Date("2026-08-18T08:00:00.000Z"),
+  }),
+  { openTaskTotal: 2, reviewTaskTotal: 1, todayCourseTotal: 1, activeCourseTotal: 1 },
+  "工作台摘要应同时呈现本人任务和课程执行情况",
+);
+
+assert.deepEqual(
+  getCoursePhaseProgress({
+    ...session,
+    tasks: [
+      { taskId: "before-done", title: "BEFORE_DONE", category: "BEFORE", isRequired: true, stepNumber: 1, status: "DONE", isMine: true },
+      { taskId: "before-open", title: "BEFORE_OPEN", category: "BEFORE", isRequired: true, stepNumber: 2, status: "PENDING", isMine: true },
+      { taskId: "during", title: "DURING", category: "DURING", isRequired: true, stepNumber: 3, status: "PENDING", isMine: true },
+    ],
+  }),
+  [
+    { category: "BEFORE", label: "课前准备", done: 1, total: 2, percent: 50 },
+    { category: "DURING", label: "课程执行", done: 0, total: 1, percent: 0 },
+    { category: "AFTER", label: "课后跟进", done: 0, total: 0, percent: 0 },
+  ],
+  "课程进度应收敛为课前、课中、课后三阶段摘要",
 );
 
 console.log("academy MVP model tests passed");

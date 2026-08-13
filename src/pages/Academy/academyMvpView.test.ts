@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 
 const academy = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
 const plans = readFileSync(new URL("./AcademyPlans.tsx", import.meta.url), "utf8");
+const workbench = academy.slice(
+  academy.indexOf("const WorkbenchOverview"),
+  academy.indexOf("const LegacyOverview"),
+);
 
 ["我的工作台", "课程库", "课程安排", "邀约跟进"].forEach((label) => {
   assert.match(academy, new RegExp(`label: "${label}"`), `一级导航应包含${label}`);
@@ -10,13 +14,20 @@ const plans = readFileSync(new URL("./AcademyPlans.tsx", import.meta.url), "utf8
 
 assert.match(academy, /academyApi\.getPublicCalendar/, "全员周历应使用独立安全日历接口");
 assert.match(academy, /academyApi\.listMyTasks/, "我的待办应使用本人任务安全接口");
+assert.match(academy, /page: 1,[\s\S]{0,80}pageSize: 100,[\s\S]{0,80}status: "OPEN"/, "我的下一步应独立读取首批待处理候选，不能跟随任务表分页漂移");
+assert.match(academy, /remainingOpenTaskPages[\s\S]*status: "OPEN"/, "我的下一步必须覆盖全部待处理分页，不能遗漏后页高优先级任务");
 assert.match(academy, /待我处理[\s\S]*待我验收[\s\S]*处理记录/, "个人工作台任务必须按处理、验收和记录分类");
 assert.match(academy, /确认完成/, "直接确认型任务必须提供明确的一步完成入口");
 assert.match(academy, /当前等待/, "非本人节点必须明确显示当前等待谁处理");
 assert.match(academy, /!workbenchTask\.eventId/, "历史处理记录必须整体只读，不能再次操作当前任务或附件");
 assert.doesNotMatch(academy, /view === "overview"[\s\S]{0,300}loadDetail/, "工作台周历不应预取任何课程详情");
 assert.match(academy, /title="全员课程周历"/, "工作台应明确标记全员课程周历");
-assert.match(academy, /课程执行接力/, "工作台应集中展示所选课程的SOP执行进度");
+assert.match(workbench, /daySessions\.map/, "全员课程周历必须显示当天全部课程，不能只截取前两场");
+assert.match(academy, /工作台概览/, "个人工作台首屏应先展示本人任务和课程摘要");
+assert.match(academy, /我的下一步/, "个人工作台应把本人最优先任务作为核心行动区");
+assert.match(academy, /课程阶段进度/, "课程进度应收敛为三阶段摘要");
+assert.match(academy, /查看全部流程/, "完整课程流程应按需打开，不能常驻占据首页");
+assert.doesNotMatch(workbench, /title="课程执行接力"/, "工作台不应继续用大卡片重复展示全部流程节点");
 assert.match(academy, /当前接力人/, "工作台应明确当前步骤负责人");
 assert.match(academy, /课前准备[\s\S]*课程执行[\s\S]*课后跟进/, "课程执行接力必须按课前、课中、课后三阶段展示");
 assert.match(academy, /任务验收人 \*/, "课程安排必须明确指定本次任务验收人");
