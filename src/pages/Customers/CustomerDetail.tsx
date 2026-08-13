@@ -1123,7 +1123,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 {renderStatusRow('平台订单号', currentCustomer.platformOrderNo || '-')}
                 {renderStatusRow('平台购买产品', currentCustomer.sourceProductName || '-')}
                 {renderStatusRow('平台付款金额', currentCustomer.sourcePaymentAmount == null ? '-' : formatCurrency(currentCustomer.sourcePaymentAmount))}
-                {renderStatusRow('平台付款时间', currentCustomer.sourcePaymentAt ? formatDate(currentCustomer.sourcePaymentAt, 'yyyy-MM-dd HH:mm') : '-')}
+                {renderStatusRow('平台付款时间', currentCustomer.sourcePaymentAt ? formatDate(currentCustomer.sourcePaymentAt, 'yyyy-MM-dd HH:mm:ss') : '-')}
               </>)}
               {renderInfoSection('ownership', '负责人及系统信息', [currentCustomer.owner || '未分配', `${currentCustomer.orderCount || 0} 单`].join(' · '), <>
                 {renderInfoRow('销售负责人', 'owner', false)}

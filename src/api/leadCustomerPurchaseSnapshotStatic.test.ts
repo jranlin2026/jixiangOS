@@ -37,6 +37,11 @@ assert.match(leadDetail, /平台付款时间/, '线索详情应展示平台付�
 assert.match(customerDetail, /平台购买产品/, '客户详情应展示平台购买产品');
 assert.match(customerDetail, /平台付款金额/, '客户详情应展示平台付款金额');
 assert.match(customerDetail, /平台付款时间/, '客户详情应展示平台付款时间');
+assert.match(
+  customerDetail,
+  /sourcePaymentAt \? formatDate\(currentCustomer\.sourcePaymentAt, 'yyyy-MM-dd HH:mm:ss'\) : '-'/,
+  '客户详情首次平台交易的付款时间应精确到秒',
+);
 
 assert.match(leadList, /id: 'sourceProductName', label: '平台购买产品'/, '线索列表应提供平台购买产品列');
 assert.match(leadList, /id: 'sourcePaymentAmount', label: '平台付款金额'/, '线索列表应提供平台付款金额列');
