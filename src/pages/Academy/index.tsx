@@ -5004,85 +5004,228 @@ const WorkbenchOverview: React.FC<{
     AFTER: "课后跟进",
   };
   const isOverdue = (value?: string) => Boolean(value && new Date(value) < now);
+  const todayLabel = now.toLocaleDateString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    weekday: "short",
+  });
+  const nextScheduledSession = [...sessions]
+    .filter(
+      (session) =>
+        session.status !== "CANCELLED" && new Date(session.startsAt) >= now,
+    )
+    .sort(
+      (left, right) =>
+        new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
+    )[0];
 
   return (
     <>
-      <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
-        <SectionTitle title="工作台概览" helper="先看今天最重要的任务和正在执行的课程" />
-        <Box
-          sx={{
-            mt: 1.25,
-            display: "grid",
-            gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
-            gap: 1,
-          }}
-        >
-          {([
-            ["待我处理", summary.openTaskTotal, palette.blue, <TaskAltIcon fontSize="small" />],
-            ["待我验收", summary.reviewTaskTotal, palette.purple, <EventAvailableOutlinedIcon fontSize="small" />],
-            ["今日课程", summary.todayCourseTotal, palette.amber, <CalendarMonthIcon fontSize="small" />],
-            ["授课中", summary.activeCourseTotal, palette.green, <AutoStoriesIcon fontSize="small" />],
-          ] as Array<[string, number, string, React.ReactNode]>).map(([label, value, color, icon]) => (
-            <Paper key={String(label)} variant="outlined" sx={{ p: 1.25, borderColor: palette.line }}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Box>
-                  <Typography fontSize={12.5} color="text.secondary">{label}</Typography>
-                  <Typography fontSize={24} fontWeight={950} color={String(color)}>{value}</Typography>
-                </Box>
-                <Box sx={{ color }}>{icon}</Box>
-              </Stack>
-            </Paper>
-          ))}
-        </Box>
-      </Paper>
-
       <Paper
         variant="outlined"
         sx={{
           ...panelSx,
-          p: { xs: 1.5, md: 1.8 },
-          borderColor: priorityTask ? "#B9D2FF" : palette.line,
-          background: priorityTask ? "linear-gradient(135deg, #F7FAFF 0%, #FFFFFF 75%)" : "#fff",
+          p: { xs: 1.4, md: 1.7 },
+          display: "flex",
+          flexDirection: { xs: "column", md: "row" },
+          justifyContent: "space-between",
+          alignItems: { md: "center" },
+          gap: 1.5,
         }}
       >
-        <SectionTitle
-          title="我的下一步"
-          helper={priorityTask ? "系统已按驳回、受阻、逾期和截止时间排好优先级" : "当前没有需要你处理的课程任务"}
-        />
-        {priorityTask ? (
-          <Stack
-            direction={{ xs: "column", md: "row" }}
-            justifyContent="space-between"
-            alignItems={{ md: "center" }}
-            spacing={1.5}
-            sx={{ mt: 1.4 }}
+        <Stack direction="row" spacing={1.3} alignItems="center">
+          <Box
+            sx={{
+              width: 42,
+              height: 42,
+              borderRadius: 1.5,
+              display: "grid",
+              placeItems: "center",
+              bgcolor: palette.blue,
+              color: "#fff",
+              flex: "0 0 auto",
+            }}
           >
-            <Box sx={{ minWidth: 0 }}>
-              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                <Chip size="small" label={phaseLabel[priorityTask.category]} sx={{ bgcolor: palette.blueSoft, color: palette.blue }} />
-                {isOverdue(priorityTask.dueAt) && <Chip size="small" label="已逾期" sx={{ bgcolor: palette.redSoft, color: palette.red }} />}
-                <Typography fontSize={13} color="text.secondary">{priorityTask.session.title}</Typography>
+            <TaskAltIcon />
+          </Box>
+          <Box>
+            <Typography fontSize={18} fontWeight={950} color={palette.ink}>
+              我的工作台
+            </Typography>
+            <Typography fontSize={12.5} color="text.secondary">
+              {todayLabel} · 先处理最紧急任务
+            </Typography>
+          </Box>
+        </Stack>
+        <Stack
+          direction="row"
+          divider={<Divider orientation="vertical" flexItem />}
+          spacing={{ xs: 1.4, md: 2.5 }}
+          sx={{ overflowX: "auto", pb: { xs: 0.2, md: 0 } }}
+        >
+          {([
+            ["待处理", summary.openTaskTotal, palette.blue, <TaskAltIcon fontSize="small" />],
+            ["待验收", summary.reviewTaskTotal, palette.purple, <EventAvailableOutlinedIcon fontSize="small" />],
+            ["今日课程", summary.todayCourseTotal, palette.amber, <CalendarMonthIcon fontSize="small" />],
+            ...(summary.activeCourseTotal > 0
+              ? [["授课中", summary.activeCourseTotal, palette.green, <AutoStoriesIcon fontSize="small" />] as [string, number, string, React.ReactNode]]
+              : []),
+          ] as Array<[string, number, string, React.ReactNode]>).map(
+            ([label, value, color, icon]) => (
+              <Stack key={label} direction="row" spacing={0.9} alignItems="center" sx={{ minWidth: 88 }}>
+                <Box sx={{ color, display: "grid", placeItems: "center" }}>{icon}</Box>
+                <Box>
+                  <Typography fontSize={11.5} color="text.secondary" whiteSpace="nowrap">{label}</Typography>
+                  <Typography fontSize={21} lineHeight={1.05} fontWeight={950} color={color}>{value}</Typography>
+                </Box>
               </Stack>
-              <Typography sx={{ mt: 0.8, fontSize: 19, fontWeight: 950, color: palette.ink }}>
-                {priorityTask.title}
+            ),
+          )}
+        </Stack>
+      </Paper>
+
+      {!priorityTask && !selectedCourse ? (
+        <Paper variant="outlined" sx={{ ...panelSx, p: { xs: 1.5, md: 1.8 } }}>
+          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1}>
+            <Box>
+              <Typography fontWeight={950} color={palette.ink}>
+                今天的任务已清空
               </Typography>
-              <Typography sx={{ mt: 0.45 }} fontSize={13} color="text.secondary">
-                完成标准：{priorityTask.acceptanceCriteria || "按任务要求完成并确认"}
-              </Typography>
-              <Typography fontSize={12.5} color={isOverdue(priorityTask.dueAt) ? palette.red : "text.secondary"}>
-                截止时间：{formatDate(priorityTask.dueAt)} · 验收人：{priorityTask.requiresReview ? priorityTask.session.taskReviewerUserName || priorityTask.reviewerUserName || "待指定" : "无需验收"}
+              <Typography fontSize={12.5} color="text.secondary">
+                {nextScheduledSession
+                  ? `下一场课程：${nextScheduledSession.title} · ${new Date(nextScheduledSession.startsAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
+                  : "当前没有待处理任务和未完结课程"}
               </Typography>
             </Box>
-            <Button variant="contained" size="large" onClick={() => onOpenTask(priorityTask)} sx={{ minWidth: 116 }}>
-              {priorityTask.status === "REJECTED" ? "重新处理" : "去完成"}
-            </Button>
+            <Chip label="工作已清空" size="small" sx={{ bgcolor: palette.greenSoft, color: palette.green, fontWeight: 850 }} />
           </Stack>
-        ) : (
-          <Box sx={{ py: 2.5, textAlign: "center" }}>
-            <Typography fontWeight={900}>今天没有待办，工作已清空</Typography>
-          </Box>
-        )}
-      </Paper>
+        </Paper>
+      ) : (
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1.65fr) minmax(360px, 1fr)" },
+            gap: 1.5,
+          }}
+        >
+          <Paper
+            variant="outlined"
+            sx={{
+              ...panelSx,
+              p: { xs: 1.6, md: 2 },
+              borderColor: priorityTask ? "#8BB8FF" : palette.line,
+              minHeight: { md: 238 },
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <SectionTitle
+              title="我的下一步"
+              helper={priorityTask ? "系统已按驳回、受阻、逾期和截止时间排好优先级" : "当前没有需要你处理的课程任务"}
+            />
+            {priorityTask ? (
+              <Stack spacing={1.2} sx={{ mt: 1.5, flex: 1 }}>
+                <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap">
+                  <Chip size="small" label={phaseLabel[priorityTask.category]} sx={{ bgcolor: palette.blueSoft, color: palette.blue }} />
+                  {isOverdue(priorityTask.dueAt) && <Chip size="small" label="已逾期" sx={{ bgcolor: palette.redSoft, color: palette.red }} />}
+                  <Typography fontSize={13} color="text.secondary">{priorityTask.session.title}</Typography>
+                </Stack>
+                <Typography fontSize={{ xs: 18, md: 20 }} fontWeight={950} color={palette.ink}>
+                  {priorityTask.title}
+                </Typography>
+                <Typography fontSize={13} color="text.secondary" sx={{ flex: 1 }}>
+                  完成标准：{priorityTask.acceptanceCriteria || "按任务要求完成并确认"}
+                </Typography>
+                <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1}>
+                  <Stack direction="row" spacing={2} flexWrap="wrap">
+                    <Typography fontSize={12.5} color={isOverdue(priorityTask.dueAt) ? palette.red : "text.secondary"}>
+                      截止：{formatDate(priorityTask.dueAt)}
+                    </Typography>
+                    <Typography fontSize={12.5} color="text.secondary">
+                      验收人：{priorityTask.requiresReview ? priorityTask.session.taskReviewerUserName || priorityTask.reviewerUserName || "待指定" : "无需验收"}
+                    </Typography>
+                  </Stack>
+                  <Button variant="contained" size="large" onClick={() => onOpenTask(priorityTask)} sx={{ minWidth: 128 }}>
+                    {priorityTask.status === "REJECTED" ? "重新处理" : "去完成"}
+                  </Button>
+                </Stack>
+              </Stack>
+            ) : (
+              <Box sx={{ flex: 1, display: "grid", placeItems: "center", py: 2 }}>
+                <Typography fontWeight={850} color="text.secondary">今天没有待办，工作已清空</Typography>
+              </Box>
+            )}
+          </Paper>
+
+          <Paper variant="outlined" sx={{ ...panelSx, p: { xs: 1.6, md: 2 }, minHeight: { md: 238 } }}>
+            <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", sm: "center" }} spacing={1}>
+              <Box>
+                <Typography fontSize={16} fontWeight={950} color={palette.ink}>正在进行的课程</Typography>
+                <Typography fontSize={12.5} color="text.secondary">
+                  {selectedCourse ? selectedCourse.title : "当前没有未完结课程"}
+                </Typography>
+              </Box>
+              {activeCourses.length > 1 && (
+                <TextField select size="small" label="查看未完结课程" value={selectedCourseId} onChange={(event) => setSelectedCourseId(event.target.value)} sx={{ minWidth: { xs: 0, sm: 200 }, width: { xs: "100%", sm: "auto" } }}>
+                  {activeCourses.map((session) => (
+                    <MenuItem key={session.id} value={session.id}>
+                      {session.title}｜{new Date(session.startsAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              )}
+            </Stack>
+            {selectedCourse ? (
+              <>
+                <Box sx={{ position: "relative", mt: 2.2, px: 0.5 }}>
+                  <Box sx={{ position: "absolute", top: 15, left: "16%", right: "16%", height: 2, bgcolor: palette.line }} />
+                  <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", position: "relative" }}>
+                    {phaseProgress.map((phase, index) => {
+                      const active = phase.category === currentPhase;
+                      const complete = phase.total > 0 && phase.done === phase.total;
+                      const color = active ? palette.blue : complete ? palette.green : palette.muted;
+                      return (
+                        <Box key={phase.category} sx={{ textAlign: "center", px: 0.4 }}>
+                          <Box sx={{ mx: "auto", width: 32, height: 32, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: active || complete ? color : "#fff", color: active || complete ? "#fff" : color, border: `2px solid ${color}`, fontWeight: 950, position: "relative" }}>
+                            {index + 1}
+                          </Box>
+                          <Typography fontSize={12.5} fontWeight={900} color={color} sx={{ mt: 0.7 }}>{phase.label}</Typography>
+                          <Typography fontSize={12} color="text.secondary">{phase.done}/{phase.total}</Typography>
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                </Box>
+                <Divider sx={{ my: 1.5 }} />
+                <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1}>
+                  <Box>
+                    <Typography fontSize={11.5} color="text.secondary">当前步骤</Typography>
+                    <Typography fontSize={13.5} fontWeight={900}>{selectedCourse.currentStep?.title || "当前阶段任务已完成"}</Typography>
+                    <Typography fontSize={12} color="text.secondary">当前负责人：{selectedCourse.currentStep?.assigneeUserName || "暂无"}</Typography>
+                  </Box>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={0.8} sx={{ width: { xs: "100%", sm: "auto" } }}>
+                    <Button variant="outlined" size="small" onClick={() => setFlowOpen(true)} sx={{ width: { xs: "100%", sm: "auto" } }}>查看全部流程</Button>
+                    {statusAction && (
+                      <Button variant="contained" size="small" disabled={incompleteRequiredTasks.length > 0} onClick={() => onChangeSessionStatus(selectedManagedCourse!, statusAction.status)} sx={{ width: { xs: "100%", sm: "auto" } }}>
+                        {statusAction.label}
+                      </Button>
+                    )}
+                  </Stack>
+                </Stack>
+                {statusAction && incompleteRequiredTasks.length > 0 && (
+                  <Typography fontSize={11.5} color={palette.amber} sx={{ mt: 0.8 }}>
+                    还有 {incompleteRequiredTasks.length} 项本阶段必做任务未完成
+                  </Typography>
+                )}
+              </>
+            ) : (
+              <Box sx={{ minHeight: 150, display: "grid", placeItems: "center" }}>
+                <Typography fontSize={13} color="text.secondary">新的课程安排创建后会显示在这里</Typography>
+              </Box>
+            )}
+          </Paper>
+        </Box>
+      )}
 
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
         <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}>
@@ -5106,13 +5249,16 @@ const WorkbenchOverview: React.FC<{
           }}
         >
           {weekDays.map(({ date, sessions: daySessions }, index) => (
-            <Box key={date.toISOString()} sx={{ minHeight: 126, p: 1, minWidth: 128, borderRight: index < 6 ? `1px solid ${palette.line}` : 0, bgcolor: date.toDateString() === now.toDateString() ? "#F5F9FF" : "#fff" }}>
-              <Typography fontSize={12.5} fontWeight={900}>
-                周{"一二三四五六日"[index]} <Box component="span" color="text.secondary">{String(date.getMonth() + 1).padStart(2, "0")}-{String(date.getDate()).padStart(2, "0")}</Box>
-              </Typography>
-              <Box sx={{ maxHeight: 112, overflowY: "auto", pr: 0.3 }}>
+            <Box key={date.toISOString()} sx={{ minHeight: 108, p: 1, minWidth: 128, borderRight: index < 6 ? `1px solid ${palette.line}` : 0, bgcolor: date.toDateString() === now.toDateString() ? "#F5F9FF" : "#fff" }}>
+              <Stack direction="row" alignItems="center" spacing={0.6}>
+                <Typography fontSize={12.5} fontWeight={900}>
+                  周{"一二三四五六日"[index]} <Box component="span" color="text.secondary">{String(date.getMonth() + 1).padStart(2, "0")}-{String(date.getDate()).padStart(2, "0")}</Box>
+                </Typography>
+                {date.toDateString() === now.toDateString() && <Chip label="今天" size="small" sx={{ height: 19, fontSize: 10.5, bgcolor: palette.blueSoft, color: palette.blue }} />}
+              </Stack>
+              <Box sx={{ maxHeight: 96, overflowY: "auto", pr: 0.3 }}>
                 {daySessions.map((session) => (
-                  <Box key={session.id} sx={{ mt: 0.8, pl: 0.8, borderLeft: `3px solid ${session.status === "COMPLETED" ? palette.green : palette.blue}` }}>
+                  <Box key={session.id} sx={{ mt: 0.8, pl: 0.8, borderLeft: `3px solid ${session.status === "COMPLETED" ? palette.green : session.status === "IN_PROGRESS" ? palette.amber : palette.blue}` }}>
                     <Typography fontSize={11.5} color="text.secondary">
                       {new Date(session.startsAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
                     </Typography>
@@ -5120,75 +5266,20 @@ const WorkbenchOverview: React.FC<{
                   </Box>
                 ))}
               </Box>
-              {!daySessions.length && <Typography fontSize={12} color="#A0A8B8" sx={{ mt: 3.5, textAlign: "center" }}>暂无安排</Typography>}
+              {!daySessions.length && <Typography fontSize={14} color="#C5CBD5" sx={{ mt: 2.8, textAlign: "center" }}>—</Typography>}
             </Box>
           ))}
         </Box>
       </Paper>
 
-      <Paper variant="outlined" sx={{ ...panelSx, p: { xs: 1.5, md: 1.8 } }}>
-        <SectionTitle
-          title="课程阶段进度"
-          helper={selectedCourse ? `${selectedCourse.title} · ${selectedCourse.progress.done}/${selectedCourse.progress.total} 已完成` : "当前没有未完结课程"}
-          action={activeCourses.length ? (
-            <TextField select size="small" label="查看未完结课程" value={selectedCourseId} onChange={(event) => setSelectedCourseId(event.target.value)} sx={{ minWidth: 240 }}>
-              {activeCourses.map((session) => <MenuItem key={session.id} value={session.id}>{session.title} · {new Date(session.startsAt).toLocaleDateString("zh-CN")}</MenuItem>)}
-            </TextField>
-          ) : undefined}
-        />
-        {selectedCourse ? (
-          <>
-            <Box sx={{ mt: 1.4, display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1 }}>
-              {phaseProgress.map((phase) => {
-                const active = phase.category === currentPhase;
-                return (
-                  <Paper key={phase.category} variant="outlined" sx={{ p: 1.25, borderColor: active ? palette.blue : palette.line, bgcolor: active ? palette.blueSoft : "#fff" }}>
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography fontWeight={900}>{phase.label}</Typography>
-                      <Typography fontWeight={950} color={active ? palette.blue : palette.ink}>{phase.done}/{phase.total}</Typography>
-                    </Stack>
-                    <LinearProgress variant="determinate" value={phase.percent} sx={{ mt: 1, height: 6, borderRadius: 3 }} />
-                    <Typography fontSize={11.5} color="text.secondary" sx={{ mt: 0.6 }}>{active ? "当前阶段" : phase.total === 0 ? "无任务" : phase.done === phase.total ? "已完成" : "待推进"}</Typography>
-                  </Paper>
-                );
-              })}
-            </Box>
-            <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} spacing={1.2} sx={{ mt: 1.3, p: 1.25, borderRadius: 1.2, bgcolor: palette.soft }}>
-              <Box>
-                <Typography fontSize={12} color="text.secondary">当前步骤</Typography>
-                <Typography fontWeight={950}>{selectedCourse.currentStep?.title || "当前阶段任务已完成"}</Typography>
-                <Typography fontSize={12.5} color="text.secondary">
-                  当前接力人：{selectedCourse.currentStep?.assigneeUserName || "暂无"} · 截止：{formatDate(selectedCourse.currentStep?.dueAt)}
-                </Typography>
-              </Box>
-              <Stack direction="row" spacing={1} flexWrap="wrap">
-                <Button variant="outlined" onClick={() => setFlowOpen(true)}>查看全部流程</Button>
-                {statusAction && (
-                  <Button variant="contained" disabled={incompleteRequiredTasks.length > 0} onClick={() => onChangeSessionStatus(selectedManagedCourse!, statusAction.status)}>
-                    {statusAction.label}
-                  </Button>
-                )}
-              </Stack>
-            </Stack>
-            {statusAction && incompleteRequiredTasks.length > 0 && (
-              <Alert severity="info" sx={{ mt: 1 }}>
-                还有 {incompleteRequiredTasks.length} 项本阶段必做任务未完成，完成后才能“{statusAction.label}”。
-              </Alert>
-            )}
-          </>
-        ) : (
-          <Box sx={{ py: 3, textAlign: "center" }}><Typography color="text.secondary">新的课程安排创建后会显示在这里</Typography></Box>
-        )}
-      </Paper>
-
       <Paper variant="outlined" sx={{ ...panelSx, p: 1.5 }}>
         <SectionTitle title="我的课程任务" helper={taskView === "OPEN" ? `${taskTotal} 项等你处理` : taskView === "REVIEW" ? `${taskTotal} 项等你验收` : `${taskTotal} 条处理记录`} />
         <Tabs value={taskView} onChange={(_, value) => onTaskViewChange(value)} sx={{ mt: 0.5, minHeight: 42 }}>
-          <Tab value="OPEN" label="待我处理" />
-          {canReviewTasks && <Tab value="REVIEW" label="待我验收" />}
+          <Tab value="OPEN" label={`待我处理 ${openTaskTotal}`} />
+          {canReviewTasks && <Tab value="REVIEW" label={`待我验收 ${reviewTaskTotal}`} />}
           <Tab value="HISTORY" label="处理记录" />
         </Tabs>
-        <TableContainer sx={{ mt: 1 }}>
+        <TableContainer sx={{ mt: 1, display: { xs: "none", md: "block" } }}>
           <SystemDataTable tableId="academy-overview-execution-tasks">
             <TableHead><TableRow><TableCell>任务内容</TableCell><TableCell>所属课程</TableCell><TableCell>阶段</TableCell><TableCell>截止时间</TableCell><TableCell>状态</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
             <TableBody>
@@ -5206,6 +5297,28 @@ const WorkbenchOverview: React.FC<{
             </TableBody>
           </SystemDataTable>
         </TableContainer>
+        <Stack spacing={1} sx={{ mt: 1, display: { xs: "flex", md: "none" } }}>
+          {tasks.map((task) => (
+            <Paper key={task.eventId || task.id} variant="outlined" sx={{ p: 1.25, borderColor: palette.line }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                <Box minWidth={0}>
+                  <Typography fontWeight={900} fontSize={14}>{task.title}</Typography>
+                  <Typography fontSize={12.5} color="text.secondary" sx={{ mt: 0.3 }}>{task.session.title} · {phaseLabel[task.category]}</Typography>
+                </Box>
+                <Chip size="small" label={taskStatusLabel[task.status] || task.status} sx={{ height: 22, flex: "0 0 auto", bgcolor: task.status === "BLOCKED" || task.status === "REJECTED" ? palette.redSoft : palette.blueSoft, color: task.status === "BLOCKED" || task.status === "REJECTED" ? palette.red : palette.blue }} />
+              </Stack>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mt: 1 }}>
+                <Typography fontSize={12} color={isOverdue(task.dueAt) && taskView === "OPEN" ? palette.red : "text.secondary"}>截止：{formatDate(task.dueAt)}</Typography>
+                <Button size="small" onClick={() => onOpenTask(task)}>{taskView === "OPEN" ? "去处理" : taskView === "REVIEW" ? "去验收" : "查看结果"}</Button>
+              </Stack>
+            </Paper>
+          ))}
+          {!tasks.length && (
+            <Box sx={{ py: 3, textAlign: "center" }}>
+              <Typography color="text.secondary" fontSize={13}>{taskView === "OPEN" ? "当前没有待处理任务" : taskView === "REVIEW" ? "当前没有待验收任务" : "暂无处理记录"}</Typography>
+            </Box>
+          )}
+        </Stack>
         <TablePagination count={taskTotal} page={taskPage} rowsPerPage={taskPageSize} onPageChange={(_, next) => onTaskPageChange(next)} onRowsPerPageChange={(event) => onTaskPageSizeChange(Number(event.target.value))} />
       </Paper>
 

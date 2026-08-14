@@ -32,9 +32,13 @@ assert.match(
 assert.doesNotMatch(academy, /view === "overview"[\s\S]{0,300}loadDetail/, "工作台周历不应预取任何课程详情");
 assert.match(academy, /title="全员课程周历"/, "工作台应明确标记全员课程周历");
 assert.match(workbench, /daySessions\.map/, "全员课程周历必须显示当天全部课程，不能只截取前两场");
-assert.match(academy, /工作台概览/, "个人工作台首屏应先展示本人任务和课程摘要");
+assert.doesNotMatch(workbench, /工作台概览/, "个人工作台不应继续使用独立的概览卡片抢占首屏");
+assert.match(workbench, /正在进行的课程/, "首屏右侧应直接展示正在进行的课程和接力进度");
+assert.match(workbench, /label="查看未完结课程"/, "未完结课程选择器必须有明确名称");
+assert.match(workbench, /session\.title}｜\{new Date\(session\.startsAt\)/, "同名课程安排必须用日期时间区分");
 assert.match(academy, /我的下一步/, "个人工作台应把本人最优先任务作为核心行动区");
-assert.match(academy, /课程阶段进度/, "课程进度应收敛为三阶段摘要");
+assert.doesNotMatch(workbench, /title="课程阶段进度"/, "课程进度不应在首屏下方重复占用一整块页面");
+assert.match(workbench, /正在进行的课程[\s\S]*phaseProgress\.map/, "课程进度应收敛到首屏右侧三阶段摘要");
 assert.match(academy, /查看全部流程/, "完整课程流程应按需打开，不能常驻占据首页");
 assert.doesNotMatch(workbench, /title="课程执行接力"/, "工作台不应继续用大卡片重复展示全部流程节点");
 assert.match(academy, /当前接力人/, "工作台应明确当前步骤负责人");
@@ -44,6 +48,7 @@ assert.match(academy, /结束授课，进入课后跟进/, "课程授课结束�
 assert.match(academy, /statusGateCategory[\s\S]*task\.category === statusGateCategory[\s\S]*task\.isRequired/, "状态推进必须只检查当前阶段的必做任务，不能被未来步骤阻塞");
 assert.match(academy, /disabled=\{incompleteRequiredTasks\.length > 0\}/, "课前、课中和课后阶段均应在前端禁用不满足门禁的状态推进按钮");
 assert.match(academy, /我负责/, "工作台应突出当前员工负责的课程节点");
+assert.match(workbench, /display: \{ xs: "none", md: "block" \}[\s\S]*display: \{ xs: "flex", md: "none" \}/, "课程任务在移动端应改为卡片，并与桌面表格复用同一数据和分页");
 assert.doesNotMatch(academy, /进入课程运营/, "工作台周历不应提供进入课程的按钮");
 assert.match(academy, /academyApi\.saveEngagementBatch/, "多选客户应使用原子批量邀约接口");
 assert.match(academy, /academyApi\.quickFollowUp/, "商学院快速跟进应由后端原子同步CRM");
