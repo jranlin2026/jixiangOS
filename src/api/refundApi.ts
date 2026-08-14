@@ -298,6 +298,11 @@ async function getRefunds(filters?: RefundFilters): Promise<ApiResponse<Paginate
     const query = new URLSearchParams();
     if (filters?.search) query.set('search', filters.search);
     if (filters?.status) query.set('status', filters.status);
+    if (filters?.refundCategory) query.set('refundCategory', filters.refundCategory);
+    if (filters?.owner) query.set('owner', filters.owner);
+    if (filters?.productLevel) query.set('productLevel', filters.productLevel);
+    if (filters?.minAmount !== undefined) query.set('minAmount', String(filters.minAmount));
+    if (filters?.maxAmount !== undefined) query.set('maxAmount', String(filters.maxAmount));
     if (filters?.startDate) query.set('startDate', filters.startDate);
     if (filters?.endDate) query.set('endDate', filters.endDate);
     query.set('page', String(filters?.page || 1));
@@ -350,6 +355,11 @@ async function getRefunds(filters?: RefundFilters): Promise<ApiResponse<Paginate
 }
 
 async function getRefundStats(): Promise<ApiResponse<RefundStats>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<PaginatedResponse<Refund> & { stats: RefundStats }>('/refunds?page=1&pageSize=1');
+    if (response.code !== 0) return createErrorResponse(response.message || '退款统计加载失败', response.code);
+    return createSuccessResponse(response.data.stats);
+  }
   const source = await readRefundsForView();
   if (source.code !== 0) return createErrorResponse(source.message || '退款统计加载失败', source.code);
   const refunds = source.data || [];

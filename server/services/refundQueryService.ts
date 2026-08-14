@@ -75,6 +75,13 @@ export function createRefundQueryService(prisma: Client) {
         }));
       let items = [...refunds, ...legacyRefunds];
       if (filters.status) items = items.filter((item) => item.status === filters.status);
+      if (filters.refundCategory) items = items.filter((item) => item.refundCategory === filters.refundCategory);
+      if (filters.owner) items = items.filter((item) => (
+        item.applicantName === filters.owner || item.recoveryTask?.assignedToName === filters.owner
+      ));
+      if (filters.productLevel) items = items.filter((item) => item.productLevel === filters.productLevel);
+      if (filters.minAmount !== undefined) items = items.filter((item) => item.refundAmount >= Number(filters.minAmount));
+      if (filters.maxAmount !== undefined) items = items.filter((item) => item.refundAmount <= Number(filters.maxAmount));
       if (filters.startDate || filters.endDate) items = items.filter((item) => {
         const time = new Date(item.refundedAt || item.completedAt || item.createdAt).getTime();
         return (!filters.startDate || time >= boundary(filters.startDate, false))
@@ -93,6 +100,17 @@ export function createRefundQueryService(prisma: Client) {
       return success({
         items: items.slice((page - 1) * pageSize, page * pageSize),
         pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+        stats: {
+          toAssign: items.filter((item) => item.status === '待分配').length,
+          recovering: items.filter((item) => item.status === '挽回中').length,
+          waitingFinance: items.filter((item) => item.status === '待财务退款' || item.status === '退款已批准').length,
+          recoverySuccess: items.filter((item) => item.status === '挽回成功').length,
+          completed: items.filter((item) => item.status === '退款已完成').length,
+          frozenCommissionAmount: items.reduce((sum, item) => sum + Number(item.frozenCommissionAmount || 0), 0),
+          estimatedLossAmount: items
+            .filter((item) => item.status !== '挽回成功' && item.status !== '退款已完成')
+            .reduce((sum, item) => sum + Number(item.refundAmount || 0), 0),
+        },
       });
     },
   };
