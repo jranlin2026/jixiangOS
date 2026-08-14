@@ -11,12 +11,15 @@ const academyModule = await vite.ssrLoadModule("/src/pages/Academy/index.tsx");
 const CourseWorkspace = Reflect.get(academyModule, "CourseWorkspace") as React.ComponentType<any> | undefined;
 const CourseDetailWorkspace = Reflect.get(academyModule, "CourseDetailWorkspace") as React.ComponentType<any> | undefined;
 const CourseDetailDrawer = Reflect.get(academyModule, "CourseDetailDrawer") as React.ComponentType<any> | undefined;
+const CourseAssetFiles = Reflect.get(academyModule, "CourseAssetFiles") as React.ComponentType<any> | undefined;
 
 assert.equal(typeof CourseWorkspace, "function", "课程列表应作为可验证的独立工作台组件");
 assert.equal(typeof CourseDetailWorkspace, "function", "课程详情内容应作为可复用工作台");
 assert.equal(typeof CourseDetailDrawer, "function", "课程详情应使用右侧抽屉，不替换当前列表页");
+assert.equal(typeof CourseAssetFiles, "function", "课程资产应提供可查看和下载的独立文件列表");
 
 const academySource = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
+const attachmentLinksSource = readFileSync(new URL("../../shared/components/BusinessAttachmentLinks.tsx", import.meta.url), "utf8");
 assert.match(
   academySource,
   /<CourseDetailDrawer\s+open=\{Boolean\(detailCourse\)\}/,
@@ -80,6 +83,28 @@ console.error = (...args: unknown[]) => {
   if (String(args[0] || "").includes("useLayoutEffect does nothing on the server")) return;
   originalConsoleError(...args);
 };
+
+const assetFilesMarkup = renderInRouter(React.createElement(CourseAssetFiles!, {
+  attachments: [{
+    id: "attachment-1",
+    name: "课程课件.pptx",
+    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    size: 1024,
+    category: "academy-course-asset",
+    uploadedById: "user-1",
+    uploadedByName: "系统管理员",
+    uploadedAt: "2026-08-14T00:00:00.000Z",
+  }],
+}));
+
+assert.match(assetFilesMarkup, /查看附件 课程课件\.pptx/, "课程资产文件应提供明确的查看入口");
+assert.match(assetFilesMarkup, /下载附件 课程课件\.pptx/, "课程资产文件应提供明确的下载入口");
+const previewWindowIndex = attachmentLinksSource.indexOf("window.open('', '_blank')");
+assert.notEqual(previewWindowIndex, -1, "附件查看应同步创建预览窗口");
+assert.ok(
+  previewWindowIndex < attachmentLinksSource.indexOf("await businessAttachmentApi.fetchBlob"),
+  "附件查看必须在异步读取前同步打开窗口，避免被浏览器拦截",
+);
 
 const listMarkup = renderInRouter(React.createElement(CourseWorkspace!, {
     ...commonProps,
@@ -149,6 +174,7 @@ assert.match(loadingAssetMarkup, /正在加载课程资产/, "资产请求完成
 assert.doesNotMatch(loadingAssetMarkup, /当前还没有上传文件/, "资产加载中不应误报为空数据");
 assert.match(assetErrorMarkup, /重新加载课程资产/, "资产加载失败时应提供重试入口");
 assert.doesNotMatch(assetErrorMarkup, />上传</, "资产加载失败时不应开放上传操作");
+assert.ok((academySource.match(/<CourseAssetFiles/g) || []).length >= 2, "课程详情与上传弹窗都应展示可查看和下载的已关联文件");
 
 console.log("academy course workspace view tests passed");
 await vite.close();

@@ -99,6 +99,7 @@ import DialogCloseTitle from "../../shared/components/DialogCloseTitle";
 import TablePagination from "../../shared/components/TablePagination";
 import SystemDataTable from "../../shared/components/SystemDataTable";
 import BusinessAttachmentPicker from "../../shared/components/BusinessAttachmentPicker";
+import BusinessAttachmentLinks from "../../shared/components/BusinessAttachmentLinks";
 import {
   ModuleHeader,
   ModulePage,
@@ -348,6 +349,16 @@ const SectionTitle: React.FC<{
     </Box>
     {action}
   </Stack>
+);
+
+export const CourseAssetFiles: React.FC<{
+  attachments: BusinessAttachment[];
+}> = ({ attachments }) => (
+  <BusinessAttachmentLinks
+    attachments={attachments}
+    emptyText="当前还没有关联文件"
+    showDownload
+  />
 );
 
 const Academy: React.FC = () => {
@@ -4758,21 +4769,7 @@ const Academy: React.FC = () => {
                     <Typography variant="subtitle2" sx={{ mb: 1 }}>
                       已关联文件
                     </Typography>
-                    <Stack
-                      direction="row"
-                      spacing={1}
-                      useFlexGap
-                      flexWrap="wrap"
-                    >
-                      {existingAssetAttachments.map((attachment) => (
-                        <Chip
-                          key={attachment.id}
-                          label={attachment.name}
-                          variant="outlined"
-                          size="small"
-                        />
-                      ))}
-                    </Stack>
+                    <CourseAssetFiles attachments={existingAssetAttachments} />
                     <Typography variant="caption" color="text.secondary">
                       已保存文件保持只读；本次可继续追加新文件，避免取消编辑时误删原文件。
                     </Typography>
@@ -6874,6 +6871,11 @@ export const CourseDetailWorkspace: React.FC<{
                               ? `${asset.attachments.length} 个文件 · ${asset.ownerUserName} · ${formatDate(asset.updatedAt)}`
                               : "当前还没有上传文件"}
                           </Typography>
+                          {asset && asset.attachments.length > 0 && (
+                            <Box sx={{ mt: 1 }}>
+                              <CourseAssetFiles attachments={asset.attachments} />
+                            </Box>
+                          )}
                         </Box>
                         {canManage && (
                           <Button
