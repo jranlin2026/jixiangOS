@@ -284,9 +284,9 @@ function writeFinanceExpense(refund: Refund, refundMethod: string, paidAt: strin
 
 async function readRefundsForView(): Promise<ApiResponse<Refund[]>> {
   if (shouldUseBackendApi()) {
-    const response = await backendRequest<Refund[]>(`/storage/${encodeURIComponent(STORAGE_KEYS.REFUNDS)}`);
+    const response = await backendRequest<PaginatedResponse<Refund>>('/refunds?page=1&pageSize=100');
     if (response.code !== 0) return createErrorResponse(response.message || '退款记录加载失败', response.code);
-    return createSuccessResponse((response.data || []).map(normalizeRefund));
+    return createSuccessResponse((response.data?.items || []).map(normalizeRefund));
   }
   ensureInit();
   await delay(200);
@@ -294,6 +294,21 @@ async function readRefundsForView(): Promise<ApiResponse<Refund[]>> {
 }
 
 async function getRefunds(filters?: RefundFilters): Promise<ApiResponse<PaginatedResponse<Refund>>> {
+  if (shouldUseBackendApi()) {
+    const query = new URLSearchParams();
+    if (filters?.search) query.set('search', filters.search);
+    if (filters?.status) query.set('status', filters.status);
+    if (filters?.startDate) query.set('startDate', filters.startDate);
+    if (filters?.endDate) query.set('endDate', filters.endDate);
+    query.set('page', String(filters?.page || 1));
+    query.set('pageSize', String(filters?.pageSize || DEFAULT_PAGE_SIZE));
+    const response = await backendRequest<PaginatedResponse<Refund>>(`/refunds?${query.toString()}`);
+    if (response.code !== 0) return response;
+    return createSuccessResponse({
+      ...response.data,
+      items: response.data.items.map(normalizeRefund),
+    });
+  }
   const source = await readRefundsForView();
   if (source.code !== 0) return createErrorResponse(source.message || '退款记录加载失败', source.code);
   const all = source.data || [];

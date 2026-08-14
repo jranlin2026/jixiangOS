@@ -17,7 +17,7 @@ test('refund cockpit drill-down reads completed refunds from the backend source'
     return new Response(JSON.stringify({
       code: 0,
       message: 'success',
-      data: [
+      data: { items: [
         {
           id: 'refund-completed', refundNo: 'RF-1', orderId: 'order-1', orderNo: 'ORD-1',
           customerId: 'customer-1', customerName: '客户', productLevel: '899', orderAmount: 999,
@@ -25,13 +25,7 @@ test('refund cockpit drill-down reads completed refunds from the backend source'
           applicantId: 'user-1', applicantName: '用户', refundedAt: '2026-08-14T02:00:00.000Z',
           createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-14T02:00:00.000Z',
         },
-        {
-          id: 'refund-active', refundNo: 'RF-2', orderId: 'order-2', orderNo: 'ORD-2',
-          customerId: 'customer-2', customerName: '客户2', productLevel: '899', orderAmount: 999,
-          refundAmount: 200, refundReason: '测试', refundCategory: '其他', status: '挽回中',
-          applicantId: 'user-1', applicantName: '用户', createdAt: '2026-08-14T02:00:00.000Z', updatedAt: '2026-08-14T02:00:00.000Z',
-        },
-      ],
+      ], pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 } },
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
 
@@ -41,7 +35,7 @@ test('refund cockpit drill-down reads completed refunds from the backend source'
     });
     assert.equal(response.code, 0);
     assert.deepEqual(response.data.items.map((item) => item.id), ['refund-completed']);
-    assert.ok(requests.some((url) => url.endsWith('/storage/aaos_refunds')));
+    assert.ok(requests.some((url) => url.includes('/refunds?') && url.includes('status=')));
   } finally {
     globalThis.fetch = originalFetch;
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalStorage });

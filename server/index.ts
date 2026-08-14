@@ -83,6 +83,7 @@ import {
 } from './services/orderApprovalEffectsService';
 import { createOrderCommandService } from './services/orderCommandService';
 import { createOrderQueryService } from './services/orderQueryService';
+import { createRefundQueryService } from './services/refundQueryService';
 import { createBusinessCockpitService } from './services/businessCockpitService';
 import { createBusinessExportService } from './services/businessExportService';
 import { createDeliveryCommandService } from './services/deliveryCommandService';
@@ -280,6 +281,7 @@ const settingsService = createSettingsService(prisma);
 const positionGovernanceService = createPositionGovernanceService(prisma);
 const orderTypeConfigCommandService = createOrderTypeConfigCommandService(prisma);
 const storageService = createStorageService(prisma);
+const refundQueryService = createRefundQueryService(prisma);
 let academyService: ReturnType<typeof createAcademyService>;
 const businessAttachmentService = createBusinessAttachmentService({
   repository: createPrismaBusinessAttachmentRepository(prisma),
@@ -1459,6 +1461,26 @@ app.post('/api/deliveries/:id/confirm', requireDeliveryWriteAccess, async (req: 
 app.delete('/api/deliveries/:id', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await deliveryCommandService.delete(routeParam(req.params.id), req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/refunds', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  if (!req.currentUser || ![
+    PERMISSION_KEYS.AFTER_SALES_REFUND,
+    PERMISSION_KEYS.FINANCE_REFUND,
+  ].some((permission) => hasPermission(req.currentUser, permission))) {
+    res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
+    return;
+  }
+  const text = (value: unknown) => typeof value === 'string' ? value : undefined;
+  const result = await refundQueryService.list({
+    search: text(req.query.search),
+    status: text(req.query.status) as any,
+    startDate: text(req.query.startDate),
+    endDate: text(req.query.endDate),
+    page: Number(req.query.page || 1),
+    pageSize: Number(req.query.pageSize || 20),
+  }, req.currentUser);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
 });
 
 app.get('/api/recovery-orders', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
