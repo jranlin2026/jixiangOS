@@ -12,14 +12,10 @@ import {
   ToggleButtonGroup,
   Typography,
 } from '@mui/material';
-import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined';
 import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
-import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
-import RestoreOutlinedIcon from '@mui/icons-material/RestoreOutlined';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { useNavigate } from 'react-router-dom';
@@ -47,6 +43,7 @@ import type {
   HomeTaskItem,
 } from '../../types/dashboard';
 import EnterpriseBrainPanel from './EnterpriseBrainPanel';
+import { resolveDashboardDateRange, toShanghaiDateString } from './businessCockpitModel';
 
 const palette = {
   page: '#F6F8FB',
@@ -69,17 +66,6 @@ const toneColor: Record<HomeTaskItem['tone'], { color: string; bg: string; borde
   success: { color: palette.green, bg: '#EBF8F2', border: '#B9DEC9' },
   info: { color: palette.teal, bg: '#E9F8FA', border: '#B4DDE2' },
 };
-
-function toShanghaiDateString(date: Date): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
 
 function monthStart(): string {
   return `${todayString().slice(0, 7)}-01`;
@@ -137,6 +123,9 @@ function canAccessCockpitPath(user: AuthenticatedUser | null, path: string): boo
   }
   if (pathname.startsWith(ROUTES.CUSTOMERS)) {
     return hasPermission(user, PERMISSION_KEYS.CUSTOMERS);
+  }
+  if (pathname.startsWith(ROUTES.LEADS)) {
+    return hasPermission(user, PERMISSION_KEYS.LEADS_LIST);
   }
   if (pathname.startsWith(ROUTES.FINANCE)) {
     if (tab === 'flow') return hasPermission(user, PERMISSION_KEYS.FINANCE_FLOW);
@@ -222,75 +211,6 @@ const SectionPanel: React.FC<{
   </Paper>
 );
 
-const MetricTile: React.FC<{
-  label: string;
-  value: React.ReactNode;
-  supporting: string;
-  color: string;
-  icon: React.ReactNode;
-  highlighted?: boolean;
-  onClick?: () => void;
-}> = ({ label, value, supporting, color, icon, highlighted = false, onClick }) => (
-  <Box
-    role={onClick ? 'button' : undefined}
-    tabIndex={onClick ? 0 : undefined}
-    aria-label={onClick ? `查看${label}` : undefined}
-    onClick={onClick}
-    onKeyDown={(event) => {
-      if (!onClick || (event.key !== 'Enter' && event.key !== ' ')) return;
-      event.preventDefault();
-      onClick();
-    }}
-    sx={{
-      minWidth: 0,
-      border: `1px solid ${highlighted ? '#AFCBFF' : palette.line}`,
-      bgcolor: highlighted ? '#F3F7FF' : palette.surface,
-      borderRadius: 1,
-      p: 1.75,
-      cursor: onClick ? 'pointer' : 'default',
-      transition: 'border-color 160ms ease, box-shadow 160ms ease',
-      '&:hover': onClick ? { borderColor: color, boxShadow: `0 4px 14px ${color}12` } : undefined,
-      '&:focus-visible': onClick ? { outline: `2px solid ${color}`, outlineOffset: 2 } : undefined,
-    }}
-  >
-    <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
-      <Typography variant="body2" sx={{ color: palette.muted, fontWeight: 800 }}>
-        {label}
-      </Typography>
-      <Box
-        sx={{
-          width: 32,
-          height: 32,
-          borderRadius: 1,
-          display: 'grid',
-          placeItems: 'center',
-          bgcolor: `${color}12`,
-          color,
-          flexShrink: 0,
-        }}
-      >
-        {icon}
-      </Box>
-    </Stack>
-    <Typography
-      variant="h5"
-      sx={{
-        color,
-        fontWeight: 900,
-        mt: 1.25,
-        lineHeight: 1.1,
-        fontVariantNumeric: 'tabular-nums',
-        overflowWrap: 'anywhere',
-      }}
-    >
-      {value}
-    </Typography>
-    <Typography variant="caption" sx={{ color: palette.muted, display: 'block', mt: 0.75 }}>
-      {supporting}
-    </Typography>
-  </Box>
-);
-
 const ExecutiveOverview: React.FC<{
   data: BusinessCockpitData;
   mainRisk?: CockpitRiskItem;
@@ -298,98 +218,76 @@ const ExecutiveOverview: React.FC<{
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
   const summary = data.summary;
+  const previous = data.comparison.summary;
   const mainTone = mainRisk ? toneColor[mainRisk.tone] : toneColor.success;
+  const comparisonText = (current: number, prior: number) => {
+    if (current === prior) return '与上期同期持平';
+    if (!prior) return current ? '上期同期为 0' : '暂无上期数据';
+    const change = Math.round(Math.abs((current - prior) / prior) * 1000) / 10;
+    return `${current > prior ? '↑' : '↓'} ${change}% 较上期同期`;
+  };
+  const conversionRate = summary.newLeadCount ? summary.newCustomerCount / summary.newLeadCount * 100 : 0;
+  const previousConversionRate = previous.newLeadCount ? previous.newCustomerCount / previous.newLeadCount * 100 : 0;
+  const navigateIfAllowed = (path: string) => canAccessCockpitPath(currentUser, path) ? () => navigate(path) : undefined;
+  const darkCard = (onClick?: () => void) => ({
+    minWidth: 0,
+    border: '1px solid rgba(255,255,255,0.12)',
+    bgcolor: 'rgba(255,255,255,0.055)',
+    borderRadius: 1.25,
+    p: 1.6,
+    cursor: onClick ? 'pointer' : 'default',
+    transition: 'background-color 160ms ease, border-color 160ms ease',
+    '&:hover': onClick ? { bgcolor: 'rgba(255,255,255,0.09)', borderColor: 'rgba(255,255,255,0.26)' } : undefined,
+    '&:focus-visible': { outline: '2px solid #8CB4FF', outlineOffset: 2 },
+  });
+  const MiniResult = ({ label, value, helper, compare, path }: { label: string; value: string; helper: string; compare: string; path?: string }) => {
+    const onClick = path ? navigateIfAllowed(path) : undefined;
+    return (
+      <Box role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined} onClick={onClick}
+        onKeyDown={(event) => { if (onClick && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onClick(); } }}
+        sx={darkCard(onClick)}>
+        <Typography variant="caption" sx={{ color: '#AEBED4', fontWeight: 700 }}>{label}</Typography>
+        <Typography variant="h6" sx={{ color: '#FFFFFF', fontWeight: 900, mt: 0.6, fontVariantNumeric: 'tabular-nums' }}>{value}</Typography>
+        <Typography variant="caption" sx={{ color: '#B9C7D9', display: 'block', mt: 0.55 }}>{helper}</Typography>
+        <Typography variant="caption" sx={{ color: '#8CB4FF', display: 'block', mt: 0.35, fontWeight: 800 }}>{compare}</Typography>
+      </Box>
+    );
+  };
   return (
-    <SectionPanel
-      title="经营信号条"
-      eyebrow={`${data.rangeLabel}经营总览`}
-      action={(
-        <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', rowGap: 0.75 }}>
-          <Chip size="small" label={`新增线索 ${summary.newLeadCount}`} sx={{ bgcolor: '#EEF4FF', color: palette.blue, fontWeight: 800 }} />
-          <Chip size="small" label={`线索转客 ${summary.newCustomerCount}`} sx={{ bgcolor: '#ECFDF3', color: palette.green, fontWeight: 800 }} />
-        </Stack>
-      )}
-    >
-      <Stack
-        direction={{ xs: 'column', lg: 'row' }}
-        justifyContent="space-between"
-        alignItems={{ xs: 'stretch', lg: 'center' }}
-        spacing={1.5}
-        sx={{ px: 2, pt: 1.5 }}
-      >
-        <Box sx={{ minWidth: 0 }}>
-          <Typography variant="h6" sx={{ color: palette.ink, fontWeight: 900 }}>
-            {data.rangeLabel}经营成交 {formatCurrency(summary.operatingAmount)}
-          </Typography>
-          <Typography variant="body2" sx={{ color: palette.muted, mt: 0.35 }}>
-            正式订单实收 {formatCurrency(summary.formalReceiptAmount)}，售后挽回 {formatCurrency(summary.recoveryAmount)}
-          </Typography>
+    <Paper elevation={0} sx={{ bgcolor: '#13243B', color: '#fff', borderRadius: 1.5, overflow: 'hidden', border: '1px solid #203754' }}>
+      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} spacing={1.5} sx={{ px: { xs: 2, md: 2.5 }, pt: 2.25 }}>
+        <Box>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography variant="overline" sx={{ color: '#8CB4FF', fontWeight: 900, letterSpacing: '0.12em' }}>期间经营结果</Typography>
+            <Chip size="small" label={data.rangeLabel} sx={{ height: 22, bgcolor: 'rgba(140,180,255,0.14)', color: '#CFE0FF', fontWeight: 800 }} />
+          </Stack>
+          <Typography variant="body2" sx={{ color: '#AEBED4', mt: 0.25 }}>按业务发生时间统计 · 对比上期同期</Typography>
         </Box>
-        <Box
-          sx={{
-            border: `1px solid ${mainTone.border}`,
-            bgcolor: mainTone.bg,
-            borderRadius: 1,
-            px: 1.5,
-            py: 1,
-            minWidth: { lg: 250 },
-          }}
-        >
+        <Box sx={{ border: `1px solid ${mainTone.border}`, bgcolor: mainTone.bg, borderRadius: 1, px: 1.5, py: 0.9, maxWidth: { xs: '100%', md: 360 } }}>
           <Stack direction="row" spacing={1} alignItems="center">
             {mainRisk ? <PriorityHighIcon sx={{ color: mainTone.color }} fontSize="small" /> : <CheckCircleOutlineIcon sx={{ color: mainTone.color }} fontSize="small" />}
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="caption" sx={{ color: mainTone.color, fontWeight: 900 }}>
-                当前阻塞
-              </Typography>
-              <Typography variant="body2" sx={{ color: mainTone.color, fontWeight: 900 }} noWrap>
-                {mainRisk ? `${mainRisk.title} ${mainRisk.count}` : '暂无待处理风险'}
-              </Typography>
-            </Box>
+            <Typography variant="body2" sx={{ color: mainTone.color, fontWeight: 900 }} noWrap>
+              {mainRisk ? `老板今日重点：${mainRisk.title} ${mainRisk.count}` : '老板今日重点：暂无经营阻塞'}
+            </Typography>
           </Stack>
         </Box>
       </Stack>
-
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' },
+          gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(6, minmax(0, 1fr))' },
           gap: 1.25,
-          p: 2,
+          p: { xs: 2, md: 2.5 },
         }}
       >
-        <MetricTile
-          label="正式订单实收"
-          value={formatCurrency(summary.formalReceiptAmount)}
-          supporting={`${summary.formalOrderCount} 笔正式订单`}
-          color={palette.blue}
-          icon={<ReceiptLongOutlinedIcon fontSize="small" />}
-          onClick={canAccessCockpitPath(currentUser, ROUTES.ORDERS) ? () => navigate(ROUTES.ORDERS) : undefined}
-        />
-        <MetricTile
-          label="售后挽回成交"
-          value={formatCurrency(summary.recoveryAmount)}
-          supporting={`${summary.recoveryOrderCount} 笔挽回订单`}
-          color={palette.green}
-          icon={<RestoreOutlinedIcon fontSize="small" />}
-          onClick={canAccessCockpitPath(currentUser, ROUTES.AFTER_SALES) ? () => navigate(ROUTES.AFTER_SALES) : undefined}
-        />
-        <MetricTile
-          label="本期经营成交额"
-          value={formatCurrency(summary.operatingAmount)}
-          supporting="正式订单实收 + 售后挽回成交"
-          color={palette.blue}
-          icon={<AccountBalanceWalletOutlinedIcon fontSize="small" />}
-          highlighted
-        />
-        <MetricTile
-          label="订单构成"
-          value={`${summary.formalOrderCount + summary.recoveryOrderCount} 笔`}
-          supporting={`正式 ${summary.formalOrderCount} 笔 · 挽回 ${summary.recoveryOrderCount} 笔`}
-          color={palette.teal}
-          icon={<GroupsOutlinedIcon fontSize="small" />}
-        />
+        <MiniResult label="正式订单实收" value={formatCurrency(summary.formalReceiptAmount)} helper={`净实收 ${formatCurrency(data.financeHealth.formalNetReceiptAmount)}`} compare={comparisonText(summary.formalReceiptAmount, previous.formalReceiptAmount)} path={ROUTES.ORDERS} />
+        <MiniResult label="售后挽回成交" value={formatCurrency(summary.recoveryAmount)} helper={`${summary.recoveryOrderCount} 笔挽回订单`} compare={comparisonText(summary.recoveryAmount, previous.recoveryAmount)} path={ROUTES.AFTER_SALES} />
+        <MiniResult label="成交订单" value={`${summary.formalOrderCount} 笔`} helper="正式订单" compare={comparisonText(summary.formalOrderCount, previous.formalOrderCount)} path={ROUTES.ORDERS} />
+        <MiniResult label="新增线索" value={`${summary.newLeadCount}`} helper={`${data.customerHealth.followedLeadCount} 条已跟进`} compare={comparisonText(summary.newLeadCount, previous.newLeadCount)} path={ROUTES.LEADS} />
+        <MiniResult label="线索转客率" value={`${conversionRate.toFixed(1)}%`} helper={`${summary.newCustomerCount} 位新增客户`} compare={comparisonText(conversionRate, previousConversionRate)} path={ROUTES.CUSTOMERS} />
+        <MiniResult label="已退款金额" value={formatCurrency(data.orderHealth.refundAmount)} helper={`${data.orderHealth.refundedOrderCount} 笔已退款`} compare={comparisonText(data.orderHealth.refundAmount, data.comparison.refundAmount)} path={ROUTES.AFTER_SALES} />
       </Box>
-    </SectionPanel>
+    </Paper>
   );
 };
 
@@ -587,7 +485,10 @@ const HealthMetric: React.FC<{
   </Box>
 );
 
-const CustomerHealthPanel: React.FC<{ health: BusinessCockpitData['customerHealth'] }> = ({ health }) => {
+const CustomerHealthPanel: React.FC<{
+  health: BusinessCockpitData['customerHealth'];
+  sources: BusinessCockpitData['leadSources'];
+}> = ({ health, sources }) => {
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
   const canViewCustomers = canAccessCockpitPath(currentUser, ROUTES.CUSTOMERS);
@@ -595,8 +496,8 @@ const CustomerHealthPanel: React.FC<{ health: BusinessCockpitData['customerHealt
   const followRateColor = followRate >= 80 ? palette.green : followRate >= 50 ? palette.amber : palette.red;
   return (
     <SectionPanel
-      title="客户跟进健康"
-      eyebrow="线索与客户推进"
+      title="客户增长漏斗"
+      eyebrow="期间转化 + 截至当前跟进"
       action={(
         <Stack direction="row" spacing={0.75} alignItems="center">
           <Chip size="small" label={`线索跟进率 ${followRate.toFixed(1)}%`} sx={{ bgcolor: `${followRateColor}12`, color: followRateColor, fontWeight: 900 }} />
@@ -639,6 +540,19 @@ const CustomerHealthPanel: React.FC<{ health: BusinessCockpitData['customerHealt
           <HealthMetric label="本期有跟进客户" value={health.followedCustomerCount} />
           <HealthMetric label="逾期客户待办" value={health.overdueTodoCount} tone={health.overdueTodoCount > 0 ? palette.red : palette.green} />
         </Box>
+        <Box sx={{ borderTop: `1px solid ${palette.softLine}`, mt: 2, pt: 1.5 }}>
+          <Typography variant="body2" sx={{ color: palette.ink, fontWeight: 900, mb: 1 }}>本期线索来源效果</Typography>
+          {sources.length ? (
+            <Stack spacing={1}>
+              {sources.slice(0, 5).map((source) => (
+                <Stack key={source.source} direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                  <Typography variant="body2" sx={{ color: palette.ink, fontWeight: 700 }} noWrap>{source.source}</Typography>
+                  <Typography variant="caption" sx={{ color: palette.muted, flexShrink: 0 }}>{source.leadCount} 条 · 跟进率 {source.followRate.toFixed(1)}%</Typography>
+                </Stack>
+              ))}
+            </Stack>
+          ) : <Typography variant="caption" sx={{ color: palette.muted }}>本期暂无新增线索来源数据</Typography>}
+        </Box>
       </Box>
     </SectionPanel>
   );
@@ -653,14 +567,14 @@ const OrderFinanceHealthPanel: React.FC<{
   const canViewFinance = canAccessCockpitPath(currentUser, ROUTES.FINANCE);
   return (
     <SectionPanel
-      title="订单 / 财务健康"
-      eyebrow="收款、退款与提成"
+      title="资金与订单健康"
+      eyebrow="期间资金结果 + 截至当前风险"
       action={canViewFinance ? <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate(ROUTES.FINANCE)}>查看财务</Button> : undefined}
     >
       <Stack spacing={1.5} sx={{ p: 2 }}>
       <Box>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-          <Typography variant="body2" sx={{ color: palette.ink, fontWeight: 900 }}>订单风险</Typography>
+          <Typography variant="body2" sx={{ color: palette.ink, fontWeight: 900 }}>订单风险 · 截至当前</Typography>
           <Typography variant="caption" sx={{ color: palette.muted }}>
             正式 {order.formalOrderCount} 笔 · 挽回 {order.recoveryOrderCount} 笔
           </Typography>
@@ -706,7 +620,7 @@ const RiskWorkbench: React.FC<{ risks: CockpitRiskItem[] }> = ({ risks }) => {
   const mainRisk = priorityRisk(risks);
   if (!mainRisk) {
     return (
-      <SectionPanel title="当前阻塞" eyebrow="订单 / 财务风险">
+      <SectionPanel title="老板今日重点" eyebrow="截至当前 · 待处理事项">
         <Box sx={{ minHeight: 230, display: 'grid', placeItems: 'center', p: 2 }}>
           <Stack spacing={1} alignItems="center">
             <CheckCircleOutlineIcon sx={{ color: palette.green, fontSize: 32 }} />
@@ -720,7 +634,7 @@ const RiskWorkbench: React.FC<{ risks: CockpitRiskItem[] }> = ({ risks }) => {
   const mainTone = toneColor[mainRisk.tone];
   const canOpenMainRisk = canAccessCockpitPath(currentUser, mainRisk.path);
   return (
-    <SectionPanel title="当前阻塞" eyebrow="订单 / 财务风险">
+    <SectionPanel title="老板今日重点" eyebrow="截至当前 · 按经营影响排序">
       <Stack spacing={1} sx={{ p: 2 }}>
         <Box sx={{ border: `1px solid ${mainTone.border}`, bgcolor: mainTone.bg, borderRadius: 1, p: 1.5 }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
@@ -779,7 +693,7 @@ const RiskWorkbench: React.FC<{ risks: CockpitRiskItem[] }> = ({ risks }) => {
 };
 
 const LegacyBusinessCockpit: React.FC = () => {
-  const [range, setRange] = useState<DashboardDateRange>({ preset: 'month', startDate: monthStart(), endDate: todayString() });
+  const [range, setRange] = useState<DashboardDateRange>(() => resolveDashboardDateRange('month'));
   const [data, setData] = useState<BusinessCockpitData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -822,10 +736,13 @@ const LegacyBusinessCockpit: React.FC = () => {
 
   const updatePreset = (_: React.MouseEvent<HTMLElement>, preset: DashboardRangePreset | null) => {
     if (!preset) return;
-    const nextRange = { ...range, preset };
     setRangeError('');
+    if (preset === 'custom') {
+      setRange((current) => ({ ...current, preset }));
+      return;
+    }
+    const nextRange = resolveDashboardDateRange(preset);
     setRange(nextRange);
-    if (preset === 'custom') return;
     fetchData(nextRange);
   };
 
@@ -871,13 +788,13 @@ const LegacyBusinessCockpit: React.FC = () => {
           <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.75 }}>
             <AccountTreeIcon sx={{ color: palette.blue }} />
             <Typography variant="h5" sx={{ fontWeight: 900, color: palette.ink, letterSpacing: 0 }}>
-              经营驾驶舱
+              老板驾驶舱
             </Typography>
             <Chip size="small" label={data.scopeLabel} sx={{ bgcolor: '#EEF4FF', color: palette.blue, fontWeight: 800 }} />
           </Stack>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
             <Typography variant="body2" sx={{ color: palette.muted }}>
-              直观看清销售、挽回、客户跟进、订单与财务健康
+              先看经营结果，再处理风险，最后检查组织执行
             </Typography>
             <Typography variant="caption" sx={{ color: palette.muted }}>· {formatUpdatedAt(String(data.updatedAt))}</Typography>
           </Stack>
@@ -934,7 +851,6 @@ const LegacyBusinessCockpit: React.FC = () => {
       )}
 
       <Stack spacing={2}>
-        <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} />
         <ExecutiveOverview data={data} mainRisk={mainRisk} />
 
         <Box
@@ -956,33 +872,35 @@ const LegacyBusinessCockpit: React.FC = () => {
         <Box
           sx={{
             display: 'grid',
-            gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' },
-            gap: 2,
-          }}
-        >
-          <Box sx={{ minWidth: 0 }}>
-            <PerformanceRanking title="销售业绩排行" eyebrow="按正式订单实收" rows={data.salesRanking} accent={palette.blue} />
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <PerformanceRanking title="挽回业绩排行" eyebrow="按售后挽回成交" rows={data.recoveryRanking} accent={palette.green} showAssist />
-          </Box>
-        </Box>
-
-        <Box
-          sx={{
-            display: 'grid',
             gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 0.9fr) minmax(0, 1.1fr)' },
             gap: 2,
             alignItems: 'stretch',
           }}
         >
           <Box sx={{ minWidth: 0 }}>
-            <CustomerHealthPanel health={data.customerHealth} />
+            <CustomerHealthPanel health={data.customerHealth} sources={data.leadSources} />
           </Box>
           <Box sx={{ minWidth: 0 }}>
             <OrderFinanceHealthPanel order={data.orderHealth} finance={data.financeHealth} />
           </Box>
         </Box>
+
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' },
+            gap: 2,
+          }}
+        >
+          <Box sx={{ minWidth: 0 }}>
+            <PerformanceRanking title="销售业绩排行" eyebrow="期间正式订单实收" rows={data.salesRanking} accent={palette.blue} />
+          </Box>
+          <Box sx={{ minWidth: 0 }}>
+            <PerformanceRanking title="挽回业绩排行" eyebrow="期间售后挽回成交" rows={data.recoveryRanking} accent={palette.green} showAssist />
+          </Box>
+        </Box>
+
+        <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} />
 
         <Stack direction="row" spacing={1} alignItems="center" sx={{ color: palette.muted, px: 0.5 }}>
           <TrendingUpIcon fontSize="small" />

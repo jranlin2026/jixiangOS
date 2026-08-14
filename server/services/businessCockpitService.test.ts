@@ -114,6 +114,7 @@ const row = (domain: string, data: { id: string }) => ({
 function fakePrisma(
   records: Array<{ domain: string; recordId: string; data: unknown }>,
   customerTodos: CustomerTodo[] = [],
+  canonicalLeads?: Lead[],
 ) {
   const now = new Date('2026-07-01T00:00:00.000Z');
   return {
@@ -125,6 +126,12 @@ function fakePrisma(
       )),
     },
     customerTodo: { findMany: async () => customerTodos },
+    leadRecord: {
+      findMany: async () => (canonicalLeads || records
+        .filter((item) => item.domain === STORAGE_KEYS.LEADS)
+        .map((item) => item.data as Lead))
+        .map((item) => ({ id: item.id, data: item })),
+    },
     user: { findMany: async () => [{
       id: 'admin-1', name: '系统管理员', account: 'admin', email: '', phone: '', role: '超级管理员',
       avatar: null, departmentId: 'department-1', positionId: null, positionName: null, roleId: 'role-admin',
@@ -170,6 +177,18 @@ const lead = (id: string, ownerId: string, overrides: Partial<Lead> = {}): Lead 
   followUpRecords: [],
   ...overrides,
 });
+
+{
+  const canonical = lead('canonical-only', 'sales-1', { createdAt: '2026-07-06T08:00:00.000Z' });
+  const service = createBusinessCockpitService(fakePrisma([], [], [canonical]) as any);
+  const result = await service.getSnapshot({
+    startAt: START_AT,
+    endAt: END_AT,
+    visibility: { unrestricted: true, visibleUserIds: [], visibleUserNames: [] },
+  });
+  assert.equal(result.data?.followUpHealth.newLeadCount, 1,
+    '经营驾驶舱必须从结构化 LeadRecord 读取线索，不能继续依赖旧 BusinessRecord 快照');
+}
 
 const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}): Customer => ({
   id,
@@ -713,6 +732,8 @@ const financeTransaction = (
     overdueCustomerTodoCount: 1,
     completedCustomerTodoCount: 1,
   });
+  assert.deepEqual(result.data?.leadSources, [{ source: '官网', leadCount: 1, followedCount: 1, followRate: 100 }],
+    '来源效果必须按当前期间新增线索统计，并沿用同一数据权限');
   assert.deepEqual(result.data?.orderHealth, {
     pendingReviewApplicationCount: 1,
     returnedApplicationCount: 1,
@@ -754,6 +775,26 @@ const financeTransaction = (
     '按月统计的提成健康不能伪装成跨月发放待办');
   assert.equal(result.data?.financeHealth.pendingHandlingCommissionCount, 1,
     '规则未解决的本期待处理提成仍须进入财务健康展示');
+}
+
+{
+  const records = [
+    row(STORAGE_KEYS.ORDERS, order('period-comparison', 'sales-1', '销售甲', [
+      payment('previous-payment', 500, '2026-07-20T08:00:00.000Z'),
+      payment('current-payment', 900, '2026-08-10T08:00:00.000Z'),
+    ])),
+  ];
+  const service = createBusinessCockpitService(fakePrisma(records) as any, {
+    now: () => new Date('2026-08-14T12:00:00.000Z'),
+  });
+  const result = await service.get({
+    preset: 'custom', startDate: '2026-08-01', endDate: '2026-08-14',
+  }, admin);
+
+  assert.equal(result.data?.comparison.label, '上期同期');
+  assert.equal(result.data?.comparison.summary.formalReceiptAmount, 500,
+    '老板驾驶舱必须用等长上一周期对比，不能拿半个月和完整月份比较');
+  assert.equal(result.data?.summary.formalReceiptAmount, 900);
 }
 
 {

@@ -34,11 +34,13 @@ export function createEnterpriseCockpitService(deps: Dependencies) {
       const employees = await deps.repository.listEmployees(departmentIds, deps.rolloutPositionIds);
       const employeeIds = employees.map((item) => item.id);
       const positionIds = Array.from(new Set(employees.flatMap((item) => item.positionId ? [item.positionId] : [])));
-      const [standardPositionIds, tasks, reviews, business] = await Promise.all([
+      const [standardPositionIds, tasks, reviews, business, okr, delivery] = await Promise.all([
         deps.repository.listCurrentStandardPositionIds(positionIds),
         deps.repository.listTasks(employeeIds, dateFrom, dateTo),
         deps.repository.listReviews(employeeIds, dateFrom, dateTo),
         deps.repository.listBusiness(employeeIds, dateFrom, dateTo),
+        deps.repository.listOkrSummary(employeeIds),
+        deps.repository.listDeliverySummary(employeeIds),
       ]);
       const coveredEmployees = employees.filter((item) => item.positionId && standardPositionIds.includes(item.positionId)).length;
       const completedTasks = tasks.filter((item) => ['COMPLETED', 'CONFIRMED'].includes(item.status)).length;
@@ -70,6 +72,7 @@ export function createEnterpriseCockpitService(deps: Dependencies) {
           upgradeCount: orders.filter((item) => item.isUpgrade).length,
           refundCount: business.filter((item) => item.isRefund || item.domain === 'refunds').length,
         },
+        organization: { okr, delivery },
         insights,
         generatedAt: clock().toISOString(),
       });

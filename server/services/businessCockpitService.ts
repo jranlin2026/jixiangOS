@@ -41,7 +41,7 @@ import {
 
 type BusinessCockpitPrisma = Pick<
   PrismaClient,
-  'businessRecord' | 'customerTodo' | 'user' | 'role' | 'department'
+  'businessRecord' | 'leadRecord' | 'customerTodo' | 'user' | 'role' | 'department'
 >;
 
 export interface BusinessCockpitVisibility {
@@ -114,6 +114,7 @@ export interface BusinessCockpitSnapshot {
     overdueCustomerTodoCount: number;
     completedCustomerTodoCount: number;
   };
+  leadSources: Array<{ source: string; leadCount: number; followedCount: number; followRate: number }>;
   orderHealth: {
     pendingReviewApplicationCount: number;
     returnedApplicationCount: number;
@@ -346,6 +347,42 @@ function resolveDateRange(
   return { startAt, endAt, label };
 }
 
+function previousComparableRange(
+  range: DashboardDateRange,
+  resolved: { startAt: string; endAt: string },
+): { startAt: string; endAt: string } {
+  const start = new Date(resolved.startAt);
+  const end = new Date(resolved.endAt);
+  if (range.preset === 'month') {
+    const shiftShanghaiMonth = (value: Date) => {
+      const local = new Date(value.getTime() + 8 * 60 * 60 * 1000);
+      const year = local.getUTCFullYear();
+      const month = local.getUTCMonth();
+      const day = local.getUTCDate();
+      const targetMonthLastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      return new Date(Date.UTC(
+        year,
+        month - 1,
+        Math.min(day, targetMonthLastDay),
+        local.getUTCHours(),
+        local.getUTCMinutes(),
+        local.getUTCSeconds(),
+        local.getUTCMilliseconds(),
+      ) - 8 * 60 * 60 * 1000);
+    };
+    return { startAt: shiftShanghaiMonth(start).toISOString(), endAt: shiftShanghaiMonth(end).toISOString() };
+  }
+  const offset = range.preset === 'today'
+    ? 24 * 60 * 60 * 1000
+    : range.preset === 'week'
+      ? 7 * 24 * 60 * 60 * 1000
+      : end.getTime() - start.getTime() + 1;
+  return {
+    startAt: new Date(start.getTime() - offset).toISOString(),
+    endAt: new Date(end.getTime() - offset).toISOString(),
+  };
+}
+
 function toCockpitVisibility(scope: DataVisibilityScope): BusinessCockpitVisibility {
   return {
     unrestricted: scope.unrestricted,
@@ -384,18 +421,22 @@ export function createBusinessCockpitService(
       const leadVisibility = visibilityFor(query, 'leads');
       const customerVisibility = visibilityFor(query, 'customers');
       const applicationVisibility = visibilityFor(query, 'orderApplications');
-      const rows = await prisma.businessRecord.findMany({
-        where: { domain: { in: [
-          STORAGE_KEYS.ORDERS,
-          STORAGE_KEYS.RECOVERY_ORDERS,
-          STORAGE_KEYS.COMMISSIONS,
-          STORAGE_KEYS.FINANCE_TRANSACTIONS,
-          STORAGE_KEYS.LEADS,
-          STORAGE_KEYS.CUSTOMERS,
-          STORAGE_KEYS.ORDER_APPLICATIONS,
-          STORAGE_KEYS.REFUNDS,
-        ] } },
-      }) as unknown as BusinessRecordRow[];
+      const [storedRows, structuredLeadRows] = await Promise.all([
+        prisma.businessRecord.findMany({
+          where: { domain: { in: [
+            STORAGE_KEYS.ORDERS,
+            STORAGE_KEYS.RECOVERY_ORDERS,
+            STORAGE_KEYS.COMMISSIONS,
+            STORAGE_KEYS.FINANCE_TRANSACTIONS,
+            STORAGE_KEYS.LEADS,
+            STORAGE_KEYS.CUSTOMERS,
+            STORAGE_KEYS.ORDER_APPLICATIONS,
+            STORAGE_KEYS.REFUNDS,
+          ] } },
+        }),
+        prisma.leadRecord.findMany({ select: { id: true, data: true } }),
+      ]);
+      const rows = storedRows as unknown as BusinessRecordRow[];
       const storedOrders = rows
         .filter((row) => row.domain === STORAGE_KEYS.ORDERS)
         .flatMap((row) => {
@@ -436,10 +477,18 @@ export function createBusinessCockpitService(
           );
         })
         .filter((commission) => inRange(commission.paymentDate || commission.createdAt, startAt, endAt));
-      const leads = rows
+      const canonicalLeads = structuredLeadRows
+        .flatMap((row) => {
+          const lead = parseRecord<Lead>(row.data);
+          return lead && !lead.deletedAt ? [{ ...lead, id: String(row.id || lead.id) }] : [];
+        });
+      const canonicalLeadIds = new Set(canonicalLeads.map((lead) => lead.id));
+      const legacyLeads = rows
         .filter((row) => row.domain === STORAGE_KEYS.LEADS)
         .map((row) => parseRecord<Lead>(row.data))
         .filter((lead): lead is Lead => Boolean(lead && !lead.deletedAt))
+        .filter((lead) => !canonicalLeadIds.has(lead.id));
+      const leads = [...canonicalLeads, ...legacyLeads]
         .filter((lead) => visibleLead(lead, leadVisibility));
       const customers = rows
         .filter((row) => row.domain === STORAGE_KEYS.CUSTOMERS)
@@ -678,6 +727,16 @@ export function createBusinessCockpitService(
           todo.status === 'completed' && inRange(todo.completedAt, startAt, endAt)
         )).length,
       };
+      const leadSourceMap = new Map<string, { source: string; leadCount: number; followedCount: number; followRate: number }>();
+      leads.filter((lead) => inRange(lead.createdAt, startAt, endAt)).forEach((lead) => {
+        const source = clean(lead.source) || '未填写来源';
+        const current = leadSourceMap.get(source) || { source, leadCount: 0, followedCount: 0, followRate: 0 };
+        current.leadCount += 1;
+        if ((lead.followUpRecords || []).some((record) => inRange(record.createdAt, startAt, endAt))) current.followedCount += 1;
+        current.followRate = roundMoney(current.followedCount / current.leadCount * 100);
+        leadSourceMap.set(source, current);
+      });
+      const leadSources = [...leadSourceMap.values()].sort((left, right) => right.leadCount - left.leadCount || left.source.localeCompare(right.source, 'zh-CN'));
       const orderHealth: BusinessCockpitSnapshot['orderHealth'] = {
         pendingReviewApplicationCount: applications.filter((application) => application.status === '待财务审核').length,
         returnedApplicationCount: applications.filter((application) => application.status === '退回修改').length,
@@ -742,6 +801,7 @@ export function createBusinessCockpitService(
           reconciliationOrderIds: reconciliationIssueOrderIds.sort(),
         },
         followUpHealth,
+        leadSources,
         orderHealth,
         refundHealth: {
           refundingOrderCount: activeRefundOrderIds.size + legacyRefundingOrders.length,
@@ -794,7 +854,7 @@ export function createBusinessCockpitService(
       customers: buildDataVisibilityScopeForUser(actor, users, roles, departments, 'customers'),
       orderApplications: buildDataVisibilityScopeForUser(actor, users, roles, departments, 'orderApplications'),
     };
-    const snapshotResponse = await getSnapshot({
+    const snapshotQuery = {
       startAt: resolvedRange.startAt,
       endAt: resolvedRange.endAt,
       visibility: toCockpitVisibility(scopes.orders),
@@ -806,8 +866,14 @@ export function createBusinessCockpitService(
         customers: toCockpitVisibility(scopes.customers),
         orderApplications: toCockpitVisibility(scopes.orderApplications),
       },
-    });
+    };
+    const previousRange = previousComparableRange(range, resolvedRange);
+    const [snapshotResponse, previousSnapshotResponse] = await Promise.all([
+      getSnapshot(snapshotQuery),
+      getSnapshot({ ...snapshotQuery, ...previousRange }),
+    ]);
     const snapshot = snapshotResponse.data;
+    const previousSnapshot = previousSnapshotResponse.data;
     const userById = new Map(users.map((user) => [user.id, user]));
     const departmentById = new Map(departments.map((department) => [department.id, department.name]));
     const mapRanking = (item: BusinessCockpitRankingItem) => {
@@ -893,6 +959,19 @@ export function createBusinessCockpitService(
         newLeadCount,
         newCustomerCount: snapshot.followUpHealth.newCustomerCount,
       },
+      comparison: {
+        label: '上期同期',
+        summary: {
+          formalReceiptAmount: previousSnapshot.business.formalOrderPaidAmount,
+          recoveryAmount: previousSnapshot.business.recoveryBusinessAmount,
+          operatingAmount: roundMoney(previousSnapshot.business.formalOrderPaidAmount + previousSnapshot.business.recoveryBusinessAmount),
+          formalOrderCount: previousSnapshot.business.formalOrderCount,
+          recoveryOrderCount: previousSnapshot.business.recoveryOrderCount,
+          newLeadCount: previousSnapshot.followUpHealth.newLeadCount,
+          newCustomerCount: previousSnapshot.followUpHealth.newCustomerCount,
+        },
+        refundAmount: previousSnapshot.refundHealth.refundAmount,
+      },
       trend: snapshot.trend,
       salesRanking: snapshot.salesRanking.map(mapRanking),
       recoveryRanking: snapshot.recoveryRanking.map(mapRanking),
@@ -907,6 +986,7 @@ export function createBusinessCockpitService(
         followedCustomerCount: snapshot.followUpHealth.followedCustomerCount,
         overdueTodoCount: snapshot.followUpHealth.overdueCustomerTodoCount,
       },
+      leadSources: snapshot.leadSources,
       orderHealth: {
         formalOrderCount: snapshot.business.formalOrderCount,
         recoveryOrderCount: snapshot.business.recoveryOrderCount,

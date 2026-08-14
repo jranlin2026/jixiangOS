@@ -2,6 +2,8 @@ export type CockpitEmployee = { id: string; name?: string; departmentId: string 
 export type CockpitTask = { employeeId: string; departmentId: string | null; workDate: string; status: string; dueAt: string | null };
 export type CockpitReview = { employeeId: string; departmentId: string | null; workDate: string };
 export type CockpitBusinessRecord = { domain: string; ownerId: string | null; departmentId: string | null; eventDate: string; amount: number; isUpgrade?: boolean; isRefund?: boolean };
+export type CockpitOkrSummary = { objectiveCount: number; riskObjectiveCount: number; objectivesWithoutKeyResults: number; averageProgress: number };
+export type CockpitDeliverySummary = { activeCount: number; overdueCount: number; blockedCount: number; completedCount: number };
 
 export interface EnterpriseCockpitRepository {
   listDepartmentTree(rootId: string): Promise<string[]>;
@@ -10,6 +12,8 @@ export interface EnterpriseCockpitRepository {
   listTasks(employeeIds: string[], dateFrom: string, dateTo: string): Promise<CockpitTask[]>;
   listReviews(employeeIds: string[], dateFrom: string, dateTo: string): Promise<CockpitReview[]>;
   listBusiness(employeeIds: string[], dateFrom: string, dateTo: string): Promise<CockpitBusinessRecord[]>;
+  listOkrSummary(employeeIds: string[]): Promise<CockpitOkrSummary>;
+  listDeliverySummary(employeeIds: string[]): Promise<CockpitDeliverySummary>;
 }
 
 type MemoryInput = {
@@ -19,6 +23,8 @@ type MemoryInput = {
   tasks?: CockpitTask[];
   reviews?: CockpitReview[];
   business?: CockpitBusinessRecord[];
+  okr?: CockpitOkrSummary;
+  delivery?: CockpitDeliverySummary;
 };
 
 export function createMemoryEnterpriseCockpitRepository(input: MemoryInput = {}): EnterpriseCockpitRepository {
@@ -37,5 +43,7 @@ export function createMemoryEnterpriseCockpitRepository(input: MemoryInput = {})
     async listTasks(employeeIds, from, to) { return (input.tasks || []).filter((item) => employeeIds.includes(item.employeeId) && item.workDate >= from && item.workDate <= to); },
     async listReviews(employeeIds, from, to) { return (input.reviews || []).filter((item) => employeeIds.includes(item.employeeId) && item.workDate >= from && item.workDate <= to); },
     async listBusiness(employeeIds, from, to) { return (input.business || []).filter((item) => (!item.ownerId || employeeIds.includes(item.ownerId)) && item.eventDate >= from && item.eventDate <= to); },
+    async listOkrSummary() { return input.okr || { objectiveCount: 0, riskObjectiveCount: 0, objectivesWithoutKeyResults: 0, averageProgress: 0 }; },
+    async listDeliverySummary() { return input.delivery || { activeCount: 0, overdueCount: 0, blockedCount: 0, completedCount: 0 }; },
   };
 }

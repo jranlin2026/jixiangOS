@@ -109,6 +109,10 @@ export type EnterpriseCockpit = {
     reviewCount: number;
   };
   business: { leadCount: number; orderCount: number; orderAmount: number; upgradeCount: number; refundCount: number };
+  organization: {
+    okr: { objectiveCount: number; riskObjectiveCount: number; objectivesWithoutKeyResults: number; averageProgress: number };
+    delivery: { activeCount: number; overdueCount: number; blockedCount: number; completedCount: number };
+  };
   insights: string[];
   generatedAt: string;
 };

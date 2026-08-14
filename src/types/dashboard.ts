@@ -113,6 +113,13 @@ export interface CockpitCustomerHealth {
   overdueTodoCount: number;
 }
 
+export interface CockpitLeadSourceItem {
+  source: string;
+  leadCount: number;
+  followedCount: number;
+  followRate: number;
+}
+
 export interface CockpitOrderHealth {
   formalOrderCount: number;
   recoveryOrderCount: number;
@@ -144,10 +151,16 @@ export interface BusinessCockpitData {
   scopeLabel: string;
   updatedAt: Timestamp;
   summary: CockpitSummary;
+  comparison: {
+    label: string;
+    summary: CockpitSummary;
+    refundAmount: number;
+  };
   trend: CockpitTrendPoint[];
   salesRanking: CockpitPerformanceRankingItem[];
   recoveryRanking: CockpitPerformanceRankingItem[];
   customerHealth: CockpitCustomerHealth;
+  leadSources: CockpitLeadSourceItem[];
   orderHealth: CockpitOrderHealth;
   financeHealth: CockpitFinanceHealth;
   riskTasks: CockpitRiskItem[];

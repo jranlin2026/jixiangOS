@@ -25,14 +25,21 @@ assert.match(page, /<AreaChart[^>]*data=\{data\}/);
 assert.match(page, /height=\{270\}/);
 assert.match(page, /销售业绩排行/);
 assert.match(page, /挽回业绩排行/);
-assert.match(page, /客户跟进健康/);
-assert.match(page, /订单 \/ 财务健康/);
+assert.match(page, /客户增长漏斗/);
+assert.match(page, /资金与订单健康/);
+assert.match(page, /期间经营结果/, '老板第一屏必须先展示期间经营结果');
+assert.match(page, /老板今日重点/, '当前存量风险必须与期间指标分开展示');
+assert.match(page, /组织执行/, '岗位、任务、OKR和交付应归入组织执行区');
 assert.match(page, /重新加载/);
 assert.match(page, /timeZone: 'Asia\/Shanghai'/, '驾驶舱日期和更新时间必须统一使用上海时区');
 assert.match(page, /validateCustomRange/, '自定义统计周期必须先做前端校验');
 assert.match(page, /rangeError/, '日期错误必须在筛选区提示，不能替换成整页加载失败');
-assert.match(page, /if \(preset === 'custom'\) return;/, '切换自定义只应进入编辑态，不应立即用旧日期重新查询');
+assert.match(page, /resolveDashboardDateRange\(preset\)/, '今日、本周、本月必须解析为统一的实际日期范围');
 assert.match(page, /setRange\(nextRange\);\s*fetchData\(nextRange\);/, '应用自定义日期时筛选状态与请求口径必须同步');
+assert.ok(
+  page.indexOf('<ExecutiveOverview') < page.indexOf('<EnterpriseBrainPanel'),
+  '老板应先看经营结果，再看组织执行',
+);
 assert.match(page, /if \(loading && !data\)/, '非首次切换周期时应保留已有驾驶舱，不能整页闪成加载器');
 assert.match(page, /latestRequestId = useRef\(0\)/, '周期查询必须记录最新请求，避免慢响应覆盖新筛选结果');
 assert.match(page, /requestId !== latestRequestId\.current/, '过期驾驶舱响应不得更新当前页面');
