@@ -86,6 +86,7 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
   const [searchParams] = useSearchParams();
   const cockpitStartDate = searchParams.get('startDate') || undefined;
   const cockpitEndDate = searchParams.get('endDate') || undefined;
+  const cockpitStatus = searchParams.get('status') as Refund['status'] | null;
   const lastRefundViewSettingsTriggerRef = useRef(refundViewSettingsTrigger);
   const {
     items,
@@ -114,12 +115,17 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
     const currentFilters = useRefundStore.getState().filters;
     const nextFilters = {
       ...currentFilters,
-      ...(cockpitStartDate || cockpitEndDate ? { startDate: cockpitStartDate, endDate: cockpitEndDate, page: 1 } : {}),
+      ...(cockpitStartDate || cockpitEndDate || cockpitStatus ? {
+        startDate: cockpitStartDate,
+        endDate: cockpitEndDate,
+        status: cockpitStatus || undefined,
+        page: 1,
+      } : {}),
     };
-    if (cockpitStartDate || cockpitEndDate) setFilters(nextFilters);
+    if (cockpitStartDate || cockpitEndDate || cockpitStatus) setFilters(nextFilters);
     fetchItems(nextFilters);
     fetchStats();
-  }, [cockpitEndDate, cockpitStartDate, fetchItems, fetchStats, setFilters]);
+  }, [cockpitEndDate, cockpitStartDate, cockpitStatus, fetchItems, fetchStats, setFilters]);
 
   useEffect(() => {
     if (refundViewSettingsTrigger <= 0) return;

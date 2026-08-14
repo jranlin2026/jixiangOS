@@ -114,7 +114,11 @@ function canAccessCockpitPath(user: AuthenticatedUser | null, path: string): boo
   if (pathname.startsWith(ROUTES.ORDERS)) {
     return hasPermission(user, PERMISSION_KEYS.ORDER_MANAGE);
   }
-  if (pathname.startsWith(ROUTES.AFTER_SALES) || pathname.startsWith(ROUTES.REFUND_CENTER)) {
+  if (pathname.startsWith(ROUTES.REFUND_CENTER)) {
+    return [PERMISSION_KEYS.AFTER_SALES_REFUND, PERMISSION_KEYS.FINANCE_REFUND]
+      .some((permission) => hasPermission(user, permission));
+  }
+  if (pathname.startsWith(ROUTES.AFTER_SALES)) {
     return [
       PERMISSION_KEYS.AFTER_SALES,
       PERMISSION_KEYS.AFTER_SALES_RECOVERY,
@@ -280,7 +284,7 @@ const ExecutiveOverview: React.FC<{
         <MiniResult label="成交订单" value={`${summary.formalOrderCount} 笔`} helper="正式订单" compare={comparisonText(summary.formalOrderCount, previous.formalOrderCount)} path={buildCockpitDrilldownPath(ROUTES.ORDERS, range, 'payment')} />
         <MiniResult label="新增线索" value={`${summary.newLeadCount}`} helper={`${data.customerHealth.followedLeadCount} 条已跟进`} compare={comparisonText(summary.newLeadCount, previous.newLeadCount)} path={buildCockpitDrilldownPath(ROUTES.LEADS, range, 'created')} />
         <MiniResult label="线索转客率" value={`${conversionRate.toFixed(1)}%`} helper={`${summary.newCustomerCount} 位新增客户`} compare={comparisonText(conversionRate, previousConversionRate)} path={buildCockpitDrilldownPath(ROUTES.LEADS, range, 'created')} />
-        <MiniResult label="退款金额 / 实收比" value={formatCurrency(data.orderHealth.refundAmount)} helper={`${data.orderHealth.refundedOrderCount} 笔 · 占实收 ${summary.formalReceiptAmount ? (data.orderHealth.refundAmount / summary.formalReceiptAmount * 100).toFixed(1) : '0.0'}%`} compare={comparisonText(data.orderHealth.refundAmount, data.comparison.refundAmount)} path={buildCockpitDrilldownPath(ROUTES.REFUND_CENTER, range, 'created')} />
+        <MiniResult label="退款金额 / 实收比" value={formatCurrency(data.orderHealth.refundAmount)} helper={`${data.orderHealth.refundedOrderCount} 笔 · 占实收 ${summary.formalReceiptAmount ? (data.orderHealth.refundAmount / summary.formalReceiptAmount * 100).toFixed(1) : '0.0'}%`} compare={comparisonText(data.orderHealth.refundAmount, data.comparison.refundAmount)} path={buildCockpitDrilldownPath(`${ROUTES.REFUND_CENTER}?status=${encodeURIComponent('退款已完成')}`, range, 'created')} />
       </Box>
     </Paper>
   );

@@ -116,12 +116,12 @@ const customerSaveProfileSource = customerDetailSource.slice(
 
 assert.match(
   businessCockpitSource,
-  /经营信号条/,
+  /期间经营结果/,
   'Business cockpit should use a distinctive operating signal strip instead of generic equal KPI cards.',
 );
 assert.match(
   businessCockpitSource,
-  /当前阻塞/,
+  /最高优先级/,
   'Business cockpit should make the highest-priority blocker explicit.',
 );
 assert.match(
@@ -607,8 +607,8 @@ assert.doesNotMatch(
 );
 assert.match(
   appSource,
-  /ROUTES\.REFUND_CENTER[\s\S]*ROUTES\.AFTER_SALES/,
-  'Legacy refund center route should redirect to after-sales default recovery workspace.',
+  /ROUTES\.REFUND_CENTER[\s\S]*<RefundCenter/,
+  'Refund cockpit drill-down should open its server-backed refund detail workspace.',
 );
 assert.match(
   sidebarSource,

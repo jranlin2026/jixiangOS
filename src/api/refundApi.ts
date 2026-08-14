@@ -13,7 +13,7 @@ import type { FinanceExpense, FinanceDailyRecord, ChannelROI, FinanceIncome } fr
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { shouldUseBackendApi } from './backendClient';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { syncLifecycleByOrder, syncOpportunityRefundedByOrderId } from './lifecycleSync';
@@ -282,10 +282,21 @@ function writeFinanceExpense(refund: Refund, refundMethod: string, paidAt: strin
   setStorageData(STORAGE_KEYS.FINANCE, storage);
 }
 
-async function getRefunds(filters?: RefundFilters): Promise<ApiResponse<PaginatedResponse<Refund>>> {
+async function readRefundsForView(): Promise<ApiResponse<Refund[]>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Refund[]>(`/storage/${encodeURIComponent(STORAGE_KEYS.REFUNDS)}`);
+    if (response.code !== 0) return createErrorResponse(response.message || '退款记录加载失败', response.code);
+    return createSuccessResponse((response.data || []).map(normalizeRefund));
+  }
   ensureInit();
   await delay(200);
-  const all = (getStorageData<Refund[]>(STORAGE_KEYS.REFUNDS) || []).map(normalizeRefund);
+  return createSuccessResponse((getStorageData<Refund[]>(STORAGE_KEYS.REFUNDS) || []).map(normalizeRefund));
+}
+
+async function getRefunds(filters?: RefundFilters): Promise<ApiResponse<PaginatedResponse<Refund>>> {
+  const source = await readRefundsForView();
+  if (source.code !== 0) return createErrorResponse(source.message || '退款记录加载失败', source.code);
+  const all = source.data || [];
   let filtered = [...all];
 
   if (filters?.search) {
@@ -324,9 +335,9 @@ async function getRefunds(filters?: RefundFilters): Promise<ApiResponse<Paginate
 }
 
 async function getRefundStats(): Promise<ApiResponse<RefundStats>> {
-  ensureInit();
-  await delay(120);
-  const refunds = (getStorageData<Refund[]>(STORAGE_KEYS.REFUNDS) || []).map(normalizeRefund);
+  const source = await readRefundsForView();
+  if (source.code !== 0) return createErrorResponse(source.message || '退款统计加载失败', source.code);
+  const refunds = source.data || [];
   return createSuccessResponse({
     toAssign: refunds.filter((item) => item.status === '待分配').length,
     recovering: refunds.filter((item) => item.status === '挽回中').length,
@@ -339,9 +350,9 @@ async function getRefundStats(): Promise<ApiResponse<RefundStats>> {
 }
 
 async function getRefundById(id: string): Promise<ApiResponse<Refund | null>> {
-  ensureInit();
-  await delay(150);
-  const refunds = (getStorageData<Refund[]>(STORAGE_KEYS.REFUNDS) || []).map(normalizeRefund);
+  const source = await readRefundsForView();
+  if (source.code !== 0) return createErrorResponse(source.message || '退款详情加载失败', source.code);
+  const refunds = source.data || [];
   return createSuccessResponse(refunds.find((r) => r.id === id) || null);
 }
 

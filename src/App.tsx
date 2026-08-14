@@ -280,7 +280,7 @@ const App: React.FC = () => {
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.SETTINGS} />}>
             <Route path={ROUTES.SETTINGS} element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />
           </Route>
-          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AFTER_SALES, PERMISSION_KEYS.AFTER_SALES_RECOVERY]} />}>
+          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AFTER_SALES_REFUND, PERMISSION_KEYS.FINANCE_REFUND]} />}>
             <Route path={ROUTES.REFUND_CENTER} element={<Suspense fallback={<PageLoader />}><RefundCenter /></Suspense>} />
           </Route>
           <Route

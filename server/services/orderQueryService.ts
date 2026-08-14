@@ -214,7 +214,11 @@ function matchesOrder(order: Order, filters: OrderFilters): boolean {
   if (filters.paymentMethod && order.paymentMethod !== filters.paymentMethod) return false;
   const paymentMatches = !filters.paymentStartDate && !filters.paymentEndDate
     ? true
-    : (order.payments || []).some((payment) => inDateRange(payment.paidAt, filters.paymentStartDate, filters.paymentEndDate));
+    : (order.payments || []).some((payment) => (
+      Number.isFinite(Number(payment.amount))
+      && Number(payment.amount) > 0
+      && inDateRange(payment.paidAt, filters.paymentStartDate, filters.paymentEndDate)
+    ));
   return inDateRange(order.createdAt, filters.startDate, filters.endDate) && paymentMatches;
 }
 
@@ -273,9 +277,9 @@ async function queryOrderPage(
     conditions.push(Prisma.sql`EXISTS (
       SELECT 1 FROM JSON_TABLE(
         COALESCE(JSON_EXTRACT(br.data, '$.payments'), JSON_ARRAY()),
-        '$[*]' COLUMNS (paidAt VARCHAR(64) PATH '$.paidAt')
+        '$[*]' COLUMNS (paidAt VARCHAR(64) PATH '$.paidAt', amount DECIMAL(18,2) PATH '$.amount' NULL ON ERROR)
       ) AS stored_payment
-      WHERE ${Prisma.join(paymentConditions, ' AND ')}
+      WHERE stored_payment.amount > 0 AND ${Prisma.join(paymentConditions, ' AND ')}
     )`);
   }
   if (!scope.unrestricted) {
