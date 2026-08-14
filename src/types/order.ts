@@ -275,7 +275,7 @@ export interface OrderFilters {
   endDate?: string;
   paymentStartDate?: string;
   paymentEndDate?: string;
-  sortBy?: 'createdAt' | 'paymentDate';
+  sortBy?: 'createdAt' | 'paymentDate' | 'actualAmount';
   sortDirection?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;

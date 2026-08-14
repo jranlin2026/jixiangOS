@@ -57,11 +57,33 @@ function timestamp(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function orderSortTimestamp(order: Order, sortBy?: OrderFilters['sortBy']): number {
+function orderSortValue(order: Order, sortBy?: OrderFilters['sortBy'], direction: 'asc' | 'desc' = 'desc'): number | null {
   if (sortBy === 'paymentDate') {
-    return timestamp(order.payments?.[0]?.paidAt || order.createdAt);
+    const timestamps = (order.payments || [])
+      .filter((payment) => Number.isFinite(Number(payment.amount)) && Number(payment.amount) > 0)
+      .map((payment) => timestamp(payment.paidAt))
+      .filter((value) => value > 0);
+    if (!timestamps.length) return null;
+    return direction === 'asc' ? Math.min(...timestamps) : Math.max(...timestamps);
+  }
+  if (sortBy === 'actualAmount') {
+    const amount = Number(order.actualAmount ?? order.amount);
+    return Number.isFinite(amount) ? amount : null;
   }
   return timestamp(order.createdAt);
+}
+
+function compareOrders(left: Order, right: Order, filters: OrderFilters): number {
+  const direction = filters.sortDirection === 'asc' ? 1 : -1;
+  const leftValue = orderSortValue(left, filters.sortBy, filters.sortDirection);
+  const rightValue = orderSortValue(right, filters.sortBy, filters.sortDirection);
+  if (leftValue === null || rightValue === null) {
+    if (leftValue === null && rightValue !== null) return 1;
+    if (rightValue === null && leftValue !== null) return -1;
+  }
+  return direction * (Number(leftValue || 0) - Number(rightValue || 0))
+    || timestamp(right.createdAt) - timestamp(left.createdAt)
+    || right.id.localeCompare(left.id);
 }
 
 function applicationSortTimestamp(
@@ -294,11 +316,17 @@ async function queryOrderPage(
     const pattern = `%${search}%`;
     conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(COALESCE(br.owner, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.productName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.thirdPartyOrderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.payments[0].paymentOrderNo')}) LIKE ${pattern})`);
   }
+  const paymentAggregate = filters.sortDirection === 'asc' ? 'MIN' : 'MAX';
+  const paymentSortDate = `(SELECT ${paymentAggregate}(sorted_payment.paidAt) FROM JSON_TABLE(COALESCE(JSON_EXTRACT(br.data, '$.payments'), JSON_ARRAY()), '$[*]' COLUMNS (paidAt VARCHAR(64) PATH '$.paidAt', amount DECIMAL(18,2) PATH '$.amount' NULL ON ERROR)) AS sorted_payment WHERE sorted_payment.amount > 0 AND sorted_payment.paidAt IS NOT NULL)`;
+  const amountSortValue = `CAST(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.actualAmount')), JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.amount'))) AS DECIMAL(18,2))`;
+  const orderBy = filters.sortBy === 'paymentDate'
+    ? `${paymentSortDate} IS NULL ASC, ${paymentSortDate} ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) DESC, br.id DESC`
+    : filters.sortBy === 'actualAmount'
+      ? `${amountSortValue} IS NULL ASC, ${amountSortValue} ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) DESC, br.id DESC`
+      : `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, br.id DESC`;
   return queryBusinessRecordPage<Order>(prisma, {
     from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
-    orderBy: filters.sortBy === 'paymentDate'
-      ? `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.payments[0].paidAt')), JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, br.id ASC`
-      : `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, br.id ASC`,
+    orderBy,
     page, pageSize,
   });
 }
@@ -372,7 +400,6 @@ export function createOrderQueryService(
           commission.orderId,
           [...(commissionsByOrder.get(commission.orderId) || []), commission],
         ));
-      const direction = filters.sortDirection === 'asc' ? 1 : -1;
       const items = (rows as BusinessRecordRow[])
         .map((row) => parseRecord<Order>(row.data))
         .filter((order): order is Order => Boolean(order && !order.deletedAt))
@@ -381,10 +408,7 @@ export function createOrderQueryService(
           settlementStatus: deriveOrderListSettlementProgress(commissionsByOrder.get(order.id) || []),
         }))
         .filter((order) => orderIsVisible(order, scope) && matchesOrder(order, filters))
-        .sort((left, right) => (
-          direction * (orderSortTimestamp(left, filters.sortBy) - orderSortTimestamp(right, filters.sortBy))
-          || left.id.localeCompare(right.id)
-        ));
+        .sort((left, right) => compareOrders(left, right, filters));
       const result = paginate(items, filters.page, filters.pageSize);
       const sourceApplicationIds = result.items
         .filter((order) => !order.createdByName && order.sourceApplicationId)

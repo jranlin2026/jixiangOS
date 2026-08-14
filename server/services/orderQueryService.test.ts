@@ -102,6 +102,24 @@ const records = [
       { id: 'installment-july', amount: 499, paymentMethod: '对公转账', paidAt: '2026-07-24T10:00:00.000Z' },
     ],
   }),
+  order('payment-priority-installment', finance.id, finance.name, {
+    payments: [
+      { id: 'priority-june', amount: 400, paymentMethod: '对公转账', paidAt: '2026-06-20T10:00:00.000Z' },
+      { id: 'priority-july-latest', amount: 499, paymentMethod: '对公转账', paidAt: '2026-07-30T10:00:00.000Z' },
+    ],
+  }),
+  order('payment-priority-single', finance.id, finance.name, {
+    payments: [{ id: 'priority-july-single', amount: 899, paymentMethod: '对公转账', paidAt: '2026-07-25T10:00:00.000Z' }],
+  }),
+  order('payment-priority-none', finance.id, finance.name, {
+    payments: [], createdAt: '2026-07-31T12:00:00.000Z', updatedAt: '2026-07-31T12:00:00.000Z',
+  }),
+  order('amount-priority-high', finance.id, finance.name, {
+    actualAmount: 5000, createdAt: '2026-07-01T12:00:00.000Z', updatedAt: '2026-07-01T12:00:00.000Z',
+  }),
+  order('amount-priority-low', finance.id, finance.name, {
+    actualAmount: 100, createdAt: '2026-07-31T12:00:00.000Z', updatedAt: '2026-07-31T12:00:00.000Z',
+  }),
 ];
 const applications = [
   {
@@ -267,6 +285,26 @@ assert.deepEqual(
   (await service.listOrders({ search: 'payment-installment', paymentStartDate: '2026-07-01', paymentEndDate: '2026-07-31', page: 1, pageSize: 10 }, finance)).data?.items.map((item) => item.id),
   ['payment-installment'],
   '分期订单任意一笔付款落在期间内都必须能从驾驶舱下钻到',
+);
+assert.deepEqual(
+  (await service.listOrders({ search: 'payment-priority', sortBy: 'paymentDate', sortDirection: 'desc', page: 1, pageSize: 10 }, finance)).data?.items.map((item) => item.id),
+  ['payment-priority-installment', 'payment-priority-single', 'payment-priority-none'],
+  '最新付款必须检查全部有效付款，无付款订单固定排在最后',
+);
+assert.deepEqual(
+  (await service.listOrders({ search: 'payment-priority', sortBy: 'paymentDate', sortDirection: 'asc', page: 1, pageSize: 10 }, finance)).data?.items.map((item) => item.id),
+  ['payment-priority-installment', 'payment-priority-single', 'payment-priority-none'],
+  '最早付款必须检查全部有效付款，无付款订单固定排在最后',
+);
+assert.deepEqual(
+  (await service.listOrders({ search: 'amount-priority', sortBy: 'actualAmount', sortDirection: 'desc', page: 1, pageSize: 10 }, finance)).data?.items.map((item) => item.id),
+  ['amount-priority-high', 'amount-priority-low'],
+  '实付金额从高到低必须按数值排序，不能被创建时间影响',
+);
+assert.deepEqual(
+  (await service.listOrders({ search: 'amount-priority', sortBy: 'actualAmount', sortDirection: 'asc', page: 1, pageSize: 10 }, finance)).data?.items.map((item) => item.id),
+  ['amount-priority-low', 'amount-priority-high'],
+  '实付金额从低到高必须按数值排序，不能被创建时间影响',
 );
 
 const forbiddenOrder = await service.getOrder('order-other', sales);

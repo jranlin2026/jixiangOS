@@ -10,7 +10,8 @@ assert.match(orders, /label="分账状态"/);
 assert.match(orders, /SettlementStatusChip/);
 assert.match(orders, /label="付款开始"/);
 assert.match(orders, /label="付款结束"/);
-assert.match(orders, /按付款时间排序/);
+assert.match(orders, /ORDER_SORT_OPTIONS/);
+assert.match(orders, /label="排序"/);
 assert.match(orders, /handleResetFilters/);
 assert.match(orders, /sortBy:\s*'createdAt'\s+as const/);
 assert.match(orders, /sortDirection:\s*'desc'\s+as const/);
@@ -24,9 +25,9 @@ assert.match(orderReview, /sortBy:\s*'createdAt'/);
 assert.match(orderReview, /sortDirection:\s*'desc'/);
 
 const orderQueryService = read('server/services/orderQueryService.ts');
-assert.match(orderQueryService, /\$\.payments\[0\]\.paidAt[\s\S]*br\.id ASC/);
-assert.match(orderQueryService, /\$\.orderData\.payments\[0\]\.paidAt[\s\S]*br\.id ASC/);
-assert.match(orderQueryService, /\$\.createdAt'\)\), br\.createdAt\)[^`]*br\.id ASC/);
+assert.match(orderQueryService, /JSON_TABLE[\s\S]*sorted_payment\.amount > 0/);
+assert.match(orderQueryService, /filters\.sortBy === 'actualAmount'/);
+assert.match(orderQueryService, /br\.id DESC/);
 
 const recoveryQueryService = read('server/services/recoveryOrderCommandService.ts');
 assert.match(recoveryQueryService, /\$\.recoveryAt[\s\S]*br\.id ASC/);

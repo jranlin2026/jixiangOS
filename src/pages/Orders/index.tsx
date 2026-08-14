@@ -28,7 +28,6 @@ import {
 import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import SortIcon from '@mui/icons-material/Sort';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
@@ -74,6 +73,12 @@ import SettlementStatusChip from '../../shared/components/SettlementStatusChip';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import { SETTLEMENT_STATUSES } from '../../shared/utils/settlementStatus';
 import BusinessSubmissionResultDialog from '../../shared/components/BusinessSubmissionResultDialog';
+import {
+  ORDER_SORT_OPTIONS,
+  orderSortFilters,
+  resolveOrderSortOption,
+  type OrderSortOption,
+} from './orderSortModel';
 
 type OrderColumn = {
   id: string;
@@ -481,9 +486,13 @@ const Orders: React.FC = () => {
     fetchItems(newFilters);
   };
 
-  const handlePaymentDateSort = () => {
-    const nextDirection: 'asc' | 'desc' = filters.sortBy === 'paymentDate' && filters.sortDirection === 'desc' ? 'asc' : 'desc';
-    const newFilters = { ...filters, paymentMethod: undefined, sortBy: 'paymentDate' as const, sortDirection: nextDirection, page: 1, pageSize: pagination.pageSize || 10 };
+  const handleSortChange = (value: OrderSortOption) => {
+    const newFilters = {
+      ...filters,
+      ...orderSortFilters(value),
+      page: 1,
+      pageSize: pagination.pageSize || 10,
+    };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
@@ -877,11 +886,18 @@ const Orders: React.FC = () => {
               size="small"
               InputLabelProps={{ shrink: true }}
             />
-            <Button variant="outlined" startIcon={<SortIcon />} onClick={handlePaymentDateSort}>
-              {filters.sortBy === 'paymentDate'
-                ? `付款时间${filters.sortDirection === 'asc' ? '升序' : '降序'}`
-                : '按付款时间排序'}
-            </Button>
+            <FormControl size="small" sx={{ minWidth: 190 }}>
+              <InputLabel>排序</InputLabel>
+              <Select
+                value={resolveOrderSortOption(filters)}
+                label="排序"
+                onChange={(event) => handleSortChange(event.target.value as OrderSortOption)}
+              >
+                {ORDER_SORT_OPTIONS.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <Button variant="outlined" startIcon={<RestartAltIcon />} onClick={handleResetFilters}>
               重置
             </Button>

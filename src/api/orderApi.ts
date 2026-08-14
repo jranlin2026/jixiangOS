@@ -36,6 +36,38 @@ function getPrimaryPaymentDate(order: Order): string {
   return order.payments?.[0]?.paidAt || order.createdAt;
 }
 
+function getPaymentSortTime(order: Order, direction: 'asc' | 'desc'): number | null {
+  const times = (order.payments || [])
+    .filter((payment) => Number.isFinite(Number(payment.amount)) && Number(payment.amount) > 0)
+    .map((payment) => new Date(payment.paidAt).getTime())
+    .filter(Number.isFinite);
+  if (!times.length) return null;
+  return direction === 'asc' ? Math.min(...times) : Math.max(...times);
+}
+
+function compareOrderListItems(left: Order, right: Order, filters: OrderFilters): number {
+  const direction = filters.sortDirection === 'asc' ? 1 : -1;
+  let leftValue: number | null;
+  let rightValue: number | null;
+  if (filters.sortBy === 'paymentDate') {
+    leftValue = getPaymentSortTime(left, filters.sortDirection || 'desc');
+    rightValue = getPaymentSortTime(right, filters.sortDirection || 'desc');
+  } else if (filters.sortBy === 'actualAmount') {
+    leftValue = Number.isFinite(Number(left.actualAmount ?? left.amount)) ? Number(left.actualAmount ?? left.amount) : null;
+    rightValue = Number.isFinite(Number(right.actualAmount ?? right.amount)) ? Number(right.actualAmount ?? right.amount) : null;
+  } else {
+    leftValue = new Date(left.createdAt).getTime();
+    rightValue = new Date(right.createdAt).getTime();
+  }
+  if (leftValue === null || rightValue === null) {
+    if (leftValue === null && rightValue !== null) return 1;
+    if (rightValue === null && leftValue !== null) return -1;
+  }
+  return direction * (Number(leftValue || 0) - Number(rightValue || 0))
+    || new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    || right.id.localeCompare(left.id);
+}
+
 function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
   const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
   const matched = (productId ? products.find((product) => product.id === productId) : undefined)
@@ -318,19 +350,7 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
     filtered = filtered.filter((o) => getPrimaryPaymentDate(o) <= paymentEndDate);
   }
 
-  if (filters?.sortBy === 'paymentDate') {
-    filtered.sort((a, b) => {
-      const aTime = new Date(getPrimaryPaymentDate(a)).getTime();
-      const bTime = new Date(getPrimaryPaymentDate(b)).getTime();
-      return filters?.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
-    });
-  } else {
-    filtered.sort((a, b) => {
-      const aTime = new Date(a.createdAt).getTime();
-      const bTime = new Date(b.createdAt).getTime();
-      return filters?.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
-    });
-  }
+  filtered.sort((left, right) => compareOrderListItems(left, right, filters || {}));
 
   const page = filters?.page || 1;
   const pageSize = filters?.pageSize || DEFAULT_PAGE_SIZE;
