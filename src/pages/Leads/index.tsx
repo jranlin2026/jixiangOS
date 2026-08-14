@@ -241,6 +241,8 @@ const readLeadViewConfig = (columns: LeadColumn[]) => {
 
 const Leads: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const cockpitStartDate = searchParams.get('startDate') || undefined;
+  const cockpitEndDate = searchParams.get('endDate') || undefined;
   const { items, filters, pagination, fetchItems, setFilters, resetListFilters } = useLeadStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const [activeTab, setActiveTab] = useState(0);
@@ -287,7 +289,16 @@ const Leads: React.FC = () => {
   );
 
   useEffect(() => {
-    fetchItems();
+    const currentFilters = useLeadStore.getState().filters;
+    const nextFilters = {
+      ...currentFilters,
+      ...(cockpitStartDate || cockpitEndDate ? { startDate: cockpitStartDate, endDate: cockpitEndDate, page: 1 } : {}),
+    };
+    if (cockpitStartDate || cockpitEndDate) setFilters(nextFilters);
+    fetchItems(nextFilters);
+  }, [cockpitEndDate, cockpitStartDate, currentUser?.id, fetchItems, setFilters]);
+
+  useEffect(() => {
     settingsApi.fetchLifecycleStatusConfigs().then((res) => {
       if (res.code === 0) setLifecycleConfigs(res.data);
     });
@@ -300,7 +311,7 @@ const Leads: React.FC = () => {
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive && !item.parentId));
     });
-  }, [currentUser?.id, fetchItems]);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     const leadId = searchParams.get('leadId');

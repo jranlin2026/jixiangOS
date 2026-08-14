@@ -44,7 +44,7 @@ import type {
   HomeTaskItem,
 } from '../../types/dashboard';
 import EnterpriseBrainPanel from './EnterpriseBrainPanel';
-import { resolveDashboardDateRange, toShanghaiDateString } from './businessCockpitModel';
+import { buildCockpitDrilldownPath, rankCockpitRisks, resolveDashboardDateRange, toShanghaiDateString } from './businessCockpitModel';
 
 const palette = {
   page: '#F6F8FB',
@@ -154,14 +154,7 @@ function normalizePercent(value: number): number {
 }
 
 function priorityRisk(risks: CockpitRiskItem[]): CockpitRiskItem | undefined {
-  const toneRank = { error: 4, warning: 3, info: 2, primary: 1, success: 0 };
-  return risks
-    .slice()
-    .sort((left, right) => (
-      (right.amount || 0) - (left.amount || 0)
-      || toneRank[right.tone] - toneRank[left.tone]
-      || right.count - left.count
-    ))[0];
+  return rankCockpitRisks(risks)[0];
 }
 
 const SectionPanel: React.FC<{
@@ -215,7 +208,8 @@ const SectionPanel: React.FC<{
 const ExecutiveOverview: React.FC<{
   data: BusinessCockpitData;
   mainRisk?: CockpitRiskItem;
-}> = ({ data, mainRisk }) => {
+  range: DashboardDateRange;
+}> = ({ data, mainRisk, range }) => {
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
   const summary = data.summary;
@@ -281,12 +275,12 @@ const ExecutiveOverview: React.FC<{
           p: { xs: 2, md: 2.5 },
         }}
       >
-        <MiniResult label="正式订单净实收" value={formatCurrency(data.financeHealth.formalNetReceiptAmount)} helper={`原实收 ${formatCurrency(summary.formalReceiptAmount)}`} compare={comparisonText(data.financeHealth.formalNetReceiptAmount, data.comparison.formalNetReceiptAmount)} path={ROUTES.ORDERS} />
-        <MiniResult label="售后挽回成交" value={formatCurrency(summary.recoveryAmount)} helper={`${summary.recoveryOrderCount} 笔挽回订单`} compare={comparisonText(summary.recoveryAmount, previous.recoveryAmount)} path={ROUTES.AFTER_SALES} />
-        <MiniResult label="成交订单" value={`${summary.formalOrderCount} 笔`} helper="正式订单" compare={comparisonText(summary.formalOrderCount, previous.formalOrderCount)} path={ROUTES.ORDERS} />
-        <MiniResult label="新增线索" value={`${summary.newLeadCount}`} helper={`${data.customerHealth.followedLeadCount} 条已跟进`} compare={comparisonText(summary.newLeadCount, previous.newLeadCount)} path={ROUTES.LEADS} />
-        <MiniResult label="线索转客率" value={`${conversionRate.toFixed(1)}%`} helper={`${summary.newCustomerCount} 位新增客户`} compare={comparisonText(conversionRate, previousConversionRate)} path={ROUTES.CUSTOMERS} />
-        <MiniResult label="退款金额 / 实收比" value={formatCurrency(data.orderHealth.refundAmount)} helper={`${data.orderHealth.refundedOrderCount} 笔 · 占实收 ${summary.formalReceiptAmount ? (data.orderHealth.refundAmount / summary.formalReceiptAmount * 100).toFixed(1) : '0.0'}%`} compare={comparisonText(data.orderHealth.refundAmount, data.comparison.refundAmount)} path={ROUTES.AFTER_SALES} />
+        <MiniResult label="正式订单净实收" value={formatCurrency(data.financeHealth.formalNetReceiptAmount)} helper={`原实收 ${formatCurrency(summary.formalReceiptAmount)}`} compare={comparisonText(data.financeHealth.formalNetReceiptAmount, data.comparison.formalNetReceiptAmount)} path={buildCockpitDrilldownPath(ROUTES.ORDERS, range, 'payment')} />
+        <MiniResult label="售后挽回成交" value={formatCurrency(summary.recoveryAmount)} helper={`${summary.recoveryOrderCount} 笔挽回订单`} compare={comparisonText(summary.recoveryAmount, previous.recoveryAmount)} path={buildCockpitDrilldownPath(ROUTES.AFTER_SALES, range, 'recovery')} />
+        <MiniResult label="成交订单" value={`${summary.formalOrderCount} 笔`} helper="正式订单" compare={comparisonText(summary.formalOrderCount, previous.formalOrderCount)} path={buildCockpitDrilldownPath(ROUTES.ORDERS, range, 'payment')} />
+        <MiniResult label="新增线索" value={`${summary.newLeadCount}`} helper={`${data.customerHealth.followedLeadCount} 条已跟进`} compare={comparisonText(summary.newLeadCount, previous.newLeadCount)} path={buildCockpitDrilldownPath(ROUTES.LEADS, range, 'created')} />
+        <MiniResult label="线索转客率" value={`${conversionRate.toFixed(1)}%`} helper={`${summary.newCustomerCount} 位新增客户`} compare={comparisonText(conversionRate, previousConversionRate)} path={buildCockpitDrilldownPath(ROUTES.LEADS, range, 'created')} />
+        <MiniResult label="退款金额 / 实收比" value={formatCurrency(data.orderHealth.refundAmount)} helper={`${data.orderHealth.refundedOrderCount} 笔 · 占实收 ${summary.formalReceiptAmount ? (data.orderHealth.refundAmount / summary.formalReceiptAmount * 100).toFixed(1) : '0.0'}%`} compare={comparisonText(data.orderHealth.refundAmount, data.comparison.refundAmount)} path={buildCockpitDrilldownPath(ROUTES.AFTER_SALES, range, 'recovery')} />
       </Box>
     </Paper>
   );
@@ -302,17 +296,26 @@ const TrendLegend: React.FC = () => (
       <Box sx={{ width: 9, height: 9, borderRadius: '50%', bgcolor: palette.green }} />
       <Typography variant="caption" sx={{ color: palette.muted }}>售后挽回成交</Typography>
     </Stack>
+    <Stack direction="row" spacing={0.6} alignItems="center">
+      <Box sx={{ width: 13, borderTop: `2px dashed ${palette.muted}` }} />
+      <Typography variant="caption" sx={{ color: palette.muted }}>上期同期实收</Typography>
+    </Stack>
   </Stack>
 );
 
-const RevenueTrend: React.FC<{ data: BusinessCockpitData['trend'] }> = ({ data }) => (
+const RevenueTrend: React.FC<{ data: BusinessCockpitData['trend']; previous: BusinessCockpitData['trend'] }> = ({ data, previous }) => {
+  const chartData = data.map((point, index) => ({
+    ...point,
+    previousFormalReceiptAmount: previous[index]?.formalReceiptAmount || 0,
+  }));
+  return (
   <SectionPanel title="经营成交趋势" eyebrow="正式订单与售后挽回双轨" action={<TrendLegend />}>
     <Box sx={{ px: { xs: 0.5, sm: 1.5 }, pt: 2, pb: 1 }}>
-      {data.length ? (
+      {chartData.length ? (
         <>
         <Box role="img" aria-label="经营成交趋势图：正式订单实收与售后挽回成交">
         <ResponsiveContainer width="100%" height={270}>
-          <AreaChart accessibilityLayer data={data} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
+          <AreaChart accessibilityLayer data={chartData} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
             <defs>
               <linearGradient id="formalReceiptGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor={palette.blue} stopOpacity={0.18} />
@@ -348,6 +351,16 @@ const RevenueTrend: React.FC<{ data: BusinessCockpitData['trend'] }> = ({ data }
             />
             <Area
               type="monotone"
+              dataKey="previousFormalReceiptAmount"
+              name="上期同期正式订单实收"
+              stroke={palette.muted}
+              strokeDasharray="5 4"
+              strokeWidth={1.8}
+              fill="transparent"
+              activeDot={{ r: 3 }}
+            />
+            <Area
+              type="monotone"
               dataKey="recoveryAmount"
               name="售后挽回成交"
               stroke={palette.green}
@@ -372,7 +385,8 @@ const RevenueTrend: React.FC<{ data: BusinessCockpitData['trend'] }> = ({ data }
       )}
     </Box>
   </SectionPanel>
-);
+  );
+};
 
 const identityLabel: Record<NonNullable<CockpitPerformanceRankingItem['identityStatus']>, string> = {
   resolved: '已匹配',
@@ -634,6 +648,7 @@ const RiskWorkbench: React.FC<{ risks: CockpitRiskItem[] }> = ({ risks }) => {
   }
 
   const mainTone = toneColor[mainRisk.tone];
+  const secondaryRisks = rankCockpitRisks(risks).filter((risk) => risk.id !== mainRisk.id).slice(0, 5);
   const canOpenMainRisk = canAccessCockpitPath(currentUser, mainRisk.path);
   return (
     <SectionPanel title="老板今日重点" eyebrow="截至当前 · 按经营影响排序">
@@ -660,7 +675,7 @@ const RiskWorkbench: React.FC<{ risks: CockpitRiskItem[] }> = ({ risks }) => {
             </Button>
           </Stack>
         </Box>
-        {risks.map((task) => {
+        {secondaryRisks.map((task) => {
           const tone = toneColor[task.tone];
           const canOpenTask = canAccessCockpitPath(currentUser, task.path);
           return (
@@ -871,7 +886,7 @@ const LegacyBusinessCockpit: React.FC = () => {
       )}
 
       <Stack spacing={2}>
-        <ExecutiveOverview data={data} mainRisk={mainRisk} />
+        <ExecutiveOverview data={data} mainRisk={mainRisk} range={range} />
 
         <Box
           sx={{
@@ -882,7 +897,7 @@ const LegacyBusinessCockpit: React.FC = () => {
           }}
         >
           <Box sx={{ minWidth: 0 }}>
-            <RevenueTrend data={data.trend} />
+            <RevenueTrend data={data.trend} previous={data.comparison.trend} />
           </Box>
           <Box sx={{ minWidth: 0 }}>
             <RiskWorkbench risks={riskTasks} />

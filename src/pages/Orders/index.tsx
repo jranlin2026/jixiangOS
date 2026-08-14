@@ -208,6 +208,8 @@ const Orders: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const cockpitPaymentStartDate = searchParams.get('paymentStartDate') || undefined;
+  const cockpitPaymentEndDate = searchParams.get('paymentEndDate') || undefined;
   const visibleTabs = useMemo<Array<{ value: 'list' | 'review'; label: string }>>(() => {
     const tabs: Array<{ value: 'list' | 'review'; label: string }> = [];
     if (hasPermission(currentUser, PERMISSION_KEYS.ORDER_MANAGE)) {
@@ -290,8 +292,19 @@ const Orders: React.FC = () => {
 
   useEffect(() => {
     if (activeTab !== 'list') return;
-    fetchItems({ ...filters, paymentMethod: undefined });
-  }, [activeTab, fetchItems]);
+    const currentFilters = useOrderStore.getState().filters;
+    const nextFilters = {
+      ...currentFilters,
+      paymentMethod: undefined,
+      ...(cockpitPaymentStartDate || cockpitPaymentEndDate ? {
+        paymentStartDate: cockpitPaymentStartDate,
+        paymentEndDate: cockpitPaymentEndDate,
+        page: 1,
+      } : {}),
+    };
+    if (cockpitPaymentStartDate || cockpitPaymentEndDate) setFilters(nextFilters);
+    fetchItems(nextFilters);
+  }, [activeTab, cockpitPaymentEndDate, cockpitPaymentStartDate, fetchItems, setFilters]);
 
   useEffect(() => {
     localStorage.setItem(ORDER_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));

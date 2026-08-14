@@ -158,6 +158,7 @@ export interface BusinessCockpitData {
     summary: CockpitSummary;
     refundAmount: number;
     formalNetReceiptAmount: number;
+    trend: CockpitTrendPoint[];
   };
   trend: CockpitTrendPoint[];
   salesRanking: CockpitPerformanceRankingItem[];

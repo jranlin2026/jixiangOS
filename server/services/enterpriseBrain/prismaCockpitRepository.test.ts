@@ -77,10 +77,12 @@ test('organization summary uses active OKRs and current delivery workload', asyn
     },
     businessRecord: {
       findMany: async () => [
-        { data: { ownerId: 'sales-1', status: '交付中' } },
-        { data: { ownerId: 'sales-1', status: '阻塞' } },
-        { data: { ownerId: 'sales-1', status: '已完成' } },
-        { data: { salesOwnerId: 'sales-1', status: '超期' } },
+        { domain: STORAGE_KEYS.DELIVERIES, data: { ownerId: 'sales-1', status: '交付中' } },
+        { domain: STORAGE_KEYS.DELIVERIES, data: { ownerId: 'sales-1', status: '阻塞' } },
+        { domain: STORAGE_KEYS.DELIVERIES, data: { ownerId: 'sales-1', status: '已完成' } },
+        { domain: STORAGE_KEYS.DELIVERIES, data: { salesOwnerId: 'sales-1', status: '超期' } },
+        { domain: STORAGE_KEYS.ORDERS, data: { id: 'order-related', serviceId: 'sales-1' } },
+        { domain: STORAGE_KEYS.DELIVERIES, data: { orderId: 'order-related', status: '交付中' } },
       ],
     },
   }));
@@ -89,6 +91,6 @@ test('organization summary uses active OKRs and current delivery workload', asyn
     activeCycleCount: 2, objectiveCount: 2, riskObjectiveCount: 1, objectivesWithoutKeyResults: 1, averageProgress: 60,
   });
   assert.deepEqual(await repository.listDeliverySummary(['sales-1']), {
-    activeCount: 3, overdueCount: 1, blockedCount: 1, completedCount: 1,
+    activeCount: 4, overdueCount: 1, blockedCount: 1, completedCount: 1,
   });
 });

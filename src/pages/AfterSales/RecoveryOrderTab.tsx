@@ -170,6 +170,8 @@ interface RecoveryOrderTabProps {
   createSignal?: number;
   viewSettingsSignal?: number;
   exportSignal?: number;
+  initialRecoveryStartDate?: string;
+  initialRecoveryEndDate?: string;
 }
 
 type ReviewAction = {
@@ -316,6 +318,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   createSignal = 0,
   viewSettingsSignal = 0,
   exportSignal = 0,
+  initialRecoveryStartDate = '',
+  initialRecoveryEndDate = '',
 }) => {
   const navigate = useNavigate();
   const mobileFullScreen = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
@@ -340,8 +344,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   const [search, setSearch] = useState('');
   const [recoveryProgress, setRecoveryProgress] = useState('');
   const [recoveryUserId, setRecoveryUserId] = useState('');
-  const [recoveryStartDate, setRecoveryStartDate] = useState('');
-  const [recoveryEndDate, setRecoveryEndDate] = useState('');
+  const [recoveryStartDate, setRecoveryStartDate] = useState(initialRecoveryStartDate || '');
+  const [recoveryEndDate, setRecoveryEndDate] = useState(initialRecoveryEndDate || '');
   const [sortBy, setSortBy] = useState<'updatedAt' | 'createdAt' | 'recoveryAt'>('createdAt');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [reviewQueueView, setReviewQueueView] = useState<ReviewQueueView>('pending');

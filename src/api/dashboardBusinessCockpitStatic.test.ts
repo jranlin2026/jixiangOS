@@ -22,7 +22,8 @@ assert.match(route, /router\.get\('\/business-cockpit'/);
 assert.match(server, /app\.use\('\/api\/dashboard', createBusinessCockpitRouter/);
 assert.match(server, /requireDashboardAccess/);
 assert.match(page, /正式订单与售后挽回双轨/);
-assert.match(page, /<AreaChart[^>]*data=\{data\}/);
+assert.match(page, /<AreaChart[^>]*data=\{chartData\}/);
+assert.match(page, /previousFormalReceiptAmount/, '趋势图必须可与上期同期直接对比');
 assert.match(page, /height=\{270\}/);
 assert.match(page, /销售业绩排行/);
 assert.match(page, /挽回业绩排行/);
@@ -52,6 +53,8 @@ assert.match(page, /ROUTES\.ORDERS/, '正式订单经营指标必须支持下钻
 assert.match(page, /ROUTES\.AFTER_SALES/, '售后挽回经营指标必须支持下钻');
 assert.match(page, /ROUTES\.CUSTOMERS/, '客户健康指标必须支持下钻');
 assert.match(page, /canAccessCockpitPath/, '驾驶舱下钻必须先判断目标页面权限');
+assert.match(page, /buildCockpitDrilldownPath/, '经营指标下钻必须保留当前已应用日期范围');
+assert.match(page, /secondaryRisks[\s\S]*slice\(0, 5\)/, '老板重点应排序后限制为五项且不重复最高风险');
 assert.match(page, /pathname === ROUTES\.ORDER_REVIEW/, '订单审核风险下钻必须校验审核列表权限');
 assert.match(page, /tab === 'flow'[\s\S]*PERMISSION_KEYS\.FINANCE_FLOW/, '收支流水风险下钻必须校验收支流水页签权限');
 assert.match(page, /tab === 'settlement'[\s\S]*PERMISSION_KEYS\.FINANCE_SETTLEMENT/, '订单分账风险下钻必须校验订单分账页签权限');

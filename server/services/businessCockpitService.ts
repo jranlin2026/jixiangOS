@@ -1010,6 +1010,7 @@ export function createBusinessCockpitService(
         },
         refundAmount: previousSnapshot.refundHealth.refundAmount,
         formalNetReceiptAmount: previousSnapshot.financeHealth.formalOrderNetReceiptAmount,
+        trend: previousSnapshot.trend,
       },
       trend: snapshot.trend,
       salesRanking: snapshot.salesRanking.map(mapRanking),

@@ -112,6 +112,8 @@ const AfterSales: React.FC = () => {
           createSignal={createSignal}
           viewSettingsSignal={viewSettingsSignal}
           exportSignal={exportSignal}
+          initialRecoveryStartDate={searchParams.get('recoveryStartDate') || ''}
+          initialRecoveryEndDate={searchParams.get('recoveryEndDate') || ''}
         />
       )}
       {activeTab === 'recovery-review' && (

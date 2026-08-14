@@ -126,17 +126,41 @@ export function createPrismaEnterpriseCockpitRepository(prisma: Client): Enterpr
     async listDeliverySummary(employeeIds) {
       if (!employeeIds.length) return { activeCount: 0, overdueCount: 0, blockedCount: 0, completedCount: 0 };
       const [rows, users] = await Promise.all([
-        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.DELIVERIES }, select: { data: true } }),
+        prisma.businessRecord.findMany({
+          where: { domain: { in: [STORAGE_KEYS.DELIVERIES, STORAGE_KEYS.ORDERS] } },
+          select: { domain: true, data: true },
+        }),
         prisma.user.findMany({ where: { id: { in: employeeIds } }, select: { name: true } }),
       ]);
       const employeeNames = new Set(users.map((user: any) => String(user.name || '')).filter(Boolean));
       const ids = new Set(employeeIds);
-      const deliveries = rows.map((row: any) => dataObject(row.data)).filter((delivery: any) => (
-        ids.has(String(delivery.ownerId || ''))
-        || ids.has(String(delivery.salesOwnerId || ''))
-        || employeeNames.has(String(delivery.owner || ''))
-        || employeeNames.has(String(delivery.salesOwner || ''))
-      ));
+      const ordersById = new Map<string, Record<string, any>>(rows
+        .filter((row: any) => row.domain === STORAGE_KEYS.ORDERS)
+        .map((row: any) => {
+          const order = dataObject(row.data);
+          return [String(order.id || ''), order] as const;
+        })
+        .filter(([id]: readonly [string, Record<string, any>]) => Boolean(id)));
+      const relationMatches = (value: unknown) => ids.has(String(value || ''));
+      const nameMatches = (value: unknown) => employeeNames.has(String(value || ''));
+      const deliveries = rows
+        .filter((row: any) => row.domain === STORAGE_KEYS.DELIVERIES)
+        .map((row: any) => dataObject(row.data)).filter((delivery: any) => {
+          const order = ordersById.get(String(delivery.orderId || ''));
+          return (
+            ids.has(String(delivery.ownerId || ''))
+            || ids.has(String(delivery.salesOwnerId || ''))
+            || employeeNames.has(String(delivery.owner || ''))
+            || employeeNames.has(String(delivery.salesOwner || ''))
+            || relationMatches(order?.salesId)
+            || relationMatches(order?.successId)
+            || relationMatches(order?.serviceId)
+            || nameMatches(order?.salesName)
+            || nameMatches(order?.owner)
+            || nameMatches(order?.successName)
+            || nameMatches(order?.serviceName)
+          );
+        });
       return {
         activeCount: deliveries.filter((delivery: any) => delivery.status !== '已完成').length,
         overdueCount: deliveries.filter((delivery: any) => delivery.status === '超期').length,
