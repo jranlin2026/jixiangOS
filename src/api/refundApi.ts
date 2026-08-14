@@ -302,8 +302,15 @@ async function getRefunds(filters?: RefundFilters): Promise<ApiResponse<Paginate
   if (filters?.maxAmount !== undefined) filtered = filtered.filter((r) => r.refundAmount <= Number(filters.maxAmount));
   if (filters?.hasRecoveryLog !== undefined) filtered = filtered.filter((r) => Boolean(r.recoveryLogs?.length) === filters.hasRecoveryLog);
   if (filters?.isTimeout) filtered = filtered.filter((r) => Boolean(r.recoveryTask?.nextFollowUpAt && r.recoveryTask.nextFollowUpAt < nowIso() && r.status === '挽回中'));
-  if (filters?.startDate) filtered = filtered.filter((r) => r.createdAt >= filters.startDate!);
-  if (filters?.endDate) filtered = filtered.filter((r) => r.createdAt <= filters.endDate!);
+  const refundEventAt = (refund: Refund) => refund.refundedAt || refund.completedAt || refund.createdAt;
+  if (filters?.startDate) {
+    const startDate = /^\d{4}-\d{2}-\d{2}$/.test(filters.startDate) ? `${filters.startDate}T00:00:00.000+08:00` : filters.startDate;
+    filtered = filtered.filter((r) => new Date(refundEventAt(r)).getTime() >= new Date(startDate).getTime());
+  }
+  if (filters?.endDate) {
+    const endDate = /^\d{4}-\d{2}-\d{2}$/.test(filters.endDate) ? `${filters.endDate}T23:59:59.999+08:00` : filters.endDate;
+    filtered = filtered.filter((r) => new Date(refundEventAt(r)).getTime() <= new Date(endDate).getTime());
+  }
 
   filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 

@@ -54,7 +54,8 @@ assert.match(page, /ROUTES\.AFTER_SALES/, '售后挽回经营指标必须支持�
 assert.match(page, /ROUTES\.CUSTOMERS/, '客户健康指标必须支持下钻');
 assert.match(page, /canAccessCockpitPath/, '驾驶舱下钻必须先判断目标页面权限');
 assert.match(page, /buildCockpitDrilldownPath/, '经营指标下钻必须保留当前已应用日期范围');
-assert.match(page, /secondaryRisks[\s\S]*slice\(0, 5\)/, '老板重点应排序后限制为五项且不重复最高风险');
+assert.match(page, /secondaryRisks[\s\S]*slice\(0, 4\)/, '老板重点含最高风险后总数应限制为五项');
+assert.match(page, /alignComparableTrend/, '上期趋势必须按周期内相对日对齐，不得用稀疏数组下标硬拼');
 assert.match(page, /pathname === ROUTES\.ORDER_REVIEW/, '订单审核风险下钻必须校验审核列表权限');
 assert.match(page, /tab === 'flow'[\s\S]*PERMISSION_KEYS\.FINANCE_FLOW/, '收支流水风险下钻必须校验收支流水页签权限');
 assert.match(page, /tab === 'settlement'[\s\S]*PERMISSION_KEYS\.FINANCE_SETTLEMENT/, '订单分账风险下钻必须校验订单分账页签权限');

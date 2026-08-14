@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildCockpitDrilldownPath, rankCockpitRisks, resolveDashboardDateRange } from './businessCockpitModel';
+import { alignComparableTrend, buildCockpitDrilldownPath, rankCockpitRisks, resolveDashboardDateRange } from './businessCockpitModel';
 
 const now = new Date('2026-08-14T04:00:00.000Z');
 
@@ -14,6 +14,22 @@ test('preset date ranges resolve to Shanghai calendar boundaries for every dashb
   assert.deepEqual(resolveDashboardDateRange('month', now), {
     preset: 'month', startDate: '2026-08-01', endDate: '2026-08-14',
   });
+});
+
+test('comparison trend aligns by relative day and retains days present only in the prior period', () => {
+  const result = alignComparableTrend(
+    [{ date: '2026-08-03', label: '08/03', formalReceiptAmount: 300, recoveryAmount: 0 }],
+    [
+      { date: '2026-07-01', label: '07/01', formalReceiptAmount: 100, recoveryAmount: 0 },
+      { date: '2026-07-03', label: '07/03', formalReceiptAmount: 200, recoveryAmount: 0 },
+    ],
+    '2026-08-01',
+    '2026-07-01',
+  );
+  assert.deepEqual(result.map((point) => [point.date, point.formalReceiptAmount, point.previousFormalReceiptAmount]), [
+    ['2026-08-01', 0, 100],
+    ['2026-08-03', 300, 200],
+  ]);
 });
 
 test('dashboard drill-down preserves the applied range and business filter semantics', () => {

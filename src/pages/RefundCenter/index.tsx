@@ -1,4 +1,5 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -82,6 +83,9 @@ interface RefundCenterProps {
 }
 
 const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundViewSettingsTrigger = 0, showInternalTabs = true }) => {
+  const [searchParams] = useSearchParams();
+  const cockpitStartDate = searchParams.get('startDate') || undefined;
+  const cockpitEndDate = searchParams.get('endDate') || undefined;
   const lastRefundViewSettingsTriggerRef = useRef(refundViewSettingsTrigger);
   const {
     items,
@@ -107,9 +111,15 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
   useResetListFiltersOnPageExit(resetListFilters);
 
   useEffect(() => {
-    fetchItems();
+    const currentFilters = useRefundStore.getState().filters;
+    const nextFilters = {
+      ...currentFilters,
+      ...(cockpitStartDate || cockpitEndDate ? { startDate: cockpitStartDate, endDate: cockpitEndDate, page: 1 } : {}),
+    };
+    if (cockpitStartDate || cockpitEndDate) setFilters(nextFilters);
+    fetchItems(nextFilters);
     fetchStats();
-  }, [fetchItems, fetchStats]);
+  }, [cockpitEndDate, cockpitStartDate, fetchItems, fetchStats, setFilters]);
 
   useEffect(() => {
     if (refundViewSettingsTrigger <= 0) return;

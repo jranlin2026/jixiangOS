@@ -1,4 +1,4 @@
-import type { CockpitRiskItem, DashboardDateRange, DashboardRangePreset } from '../../types/dashboard';
+import type { CockpitRiskItem, CockpitTrendPoint, DashboardDateRange, DashboardRangePreset } from '../../types/dashboard';
 
 export function toShanghaiDateString(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -55,4 +55,32 @@ export function rankCockpitRisks(risks: CockpitRiskItem[]): CockpitRiskItem[] {
     || toneRank[right.tone] - toneRank[left.tone]
     || right.count - left.count
   ));
+}
+
+export type ComparableTrendPoint = CockpitTrendPoint & { previousFormalReceiptAmount: number };
+
+export function alignComparableTrend(
+  current: CockpitTrendPoint[],
+  previous: CockpitTrendPoint[],
+  currentStartDate: string,
+  previousStartDate: string,
+): ComparableTrendPoint[] {
+  const dayOffset = (date: string, start: string) => {
+    const [year, month, day] = date.split('-').map(Number);
+    const [startYear, startMonth, startDay] = start.split('-').map(Number);
+    return Math.round((Date.UTC(year, month - 1, day) - Date.UTC(startYear, startMonth - 1, startDay)) / 86_400_000);
+  };
+  const currentByOffset = new Map(current.map((point) => [dayOffset(point.date, currentStartDate), point]));
+  const previousByOffset = new Map(previous.map((point) => [dayOffset(point.date, previousStartDate), point]));
+  const offsets = [...new Set([...currentByOffset.keys(), ...previousByOffset.keys()])].sort((a, b) => a - b);
+  return offsets.map((offset) => {
+    const currentPoint = currentByOffset.get(offset);
+    return {
+      date: currentPoint?.date || shiftDate(currentStartDate, offset),
+      label: currentPoint?.label || shiftDate(currentStartDate, offset).slice(5).replace('-', '/'),
+      formalReceiptAmount: currentPoint?.formalReceiptAmount || 0,
+      recoveryAmount: currentPoint?.recoveryAmount || 0,
+      previousFormalReceiptAmount: previousByOffset.get(offset)?.formalReceiptAmount || 0,
+    };
+  });
 }

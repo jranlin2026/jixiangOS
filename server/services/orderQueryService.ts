@@ -76,13 +76,14 @@ function applicationSortTimestamp(
 
 function inDateRange(value: unknown, startDate?: string, endDate?: string): boolean {
   const time = timestamp(value);
-  if (startDate && time < timestamp(startDate)) return false;
-  if (endDate) {
-    const end = new Date(endDate);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(endDate)) end.setHours(23, 59, 59, 999);
-    if (time > end.getTime()) return false;
-  }
+  if (startDate && time < timestamp(dateBoundary(startDate, false))) return false;
+  if (endDate && time > timestamp(dateBoundary(endDate, true))) return false;
   return true;
+}
+
+function dateBoundary(value: string, endOfDay: boolean): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  return new Date(`${value}${endOfDay ? 'T23:59:59.999' : 'T00:00:00.000'}+08:00`).toISOString();
 }
 
 function orderIsVisible(order: Order, scope: DataVisibilityScope): boolean {
@@ -211,8 +212,10 @@ function matchesOrder(order: Order, filters: OrderFilters): boolean {
   if (filters.owner && order.owner !== filters.owner && order.salesName !== filters.owner) return false;
   if (filters.orderType && order.orderType !== filters.orderType) return false;
   if (filters.paymentMethod && order.paymentMethod !== filters.paymentMethod) return false;
-  return inDateRange(order.createdAt, filters.startDate, filters.endDate)
-    && inDateRange(order.payments?.[0]?.paidAt || order.createdAt, filters.paymentStartDate, filters.paymentEndDate);
+  const paymentMatches = !filters.paymentStartDate && !filters.paymentEndDate
+    ? true
+    : (order.payments || []).some((payment) => inDateRange(payment.paidAt, filters.paymentStartDate, filters.paymentEndDate));
+  return inDateRange(order.createdAt, filters.startDate, filters.endDate) && paymentMatches;
 }
 
 function matchesApplication(application: OrderApplication, filters: OrderApplicationFilters): boolean {
@@ -261,11 +264,20 @@ async function queryOrderPage(
   ];
   if (filters.status) conditions.push(Prisma.sql`br.status = ${filters.status}`);
   if (filters.owner) conditions.push(Prisma.sql`(br.owner = ${filters.owner} OR ${jsonText('br', '$.salesName')} = ${filters.owner})`);
-  if (filters.startDate) conditions.push(Prisma.sql`${jsonText('br', '$.createdAt')} >= ${filters.startDate}`);
-  if (filters.endDate) conditions.push(Prisma.sql`${jsonText('br', '$.createdAt')} <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.endDate) ? `${filters.endDate}T23:59:59.999Z` : filters.endDate}`);
-  const paymentDate = Prisma.sql`COALESCE(${jsonText('br', '$.payments[0].paidAt')}, ${jsonText('br', '$.createdAt')}, br.createdAt)`;
-  if (filters.paymentStartDate) conditions.push(Prisma.sql`${paymentDate} >= ${filters.paymentStartDate}`);
-  if (filters.paymentEndDate) conditions.push(Prisma.sql`${paymentDate} <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.paymentEndDate) ? `${filters.paymentEndDate}T23:59:59.999Z` : filters.paymentEndDate}`);
+  if (filters.startDate) conditions.push(Prisma.sql`${jsonText('br', '$.createdAt')} >= ${dateBoundary(filters.startDate, false)}`);
+  if (filters.endDate) conditions.push(Prisma.sql`${jsonText('br', '$.createdAt')} <= ${dateBoundary(filters.endDate, true)}`);
+  if (filters.paymentStartDate || filters.paymentEndDate) {
+    const paymentConditions: Prisma.Sql[] = [];
+    if (filters.paymentStartDate) paymentConditions.push(Prisma.sql`stored_payment.paidAt >= ${dateBoundary(filters.paymentStartDate, false)}`);
+    if (filters.paymentEndDate) paymentConditions.push(Prisma.sql`stored_payment.paidAt <= ${dateBoundary(filters.paymentEndDate, true)}`);
+    conditions.push(Prisma.sql`EXISTS (
+      SELECT 1 FROM JSON_TABLE(
+        COALESCE(JSON_EXTRACT(br.data, '$.payments'), JSON_ARRAY()),
+        '$[*]' COLUMNS (paidAt VARCHAR(64) PATH '$.paidAt')
+      ) AS stored_payment
+      WHERE ${Prisma.join(paymentConditions, ' AND ')}
+    )`);
+  }
   if (!scope.unrestricted) {
     const salesId = jsonText('br', '$.salesId');
     const ownerName = Prisma.sql`COALESCE(NULLIF(${jsonText('br', '$.salesName')}, ''), ${jsonText('br', '$.owner')})`;

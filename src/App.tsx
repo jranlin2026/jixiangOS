@@ -21,6 +21,7 @@ const CustomerDuplicateGovernance = React.lazy(() => import('./pages/Customers/C
 const Orders = React.lazy(() => import('./pages/Orders'));
 const Delivery = React.lazy(() => import('./pages/Delivery'));
 const AfterSales = React.lazy(() => import('./pages/AfterSales'));
+const RefundCenter = React.lazy(() => import('./pages/RefundCenter'));
 const Finance = React.lazy(() => import('./pages/Finance'));
 const EcommerceSettlement = React.lazy(() => import('./pages/EcommerceSettlement'));
 const Assets = React.lazy(() => import('./pages/Assets'));
@@ -280,7 +281,7 @@ const App: React.FC = () => {
             <Route path={ROUTES.SETTINGS} element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AFTER_SALES, PERMISSION_KEYS.AFTER_SALES_RECOVERY]} />}>
-            <Route path={ROUTES.REFUND_CENTER} element={<Navigate to={ROUTES.AFTER_SALES} replace />} />
+            <Route path={ROUTES.REFUND_CENTER} element={<Suspense fallback={<PageLoader />}><RefundCenter /></Suspense>} />
           </Route>
           <Route
             path="/no-permission"

@@ -1011,6 +1011,8 @@ export function createBusinessCockpitService(
         refundAmount: previousSnapshot.refundHealth.refundAmount,
         formalNetReceiptAmount: previousSnapshot.financeHealth.formalOrderNetReceiptAmount,
         trend: previousSnapshot.trend,
+        startDate: shanghaiDateKey(previousRange.startAt) || '',
+        endDate: shanghaiDateKey(previousRange.endAt) || '',
       },
       trend: snapshot.trend,
       salesRanking: snapshot.salesRanking.map(mapRanking),

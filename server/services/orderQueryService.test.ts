@@ -96,6 +96,12 @@ const records = [
     createdAt: '2026-07-01T00:00:00.000Z',
     updatedAt: '2026-07-01T00:00:00.000Z',
   }),
+  order('payment-installment', finance.id, finance.name, {
+    payments: [
+      { id: 'installment-june', amount: 400, paymentMethod: '对公转账', paidAt: '2026-06-24T10:00:00.000Z' },
+      { id: 'installment-july', amount: 499, paymentMethod: '对公转账', paidAt: '2026-07-24T10:00:00.000Z' },
+    ],
+  }),
 ];
 const applications = [
   {
@@ -257,6 +263,11 @@ const julyPaymentDateOnly = await service.listOrders({
   search: 'payment-sort', paymentStartDate: '2026-07-01', paymentEndDate: '2026-07-31', page: 1, pageSize: 10,
 }, finance);
 assert.deepEqual(julyPaymentDateOnly.data?.items.map((item) => item.id), ['payment-sort-july']);
+assert.deepEqual(
+  (await service.listOrders({ search: 'payment-installment', paymentStartDate: '2026-07-01', paymentEndDate: '2026-07-31', page: 1, pageSize: 10 }, finance)).data?.items.map((item) => item.id),
+  ['payment-installment'],
+  '分期订单任意一笔付款落在期间内都必须能从驾驶舱下钻到',
+);
 
 const forbiddenOrder = await service.getOrder('order-other', sales);
 assert.equal(forbiddenOrder.code, 403);

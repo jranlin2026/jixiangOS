@@ -9,6 +9,11 @@ import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 
 type LeadListPrisma = Pick<PrismaClient, 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
 
+function shanghaiBoundary(value: string, endOfDay: boolean): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(value);
+  return new Date(`${value}${endOfDay ? 'T23:59:59.999' : 'T00:00:00.000'}+08:00`);
+}
+
 type LeadRow = {
   data: unknown;
 };
@@ -64,8 +69,8 @@ function buildLeadWhere(filters: LeadFilters): Prisma.Sql {
   if (filters.status) conditions.push(Prisma.sql`status = ${filters.status}`);
   if (filters.lifecycleStatusCode) conditions.push(Prisma.sql`lifecycleStatusCode = ${filters.lifecycleStatusCode}`);
   if (filters.owner) conditions.push(Prisma.sql`(owner = ${filters.owner} OR assignedTo = ${filters.owner})`);
-  if (filters.startDate) conditions.push(Prisma.sql`createdAt >= ${new Date(filters.startDate)}`);
-  if (filters.endDate) conditions.push(Prisma.sql`createdAt <= ${new Date(filters.endDate)}`);
+  if (filters.startDate) conditions.push(Prisma.sql`createdAt >= ${shanghaiBoundary(filters.startDate, false)}`);
+  if (filters.endDate) conditions.push(Prisma.sql`createdAt <= ${shanghaiBoundary(filters.endDate, true)}`);
 
   return Prisma.sql`${Prisma.join(conditions, ' AND ')}`;
 }
