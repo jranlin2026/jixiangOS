@@ -1276,7 +1276,16 @@ const Academy: React.FC = () => {
             : item,
         ),
       );
+      if (workbenchTask?.session.id === session.id) {
+        setWorkbenchTask(null);
+        activeTaskEvidenceIdRef.current = "";
+        taskEvidenceAttachmentsRef.current = [];
+        setTaskEvidenceAttachments([]);
+        setTaskEvidenceLoading(false);
+        setTaskEvidenceUploading(false);
+      }
       await loadDetail(session.id);
+      await loadBase();
     } finally {
       setSaving(false);
     }

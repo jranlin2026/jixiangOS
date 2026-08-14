@@ -7,6 +7,10 @@ const workbench = academy.slice(
   academy.indexOf("const WorkbenchOverview"),
   academy.indexOf("const LegacyOverview"),
 );
+const changeSessionStatus = academy.slice(
+  academy.indexOf("const changeSessionStatus"),
+  academy.indexOf("const openSessionCreate"),
+);
 
 ["我的工作台", "课程库", "课程安排", "邀约跟进"].forEach((label) => {
   assert.match(academy, new RegExp(`label: "${label}"`), `一级导航应包含${label}`);
@@ -20,6 +24,11 @@ assert.match(academy, /待我处理[\s\S]*待我验收[\s\S]*处理记录/, "个
 assert.match(academy, /确认完成/, "直接确认型任务必须提供明确的一步完成入口");
 assert.match(academy, /当前等待/, "非本人节点必须明确显示当前等待谁处理");
 assert.match(academy, /!workbenchTask\.eventId/, "历史处理记录必须整体只读，不能再次操作当前任务或附件");
+assert.match(
+  changeSessionStatus,
+  /setWorkbenchTask\(null\)[\s\S]*await loadBase\(\)/,
+  "课程状态改变后必须关闭旧任务抽屉并刷新工作台，避免已取消任务仍可上传附件",
+);
 assert.doesNotMatch(academy, /view === "overview"[\s\S]{0,300}loadDetail/, "工作台周历不应预取任何课程详情");
 assert.match(academy, /title="全员课程周历"/, "工作台应明确标记全员课程周历");
 assert.match(workbench, /daySessions\.map/, "全员课程周历必须显示当天全部课程，不能只截取前两场");
