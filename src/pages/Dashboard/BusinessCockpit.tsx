@@ -34,6 +34,7 @@ import { formatCurrency } from '../../shared/utils/formatters';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
 import type { AuthenticatedUser } from '../../types/auth';
+import type { EnterpriseCockpit } from '../../types/enterpriseBrain';
 import type {
   BusinessCockpitData,
   CockpitPerformanceRankingItem,
@@ -157,9 +158,9 @@ function priorityRisk(risks: CockpitRiskItem[]): CockpitRiskItem | undefined {
   return risks
     .slice()
     .sort((left, right) => (
-      toneRank[right.tone] - toneRank[left.tone]
+      (right.amount || 0) - (left.amount || 0)
+      || toneRank[right.tone] - toneRank[left.tone]
       || right.count - left.count
-      || (right.amount || 0) - (left.amount || 0)
     ))[0];
 }
 
@@ -280,12 +281,12 @@ const ExecutiveOverview: React.FC<{
           p: { xs: 2, md: 2.5 },
         }}
       >
-        <MiniResult label="正式订单实收" value={formatCurrency(summary.formalReceiptAmount)} helper={`净实收 ${formatCurrency(data.financeHealth.formalNetReceiptAmount)}`} compare={comparisonText(summary.formalReceiptAmount, previous.formalReceiptAmount)} path={ROUTES.ORDERS} />
+        <MiniResult label="正式订单净实收" value={formatCurrency(data.financeHealth.formalNetReceiptAmount)} helper={`原实收 ${formatCurrency(summary.formalReceiptAmount)}`} compare={comparisonText(data.financeHealth.formalNetReceiptAmount, data.comparison.formalNetReceiptAmount)} path={ROUTES.ORDERS} />
         <MiniResult label="售后挽回成交" value={formatCurrency(summary.recoveryAmount)} helper={`${summary.recoveryOrderCount} 笔挽回订单`} compare={comparisonText(summary.recoveryAmount, previous.recoveryAmount)} path={ROUTES.AFTER_SALES} />
         <MiniResult label="成交订单" value={`${summary.formalOrderCount} 笔`} helper="正式订单" compare={comparisonText(summary.formalOrderCount, previous.formalOrderCount)} path={ROUTES.ORDERS} />
         <MiniResult label="新增线索" value={`${summary.newLeadCount}`} helper={`${data.customerHealth.followedLeadCount} 条已跟进`} compare={comparisonText(summary.newLeadCount, previous.newLeadCount)} path={ROUTES.LEADS} />
         <MiniResult label="线索转客率" value={`${conversionRate.toFixed(1)}%`} helper={`${summary.newCustomerCount} 位新增客户`} compare={comparisonText(conversionRate, previousConversionRate)} path={ROUTES.CUSTOMERS} />
-        <MiniResult label="已退款金额" value={formatCurrency(data.orderHealth.refundAmount)} helper={`${data.orderHealth.refundedOrderCount} 笔已退款`} compare={comparisonText(data.orderHealth.refundAmount, data.comparison.refundAmount)} path={ROUTES.AFTER_SALES} />
+        <MiniResult label="退款金额 / 实收比" value={formatCurrency(data.orderHealth.refundAmount)} helper={`${data.orderHealth.refundedOrderCount} 笔 · 占实收 ${summary.formalReceiptAmount ? (data.orderHealth.refundAmount / summary.formalReceiptAmount * 100).toFixed(1) : '0.0'}%`} compare={comparisonText(data.orderHealth.refundAmount, data.comparison.refundAmount)} path={ROUTES.AFTER_SALES} />
       </Box>
     </Paper>
   );
@@ -488,7 +489,9 @@ const HealthMetric: React.FC<{
 const CustomerHealthPanel: React.FC<{
   health: BusinessCockpitData['customerHealth'];
   sources: BusinessCockpitData['leadSources'];
-}> = ({ health, sources }) => {
+  summary: BusinessCockpitData['summary'];
+  finance: BusinessCockpitData['financeHealth'];
+}> = ({ health, sources, summary, finance }) => {
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
   const canViewCustomers = canAccessCockpitPath(currentUser, ROUTES.CUSTOMERS);
@@ -528,7 +531,7 @@ const CustomerHealthPanel: React.FC<{
         <Box
           sx={{
             display: 'grid',
-            gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(3, minmax(0, 1fr))' },
+            gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(5, minmax(0, 1fr))' },
             gap: 1,
             mt: 2,
           }}
@@ -536,9 +539,8 @@ const CustomerHealthPanel: React.FC<{
           <HealthMetric label="新增线索" value={health.newLeadCount} tone={palette.blue} />
           <HealthMetric label="已跟进线索" value={health.followedLeadCount} tone={palette.teal} />
           <HealthMetric label="线索转客" value={health.newCustomerCount} tone={palette.green} />
-          <HealthMetric label="跟进中客户" value={health.followingCustomerCount} />
-          <HealthMetric label="本期有跟进客户" value={health.followedCustomerCount} />
-          <HealthMetric label="逾期客户待办" value={health.overdueTodoCount} tone={health.overdueTodoCount > 0 ? palette.red : palette.green} />
+          <HealthMetric label="成交订单" value={summary.formalOrderCount} tone={palette.blue} />
+          <HealthMetric label="正式订单净实收" value={formatCompactCurrency(finance.formalNetReceiptAmount)} tone={palette.blue} />
         </Box>
         <Box sx={{ borderTop: `1px solid ${palette.softLine}`, mt: 2, pt: 1.5 }}>
           <Typography variant="body2" sx={{ color: palette.ink, fontWeight: 900, mb: 1 }}>本期线索来源效果</Typography>
@@ -547,7 +549,7 @@ const CustomerHealthPanel: React.FC<{
               {sources.slice(0, 5).map((source) => (
                 <Stack key={source.source} direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
                   <Typography variant="body2" sx={{ color: palette.ink, fontWeight: 700 }} noWrap>{source.source}</Typography>
-                  <Typography variant="caption" sx={{ color: palette.muted, flexShrink: 0 }}>{source.leadCount} 条 · 跟进率 {source.followRate.toFixed(1)}%</Typography>
+                  <Typography variant="caption" sx={{ color: palette.muted, flexShrink: 0 }}>{source.leadCount} 条 · 转客 {source.convertedCustomerCount} · 实收 {formatCompactCurrency(source.receiptAmount)} · 跟进率 {source.followRate.toFixed(1)}%</Typography>
                 </Stack>
               ))}
             </Stack>
@@ -694,7 +696,9 @@ const RiskWorkbench: React.FC<{ risks: CockpitRiskItem[] }> = ({ risks }) => {
 
 const LegacyBusinessCockpit: React.FC = () => {
   const [range, setRange] = useState<DashboardDateRange>(() => resolveDashboardDateRange('month'));
+  const [draftRange, setDraftRange] = useState<DashboardDateRange>(() => resolveDashboardDateRange('month'));
   const [data, setData] = useState<BusinessCockpitData | null>(null);
+  const [organizationData, setOrganizationData] = useState<EnterpriseCockpit | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [rangeError, setRangeError] = useState('');
@@ -738,21 +742,37 @@ const LegacyBusinessCockpit: React.FC = () => {
     if (!preset) return;
     setRangeError('');
     if (preset === 'custom') {
-      setRange((current) => ({ ...current, preset }));
+      setDraftRange((current) => ({ ...current, preset }));
       return;
     }
     const nextRange = resolveDashboardDateRange(preset);
+    setDraftRange(nextRange);
     setRange(nextRange);
     fetchData(nextRange);
   };
 
   const applyCustomRange = () => {
-    const nextRange = { ...range, preset: 'custom' as const };
+    const nextRange = { ...draftRange, preset: 'custom' as const };
+    const nextRangeError = validateCustomRange(nextRange);
+    if (nextRangeError) {
+      setRangeError(nextRangeError);
+      return;
+    }
+    setDraftRange(nextRange);
     setRange(nextRange);
     fetchData(nextRange);
   };
 
-  const mainRisk = useMemo(() => (data ? priorityRisk(data.riskTasks) : undefined), [data]);
+  const riskTasks = useMemo(() => {
+    if (!data) return [];
+    const organizationRisks: CockpitRiskItem[] = organizationData ? [
+      { id: 'delivery-overdue', title: '交付超期', count: organizationData.organization.delivery.overdueCount, path: ROUTES.DELIVERY, tone: 'error' },
+      { id: 'delivery-blocked', title: '交付阻塞', count: organizationData.organization.delivery.blockedCount, path: ROUTES.DELIVERY, tone: 'warning' },
+      { id: 'okr-risk', title: 'OKR风险目标', count: organizationData.organization.okr.riskObjectiveCount, path: ROUTES.OKR, tone: 'warning' },
+    ] : [];
+    return [...data.riskTasks, ...organizationRisks].filter((item) => item.count > 0 || Number(item.amount || 0) > 0);
+  }, [data, organizationData]);
+  const mainRisk = useMemo(() => priorityRisk(riskTasks), [riskTasks]);
 
   if (loading && !data) {
     return (
@@ -801,7 +821,7 @@ const LegacyBusinessCockpit: React.FC = () => {
         </Box>
         <Stack spacing={0.5} alignItems={{ xs: 'stretch', lg: 'flex-end' }}>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap', rowGap: 1 }}>
-            <ToggleButtonGroup value={range.preset} exclusive size="small" onChange={updatePreset}>
+            <ToggleButtonGroup value={draftRange.preset} exclusive size="small" onChange={updatePreset}>
               <ToggleButton value="today">今日</ToggleButton>
               <ToggleButton value="week">本周</ToggleButton>
               <ToggleButton value="month">本月</ToggleButton>
@@ -811,11 +831,11 @@ const LegacyBusinessCockpit: React.FC = () => {
               type="date"
               size="small"
               label="开始"
-              value={range.startDate || ''}
+              value={draftRange.startDate || ''}
               error={Boolean(rangeError)}
               onChange={(event) => {
                 setRangeError('');
-                setRange((prev) => ({ ...prev, preset: 'custom', startDate: event.target.value }));
+                setDraftRange((prev) => ({ ...prev, preset: 'custom', startDate: event.target.value }));
               }}
               InputLabelProps={{ shrink: true }}
               sx={{ bgcolor: '#fff' }}
@@ -824,11 +844,11 @@ const LegacyBusinessCockpit: React.FC = () => {
               type="date"
               size="small"
               label="结束"
-              value={range.endDate || ''}
+              value={draftRange.endDate || ''}
               error={Boolean(rangeError)}
               onChange={(event) => {
                 setRangeError('');
-                setRange((prev) => ({ ...prev, preset: 'custom', endDate: event.target.value }));
+                setDraftRange((prev) => ({ ...prev, preset: 'custom', endDate: event.target.value }));
               }}
               InputLabelProps={{ shrink: true }}
               sx={{ bgcolor: '#fff' }}
@@ -865,7 +885,7 @@ const LegacyBusinessCockpit: React.FC = () => {
             <RevenueTrend data={data.trend} />
           </Box>
           <Box sx={{ minWidth: 0 }}>
-            <RiskWorkbench risks={data.riskTasks} />
+            <RiskWorkbench risks={riskTasks} />
           </Box>
         </Box>
 
@@ -878,7 +898,7 @@ const LegacyBusinessCockpit: React.FC = () => {
           }}
         >
           <Box sx={{ minWidth: 0 }}>
-            <CustomerHealthPanel health={data.customerHealth} sources={data.leadSources} />
+            <CustomerHealthPanel health={data.customerHealth} sources={data.leadSources} summary={data.summary} finance={data.financeHealth} />
           </Box>
           <Box sx={{ minWidth: 0 }}>
             <OrderFinanceHealthPanel order={data.orderHealth} finance={data.financeHealth} />
@@ -900,7 +920,7 @@ const LegacyBusinessCockpit: React.FC = () => {
           </Box>
         </Box>
 
-        <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} />
+        <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} onData={setOrganizationData} />
 
         <Stack direction="row" spacing={1} alignItems="center" sx={{ color: palette.muted, px: 0.5 }}>
           <TrendingUpIcon fontSize="small" />

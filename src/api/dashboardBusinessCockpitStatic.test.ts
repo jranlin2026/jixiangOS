@@ -5,6 +5,7 @@ const api = readFileSync('src/api/dashboardApi.ts', 'utf8');
 const server = readFileSync('server/index.ts', 'utf8');
 const route = readFileSync('server/routes/businessCockpitRoutes.ts', 'utf8');
 const page = readFileSync('src/pages/Dashboard/BusinessCockpit.tsx', 'utf8');
+const enterprisePanel = readFileSync('src/pages/Dashboard/EnterpriseBrainPanel.tsx', 'utf8');
 const financePage = readFileSync('src/pages/Finance/index.tsx', 'utf8');
 
 assert.match(
@@ -36,6 +37,8 @@ assert.match(page, /validateCustomRange/, '自定义统计周期必须先做前�
 assert.match(page, /rangeError/, '日期错误必须在筛选区提示，不能替换成整页加载失败');
 assert.match(page, /resolveDashboardDateRange\(preset\)/, '今日、本周、本月必须解析为统一的实际日期范围');
 assert.match(page, /setRange\(nextRange\);\s*fetchData\(nextRange\);/, '应用自定义日期时筛选状态与请求口径必须同步');
+assert.match(page, /value=\{draftRange\.startDate/, '自定义日期输入必须使用独立草稿，不能提前改变已应用周期');
+assert.match(page, /<EnterpriseBrainPanel dateFrom=\{range\.startDate/, '组织执行必须只读取已应用周期');
 assert.ok(
   page.indexOf('<ExecutiveOverview') < page.indexOf('<EnterpriseBrainPanel'),
   '老板应先看经营结果，再看组织执行',
@@ -43,6 +46,8 @@ assert.ok(
 assert.match(page, /if \(loading && !data\)/, '非首次切换周期时应保留已有驾驶舱，不能整页闪成加载器');
 assert.match(page, /latestRequestId = useRef\(0\)/, '周期查询必须记录最新请求，避免慢响应覆盖新筛选结果');
 assert.match(page, /requestId !== latestRequestId\.current/, '过期驾驶舱响应不得更新当前页面');
+assert.match(enterprisePanel, /latestRequestId = useRef\(0\)/, '组织执行查询也必须防止旧周期响应覆盖新周期');
+assert.match(enterprisePanel, /\.catch\(/, '组织执行请求失败必须收敛为页面错误状态');
 assert.match(page, /ROUTES\.ORDERS/, '正式订单经营指标必须支持下钻');
 assert.match(page, /ROUTES\.AFTER_SALES/, '售后挽回经营指标必须支持下钻');
 assert.match(page, /ROUTES\.CUSTOMERS/, '客户健康指标必须支持下钻');

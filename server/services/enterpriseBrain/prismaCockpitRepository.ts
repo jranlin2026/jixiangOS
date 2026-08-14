@@ -110,12 +110,13 @@ export function createPrismaEnterpriseCockpitRepository(prisma: Client): Enterpr
       return result;
     },
     async listOkrSummary(employeeIds) {
-      if (!employeeIds.length) return { objectiveCount: 0, riskObjectiveCount: 0, objectivesWithoutKeyResults: 0, averageProgress: 0 };
+      if (!employeeIds.length) return { activeCycleCount: 0, objectiveCount: 0, riskObjectiveCount: 0, objectivesWithoutKeyResults: 0, averageProgress: 0 };
       const rows = await prisma.objective.findMany({
         where: { ownerId: { in: employeeIds }, cycle: { status: 'ACTIVE' }, status: { in: ['PUBLISHED', 'COMPLETED'] } },
-        select: { progress: true, health: true, _count: { select: { keyResults: true } } },
+        select: { cycleId: true, progress: true, health: true, _count: { select: { keyResults: true } } },
       });
       return {
+        activeCycleCount: new Set(rows.map((row: any) => row.cycleId)).size,
         objectiveCount: rows.length,
         riskObjectiveCount: rows.filter((row: any) => row.health !== 'ON_TRACK').length,
         objectivesWithoutKeyResults: rows.filter((row: any) => Number(row._count?.keyResults || 0) === 0).length,
@@ -124,8 +125,18 @@ export function createPrismaEnterpriseCockpitRepository(prisma: Client): Enterpr
     },
     async listDeliverySummary(employeeIds) {
       if (!employeeIds.length) return { activeCount: 0, overdueCount: 0, blockedCount: 0, completedCount: 0 };
-      const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.DELIVERIES }, select: { data: true } });
-      const deliveries = rows.map((row: any) => dataObject(row.data)).filter((delivery: any) => employeeIds.includes(String(delivery.ownerId || '')));
+      const [rows, users] = await Promise.all([
+        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.DELIVERIES }, select: { data: true } }),
+        prisma.user.findMany({ where: { id: { in: employeeIds } }, select: { name: true } }),
+      ]);
+      const employeeNames = new Set(users.map((user: any) => String(user.name || '')).filter(Boolean));
+      const ids = new Set(employeeIds);
+      const deliveries = rows.map((row: any) => dataObject(row.data)).filter((delivery: any) => (
+        ids.has(String(delivery.ownerId || ''))
+        || ids.has(String(delivery.salesOwnerId || ''))
+        || employeeNames.has(String(delivery.owner || ''))
+        || employeeNames.has(String(delivery.salesOwner || ''))
+      ));
       return {
         activeCount: deliveries.filter((delivery: any) => delivery.status !== '已完成').length,
         overdueCount: deliveries.filter((delivery: any) => delivery.status === '超期').length,

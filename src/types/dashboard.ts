@@ -118,6 +118,8 @@ export interface CockpitLeadSourceItem {
   leadCount: number;
   followedCount: number;
   followRate: number;
+  convertedCustomerCount: number;
+  receiptAmount: number;
 }
 
 export interface CockpitOrderHealth {
@@ -155,6 +157,7 @@ export interface BusinessCockpitData {
     label: string;
     summary: CockpitSummary;
     refundAmount: number;
+    formalNetReceiptAmount: number;
   };
   trend: CockpitTrendPoint[];
   salesRanking: CockpitPerformanceRankingItem[];

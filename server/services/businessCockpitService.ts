@@ -114,7 +114,7 @@ export interface BusinessCockpitSnapshot {
     overdueCustomerTodoCount: number;
     completedCustomerTodoCount: number;
   };
-  leadSources: Array<{ source: string; leadCount: number; followedCount: number; followRate: number }>;
+  leadSources: Array<{ source: string; leadCount: number; followedCount: number; followRate: number; convertedCustomerCount: number; receiptAmount: number }>;
   orderHealth: {
     pendingReviewApplicationCount: number;
     returnedApplicationCount: number;
@@ -135,6 +135,11 @@ export interface BusinessCockpitSnapshot {
 }
 
 type BusinessRecordRow = { domain: string; recordId: string; data: unknown };
+type BusinessCockpitSnapshotSource = {
+  rows: BusinessRecordRow[];
+  structuredLeadRows: Array<{ id: string; data: unknown }>;
+  customerTodoRows: unknown[];
+};
 
 const MAX_RECONCILIATION_DRILLDOWN_ORDERS = 100;
 const roundMoney = (value: number) => Number.isFinite(value)
@@ -413,7 +418,34 @@ export function createBusinessCockpitService(
   prisma: BusinessCockpitPrisma,
   options: { now?: () => Date } = {},
 ) {
-  const getSnapshot = async (query: BusinessCockpitQuery): Promise<ApiResponse<BusinessCockpitSnapshot>> => {
+  const loadSnapshotSource = async (): Promise<BusinessCockpitSnapshotSource> => {
+    const [storedRows, structuredLeadRows, customerTodoRows] = await Promise.all([
+      prisma.businessRecord.findMany({
+        where: { domain: { in: [
+          STORAGE_KEYS.ORDERS,
+          STORAGE_KEYS.RECOVERY_ORDERS,
+          STORAGE_KEYS.COMMISSIONS,
+          STORAGE_KEYS.FINANCE_TRANSACTIONS,
+          STORAGE_KEYS.LEADS,
+          STORAGE_KEYS.CUSTOMERS,
+          STORAGE_KEYS.ORDER_APPLICATIONS,
+          STORAGE_KEYS.REFUNDS,
+        ] } },
+      }),
+      prisma.leadRecord.findMany({ select: { id: true, data: true } }),
+      prisma.customerTodo.findMany(),
+    ]);
+    return {
+      rows: storedRows as unknown as BusinessRecordRow[],
+      structuredLeadRows: structuredLeadRows as Array<{ id: string; data: unknown }>,
+      customerTodoRows,
+    };
+  };
+
+  const getSnapshot = async (
+    query: BusinessCockpitQuery,
+    loadedSource?: BusinessCockpitSnapshotSource,
+  ): Promise<ApiResponse<BusinessCockpitSnapshot>> => {
       const startAt = timestamp(query.startAt);
       const endAt = timestamp(query.endAt);
       const orderVisibility = visibilityFor(query, 'orders');
@@ -421,22 +453,8 @@ export function createBusinessCockpitService(
       const leadVisibility = visibilityFor(query, 'leads');
       const customerVisibility = visibilityFor(query, 'customers');
       const applicationVisibility = visibilityFor(query, 'orderApplications');
-      const [storedRows, structuredLeadRows] = await Promise.all([
-        prisma.businessRecord.findMany({
-          where: { domain: { in: [
-            STORAGE_KEYS.ORDERS,
-            STORAGE_KEYS.RECOVERY_ORDERS,
-            STORAGE_KEYS.COMMISSIONS,
-            STORAGE_KEYS.FINANCE_TRANSACTIONS,
-            STORAGE_KEYS.LEADS,
-            STORAGE_KEYS.CUSTOMERS,
-            STORAGE_KEYS.ORDER_APPLICATIONS,
-            STORAGE_KEYS.REFUNDS,
-          ] } },
-        }),
-        prisma.leadRecord.findMany({ select: { id: true, data: true } }),
-      ]);
-      const rows = storedRows as unknown as BusinessRecordRow[];
+      const source = loadedSource || await loadSnapshotSource();
+      const { rows, structuredLeadRows } = source;
       const storedOrders = rows
         .filter((row) => row.domain === STORAGE_KEYS.ORDERS)
         .flatMap((row) => {
@@ -501,7 +519,7 @@ export function createBusinessCockpitService(
         .filter((application): application is OrderApplication => Boolean(application && !application.reviewCleanedAt))
         .filter((application) => visibleApplication(application, applicationVisibility));
       const visibleCustomerIds = new Set(customers.map((customer) => customer.id));
-      const customerTodos = (await prisma.customerTodo.findMany())
+      const customerTodos = source.customerTodoRows
         .map(normalizeTodo)
         .filter((todo): todo is CustomerTodo => Boolean(todo))
         .filter((todo) => visibleCustomerIds.has(todo.customerId))
@@ -727,16 +745,31 @@ export function createBusinessCockpitService(
           todo.status === 'completed' && inRange(todo.completedAt, startAt, endAt)
         )).length,
       };
-      const leadSourceMap = new Map<string, { source: string; leadCount: number; followedCount: number; followRate: number }>();
+      const leadSourceMap = new Map<string, BusinessCockpitSnapshot['leadSources'][number]>();
+      const sourceItem = (sourceValue: unknown) => {
+        const source = clean(sourceValue) || '未填写来源';
+        const current = leadSourceMap.get(source) || { source, leadCount: 0, followedCount: 0, followRate: 0, convertedCustomerCount: 0, receiptAmount: 0 };
+        leadSourceMap.set(source, current);
+        return current;
+      };
       leads.filter((lead) => inRange(lead.createdAt, startAt, endAt)).forEach((lead) => {
-        const source = clean(lead.source) || '未填写来源';
-        const current = leadSourceMap.get(source) || { source, leadCount: 0, followedCount: 0, followRate: 0 };
+        const current = sourceItem(lead.source);
         current.leadCount += 1;
         if ((lead.followUpRecords || []).some((record) => inRange(record.createdAt, startAt, endAt))) current.followedCount += 1;
         current.followRate = roundMoney(current.followedCount / current.leadCount * 100);
-        leadSourceMap.set(source, current);
       });
-      const leadSources = [...leadSourceMap.values()].sort((left, right) => right.leadCount - left.leadCount || left.source.localeCompare(right.source, 'zh-CN'));
+      customers.filter((customer) => isLeadConversionInRange(customer, startAt, endAt)).forEach((customer) => {
+        sourceItem(customer.leadSource).convertedCustomerCount += 1;
+      });
+      const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+      formalOrderIds.forEach((orderId) => {
+        const order = orders.find((item) => item.id === orderId);
+        const customer = order ? customerById.get(order.customerId) : undefined;
+        sourceItem(customer?.leadSource).receiptAmount = roundMoney(
+          sourceItem(customer?.leadSource).receiptAmount + (formalPaymentAmountByOrder.get(orderId) || 0),
+        );
+      });
+      const leadSources = [...leadSourceMap.values()].sort((left, right) => right.receiptAmount - left.receiptAmount || right.leadCount - left.leadCount || left.source.localeCompare(right.source, 'zh-CN'));
       const orderHealth: BusinessCockpitSnapshot['orderHealth'] = {
         pendingReviewApplicationCount: applications.filter((application) => application.status === '待财务审核').length,
         returnedApplicationCount: applications.filter((application) => application.status === '退回修改').length,
@@ -868,9 +901,10 @@ export function createBusinessCockpitService(
       },
     };
     const previousRange = previousComparableRange(range, resolvedRange);
+    const snapshotSource = await loadSnapshotSource();
     const [snapshotResponse, previousSnapshotResponse] = await Promise.all([
-      getSnapshot(snapshotQuery),
-      getSnapshot({ ...snapshotQuery, ...previousRange }),
+      getSnapshot(snapshotQuery, snapshotSource),
+      getSnapshot({ ...snapshotQuery, ...previousRange }, snapshotSource),
     ]);
     const snapshot = snapshotResponse.data;
     const previousSnapshot = previousSnapshotResponse.data;
@@ -930,6 +964,10 @@ export function createBusinessCockpitService(
         count: snapshot.followUpHealth.overdueCustomerTodoCount, path: ROUTES.CUSTOMERS, tone: 'error',
       },
       {
+        id: 'refund-processing', title: '退款处理中',
+        count: snapshot.refundHealth.refundingOrderCount, path: ROUTES.AFTER_SALES, tone: 'warning',
+      },
+      {
         id: 'order-pending-settlement', title: '待处理订单分账',
         count: snapshot.orderHealth.pendingSettlementOrderCount, path: `${ROUTES.FINANCE}?tab=settlement`, tone: 'info',
       },
@@ -971,6 +1009,7 @@ export function createBusinessCockpitService(
           newCustomerCount: previousSnapshot.followUpHealth.newCustomerCount,
         },
         refundAmount: previousSnapshot.refundHealth.refundAmount,
+        formalNetReceiptAmount: previousSnapshot.financeHealth.formalOrderNetReceiptAmount,
       },
       trend: snapshot.trend,
       salesRanking: snapshot.salesRanking.map(mapRanking),

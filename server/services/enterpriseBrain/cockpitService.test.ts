@@ -24,7 +24,7 @@ const repository = createMemoryEnterpriseCockpitRepository({
   ],
   reviews: [{ employeeId: 'sales-1', departmentId: 'dept-sales-one', workDate: '2026-07-29' }],
   business: [{ domain: 'orders', ownerId: 'sales-1', departmentId: 'dept-sales-one', eventDate: '2026-07-29', amount: 899 }],
-  okr: { objectiveCount: 4, riskObjectiveCount: 1, objectivesWithoutKeyResults: 1, averageProgress: 62.5 },
+  okr: { activeCycleCount: 1, objectiveCount: 4, riskObjectiveCount: 1, objectivesWithoutKeyResults: 1, averageProgress: 62.5 },
   delivery: { activeCount: 6, overdueCount: 1, blockedCount: 2, completedCount: 3 },
 });
 const service = createEnterpriseCockpitService({ repository, now: () => new Date('2026-07-29T10:00:00.000Z') });
@@ -39,7 +39,7 @@ assert.equal(result.data?.execution.reviewRate, 50);
 assert.equal(result.data?.business.orderCount, 1);
 assert.equal(result.data?.business.orderAmount, 899);
 assert.deepEqual(result.data?.organization.okr, {
-  objectiveCount: 4, riskObjectiveCount: 1, objectivesWithoutKeyResults: 1, averageProgress: 62.5,
+  activeCycleCount: 1, objectiveCount: 4, riskObjectiveCount: 1, objectivesWithoutKeyResults: 1, averageProgress: 62.5,
 });
 assert.deepEqual(result.data?.organization.delivery, {
   activeCount: 6, overdueCount: 1, blockedCount: 2, completedCount: 3,

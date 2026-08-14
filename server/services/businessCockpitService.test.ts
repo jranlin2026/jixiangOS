@@ -648,6 +648,7 @@ const financeTransaction = (
       }],
     })),
     row(STORAGE_KEYS.CUSTOMERS, customer('visible-followed', 'sales-1', {
+      leadSource: '官网',
       lifecycleStatusCode: 'following',
       activityRecords: [
         {
@@ -732,7 +733,7 @@ const financeTransaction = (
     overdueCustomerTodoCount: 1,
     completedCustomerTodoCount: 1,
   });
-  assert.deepEqual(result.data?.leadSources, [{ source: '官网', leadCount: 1, followedCount: 1, followRate: 100 }],
+  assert.deepEqual(result.data?.leadSources, [{ source: '官网', leadCount: 1, followedCount: 1, followRate: 100, convertedCustomerCount: 1, receiptAmount: 0 }],
     '来源效果必须按当前期间新增线索统计，并沿用同一数据权限');
   assert.deepEqual(result.data?.orderHealth, {
     pendingReviewApplicationCount: 1,
@@ -784,7 +785,11 @@ const financeTransaction = (
       payment('current-payment', 900, '2026-08-10T08:00:00.000Z'),
     ])),
   ];
-  const service = createBusinessCockpitService(fakePrisma(records) as any, {
+  const prisma = fakePrisma(records) as any;
+  let businessRecordReads = 0;
+  const findMany = prisma.businessRecord.findMany;
+  prisma.businessRecord.findMany = async (...args: any[]) => { businessRecordReads += 1; return findMany(...args); };
+  const service = createBusinessCockpitService(prisma, {
     now: () => new Date('2026-08-14T12:00:00.000Z'),
   });
   const result = await service.get({
@@ -795,6 +800,7 @@ const financeTransaction = (
   assert.equal(result.data?.comparison.summary.formalReceiptAmount, 500,
     '老板驾驶舱必须用等长上一周期对比，不能拿半个月和完整月份比较');
   assert.equal(result.data?.summary.formalReceiptAmount, 900);
+  assert.equal(businessRecordReads, 1, '本期与上期同期必须复用一次源数据读取，不能双倍扫描业务表');
 }
 
 {

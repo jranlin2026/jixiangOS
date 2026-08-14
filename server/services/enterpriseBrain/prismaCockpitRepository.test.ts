@@ -71,8 +71,8 @@ test('organization summary uses active OKRs and current delivery workload', asyn
   const repository = createPrismaEnterpriseCockpitRepository(createPrisma({
     objective: {
       findMany: async () => [
-        { progress: 80, health: 'ON_TRACK', _count: { keyResults: 2 } },
-        { progress: 40, health: 'AT_RISK', _count: { keyResults: 0 } },
+        { cycleId: 'cycle-month', progress: 80, health: 'ON_TRACK', _count: { keyResults: 2 } },
+        { cycleId: 'cycle-quarter', progress: 40, health: 'AT_RISK', _count: { keyResults: 0 } },
       ],
     },
     businessRecord: {
@@ -80,14 +80,15 @@ test('organization summary uses active OKRs and current delivery workload', asyn
         { data: { ownerId: 'sales-1', status: '交付中' } },
         { data: { ownerId: 'sales-1', status: '阻塞' } },
         { data: { ownerId: 'sales-1', status: '已完成' } },
+        { data: { salesOwnerId: 'sales-1', status: '超期' } },
       ],
     },
   }));
 
   assert.deepEqual(await repository.listOkrSummary(['sales-1']), {
-    objectiveCount: 2, riskObjectiveCount: 1, objectivesWithoutKeyResults: 1, averageProgress: 60,
+    activeCycleCount: 2, objectiveCount: 2, riskObjectiveCount: 1, objectivesWithoutKeyResults: 1, averageProgress: 60,
   });
   assert.deepEqual(await repository.listDeliverySummary(['sales-1']), {
-    activeCount: 2, overdueCount: 0, blockedCount: 1, completedCount: 1,
+    activeCount: 3, overdueCount: 1, blockedCount: 1, completedCount: 1,
   });
 });
