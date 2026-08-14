@@ -25,9 +25,9 @@ assert.match(orderReview, /sortBy:\s*'createdAt'/);
 assert.match(orderReview, /sortDirection:\s*'desc'/);
 
 const orderQueryService = read('server/services/orderQueryService.ts');
-assert.match(orderQueryService, /JSON_TABLE[\s\S]*sorted_payment\.amount > 0/);
-assert.match(orderQueryService, /filters\.sortBy === 'actualAmount'/);
-assert.match(orderQueryService, /br\.id DESC/);
+assert.match(orderQueryService, /\$\.payments\[0\]\.paidAt[\s\S]*br\.id ASC/);
+assert.match(orderQueryService, /\$\.orderData\.payments\[0\]\.paidAt[\s\S]*br\.id ASC/);
+assert.match(orderQueryService, /\$\.createdAt'\)\), br\.createdAt\)[^`]*br\.id ASC/);
 
 const recoveryQueryService = read('server/services/recoveryOrderCommandService.ts');
 assert.match(recoveryQueryService, /\$\.recoveryAt[\s\S]*br\.id ASC/);

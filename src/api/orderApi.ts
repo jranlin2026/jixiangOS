@@ -36,11 +36,15 @@ function getPrimaryPaymentDate(order: Order): string {
   return order.payments?.[0]?.paidAt || order.createdAt;
 }
 
-function getPaymentSortTime(order: Order, direction: 'asc' | 'desc'): number | null {
-  const times = (order.payments || [])
-    .filter((payment) => Number.isFinite(Number(payment.amount)) && Number(payment.amount) > 0)
-    .map((payment) => new Date(payment.paidAt).getTime())
+function getValidPaymentTimes(order: Order): number[] {
+  return (order.payments || [])
+    .filter((payment) => payment && Number.isFinite(Number(payment.amount)) && Number(payment.amount) > 0)
+    .map((payment) => new Date(payment?.paidAt || '').getTime())
     .filter(Number.isFinite);
+}
+
+function getPaymentSortTime(order: Order, direction: 'asc' | 'desc'): number | null {
+  const times = getValidPaymentTimes(order);
   if (!times.length) return null;
   return direction === 'asc' ? Math.min(...times) : Math.max(...times);
 }
@@ -340,14 +344,14 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   if (filters?.endDate) {
     filtered = filtered.filter((o) => o.createdAt <= filters.endDate!);
   }
-  if (filters?.paymentStartDate) {
-    filtered = filtered.filter((o) => getPrimaryPaymentDate(o) >= filters.paymentStartDate!);
-  }
-  if (filters?.paymentEndDate) {
-    const paymentEndDate = filters.paymentEndDate.length === 10
-      ? `${filters.paymentEndDate}T23:59:59.999Z`
-      : filters.paymentEndDate;
-    filtered = filtered.filter((o) => getPrimaryPaymentDate(o) <= paymentEndDate);
+  if (filters?.paymentStartDate || filters?.paymentEndDate) {
+    const startTime = filters.paymentStartDate
+      ? new Date(filters.paymentStartDate.length === 10 ? `${filters.paymentStartDate}T00:00:00.000+08:00` : filters.paymentStartDate).getTime()
+      : Number.NEGATIVE_INFINITY;
+    const endTime = filters.paymentEndDate
+      ? new Date(filters.paymentEndDate.length === 10 ? `${filters.paymentEndDate}T23:59:59.999+08:00` : filters.paymentEndDate).getTime()
+      : Number.POSITIVE_INFINITY;
+    filtered = filtered.filter((order) => getValidPaymentTimes(order).some((time) => time >= startTime && time <= endTime));
   }
 
   filtered.sort((left, right) => compareOrderListItems(left, right, filters || {}));

@@ -109,7 +109,11 @@ const records = [
     ],
   }),
   order('payment-priority-single', finance.id, finance.name, {
-    payments: [{ id: 'priority-july-single', amount: 899, paymentMethod: '对公转账', paidAt: '2026-07-25T10:00:00.000Z' }],
+    payments: [
+      null as any,
+      { id: 'priority-invalid', amount: 899, paymentMethod: '对公转账', paidAt: 'not-a-date' },
+      { id: 'priority-july-single', amount: 899, paymentMethod: '对公转账', paidAt: '2026-07-25T10:00:00.000Z' },
+    ],
   }),
   order('payment-priority-none', finance.id, finance.name, {
     payments: [], createdAt: '2026-07-31T12:00:00.000Z', updatedAt: '2026-07-31T12:00:00.000Z',

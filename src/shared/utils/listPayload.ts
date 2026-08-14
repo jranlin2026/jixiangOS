@@ -32,7 +32,9 @@ export function compactOrderListItem(order: Order): Order {
     reviewLogs: undefined,
     dealEvidencePreview: withoutInlinePayload(order.dealEvidencePreview),
     dealEvidenceAttachments: order.dealEvidenceAttachments?.map(compactBusinessAttachment),
-    payments: (order.payments || []).map(compactPayment),
+    payments: (order.payments || [])
+      .filter((payment): payment is OrderPayment => Boolean(payment && typeof payment === 'object'))
+      .map(compactPayment),
   };
 }
 

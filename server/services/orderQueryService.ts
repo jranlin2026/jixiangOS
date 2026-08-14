@@ -60,8 +60,8 @@ function timestamp(value: unknown): number {
 function orderSortValue(order: Order, sortBy?: OrderFilters['sortBy'], direction: 'asc' | 'desc' = 'desc'): number | null {
   if (sortBy === 'paymentDate') {
     const timestamps = (order.payments || [])
-      .filter((payment) => Number.isFinite(Number(payment.amount)) && Number(payment.amount) > 0)
-      .map((payment) => timestamp(payment.paidAt))
+      .filter((payment) => payment && Number.isFinite(Number(payment.amount)) && Number(payment.amount) > 0)
+      .map((payment) => timestamp(payment?.paidAt))
       .filter((value) => value > 0);
     if (!timestamps.length) return null;
     return direction === 'asc' ? Math.min(...timestamps) : Math.max(...timestamps);
@@ -237,7 +237,8 @@ function matchesOrder(order: Order, filters: OrderFilters): boolean {
   const paymentMatches = !filters.paymentStartDate && !filters.paymentEndDate
     ? true
     : (order.payments || []).some((payment) => (
-      Number.isFinite(Number(payment.amount))
+      payment
+      && Number.isFinite(Number(payment.amount))
       && Number(payment.amount) > 0
       && inDateRange(payment.paidAt, filters.paymentStartDate, filters.paymentEndDate)
     ));
@@ -316,17 +317,11 @@ async function queryOrderPage(
     const pattern = `%${search}%`;
     conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(COALESCE(br.owner, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.productName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.thirdPartyOrderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.payments[0].paymentOrderNo')}) LIKE ${pattern})`);
   }
-  const paymentAggregate = filters.sortDirection === 'asc' ? 'MIN' : 'MAX';
-  const paymentSortDate = `(SELECT ${paymentAggregate}(sorted_payment.paidAt) FROM JSON_TABLE(COALESCE(JSON_EXTRACT(br.data, '$.payments'), JSON_ARRAY()), '$[*]' COLUMNS (paidAt VARCHAR(64) PATH '$.paidAt', amount DECIMAL(18,2) PATH '$.amount' NULL ON ERROR)) AS sorted_payment WHERE sorted_payment.amount > 0 AND sorted_payment.paidAt IS NOT NULL)`;
-  const amountSortValue = `CAST(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.actualAmount')), JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.amount'))) AS DECIMAL(18,2))`;
-  const orderBy = filters.sortBy === 'paymentDate'
-    ? `${paymentSortDate} IS NULL ASC, ${paymentSortDate} ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) DESC, br.id DESC`
-    : filters.sortBy === 'actualAmount'
-      ? `${amountSortValue} IS NULL ASC, ${amountSortValue} ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) DESC, br.id DESC`
-      : `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, br.id DESC`;
   return queryBusinessRecordPage<Order>(prisma, {
     from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
-    orderBy,
+    orderBy: filters.sortBy === 'paymentDate'
+      ? `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.payments[0].paidAt')), JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, br.id ASC`
+      : `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, br.id ASC`,
     page, pageSize,
   });
 }
