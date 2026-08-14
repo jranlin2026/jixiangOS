@@ -91,6 +91,8 @@ export type AcademyCourseAssetRecord = {
   courseVersionId: string;
   assetType: AcademyAssetType;
   title: string;
+  contentText?: string | null;
+  externalUrl?: string | null;
   attachments: BusinessAttachment[];
   ownerUserId: string;
   ownerUserName: string;
@@ -379,6 +381,21 @@ const ASSET_TYPES = new Set<AcademyAssetType>([
   "POSTER",
   "INVITATION",
   "REPLAY",
+]);
+const ASSET_TYPE_LABELS: Record<AcademyAssetType, string> = {
+  PPT: "课件 PPT",
+  SCRIPT: "逐字稿",
+  CASE: "课程案例",
+  POSTER: "宣传海报",
+  INVITATION: "邀约话术",
+  REPLAY: "直播回放",
+};
+const ASSET_TYPES_REQUIRING_FILE = new Set<AcademyAssetType>(["PPT", "POSTER"]);
+const ASSET_TYPES_ALLOWING_TEXT_OR_FILE = new Set<AcademyAssetType>(["SCRIPT", "CASE"]);
+const COURSEWARE_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ]);
 const DELIVERY_MODES = new Set<AcademyDeliveryMode>(["OFFLINE", "LIVE", "ONLINE"]);
 const INVITATION_STATUSES = new Set(["PENDING", "INVITED", "REGISTERED", "CONFIRMED", "DECLINED"]);
@@ -736,24 +753,57 @@ export function createAcademyService(
       if (!course) return invalid("课程不存在", 404);
       const assetType = String(raw.assetType || "") as AcademyAssetType;
       if (!ASSET_TYPES.has(assetType)) return invalid("课程资产类型无效");
+      const contentText = String(raw.contentText || "").trim();
+      const externalUrl = String(raw.externalUrl || "").trim();
+      if (contentText.length > 20_000) return invalid("课程资产文案不能超过20000字");
+      if (externalUrl.length > 2_000) return invalid("课程资产链接不能超过2000字符");
+      if (externalUrl) {
+        if (assetType !== "REPLAY") return invalid("只有直播回放可以填写外部链接");
+        try {
+          const parsed = new URL(externalUrl);
+          if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("链接协议无效");
+        } catch {
+          return invalid("请填写有效的 http 或 https 回放链接");
+        }
+      }
       const requestedIds = Array.isArray(raw.attachments)
         ? [...new Set(raw.attachments.map((item) => String((item as { id?: unknown })?.id || "").trim()).filter(Boolean))]
         : [];
-      if (!requestedIds.length) return invalid("请至少上传一个课程资产文件");
       if (requestedIds.length > 20) return invalid("每类课程资产最多关联20个文件");
-      if (!deps.findBusinessAttachment) return invalid("附件服务暂不可用", 409);
+      if (ASSET_TYPES_REQUIRING_FILE.has(assetType) && !requestedIds.length) {
+        return invalid(assetType === "PPT" ? "课件 PPT 请至少上传一个文件" : "宣传海报请至少上传一张图片");
+      }
+      if (ASSET_TYPES_ALLOWING_TEXT_OR_FILE.has(assetType) && !contentText && !requestedIds.length) {
+        return invalid("请填写文案或上传文件");
+      }
+      if (assetType === "INVITATION" && !contentText) return invalid("请填写邀约话术内容");
+      if (assetType === "REPLAY" && !externalUrl && !requestedIds.length) {
+        return invalid("请填写回放链接或上传回放文件");
+      }
+      const findBusinessAttachment = deps.findBusinessAttachment;
+      if (requestedIds.length && !findBusinessAttachment) return invalid("附件服务暂不可用", 409);
       const existingAssets = await repository.listCourseAssets(courseId);
       const existingAttachmentIds = new Set(existingAssets.flatMap((item) => item.attachments.map((attachment) => attachment.id)));
       const attachments: BusinessAttachment[] = [];
       const expectedDraftKey = `academy-course-${courseId}-${assetType}`;
       for (const attachmentId of requestedIds) {
-        const attachment = await deps.findBusinessAttachment(attachmentId);
+        const attachment = await findBusinessAttachment!(attachmentId);
+        const isExistingAttachment = existingAttachmentIds.has(attachmentId);
         if (
           !attachment
           || attachment.category !== "academy-course-asset"
           || attachment.draftKey !== expectedDraftKey
-          || (!existingAttachmentIds.has(attachmentId) && attachment.uploadedById !== actor.id)
+          || (!isExistingAttachment && attachment.uploadedById !== actor.id)
         ) return invalid("课程资产附件不存在或无权关联", 404);
+        if (!isExistingAttachment && assetType === "PPT" && !COURSEWARE_MIME_TYPES.has(attachment.mimeType)) {
+          return invalid("课件 PPT 只支持 PPT、PPTX 或 PDF 文件");
+        }
+        if (!isExistingAttachment && assetType === "POSTER" && !attachment.mimeType.startsWith("image/")) {
+          return invalid("宣传海报只支持图片文件");
+        }
+        if (!isExistingAttachment && assetType === "REPLAY" && attachment.mimeType !== "video/mp4") {
+          return invalid("直播回放上传只支持 MP4 视频");
+        }
         const { draftKey: _draftKey, ...publicAttachment } = attachment;
         attachments.push(publicAttachment);
       }
@@ -769,7 +819,9 @@ export function createAcademyService(
           courseId,
           courseVersionId,
           assetType,
-          title: String(raw.title || "").trim() || course.title,
+          title: `${course.title} · ${ASSET_TYPE_LABELS[assetType]}`,
+          contentText: contentText || null,
+          externalUrl: externalUrl || null,
           attachments,
           ownerUserId: actor.id,
           ownerUserName: actor.name,

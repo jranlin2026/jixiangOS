@@ -12,11 +12,13 @@ const CourseWorkspace = Reflect.get(academyModule, "CourseWorkspace") as React.C
 const CourseDetailWorkspace = Reflect.get(academyModule, "CourseDetailWorkspace") as React.ComponentType<any> | undefined;
 const CourseDetailDrawer = Reflect.get(academyModule, "CourseDetailDrawer") as React.ComponentType<any> | undefined;
 const CourseAssetFiles = Reflect.get(academyModule, "CourseAssetFiles") as React.ComponentType<any> | undefined;
+const CourseAssetContent = Reflect.get(academyModule, "CourseAssetContent") as React.ComponentType<any> | undefined;
 
 assert.equal(typeof CourseWorkspace, "function", "课程列表应作为可验证的独立工作台组件");
 assert.equal(typeof CourseDetailWorkspace, "function", "课程详情内容应作为可复用工作台");
 assert.equal(typeof CourseDetailDrawer, "function", "课程详情应使用右侧抽屉，不替换当前列表页");
 assert.equal(typeof CourseAssetFiles, "function", "课程资产应提供可查看和下载的独立文件列表");
+assert.equal(typeof CourseAssetContent, "function", "课程资产应统一展示文案、链接和文件");
 
 const academySource = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
 const attachmentLinksSource = readFileSync(new URL("../../shared/components/BusinessAttachmentLinks.tsx", import.meta.url), "utf8");
@@ -106,6 +108,26 @@ assert.ok(
   "附件查看必须在异步读取前同步打开窗口，避免被浏览器拦截",
 );
 
+const mixedAssetMarkup = renderInRouter(React.createElement(CourseAssetContent!, {
+  asset: {
+    id: "asset-replay",
+    courseId: "course-1",
+    courseVersionId: "version-1",
+    assetType: "REPLAY",
+    title: "课程回放",
+    contentText: "这是课程内容摘要。".repeat(20),
+    externalUrl: "https://example.com/replay",
+    attachments: [],
+    ownerUserId: "user-1",
+    ownerUserName: "系统管理员",
+    createdAt: "2026-08-14T00:00:00.000Z",
+    updatedAt: "2026-08-14T00:00:00.000Z",
+  },
+}));
+assert.match(mixedAssetMarkup, /这是课程内容摘要/, "课程资产卡片应直接显示文案摘要");
+assert.match(mixedAssetMarkup, /查看全文/, "长文案资产应提供全文查看入口");
+assert.match(mixedAssetMarkup, /打开回放/, "链接型课程资产应提供明确入口");
+
 const listMarkup = renderInRouter(React.createElement(CourseWorkspace!, {
     ...commonProps,
     items: [course],
@@ -175,6 +197,7 @@ assert.doesNotMatch(loadingAssetMarkup, /当前还没有上传文件/, "资产�
 assert.match(assetErrorMarkup, /重新加载课程资产/, "资产加载失败时应提供重试入口");
 assert.doesNotMatch(assetErrorMarkup, />上传</, "资产加载失败时不应开放上传操作");
 assert.ok((academySource.match(/<CourseAssetFiles/g) || []).length >= 2, "课程详情与上传弹窗都应展示可查看和下载的已关联文件");
+assert.match(academySource, /添加参考附件（可选）/, "文案型资产不应默认强调上传区");
 
 console.log("academy course workspace view tests passed");
 await vite.close();

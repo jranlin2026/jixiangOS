@@ -94,6 +94,8 @@ export interface AcademyCourseAsset {
   courseVersionId: string;
   assetType: AcademyAssetType;
   title: string;
+  contentText?: string | null;
+  externalUrl?: string | null;
   attachments: BusinessAttachment[];
   ownerUserId: string;
   ownerUserName: string;
@@ -340,7 +342,8 @@ export type SaveAcademyEngagementInput = Omit<
 >;
 export interface SaveAcademyCourseAssetInput {
   assetType: AcademyAssetType;
-  title: string;
+  contentText?: string;
+  externalUrl?: string;
   attachments: BusinessAttachment[];
 }
 export type SaveAcademyReviewInput = Pick<

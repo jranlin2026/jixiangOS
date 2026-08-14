@@ -114,6 +114,11 @@ import {
   taskRequiresEvidence,
 } from "./academyMvpModel";
 import {
+  canSaveCourseAssetDraft,
+  getCourseAssetInputConfig,
+  getRemainingCourseAssetAttachmentSlots,
+} from "./courseAssetModel";
+import {
   clampPageIndex,
   getCourseStatusAction,
   replaceCourseById,
@@ -361,6 +366,67 @@ export const CourseAssetFiles: React.FC<{
   />
 );
 
+export const CourseAssetContent: React.FC<{
+  asset: AcademyCourseAsset;
+}> = ({ asset }) => {
+  const [expanded, setExpanded] = useState(false);
+  const canExpand = Boolean(
+    asset.contentText
+    && (asset.contentText.length > 100 || asset.contentText.split("\n").length > 3),
+  );
+  return (
+    <Stack spacing={1} sx={{ mt: 1 }}>
+    {asset.contentText && (
+      <>
+        <Typography
+          fontSize={12.5}
+          color="text.secondary"
+          sx={{
+            whiteSpace: "pre-wrap",
+            ...(canExpand && !expanded
+              ? {
+                  display: "-webkit-box",
+                  WebkitLineClamp: 3,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }
+              : {}),
+          }}
+        >
+          {asset.contentText}
+        </Typography>
+        {canExpand && (
+          <Button
+            size="small"
+            onClick={() => setExpanded((value) => !value)}
+            sx={{ alignSelf: "flex-start", px: 0, minWidth: 0 }}
+          >
+            {expanded ? "收起" : "查看全文"}
+          </Button>
+        )}
+      </>
+    )}
+    {asset.externalUrl && (
+      <Button
+        component="a"
+        href={asset.externalUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        size="small"
+        variant="outlined"
+        startIcon={<VisibilityOutlinedIcon />}
+        sx={{ alignSelf: "flex-start" }}
+      >
+        打开回放
+      </Button>
+    )}
+    {asset.attachments.length > 0 && (
+      <CourseAssetFiles attachments={asset.attachments} />
+    )}
+    </Stack>
+  );
+};
+
 const Academy: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -458,7 +524,9 @@ const Academy: React.FC = () => {
   const [assetOpen, setAssetOpen] = useState(false);
   const [assetCourseId, setAssetCourseId] = useState("");
   const [assetType, setAssetType] = useState<AcademyAssetType>("PPT");
-  const [assetTitle, setAssetTitle] = useState("");
+  const [assetContentText, setAssetContentText] = useState("");
+  const [assetExternalUrl, setAssetExternalUrl] = useState("");
+  const [assetAttachmentOpen, setAssetAttachmentOpen] = useState(false);
   const [existingAssetAttachments, setExistingAssetAttachments] = useState<
     BusinessAttachment[]
   >([]);
@@ -1697,19 +1765,19 @@ const Academy: React.FC = () => {
     );
     setAssetCourseId(course.id);
     setAssetType(nextType);
-    setAssetTitle(
-      existing?.title ||
-        `${course.title} · ${assetTypes.find((item) => item.value === nextType)?.label || "课程资产"}`,
-    );
+    setAssetContentText(existing?.contentText || "");
+    setAssetExternalUrl(existing?.externalUrl || "");
     setExistingAssetAttachments(existing?.attachments || []);
     setAssetAttachments([]);
+    setAssetAttachmentOpen(getCourseAssetInputConfig(nextType).attachment.required);
     setAssetOpen(true);
   };
   const saveCourseAsset = async () => {
     setSaving(true);
     const response = await academyApi.saveCourseAsset(assetCourseId, {
       assetType,
-      title: assetTitle,
+      contentText: assetContentText,
+      externalUrl: assetExternalUrl,
       attachments: [...existingAssetAttachments, ...assetAttachments],
     });
     setSaving(false);
@@ -2452,6 +2520,10 @@ const Academy: React.FC = () => {
       </ModulePage>
     );
   }
+
+  const remainingAssetAttachmentSlots = getRemainingCourseAssetAttachmentSlots(
+    existingAssetAttachments.length,
+  );
 
   return (
     <ModulePage>
@@ -4737,33 +4809,44 @@ const Academy: React.FC = () => {
         {({ markDirty, requestClose }) => (
           <>
             <DialogCloseTitle onClose={() => void requestClose()}>
-              上传课程资产
+              {courseAssets[assetCourseId]?.some((item) => item.assetType === assetType)
+                ? "编辑"
+                : "添加"}
+              {getCourseAssetInputConfig(assetType).label}
             </DialogCloseTitle>
             <DialogContent dividers>
               <Stack spacing={2}>
-                <TextField
-                  select
-                  label="资产类型 *"
-                  value={assetType}
-                  onChange={(event) => {
-                    markDirty();
-                    setAssetType(event.target.value as AcademyAssetType);
-                  }}
-                >
-                  {assetTypes.map((item) => (
-                    <MenuItem key={item.value} value={item.value}>
-                      {item.label}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                <TextField
-                  label="资产名称 *"
-                  value={assetTitle}
-                  onChange={(event) => {
-                    markDirty();
-                    setAssetTitle(event.target.value);
-                  }}
-                />
+                <Alert severity="info" icon={false}>
+                  资产名称已按课程和类型自动生成。请直接完善下方内容，只有需要文件时才上传附件。
+                </Alert>
+                {getCourseAssetInputConfig(assetType).text && (
+                  <TextField
+                    label={getCourseAssetInputConfig(assetType).text!.label}
+                    placeholder={getCourseAssetInputConfig(assetType).text!.placeholder}
+                    value={assetContentText}
+                    multiline
+                    minRows={6}
+                    inputProps={{ maxLength: 20_000 }}
+                    helperText={`${assetContentText.length}/20000`}
+                    onChange={(event) => {
+                      markDirty();
+                      setAssetContentText(event.target.value);
+                    }}
+                  />
+                )}
+                {getCourseAssetInputConfig(assetType).url && (
+                  <TextField
+                    label={getCourseAssetInputConfig(assetType).url!.label}
+                    placeholder={getCourseAssetInputConfig(assetType).url!.placeholder}
+                    value={assetExternalUrl}
+                    type="url"
+                    helperText="填写 http 或 https 回放地址；如果直接上传回放文件，可以留空。"
+                    onChange={(event) => {
+                      markDirty();
+                      setAssetExternalUrl(event.target.value);
+                    }}
+                  />
+                )}
                 {existingAssetAttachments.length > 0 && (
                   <Box>
                     <Typography variant="subtitle2" sx={{ mb: 1 }}>
@@ -4775,19 +4858,55 @@ const Academy: React.FC = () => {
                     </Typography>
                   </Box>
                 )}
-                <BusinessAttachmentPicker
-                  title="课程资产文件"
-                  description="支持课件、文档、图片和 MP4 回放；文件保存在业务附件私有目录。"
-                  value={assetAttachments}
-                  onChange={(attachments) => {
-                    markDirty();
-                    setAssetAttachments(attachments);
-                  }}
-                  category="academy-course-asset"
-                  draftKey={`academy-course-${assetCourseId}-${assetType}`}
-                  imagesOnly={false}
-                  maxCount={20}
-                />
+                {!getCourseAssetInputConfig(assetType).attachment.required &&
+                  !assetAttachmentOpen &&
+                  remainingAssetAttachmentSlots > 0 && (
+                  <Button
+                    variant="outlined"
+                    startIcon={<AddIcon />}
+                    onClick={() => setAssetAttachmentOpen(true)}
+                    sx={{ alignSelf: "flex-start" }}
+                  >
+                    添加参考附件（可选）
+                  </Button>
+                )}
+                {(getCourseAssetInputConfig(assetType).attachment.required || assetAttachmentOpen) &&
+                  remainingAssetAttachmentSlots > 0 && (
+                  <BusinessAttachmentPicker
+                    title={getCourseAssetInputConfig(assetType).attachment.title}
+                    description={getCourseAssetInputConfig(assetType).attachment.description}
+                    value={assetAttachments}
+                    onChange={(attachments) => {
+                      markDirty();
+                      setAssetAttachments(attachments);
+                    }}
+                    category="academy-course-asset"
+                    draftKey={`academy-course-${assetCourseId}-${assetType}`}
+                    imagesOnly={assetType === "POSTER"}
+                    acceptedMimeTypes={
+                      assetType === "PPT"
+                        ? [
+                            "application/pdf",
+                            "application/vnd.ms-powerpoint",
+                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                          ]
+                        : assetType === "REPLAY"
+                          ? ["video/mp4"]
+                          : undefined
+                    }
+                    fileInputAccept={
+                      assetType === "PPT"
+                        ? ".pdf,.ppt,.pptx"
+                        : assetType === "REPLAY"
+                          ? ".mp4"
+                          : undefined
+                    }
+                    maxCount={remainingAssetAttachmentSlots}
+                  />
+                )}
+                {remainingAssetAttachmentSlots === 0 && (
+                  <Alert severity="info">已达到每类课程资产最多 20 个文件的上限。</Alert>
+                )}
               </Stack>
             </DialogContent>
             <DialogActions>
@@ -4796,13 +4915,15 @@ const Academy: React.FC = () => {
                 variant="contained"
                 disabled={
                   saving ||
-                  !assetTitle.trim() ||
-                  existingAssetAttachments.length + assetAttachments.length ===
-                    0
+                  !canSaveCourseAssetDraft(assetType, {
+                    contentText: assetContentText,
+                    externalUrl: assetExternalUrl,
+                    attachmentCount: existingAssetAttachments.length + assetAttachments.length,
+                  })
                 }
                 onClick={() => void saveCourseAsset()}
               >
-                保存并关联当前版本
+                保存课程资产
               </Button>
             </DialogActions>
           </>
@@ -6868,14 +6989,14 @@ export const CourseDetailWorkspace: React.FC<{
                             sx={{ mt: 0.5 }}
                           >
                             {asset
-                              ? `${asset.attachments.length} 个文件 · ${asset.ownerUserName} · ${formatDate(asset.updatedAt)}`
-                              : "当前还没有上传文件"}
+                              ? `${[
+                                  asset.contentText ? "已录入文案" : "",
+                                  asset.externalUrl ? "已设置回放链接" : "",
+                                  asset.attachments.length ? `${asset.attachments.length} 个文件` : "",
+                                ].filter(Boolean).join(" · ")} · ${asset.ownerUserName} · ${formatDate(asset.updatedAt)}`
+                              : "当前还没有内容"}
                           </Typography>
-                          {asset && asset.attachments.length > 0 && (
-                            <Box sx={{ mt: 1 }}>
-                              <CourseAssetFiles attachments={asset.attachments} />
-                            </Box>
-                          )}
+                          {asset && <CourseAssetContent asset={asset} />}
                         </Box>
                         {canManage && (
                           <Button
@@ -6884,7 +7005,7 @@ export const CourseDetailWorkspace: React.FC<{
                               onUploadAsset(course, assetType.value)
                             }
                           >
-                            {asset ? "更新" : "上传"}
+                            {asset ? "编辑" : "添加"}
                           </Button>
                         )}
                       </Stack>

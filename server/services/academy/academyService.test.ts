@@ -1093,6 +1093,98 @@ assert.deepEqual(
   ["category", "id", "mimeType", "name", "size", "uploadedAt", "uploadedById", "uploadedByName"].sort(),
   "课程资产只持久化服务端真实附件的安全投影",
 );
+await repository.upsertCourseAsset({
+  ...savedAsset.data!,
+  attachments: [{ ...savedAsset.data!.attachments[0], mimeType: "application/msword" }],
+});
+businessAttachments.get("attachment-1")!.mimeType = "application/msword";
+assert.equal(
+  (await service.saveCourseAsset(courseResult.data!.id, {
+    assetType: "PPT",
+    contentText: "仅更新课件说明",
+    attachments: [{ id: "attachment-1" }],
+  }, actor)).code,
+  0,
+  "历史已关联附件即使不符合新MIME规则也应允许兼容保留",
+);
+businessAttachments.get("attachment-1")!.mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+const savedInvitationCopy = await service.saveCourseAsset(
+  courseResult.data!.id,
+  {
+    assetType: "INVITATION",
+    title: "AI企业升级公开课邀约话术",
+    contentText: "老板您好，这场课程会用真实业务案例讲清AI如何落地。",
+    attachments: [],
+  },
+  actor,
+);
+assert.equal(savedInvitationCopy.code, 0, "邀约话术只填写文案也应允许保存");
+assert.equal(savedInvitationCopy.data?.title, "AI企业升级公开课 V2 · 邀约话术", "课程资产名称应由服务端按当前课程名统一生成");
+assert.equal(savedInvitationCopy.data?.contentText, "老板您好，这场课程会用真实业务案例讲清AI如何落地。");
+assert.deepEqual(savedInvitationCopy.data?.attachments, []);
+assert.notEqual(
+  (await service.saveCourseAsset(courseResult.data!.id, {
+    assetType: "INVITATION", title: "空话术", contentText: "", attachments: [],
+  }, actor)).code,
+  0,
+  "邀约话术不能在文案和附件均为空时保存",
+);
+const savedReplayLink = await service.saveCourseAsset(
+  courseResult.data!.id,
+  {
+    assetType: "REPLAY",
+    title: "AI企业升级公开课回放",
+    externalUrl: "https://example.com/replay/ai-course",
+    attachments: [],
+  },
+  actor,
+);
+assert.equal(savedReplayLink.code, 0, "直播回放只填写合法链接也应允许保存");
+assert.equal(savedReplayLink.data?.externalUrl, "https://example.com/replay/ai-course");
+assert.notEqual(
+  (await service.saveCourseAsset(courseResult.data!.id, {
+    assetType: "REPLAY", title: "不安全回放", externalUrl: "javascript:alert(1)", attachments: [],
+  }, actor)).code,
+  0,
+  "回放链接必须限定为 http 或 https",
+);
+businessAttachments.set("poster-wrong-mime", {
+  ...businessAttachments.get("attachment-1"),
+  id: "poster-wrong-mime",
+  draftKey: `academy-course-${courseResult.data!.id}-POSTER`,
+});
+assert.notEqual(
+  (await service.saveCourseAsset(courseResult.data!.id, {
+    assetType: "POSTER", attachments: [{ id: "poster-wrong-mime" }],
+  }, actor)).code,
+  0,
+  "宣传海报必须由服务端限定为图片",
+);
+businessAttachments.set("replay-wrong-mime", {
+  ...businessAttachments.get("attachment-1"),
+  id: "replay-wrong-mime",
+  draftKey: `academy-course-${courseResult.data!.id}-REPLAY`,
+});
+assert.notEqual(
+  (await service.saveCourseAsset(courseResult.data!.id, {
+    assetType: "REPLAY", attachments: [{ id: "replay-wrong-mime" }],
+  }, actor)).code,
+  0,
+  "直播回放文件必须由服务端限定为视频",
+);
+businessAttachments.set("ppt-wrong-mime", {
+  ...businessAttachments.get("attachment-1"),
+  id: "ppt-wrong-mime",
+  mimeType: "image/png",
+  draftKey: `academy-course-${courseResult.data!.id}-PPT`,
+});
+assert.notEqual(
+  (await service.saveCourseAsset(courseResult.data!.id, {
+    assetType: "PPT", attachments: [{ id: "ppt-wrong-mime" }],
+  }, actor)).code,
+  0,
+  "课件 PPT 只允许 PPT、PPTX 或 PDF",
+);
 businessAttachments.set("other-course-asset", {
   ...businessAttachments.get("attachment-1"), id: "other-course-asset", draftKey: "academy-course-other-course-PPT",
 });
@@ -1115,7 +1207,7 @@ assert.equal(
   "不得信任客户端传入的附件元数据",
 );
 const listedAssets = await service.listCourseAssets(courseResult.data!.id, actor);
-assert.equal(listedAssets.data?.length, 1);
+assert.equal(listedAssets.data?.length, 3);
 
 const detail = await service.getSessionDetail(sessionResult.data!.id, actor);
 assert.equal(detail.code, 0);

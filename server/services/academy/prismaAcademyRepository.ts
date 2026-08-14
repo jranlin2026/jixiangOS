@@ -311,6 +311,8 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
           ...data,
           createdAt: new Date(data.createdAt || row.createdAt),
           updatedAt: new Date(data.updatedAt || row.updatedAt),
+          contentText: typeof data.contentText === "string" ? data.contentText : null,
+          externalUrl: typeof data.externalUrl === "string" ? data.externalUrl : null,
           attachments: Array.isArray(data.attachments) ? data.attachments : [],
         } as AcademyCourseAssetRecord;
       });

@@ -25,6 +25,8 @@ export interface BusinessAttachmentPickerProps {
   draftKey: string;
   maxCount?: number;
   imagesOnly?: boolean;
+  acceptedMimeTypes?: string[];
+  fileInputAccept?: string;
   disabled?: boolean;
   rejectWholeBatchOnOverflow?: boolean;
   headerAction?: React.ReactNode;
@@ -68,6 +70,8 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
   draftKey,
   maxCount = Number.MAX_SAFE_INTEGER,
   imagesOnly = true,
+  acceptedMimeTypes,
+  fileInputAccept,
   disabled = false,
   rejectWholeBatchOnOverflow = false,
   headerAction,
@@ -89,13 +93,14 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
   }, [onUploadingChange, uploading]);
 
   const accept = useMemo(() => (
-    imagesOnly ? ['image/'] : category === 'academy-task-evidence' ? ACADEMY_TASK_MIME_TYPES : DOCUMENT_MIME_TYPES
-  ), [category, imagesOnly]);
-  const inputAccept = imagesOnly
+    acceptedMimeTypes
+      || (imagesOnly ? ['image/'] : category === 'academy-task-evidence' ? ACADEMY_TASK_MIME_TYPES : DOCUMENT_MIME_TYPES)
+  ), [acceptedMimeTypes, category, imagesOnly]);
+  const inputAccept = fileInputAccept || (imagesOnly
     ? 'image/*'
     : category === 'academy-task-evidence'
       ? 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt'
-      : 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.mp4';
+      : 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.mp4');
   const countUnit = imagesOnly ? '张' : '个文件';
 
   useEffect(() => {
