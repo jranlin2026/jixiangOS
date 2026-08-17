@@ -6096,7 +6096,7 @@ const LegacyOverview: React.FC<{
           <Tab value="HISTORY" label="处理记录" />
         </Tabs>
         <TableContainer sx={{ mt: 1 }}>
-          <SystemDataTable tableId="academy-overview-execution-tasks">
+          <SystemDataTable tableId="academy-legacy-overview-execution-tasks">
             <TableHead>
               <TableRow>
                 <TableCell>任务内容</TableCell>
