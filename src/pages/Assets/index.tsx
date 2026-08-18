@@ -178,7 +178,7 @@ const DEVICE_COLUMNS: AssetColumnConfig[] = [
   { id: 'deviceCode', label: '设备编号', width: 130 },
   { id: 'deviceName', label: '设备名称', width: 130 },
   { id: 'brandModel', label: '品牌型号', width: 130 },
-  { id: 'imei', label: 'IMEI', width: 130 },
+  { id: 'imei', label: 'IMEI 1 / 2', width: 190 },
   { id: 'simType', label: '手机号', width: 190 },
   { id: 'accountCount', label: '账号数', width: 100 },
   { id: 'department', label: '所属部门', width: 130 },
@@ -1053,7 +1053,8 @@ const AssetManagement: React.FC = () => {
         设备编号: device.deviceCode,
         设备名称: device.deviceName,
         品牌型号: device.brandModel,
-        IMEI: device.imeiMasked,
+        'IMEI 1': device.imei1Masked,
+        'IMEI 2': device.imei2Masked || '',
         手机号: (phonesByDeviceId.get(device.id) || []).map((phone) => `${phone.slotType}:${phone.phoneNumberMasked}`).join(' / '),
         账号数: (accountsByDeviceId.get(device.id) || []).length,
         所属部门: device.department,
@@ -1253,7 +1254,7 @@ const AssetManagement: React.FC = () => {
   const renderToolbar = () => {
     if (activeTab === 'overview') return null;
     const searchPlaceholderMap: Partial<Record<AssetTab, string>> = {
-      devices: '搜索设备编号、设备名称、IMEI、负责人',
+      devices: '搜索设备编号、设备名称、IMEI 1/2、负责人',
       phones: '搜索手机号、实名信息、归属地、所属设备',
       accounts: '搜索平台、账号名称、实名信息、绑定手机号',
       matrix: '搜索任务、账号、执行人',
@@ -1373,7 +1374,12 @@ const AssetManagement: React.FC = () => {
       case 'brandModel':
         return device.brandModel;
       case 'imei':
-        return device.imeiMasked;
+        return (
+          <Stack spacing={0.25}>
+            <Box><Box component="span" sx={{ color: shell.muted, mr: 0.5 }}>1</Box>{device.imei1Masked}</Box>
+            {device.imei2Masked ? <Box><Box component="span" sx={{ color: shell.muted, mr: 0.5 }}>2</Box>{device.imei2Masked}</Box> : null}
+          </Stack>
+        );
       case 'simType':
         return renderDevicePhones(device);
       case 'accountCount': {
@@ -2034,7 +2040,8 @@ const AssetManagement: React.FC = () => {
         { label: '设备名称', value: device.deviceName },
         { label: '设备编号', value: <Stack direction="row" alignItems="center" spacing={0.5}>{device.deviceCode}{renderCopyButton(device.deviceCode, '设备编号')}</Stack> },
         { label: '品牌/型号', value: device.brandModel },
-        { label: 'IMEI', value: renderSensitiveInline('device', device.id, 'imei', device.imeiMasked) },
+        { label: 'IMEI 1', value: renderSensitiveInline('device', device.id, 'imei1', device.imei1Masked) },
+        ...(device.imei2Masked ? [{ label: 'IMEI 2', value: renderSensitiveInline('device', device.id, 'imei2', device.imei2Masked) }] : []),
         { label: 'SIM 类型', value: device.simType },
         { label: '状态', value: <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} /> },
         { label: '所属主体', value: device.ownerSubject },
@@ -2338,8 +2345,20 @@ const AssetManagement: React.FC = () => {
     <>
       {renderTextField('deviceName', '设备名称', { required: true })}
       {renderTextField('brandModel', '品牌型号', { required: true })}
-      {renderTextField('imei', 'IMEI', { required: true })}
       {renderSelectField('simType', 'SIM类型', ['单卡', '双卡'], { required: true })}
+      {renderTextField('imei1', 'IMEI 1', { required: true })}
+      {formState.values.simType === '双卡' || Boolean(formState.values.imei2) ? (
+        <TextField
+          size="small"
+          label="IMEI 2"
+          value={formState.values.imei2 || ''}
+          onChange={(event) => updateFormValue('imei2', event.target.value)}
+          required={formState.values.simType === '双卡'}
+          helperText={formState.values.simType === '单卡' && formState.values.imei2 ? '改为单卡前请先清空 IMEI 2' : undefined}
+          error={formState.values.simType === '单卡' && Boolean(formState.values.imei2)}
+          fullWidth
+        />
+      ) : null}
       {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
       {renderDepartmentSelectField()}
       {renderUserSelectField('owner', '负责人')}
