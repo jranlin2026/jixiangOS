@@ -83,7 +83,7 @@ import type { User } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { readAccountControlStatus, readDeviceCommunicationType } from '../../domain/assets/assetFields';
-import { ASSET_FORM_SECTIONS, createAssetFormDefaults, type AssetFormType } from './assetFormModel';
+import { ASSET_FORM_SECTIONS, createAssetFormDefaults, formatPhoneSlotImeiLabel, type AssetFormType } from './assetFormModel';
 
 type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'matrix' | 'logs' | 'offboarding';
 
@@ -909,6 +909,7 @@ const AssetManagement: React.FC = () => {
       acc[key] = String(value ?? '');
       return acc;
     }, {});
+    if (type === 'phone') values.servicePassword = '';
     setFormState({ open: true, type, mode: 'edit', id: item.id, values: normalizeAssetFormValues(values), validationAttempted: false });
   };
 
@@ -1485,7 +1486,7 @@ const AssetManagement: React.FC = () => {
         );
       }
       case 'slotType':
-        return phone.slotType || '-';
+        return phone.slotType ? formatPhoneSlotImeiLabel(phone.slotType, device) : '-';
       case 'packageName':
         return phone.packageName;
       case 'monthlyFee':
@@ -2083,13 +2084,14 @@ const AssetManagement: React.FC = () => {
         { label: 'SIM 形态', value: phone.simForm || '实体SIM' },
         { label: 'ICCID', value: phone.iccidMasked ? renderSensitiveInline('phone', phone.id, 'iccid', phone.iccidMasked) : '-' },
         { label: 'IMSI', value: phone.imsiMasked ? renderSensitiveInline('phone', phone.id, 'imsi', phone.imsiMasked) : '-' },
+        { label: '服务密码', value: phone.servicePasswordMasked ? renderSensitiveInline('phone', phone.id, 'servicePassword', phone.servicePasswordMasked) : '-' },
         {
           label: '所属设备',
           value: primaryDevice
             ? renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))
             : '-',
         },
-        { label: 'SIM 卡槽', value: phone.slotType || '-' },
+        { label: 'SIM 卡槽 / IMEI', value: phone.slotType ? formatPhoneSlotImeiLabel(phone.slotType, primaryDevice) : '-' },
         { label: '套餐', value: phone.packageName || '-' },
         { label: '月费用', value: formatCurrency(phone.monthlyFee) },
         { label: '所属部门', value: phone.department || primaryDevice?.department || '-' },
@@ -2406,11 +2408,12 @@ const AssetManagement: React.FC = () => {
 
   const renderPhoneFields = () => (
     <>
-      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.phone[0].title} summary={sectionSummary(['phoneNumber', 'simForm', 'iccid', 'imsi'], ASSET_FORM_SECTIONS.phone[0].summary)} errorCount={sectionErrorCount(['phoneNumber', 'simForm']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
+      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.phone[0].title} summary={sectionSummary(['phoneNumber', 'simForm', 'iccid', 'imsi', 'servicePassword'], ASSET_FORM_SECTIONS.phone[0].summary)} errorCount={sectionErrorCount(['phoneNumber', 'simForm']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
         <TextField size="small" label="完整手机号" value={formState.values.phoneNumber || ''} onChange={(event) => updatePhoneNumberValue(event.target.value)} required fullWidth />
         {renderSelectField('simForm', 'SIM形态', ['实体SIM', 'eSIM'], { required: true })}
         {renderTextField('iccid', 'ICCID')}
         {renderTextField('imsi', 'IMSI')}
+        {renderTextField('servicePassword', '服务密码', { type: 'password' })}
       </BusinessFormSection>
       <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.phone[1].title} summary={sectionSummary(['deviceId', 'slotType'], ASSET_FORM_SECTIONS.phone[1].summary)} errorCount={formState.validationErrorSection === 2 ? 1 : 0}>
       <FormControl size="small" fullWidth>
@@ -2444,8 +2447,11 @@ const AssetManagement: React.FC = () => {
           label="SIM卡槽"
           value={phoneSlotOptionsForDevice(formState.values.deviceId).includes(formState.values.slotType) ? formState.values.slotType : ''}
           onChange={(event) => updateFormValue('slotType', event.target.value)}
+          renderValue={(selected) => formatPhoneSlotImeiLabel(selected as '卡槽1' | '卡槽2', deviceById.get(formState.values.deviceId))}
         >
-          {phoneSlotOptionsForDevice(formState.values.deviceId).map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
+          {phoneSlotOptionsForDevice(formState.values.deviceId).map((option) => (
+            <MenuItem key={option} value={option}>{formatPhoneSlotImeiLabel(option as '卡槽1' | '卡槽2', deviceById.get(formState.values.deviceId))}</MenuItem>
+          ))}
         </Select>
         <Typography variant="caption" sx={{ color: shell.muted, mt: 0.5 }}>
           可先不绑定设备；单卡/eSIM 仅支持卡槽1。

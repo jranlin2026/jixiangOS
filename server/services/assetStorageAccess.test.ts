@@ -143,7 +143,7 @@ const storageData = {
     { id: 'device-other', owner: '其他员工', currentUser: '其他员工', imei: 'OTHER-RAW', imeiMasked: 'OTHER-***' },
   ],
   [STORAGE_KEYS.ASSET_PHONE_NUMBERS]: [
-    { id: 'phone-self', owner: '童双全', deviceId: 'device-self', phoneNumber: '13800001111', phoneNumberMasked: '138****1111' },
+    { id: 'phone-self', owner: '童双全', deviceId: 'device-self', phoneNumber: '13800001111', phoneNumberMasked: '138****1111', servicePassword: '123456', servicePasswordMasked: '******' },
     { id: 'phone-other', owner: '其他员工', deviceId: 'device-other', phoneNumber: '13900002222', phoneNumberMasked: '139****2222' },
   ],
   [STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS]: [
@@ -185,6 +185,7 @@ assert.deepEqual((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[]).map((item) => 
 assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei1, 'IMEI-***-1');
 assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei2, 'IMEI-***-2');
 assert.equal(JSON.stringify((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0]).includes('IMEI-RAW'), false);
+assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePassword, '******');
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[]).map((item) => item.id), ['account-self']);
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginAccount, 'self_***');
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_RISKS] as any[]).map((item) => item.id), ['risk-self']);
@@ -195,6 +196,7 @@ assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[]).length, 2);
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei1, 'IMEI-RAW-1');
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei2, 'IMEI-RAW-2');
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[1].imei1, 'OTHER-RAW');
+assert.equal((opsData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePassword, '123456');
 assert.equal(canWriteStorageKey(opsAuth, STORAGE_KEYS.ASSET_DEVICES), true);
 
 const recoveryStorageData = {

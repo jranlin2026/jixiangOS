@@ -206,6 +206,10 @@ function maskIdentifier(value: unknown): string | undefined {
   return `${raw.slice(0, 6)}${'*'.repeat(Math.min(8, raw.length - 10))}${raw.slice(-4)}`;
 }
 
+function maskSecret(value: unknown): string | undefined {
+  return cleanText(value) ? '••••••' : undefined;
+}
+
 function nextNumber(rows: AssetDevice[]): string {
   const max = rows.reduce((current, row) => {
     const value = Number(String(row.deviceCode || '').replace(/\D/g, ''));
@@ -750,8 +754,8 @@ export function createAssetCommandService(
       }
       const phoneNumber = cleanText(input.phoneNumber).replace(/\D/g, '');
       if (!phoneNumber) return failure('手机号不能为空', 400);
-      if (masked(input.phoneNumber) || masked(input.realName)) {
-        return failure('手机号或实名信息不能使用掩码值', 400);
+      if (masked(input.phoneNumber) || masked(input.realName) || masked(input.servicePassword)) {
+        return failure('手机号、实名信息或服务密码不能使用掩码值', 400);
       }
       try {
         const directory = await loadDirectory(prisma);
@@ -795,6 +799,8 @@ export function createAssetCommandService(
             iccidMasked: maskIdentifier(input.iccid),
             imsi: cleanText(input.imsi) || undefined,
             imsiMasked: maskIdentifier(input.imsi),
+            servicePassword: cleanText(input.servicePassword) || undefined,
+            servicePasswordMasked: maskSecret(input.servicePassword),
             deviceId,
             slotType,
             packageName: cleanText(input.packageName),
@@ -857,8 +863,9 @@ export function createAssetCommandService(
       if (
         (input.phoneNumber !== undefined && masked(input.phoneNumber))
         || (input.realName !== undefined && masked(input.realName))
+        || (input.servicePassword !== undefined && masked(input.servicePassword))
       ) {
-        return failure('手机号或实名信息不能使用掩码值覆盖', 400);
+        return failure('手机号、实名信息或服务密码不能使用掩码值覆盖', 400);
       }
       try {
         const directory = await loadDirectory(prisma);
@@ -893,6 +900,7 @@ export function createAssetCommandService(
             throw new AssetCommandError(409, `${communicationType}设备最多绑定${maxPhoneCount}个手机号`);
           }
           const realName = input.realName === undefined ? existing.realName : cleanText(input.realName) || undefined;
+          const servicePassword = cleanText(input.servicePassword) || existing.servicePassword;
           const org = resolveOrgFields({ ...existing, ...input }, directory);
           const next = normalizeAssetPhone({
             ...existing,
@@ -907,6 +915,8 @@ export function createAssetCommandService(
             iccidMasked: maskIdentifier(input.iccid ?? existing.iccid),
             imsi: input.imsi === undefined ? existing.imsi : cleanText(input.imsi) || undefined,
             imsiMasked: maskIdentifier(input.imsi ?? existing.imsi),
+            servicePassword,
+            servicePasswordMasked: maskSecret(servicePassword),
             operator: input.operator || existing.operator,
             attributionLocation: input.attributionLocation === undefined
               ? existing.attributionLocation

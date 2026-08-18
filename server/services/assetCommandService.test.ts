@@ -410,6 +410,7 @@ const unboundPhone = await riskService.createPhoneNumber({
   simForm: 'eSIM',
   iccid: '89860012345678901234',
   imsi: '460001234567890',
+  servicePassword: '123456',
   ownerSubject: '公司',
   departmentId: 'dept-assets',
   ownerId: assetAdmin.id,
@@ -421,16 +422,19 @@ assert.equal(unboundPhone.code, 0);
 assert.equal(unboundPhone.data?.deviceId, undefined);
 assert.equal(unboundPhone.data?.slotType, undefined);
 assert.match(unboundPhone.data?.iccidMasked || '', /\*/);
+assert.match((unboundPhone.data as any)?.servicePasswordMasked || '', /[*•]/);
 const updatedUnboundPhone = await riskService.updatePhoneNumber(unboundPhone.data!.id, {
   simForm: '实体SIM',
   iccid: '89860099999999999999',
   contractExpiresAt: '2027-08-18',
   remark: '已更换SIM',
+  servicePassword: '',
 }, assetAdmin);
 assert.equal(updatedUnboundPhone.code, 0);
 assert.equal(updatedUnboundPhone.data?.iccid, '89860099999999999999');
 assert.equal(updatedUnboundPhone.data?.contractExpiresAt, '2027-08-18');
 assert.equal(updatedUnboundPhone.data?.remark, '已更换SIM');
+assert.equal((updatedUnboundPhone.data as any)?.servicePassword, '123456');
 
 const pendingAccount = await riskService.createInternetAccount({
   platform: '小红书',

@@ -714,6 +714,7 @@ await resetAssets();
     simForm: 'eSIM',
     iccid: '89860012345678901234',
     imsi: '460001234567890',
+    servicePassword: '123456',
     ownerSubject: '公司',
     packageName: '备用套餐',
     monthlyFee: 0,
@@ -725,16 +726,22 @@ await resetAssets();
   assert.equal(phone.data.slotType, undefined);
   assert.match(phone.data.iccidMasked || '', /\*/);
   assert.match(phone.data.imsiMasked || '', /\*/);
+  assert.match((phone.data as any).servicePasswordMasked || '', /[*•]/);
+  const revealedServicePassword = await assetApi.revealSensitiveField('phone', phone.data.id, 'servicePassword' as any);
+  assert.equal(revealedServicePassword.code, 0);
+  assert.equal(revealedServicePassword.data.value, '123456');
   const updated = await assetApi.updatePhoneNumber(phone.data.id, {
     simForm: '实体SIM',
     iccid: '89860099999999999999',
     contractExpiresAt: '2027-08-18',
     remark: '已更换SIM',
+    servicePassword: '',
   });
   assert.equal(updated.code, 0);
   assert.equal(updated.data.iccid, '89860099999999999999');
   assert.equal(updated.data.contractExpiresAt, '2027-08-18');
   assert.equal(updated.data.remark, '已更换SIM');
+  assert.equal((updated.data as any).servicePassword, '123456');
 }
 
 {

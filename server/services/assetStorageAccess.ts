@@ -144,6 +144,7 @@ function sanitizePhone(phone: AssetPhoneNumber, canViewSensitive: boolean): Asse
     phoneNumber: phone.phoneNumberMasked || '',
     iccid: phone.iccidMasked || undefined,
     imsi: phone.imsiMasked || undefined,
+    servicePassword: phone.servicePasswordMasked || undefined,
   };
 }
 

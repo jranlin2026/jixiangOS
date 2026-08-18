@@ -84,6 +84,8 @@ export function normalizeAssetPhone<T extends LooseAsset>(source: T): T & AssetP
     iccidMasked: text(source.iccidMasked) || undefined,
     imsi: text(source.imsi) || undefined,
     imsiMasked: text(source.imsiMasked) || undefined,
+    servicePassword: text(source.servicePassword) || undefined,
+    servicePasswordMasked: text(source.servicePasswordMasked) || undefined,
     realNameSubject: text(source.realNameSubject) || undefined,
     deviceId,
     slotType: deviceId ? (text(source.slotType) || '卡槽1') as AssetPhoneNumber['slotType'] : undefined,

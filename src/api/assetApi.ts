@@ -151,6 +151,10 @@ function maskIdentifier(value?: string): string | undefined {
   return `${raw.slice(0, 6)}${'*'.repeat(Math.min(8, raw.length - 10))}${raw.slice(-4)}`;
 }
 
+function maskSecret(value?: string): string | undefined {
+  return String(value || '').trim() ? '••••••' : undefined;
+}
+
 function nextNumber<T>(rows: T[], readValue: (row: T) => string, prefix: string): string {
   const max = rows.reduce((value, row) => {
     const raw = readValue(row);
@@ -437,7 +441,7 @@ const ASSET_IMPORT_LABELS: Record<AssetImportType, string> = {
 
 export const ASSET_IMPORT_TEMPLATES: Record<AssetImportType, string[]> = {
   devices: ['设备类型*', '设备名称*', '品牌*', '型号*', '序列号', '通信方式*', 'IMEI 1', 'IMEI 2', '取得方式', '购买金额', '月租金', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
-  phones: ['手机号*', 'SIM形态*', 'ICCID', 'IMSI', '实名主体', '实名信息', '运营商', '归属地', '所属设备编号', 'SIM卡槽', '套餐', '月费用', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
+  phones: ['手机号*', 'SIM形态*', 'ICCID', 'IMSI', '服务密码', '实名主体', '实名信息', '运营商', '归属地', '所属设备编号', 'SIM卡槽', '套餐', '月费用', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
   accounts: ['平台*', '账号类型*', '账号名称*', '登录账号*', '实名主体', '实名信息', '绑定手机号', '绑定邮箱', '二次验证', '账号控制权*', '所属主体', '所属部门', '资产负责人', '当前使用人', '账号状态', '业务场景', '服务商', '月费用', '用途', '备注'],
 };
 
@@ -462,6 +466,7 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
   phones: {
     '手机号*': '13900001111',
     'SIM形态*': '实体SIM',
+    服务密码: '',
     实名主体: '张三',
     实名信息: '张三',
     运营商: '',
@@ -644,6 +649,7 @@ function phoneInputFromCsv(raw: Record<string, string>): Partial<AssetPhoneNumbe
     simForm: (csvCell(raw, 'SIM形态*', 'SIM形态') || '实体SIM') as AssetPhoneNumberInput['simForm'],
     iccid: csvCell(raw, 'ICCID'),
     imsi: csvCell(raw, 'IMSI'),
+    servicePassword: csvCell(raw, '服务密码'),
     realNameSubject: csvCell(raw, '实名主体'),
     realName: csvCell(raw, '实名信息'),
     operator: (csvCell(raw, '运营商') || inferPhoneOperator(phoneNumber)) as AssetPhoneNumberInput['operator'],
@@ -1172,6 +1178,8 @@ async function createPhoneNumber(input: Partial<AssetPhoneNumberInput>): Promise
       iccidMasked: maskIdentifier(input.iccid),
       imsi: input.imsi,
       imsiMasked: maskIdentifier(input.imsi),
+      servicePassword: input.servicePassword || undefined,
+      servicePasswordMasked: maskSecret(input.servicePassword),
       deviceId,
       slotType: deviceId ? input.slotType || '卡槽1' : undefined,
       packageName: input.packageName || '',
@@ -1206,6 +1214,7 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
     if (rows.some((phone) => phone.id !== id && phone.phoneNumber === phoneNumber)) throw new Error('手机号已存在');
     const orgFields = resolveAssetOrgFields(input, existing);
     const nextDeviceId = input.deviceId === undefined ? existing.deviceId : String(input.deviceId || '').trim() || undefined;
+    const nextServicePassword = String(input.servicePassword || '').trim() ? input.servicePassword : existing.servicePassword;
     const updated = normalizeAssetPhone({
       ...existing,
       ...input,
@@ -1214,6 +1223,8 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
       realNameMasked: maskRealName(input.realName ?? existing.realName),
       iccidMasked: maskIdentifier(input.iccid ?? existing.iccid),
       imsiMasked: maskIdentifier(input.imsi ?? existing.imsi),
+      servicePassword: nextServicePassword,
+      servicePasswordMasked: maskSecret(nextServicePassword),
       deviceId: nextDeviceId,
       slotType: nextDeviceId ? input.slotType || existing.slotType || '卡槽1' : undefined,
       operator: input.operator || (input.phoneNumber !== undefined ? inferPhoneOperator(phoneNumber) : existing.operator),
@@ -1792,6 +1803,10 @@ async function revealSensitiveField(
       if (field === 'imsi' && phone.imsi) {
         logAssetOperation('查看敏感字段', '手机号资产', phone.id, phone.phoneNumberMasked, '查看敏感字段：IMSI');
         return { field, label: 'IMSI', value: phone.imsi };
+      }
+      if (field === 'servicePassword' && phone.servicePassword) {
+        logAssetOperation('查看敏感字段', '手机号资产', phone.id, phone.phoneNumberMasked, '查看敏感字段：服务密码');
+        return { field, label: '服务密码', value: phone.servicePassword };
       }
       throw new Error('该字段不属于手机号资产');
     }

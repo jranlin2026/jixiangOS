@@ -26,7 +26,7 @@ export type AssetRiskStatus = 'open' | 'resolved' | 'ignored';
 
 export type AssetType = 'device' | 'phone' | 'account';
 
-export type AssetSensitiveField = 'imei' | 'imei1' | 'imei2' | 'phoneNumber' | 'phoneRealName' | 'iccid' | 'imsi' | 'loginAccount' | 'accountRealName' | 'boundEmail';
+export type AssetSensitiveField = 'imei' | 'imei1' | 'imei2' | 'phoneNumber' | 'phoneRealName' | 'iccid' | 'imsi' | 'servicePassword' | 'loginAccount' | 'accountRealName' | 'boundEmail';
 
 export type AssetImportType = 'devices' | 'phones' | 'accounts';
 
@@ -79,6 +79,8 @@ export interface AssetPhoneNumber {
   iccidMasked?: string;
   imsi?: string;
   imsiMasked?: string;
+  servicePassword?: string;
+  servicePasswordMasked?: string;
   realNameSubject?: string;
   realName?: string;
   realNameMasked?: string;
@@ -291,7 +293,7 @@ export type AssetDeviceInput = Omit<AssetDevice, 'id' | 'deviceCode' | 'imei1Mas
   deviceCode?: string;
 };
 
-export type AssetPhoneNumberInput = Omit<AssetPhoneNumber, 'id' | 'phoneNumberMasked' | 'iccidMasked' | 'imsiMasked' | 'createdAt' | 'updatedAt'>;
+export type AssetPhoneNumberInput = Omit<AssetPhoneNumber, 'id' | 'phoneNumberMasked' | 'iccidMasked' | 'imsiMasked' | 'servicePasswordMasked' | 'createdAt' | 'updatedAt'>;
 
 export type AssetInternetAccountInput = Omit<AssetInternetAccount, 'id' | 'accountNo' | 'loginAccountMasked' | 'boundEmailMasked' | 'createdAt' | 'updatedAt'> & {
   accountNo?: string;

@@ -1,4 +1,15 @@
+import type { AssetDevice } from '../../types/asset';
+
 export type AssetFormType = 'device' | 'phone' | 'account';
+
+export function formatPhoneSlotImeiLabel(
+  slot: '卡槽1' | '卡槽2',
+  device?: Pick<AssetDevice, 'imei1Masked' | 'imei2Masked'>,
+): string {
+  const imeiLabel = slot === '卡槽2' ? 'IMEI 2' : 'IMEI 1';
+  const imei = slot === '卡槽2' ? device?.imei2Masked : device?.imei1Masked;
+  return imei ? `${slot}（${imeiLabel}：${imei}）` : `${slot}（对应 ${imeiLabel}）`;
+}
 
 export const ASSET_FORM_SECTIONS: Record<AssetFormType, Array<{ title: string; summary: string }>> = {
   device: [
@@ -8,7 +19,7 @@ export const ASSET_FORM_SECTIONS: Record<AssetFormType, Array<{ title: string; s
     { title: '状态与成本', summary: '取得方式 / 成本 / 保修 / 状态' },
   ],
   phone: [
-    { title: '号码与SIM', summary: '手机号 / SIM形态 / ICCID / IMSI' },
+    { title: '号码与SIM', summary: '手机号 / SIM身份 / 服务密码' },
     { title: '设备绑定', summary: '可先建档，后绑定设备卡槽' },
     { title: '归属与使用', summary: '实名主体 / 实名信息 / 部门 / 负责人' },
     { title: '套餐与状态', summary: '运营商 / 套餐 / 费用 / 状态' },
