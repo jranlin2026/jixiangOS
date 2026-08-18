@@ -2375,7 +2375,13 @@ const AssetManagement: React.FC = () => {
     : 0;
 
   const sectionSummary = (fields: string[], fallback: string) => {
-    const filled = fields.filter((field) => String(formState.values[field] || '').trim()).length;
+    const filled = fields.filter((field) => {
+      if (field === 'servicePassword') {
+        return formState.values.clearServicePassword !== 'true'
+          && Boolean(String(formState.values.servicePassword || formState.values.servicePasswordMasked || '').trim());
+      }
+      return Boolean(String(formState.values[field] || '').trim());
+    }).length;
     return filled ? `已填 ${filled}/${fields.length} 项` : fallback;
   };
 
