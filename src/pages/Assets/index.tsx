@@ -2762,7 +2762,8 @@ const AssetManagement: React.FC = () => {
         onClose={closeForm}
         submitting={loading}
         resetKey={`${formState.type}:${formState.mode}:${formState.id || 'new'}`}
-        maxWidth="lg"
+        markButtonClicksDirty={false}
+        maxWidth="md"
         fullWidth
         fullScreen={isMobile}
         PaperProps={{ sx: { maxHeight: { xs: '100%', sm: '92vh' }, m: { xs: 0, sm: 2 }, borderRadius: { xs: 0, sm: 2 } } }}
