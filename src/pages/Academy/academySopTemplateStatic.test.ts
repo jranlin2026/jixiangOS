@@ -15,7 +15,8 @@ assert.match(source, /deleteSopTemplate/, "模板删除必须通过受保护的�
 assert.match(source, /流程阶段/, "模板步骤必须可配置课前、课中和课后阶段");
 assert.match(source, /是否必做/, "模板步骤必须可配置是否为开课必做项");
 assert.match(source, /直接确认[\s\S]*填写说明[\s\S]*上传附件[\s\S]*检查确认/, "步骤完成方式必须由模板决定");
-assert.match(source, /moveSopStep/, "模板步骤必须支持调整顺序");
+assert.match(source, /moveSopStage/, "课程流程必须支持以环节为单位调整真实执行顺序");
+assert.match(source, /在当前环节添加并行任务/, "同一环节必须支持配置多项同步执行任务");
 assert.match(source, /visibleSessionOwnerFields/, "创建课程安排必须按模板实际角色分配负责人");
 assert.match(source, /workbenchTask\.completionMode === "ATTACHMENT"/, "只有附件型任务才能展示上传入口");
 assert.match(source, /closeSopSettings/, "模板抽屉必须保护未保存编辑");

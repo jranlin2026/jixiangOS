@@ -3,7 +3,81 @@ import type {
   AcademyPublicCalendarItem,
   AcademySessionDetail,
   AcademySessionTask,
+  AcademySopTemplateStep,
 } from "../../types/academy";
+
+export const normalizeAcademySopStages = (
+  input: AcademySopTemplateStep[],
+): AcademySopTemplateStep[] => {
+  const stageOrders = new Map<string, number>();
+  let nextStageOrder = 0;
+  return input.map((step, index) => {
+    const stageKey = step.stageKey || step.stepKey;
+    if (!stageOrders.has(stageKey)) stageOrders.set(stageKey, ++nextStageOrder);
+    return {
+      ...step,
+      stageKey,
+      stageName: step.stageName || step.title || `环节 ${stageOrders.get(stageKey)}`,
+      stageOrder: stageOrders.get(stageKey)!,
+      sortOrder: index + 1,
+    };
+  });
+};
+
+export const moveAcademySopStage = (
+  input: AcademySopTemplateStep[],
+  stageKey: string,
+  direction: -1 | 1,
+) => {
+  const stageKeys = [...new Set(input.map((step) => step.stageKey || step.stepKey))];
+  const currentCategory = input.find((step) => (step.stageKey || step.stepKey) === stageKey)?.category;
+  const categoryStageKeys = stageKeys.filter((key) => input.find((step) => (step.stageKey || step.stepKey) === key)?.category === currentCategory);
+  const categoryIndex = categoryStageKeys.indexOf(stageKey);
+  const categoryTarget = categoryIndex + direction;
+  if (categoryIndex < 0 || categoryTarget < 0 || categoryTarget >= categoryStageKeys.length) return normalizeAcademySopStages(input);
+  const targetStageKey = categoryStageKeys[categoryTarget];
+  const index = stageKeys.indexOf(stageKey);
+  const target = stageKeys.indexOf(targetStageKey);
+  [stageKeys[index], stageKeys[target]] = [stageKeys[target], stageKeys[index]];
+  const byStage = new Map(stageKeys.map((key) => [key, input.filter((step) => (step.stageKey || step.stepKey) === key)]));
+  return normalizeAcademySopStages(stageKeys.flatMap((key) => byStage.get(key) || []));
+};
+
+export const splitAcademySopTaskToStage = (
+  input: AcademySopTemplateStep[],
+  taskIndex: number,
+  stageKey: string,
+  stageName: string,
+) => {
+  const selected = input[taskIndex];
+  if (!selected) return normalizeAcademySopStages(input);
+  const originalStageKey = selected.stageKey || selected.stepKey;
+  const remaining = input.filter((_, index) => index !== taskIndex);
+  const lastOriginalIndex = remaining.reduce(
+    (last, step, index) => (step.stageKey || step.stepKey) === originalStageKey ? index : last,
+    -1,
+  );
+  const nextTask = { ...selected, stageKey, stageName };
+  remaining.splice(lastOriginalIndex + 1, 0, nextTask);
+  return normalizeAcademySopStages(remaining);
+};
+
+export const changeAcademySopStageCategory = (
+  input: AcademySopTemplateStep[],
+  stageKey: string,
+  category: AcademySopTemplateStep["category"],
+) => {
+  const categoryRank: Record<AcademySopTemplateStep["category"], number> = { BEFORE: 0, DURING: 1, AFTER: 2 };
+  const stageKeys = [...new Set(input.map((step) => step.stageKey || step.stepKey))];
+  const byStage = new Map(stageKeys.map((key) => [key, input
+    .filter((step) => (step.stageKey || step.stepKey) === key)
+    .map((step) => key === stageKey ? { ...step, category } : step)]));
+  const orderedKeys = stageKeys
+    .map((key, index) => ({ key, index, category: byStage.get(key)?.[0]?.category || "BEFORE" }))
+    .sort((left, right) => categoryRank[left.category] - categoryRank[right.category] || left.index - right.index)
+    .map((item) => item.key);
+  return normalizeAcademySopStages(orderedKeys.flatMap((key) => byStage.get(key) || []));
+};
 
 export interface AcademyPrivateAccess {
   plan: boolean;
@@ -47,7 +121,7 @@ export const getSessionNextStep = (
   now = new Date(),
 ) => {
   const pending = sortAcademyTasks(detail.tasks).filter(
-    (task) => !["DONE", "SKIPPED"].includes(task.status),
+    (task) => task.isUnlocked !== false && !["DONE", "SKIPPED"].includes(task.status),
   );
   const overdue = pending
     .filter((task) => task.dueAt && new Date(task.dueAt) < now)
@@ -62,7 +136,7 @@ export const getMyAcademyTodos = (
   currentUserId: string,
 ) => details
   .flatMap((detail) => detail.tasks
-    .filter((task) => task.assigneeUserId === currentUserId && !["DONE", "SKIPPED"].includes(task.status))
+    .filter((task) => task.assigneeUserId === currentUserId && task.isUnlocked !== false && !["DONE", "SKIPPED"].includes(task.status))
     .map((task) => ({ detail, task, step: { order: Number(task.sortOrder || 99), timeLabel: task.sortOrder ? `第${task.sortOrder}步` : "未排序", label: task.title } })))
   .sort((left, right) => +(new Date(left.task.dueAt || 0)) - +(new Date(right.task.dueAt || 0)));
 
@@ -109,12 +183,61 @@ export const getCoursePhaseProgress = (
   ["AFTER", "课后跟进"],
 ] as const).map(([category, label]) => {
   const tasks = course.tasks.filter((task) => task.category === category);
-  const done = tasks.filter((task) => task.status === "DONE").length;
+  const requiredTasks = tasks.filter((task) => task.isRequired);
+  const progressTasks = requiredTasks.length ? requiredTasks : tasks;
+  const done = progressTasks.filter((task) => task.status === "DONE").length;
   return {
     category,
     label,
     done,
-    total: tasks.length,
-    percent: tasks.length ? Math.round((done / tasks.length) * 100) : 0,
+    total: progressTasks.length,
+    percent: progressTasks.length ? Math.round((done / progressTasks.length) * 100) : 0,
   };
 });
+
+export interface AcademyCourseStageProgress {
+  key: string;
+  name: string;
+  order: number;
+  category: "BEFORE" | "DURING" | "AFTER";
+  isUnlocked: boolean;
+  done: number;
+  total: number;
+  requiredDone: number;
+  requiredTotal: number;
+  tasks: AcademyPublicCalendarItem["tasks"];
+}
+
+export const getCourseStageProgress = (
+  course: Pick<AcademyPublicCalendarItem, "tasks">,
+): AcademyCourseStageProgress[] => {
+  const stages = new Map<string, AcademyCourseStageProgress>();
+  course.tasks.forEach((task, index) => {
+    const key = task.stageKey || task.templateKey || `${task.category}-${task.stepNumber || index + 1}`;
+    const existing = stages.get(key);
+    if (existing) {
+      existing.tasks.push(task);
+      existing.total += 1;
+      existing.done += task.status === "DONE" ? 1 : 0;
+      if (task.isRequired) {
+        existing.requiredTotal += 1;
+        existing.requiredDone += task.status === "DONE" ? 1 : 0;
+      }
+      existing.isUnlocked = existing.isUnlocked || task.isUnlocked !== false;
+      return;
+    }
+    stages.set(key, {
+      key,
+      name: task.stageName || task.title,
+      order: Number(task.stageOrder || task.stepNumber || index + 1),
+      category: task.category,
+      isUnlocked: task.isUnlocked !== false,
+      done: task.status === "DONE" ? 1 : 0,
+      total: 1,
+      requiredDone: task.isRequired && task.status === "DONE" ? 1 : 0,
+      requiredTotal: task.isRequired ? 1 : 0,
+      tasks: [task],
+    });
+  });
+  return [...stages.values()].sort((left, right) => left.order - right.order);
+};

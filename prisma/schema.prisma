@@ -1094,6 +1094,9 @@ model AcademySopTemplateStep {
   stepKey            String   @db.VarChar(40)
   title              String   @db.VarChar(200)
   category           String   @db.VarChar(24)
+  stageKey           String   @db.VarChar(64)
+  stageName          String   @db.VarChar(160)
+  stageOrder         Int
   sortOrder          Int
   assigneeRole       String   @db.VarChar(40)
   dueAnchor          String   @default("STARTS_AT") @db.VarChar(24)
@@ -1109,6 +1112,7 @@ model AcademySopTemplateStep {
 
   @@unique([templateId, stepKey])
   @@index([templateId, sortOrder])
+  @@index([templateId, category, stageOrder])
   @@map("academy_sop_template_steps")
 }
 
@@ -1191,6 +1195,10 @@ model AcademySessionTask {
   templateKey        String    @db.VarChar(40)
   title              String    @db.VarChar(200)
   category           String    @db.VarChar(24)
+  stageKey           String    @db.VarChar(64)
+  stageName          String    @db.VarChar(160)
+  stageOrder         Int
+  isUnlocked         Boolean   @default(true)
   isRequired         Boolean   @default(true)
   status             String    @default("PENDING") @db.VarChar(24)
   note               String?   @db.Text
@@ -1225,6 +1233,7 @@ model AcademySessionTask {
 
   @@unique([sessionId, templateKey])
   @@index([sessionId, category, status])
+  @@index([sessionId, category, stageOrder, isUnlocked])
   @@index([assigneeUserId, status, dueAt])
   @@map("academy_session_tasks")
 }

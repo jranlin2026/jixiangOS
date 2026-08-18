@@ -111,6 +111,11 @@ import {
   getAcademyPrivateLoadPlan,
   getAcademyWorkbenchSummary,
   getCoursePhaseProgress,
+  getCourseStageProgress,
+  changeAcademySopStageCategory,
+  moveAcademySopStage,
+  normalizeAcademySopStages,
+  splitAcademySopTaskToStage,
   taskRequiresEvidence,
 } from "./academyMvpModel";
 import {
@@ -182,6 +187,9 @@ const emptySopStep = (index: number): AcademySopTemplateStep => ({
   stepKey: `STEP_${index + 1}_${crypto.randomUUID().slice(0, 8)}`,
   title: "",
   category: "BEFORE",
+  stageKey: `STAGE_${index + 1}_${crypto.randomUUID().slice(0, 8)}`,
+  stageName: `环节 ${index + 1}`,
+  stageOrder: index + 1,
   sortOrder: index + 1,
   assigneeRole: "PROJECT_OWNER",
   dueAnchor: "STARTS_AT",
@@ -191,6 +199,7 @@ const emptySopStep = (index: number): AcademySopTemplateStep => ({
   acceptanceCriteria: "",
   isRequired: true,
 });
+
 const emptySession: CreateAcademySessionInput = {
   courseId: "",
   title: "",
@@ -1160,7 +1169,15 @@ const Academy: React.FC = () => {
   };
   const openSopSettings = (template?: AcademySopTemplate) => {
     const draft: AcademySopTemplate = template
-      ? { ...template, steps: template.steps.map((step) => ({ ...step })) }
+      ? {
+          ...template,
+          steps: normalizeAcademySopStages(template.steps.map((step, index) => ({
+            ...step,
+            stageKey: step.stageKey || step.stepKey,
+            stageName: step.stageName || step.title,
+            stageOrder: step.stageOrder || index + 1,
+          }))),
+        }
       : {
           id: "",
           name: "",
@@ -1197,8 +1214,11 @@ const Academy: React.FC = () => {
       description: sopEditing.description,
       status: sopEditing.status,
       isDefault: sopEditing.isDefault,
-      steps: sopEditing.steps.map((step, index) => ({
+      steps: normalizeAcademySopStages(sopEditing.steps).map((step, index) => ({
         ...step,
+        stageKey: step.stageKey || step.stepKey,
+        stageName: step.stageName || step.title,
+        stageOrder: step.stageOrder || index + 1,
         sortOrder: index + 1,
       })),
     });
@@ -1265,18 +1285,37 @@ const Academy: React.FC = () => {
     setSopTemplatePage((page) => Math.min(page, lastPage));
     await loadBase();
   };
-  const moveSopStep = (index: number, direction: -1 | 1) => {
+  const moveSopStage = (stageKey: string, direction: -1 | 1) => {
     if (!sopEditing) return;
-    const target = index + direction;
-    if (target < 0 || target >= sopEditing.steps.length) return;
-    const steps = [...sopEditing.steps];
-    [steps[index], steps[target]] = [steps[target], steps[index]];
     setSopEditing({
       ...sopEditing,
-      steps: steps.map((step, itemIndex) => ({
-        ...step,
-        sortOrder: itemIndex + 1,
-      })),
+      steps: moveAcademySopStage(sopEditing.steps, stageKey, direction),
+    });
+  };
+  const joinPreviousSopStage = (index: number) => {
+    if (!sopEditing || index <= 0) return;
+    const previous = sopEditing.steps[index - 1];
+    const steps = [...sopEditing.steps];
+    steps[index] = {
+      ...steps[index],
+      stageKey: previous.stageKey || previous.stepKey,
+      stageName: previous.stageName || previous.title,
+      stageOrder: previous.stageOrder || index,
+      category: previous.category,
+    };
+    setSopEditing({ ...sopEditing, steps: normalizeAcademySopStages(steps) });
+  };
+  const splitSopStage = (index: number) => {
+    if (!sopEditing) return;
+    const nextStageNumber = Number(sopEditing.steps[index].stageOrder || index + 1) + 1;
+    setSopEditing({
+      ...sopEditing,
+      steps: splitAcademySopTaskToStage(
+        sopEditing.steps,
+        index,
+        `STAGE_${nextStageNumber}_${crypto.randomUUID().slice(0, 8)}`,
+        sopEditing.steps[index].title || `环节 ${nextStageNumber}`,
+      ),
     });
   };
   const saveSession = async () => {
@@ -3278,7 +3317,7 @@ const Academy: React.FC = () => {
                   课程流程设置
                 </Typography>
                 <Typography fontSize={12.5} color="text.secondary">
-                  配置每次课程安排可以选择的执行步骤、负责人角色和完成方式
+                  环节按顺序推进，同一环节内的任务可以多人同步完成
                 </Typography>
               </Box>
               <IconButton
@@ -3324,7 +3363,7 @@ const Academy: React.FC = () => {
                       <TableHead>
                         <TableRow>
                           <TableCell>流程名称</TableCell>
-                          <TableCell>步骤</TableCell>
+                          <TableCell>环节 / 任务</TableCell>
                           <TableCell>默认流程</TableCell>
                           <TableCell>状态</TableCell>
                           <TableCell>最近更新</TableCell>
@@ -3352,7 +3391,9 @@ const Academy: React.FC = () => {
                                   {template.description || "暂无说明"}
                                 </Typography>
                               </TableCell>
-                              <TableCell>{template.steps.length} 步</TableCell>
+                              <TableCell>
+                                {new Set(template.steps.map((step, index) => step.stageKey || `${step.category}-${step.stageOrder || index + 1}`)).size} 个环节 · {template.steps.length} 项任务
+                              </TableCell>
                               <TableCell>
                                 {template.isDefault ? (
                                   <Chip
@@ -3539,7 +3580,7 @@ const Academy: React.FC = () => {
                       <Box>
                         <Typography fontWeight={950}>流程基本信息</Typography>
                         <Typography fontSize={12.5} color="text.secondary">
-                          这里只设置流程名称和每一步需要谁完成；启停、默认流程在列表操作。
+                          先划分执行环节，再把可以同步做的任务放进同一环节；全部必做任务完成后自动进入下一环节。
                         </Typography>
                       </Box>
                       <Button
@@ -3581,28 +3622,53 @@ const Academy: React.FC = () => {
                     sx={{ ...panelSx, p: 1.5 }}
                   >
                     <Stack
-                      direction="row"
+                      direction={{ xs: "column", sm: "row" }}
                       justifyContent="space-between"
-                      alignItems="center"
+                      alignItems={{ xs: "stretch", sm: "center" }}
+                      spacing={1}
                     >
-                      <Typography fontWeight={950}>
-                        第 {index + 1} 步
-                      </Typography>
-                      <Stack direction="row" spacing={0.5}>
-                        <Button
-                          size="small"
-                          disabled={index === 0}
-                          onClick={() => moveSopStep(index, -1)}
-                        >
-                          上移
-                        </Button>
-                        <Button
-                          size="small"
-                          disabled={index === sopEditing.steps.length - 1}
-                          onClick={() => moveSopStep(index, 1)}
-                        >
-                          下移
-                        </Button>
+                      <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap">
+                        <Typography fontWeight={950}>
+                          环节 {step.stageOrder || index + 1} · 任务 {index + 1}
+                        </Typography>
+                        {sopEditing.steps.filter((item) => (item.stageKey || item.stepKey) === (step.stageKey || step.stepKey)).length > 1 && (
+                          <Chip size="small" color="primary" label={`本环节 ${sopEditing.steps.filter((item) => (item.stageKey || item.stepKey) === (step.stageKey || step.stepKey)).length} 项同步进行`} />
+                        )}
+                      </Stack>
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                        {sopEditing.steps.findIndex((item) => (item.stageKey || item.stepKey) === (step.stageKey || step.stepKey)) === index && (
+                          <>
+                            <Button
+                              size="small"
+                              disabled={!sopEditing.steps.some((item, itemIndex) =>
+                                item.category === step.category
+                                && Number(item.stageOrder || itemIndex + 1) < Number(step.stageOrder || index + 1),
+                              )}
+                              onClick={() => moveSopStage(step.stageKey || step.stepKey, -1)}
+                            >
+                              环节上移
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={!sopEditing.steps.some((item, itemIndex) =>
+                                item.category === step.category
+                                && Number(item.stageOrder || itemIndex + 1) > Number(step.stageOrder || index + 1),
+                              )}
+                              onClick={() => moveSopStage(step.stageKey || step.stepKey, 1)}
+                            >
+                              环节下移
+                            </Button>
+                          </>
+                        )}
+                        {index > 0 && step.category === sopEditing.steps[index - 1].category && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => (step.stageKey || step.stepKey) === (sopEditing.steps[index - 1].stageKey || sopEditing.steps[index - 1].stepKey) ? splitSopStage(index) : joinPreviousSopStage(index)}
+                          >
+                            {(step.stageKey || step.stepKey) === (sopEditing.steps[index - 1].stageKey || sopEditing.steps[index - 1].stepKey) ? "拆为新环节" : "与上一步并行"}
+                          </Button>
+                        )}
                         <Button
                           color="error"
                           size="small"
@@ -3610,9 +3676,9 @@ const Academy: React.FC = () => {
                           onClick={() =>
                             setSopEditing({
                               ...sopEditing,
-                              steps: sopEditing.steps.filter(
+                              steps: normalizeAcademySopStages(sopEditing.steps.filter(
                                 (_, itemIndex) => itemIndex !== index,
-                              ),
+                              )),
                             })
                           }
                         >
@@ -3628,6 +3694,20 @@ const Academy: React.FC = () => {
                         gap: 1.2,
                       }}
                     >
+                      <TextField
+                        label="环节名称 *"
+                        value={step.stageName || step.title}
+                        helperText="同一环节的任务会同时解锁"
+                        onChange={(event) => {
+                          const currentStageKey = step.stageKey || step.stepKey;
+                          const steps = sopEditing.steps.map((item) =>
+                            (item.stageKey || item.stepKey) === currentStageKey
+                              ? { ...item, stageName: event.target.value }
+                              : item,
+                          );
+                          setSopEditing({ ...sopEditing, steps });
+                        }}
+                      />
                       <TextField
                         label="步骤名称 *"
                         value={step.title}
@@ -3672,13 +3752,16 @@ const Academy: React.FC = () => {
                           label="流程阶段"
                           value={step.category}
                           onChange={(event) => {
-                            const steps = [...sopEditing.steps];
-                            steps[index] = {
-                              ...step,
-                              category: event.target
-                                .value as AcademySopTemplateStep["category"],
-                            };
-                            setSopEditing({ ...sopEditing, steps });
+                            const nextCategory = event.target.value as AcademySopTemplateStep["category"];
+                            const currentStageKey = step.stageKey || step.stepKey;
+                            setSopEditing({
+                              ...sopEditing,
+                              steps: changeAcademySopStageCategory(
+                                sopEditing.steps,
+                                currentStageKey,
+                                nextCategory,
+                              ),
+                            });
                           }}
                         >
                           <MenuItem value="BEFORE">课前准备</MenuItem>
@@ -3795,21 +3878,44 @@ const Academy: React.FC = () => {
                     </Box>
                   </Paper>
                 ))}
-                <Button
-                  variant="outlined"
-                  startIcon={<AddIcon />}
-                  onClick={() =>
-                    setSopEditing({
-                      ...sopEditing,
-                      steps: [
-                        ...sopEditing.steps,
-                        emptySopStep(sopEditing.steps.length),
-                      ],
-                    })
-                  }
-                >
-                  添加步骤
-                </Button>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => {
+                      const last = sopEditing.steps[sopEditing.steps.length - 1];
+                      setSopEditing({
+                        ...sopEditing,
+                        steps: normalizeAcademySopStages([
+                          ...sopEditing.steps,
+                          { ...emptySopStep(sopEditing.steps.length), category: last.category },
+                        ]),
+                      });
+                    }}
+                  >
+                    添加下一环节
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<AddIcon />}
+                    onClick={() => {
+                      const last = sopEditing.steps[sopEditing.steps.length - 1];
+                      const task = emptySopStep(sopEditing.steps.length);
+                      setSopEditing({
+                        ...sopEditing,
+                        steps: normalizeAcademySopStages([...sopEditing.steps, {
+                          ...task,
+                          stageKey: last.stageKey || last.stepKey,
+                          stageName: last.stageName || last.title,
+                          stageOrder: last.stageOrder || sopEditing.steps.length,
+                          category: last.category,
+                        }]),
+                      });
+                    }}
+                  >
+                    在当前环节添加并行任务
+                  </Button>
+                </Stack>
               </Stack>
             )}
           </Box>
@@ -5089,6 +5195,9 @@ const WorkbenchOverview: React.FC<{
   const phaseProgress = selectedCourse
     ? getCoursePhaseProgress(selectedCourse)
     : [];
+  const stageProgress = selectedCourse
+    ? getCourseStageProgress(selectedCourse)
+    : [];
   const currentPhase = selectedCourse
     ? ["PLANNED", "READY"].includes(selectedCourse.status)
       ? "BEFORE"
@@ -5096,6 +5205,12 @@ const WorkbenchOverview: React.FC<{
         ? "DURING"
         : "AFTER"
     : null;
+  const currentStage = stageProgress.find(
+    (stage) =>
+      stage.category === currentPhase
+      && stage.isUnlocked
+      && stage.requiredDone < stage.requiredTotal,
+  ) || null;
   const statusAction =
     selectedManagedCourse && canManageSessions
       ? selectedManagedCourse.status === "PLANNED"
@@ -5315,11 +5430,39 @@ const WorkbenchOverview: React.FC<{
                   </Box>
                 </Box>
                 <Divider sx={{ my: 1.5 }} />
+                {currentStage && (
+                  <Box sx={{ mb: 1.4, p: 1.2, borderRadius: 1.2, bgcolor: palette.blueSoft }}>
+                    <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={0.8}>
+                      <Box>
+                        <Typography fontSize={11.5} color="text.secondary">当前环节</Typography>
+                        <Typography fontSize={15} fontWeight={950}>{currentStage.name}</Typography>
+                      </Box>
+                      <Chip
+                        size="small"
+                        color="primary"
+                        label={`必做 ${currentStage.requiredDone}/${currentStage.requiredTotal} · 全部 ${currentStage.done}/${currentStage.total}`}
+                        sx={{ alignSelf: { sm: "center" } }}
+                      />
+                    </Stack>
+                    <Box sx={{ mt: 1, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 0.8 }}>
+                      {currentStage.tasks.map((task) => (
+                        <Paper key={`${task.stepNumber}-${task.title}`} variant="outlined" sx={{ p: 0.9, bgcolor: "#fff" }}>
+                          <Stack direction="row" justifyContent="space-between" spacing={0.8}>
+                            <Box minWidth={0}>
+                              <Typography fontSize={12.5} fontWeight={850}>{task.title}</Typography>
+                              <Typography fontSize={11.5} color="text.secondary">{task.assigneeUserName || "待分配"}</Typography>
+                            </Box>
+                            <Chip size="small" label={taskStatusLabel[task.status] || task.status} sx={{ height: 21, flex: "0 0 auto" }} />
+                          </Stack>
+                        </Paper>
+                      ))}
+                    </Box>
+                  </Box>
+                )}
                 <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1}>
                   <Box>
-                    <Typography fontSize={11.5} color="text.secondary">当前步骤</Typography>
-                    <Typography fontSize={13.5} fontWeight={900}>{selectedCourse.currentStep?.title || "当前阶段任务已完成"}</Typography>
-                    <Typography fontSize={12} color="text.secondary">当前负责人：{selectedCourse.currentStep?.assigneeUserName || "暂无"}</Typography>
+                    <Typography fontSize={11.5} color="text.secondary">推进规则</Typography>
+                    <Typography fontSize={13.5} fontWeight={900}>{currentStage ? "本环节必做任务全部完成后，自动解锁下一环节；选做任务不阻塞推进" : "当前阶段必做任务已完成，未完成的选做任务仍可在任务列表处理"}</Typography>
                   </Box>
                   <Stack direction={{ xs: "column", sm: "row" }} spacing={0.8} sx={{ width: { xs: "100%", sm: "auto" } }}>
                     <Button variant="outlined" size="small" onClick={() => setFlowOpen(true)} sx={{ width: { xs: "100%", sm: "auto" } }}>查看全部流程</Button>
@@ -5445,11 +5588,25 @@ const WorkbenchOverview: React.FC<{
         <Box sx={{ p: 2 }}>
           <Typography color="text.secondary" fontSize={13}>{selectedCourse?.title} · 仅用于查看整场进度，任务统一从“我的课程任务”处理。</Typography>
           <Stack spacing={1} sx={{ mt: 1.5 }}>
-            {selectedCourse?.tasks.map((task) => (
-              <Paper key={`${task.stepNumber}-${task.title}`} variant="outlined" sx={{ p: 1.2 }}>
-                <Stack direction="row" justifyContent="space-between" spacing={1}>
-                  <Box><Typography fontWeight={900}>{task.stepNumber}. {task.title}</Typography><Typography fontSize={12.5} color="text.secondary">{phaseLabel[task.category]} · 负责人：{task.assigneeUserName || "待分配"}</Typography></Box>
-                  <Chip size="small" label={taskStatusLabel[task.status] || task.status} />
+            {selectedCourse && getCourseStageProgress(selectedCourse).map((stage, stageIndex) => (
+              <Paper key={stage.key} variant="outlined" sx={{ p: 1.2, opacity: stage.isUnlocked ? 1 : 0.72 }}>
+                <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="center">
+                  <Box>
+                    <Typography fontWeight={950}>环节 {stageIndex + 1} · {stage.name}</Typography>
+                    <Typography fontSize={12.5} color="text.secondary">{phaseLabel[stage.category]} · {stage.tasks.length > 1 ? `${stage.tasks.length} 项任务同步进行` : "单项任务"}</Typography>
+                  </Box>
+                  <Chip size="small" label={!stage.isUnlocked ? "未解锁" : stage.done === stage.total ? "已完成" : `${stage.done}/${stage.total}`} />
+                </Stack>
+                <Stack spacing={0.7} sx={{ mt: 1 }}>
+                  {stage.tasks.map((task) => (
+                    <Stack key={`${task.stepNumber}-${task.title}`} direction="row" justifyContent="space-between" spacing={1} sx={{ p: 0.8, borderRadius: 1, bgcolor: palette.soft }}>
+                      <Box>
+                        <Typography fontSize={13} fontWeight={850}>{task.title}</Typography>
+                        <Typography fontSize={11.5} color="text.secondary">负责人：{task.assigneeUserName || "待分配"}</Typography>
+                      </Box>
+                      <Chip size="small" label={taskStatusLabel[task.status] || task.status} />
+                    </Stack>
+                  ))}
                 </Stack>
               </Paper>
             ))}

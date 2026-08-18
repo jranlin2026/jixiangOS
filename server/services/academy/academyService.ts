@@ -27,6 +27,9 @@ export type AcademySopTemplateStepRecord = {
   stepKey: string;
   title: string;
   category: "BEFORE" | "DURING" | "AFTER";
+  stageKey: string;
+  stageName: string;
+  stageOrder: number;
   sortOrder: number;
   assigneeRole: AcademyTaskAssigneeRole;
   dueAnchor: "STARTS_AT" | "ENDS_AT";
@@ -141,6 +144,10 @@ export type AcademySessionTaskRecord = {
   templateKey: string;
   title: string;
   category: "BEFORE" | "DURING" | "AFTER";
+  stageKey: string;
+  stageName: string;
+  stageOrder: number;
+  isUnlocked: boolean;
   isRequired: boolean;
   status: AcademyTaskStatus;
   note?: string | null;
@@ -295,6 +302,7 @@ export interface AcademyRepository {
     expectedStatus: AcademySessionStatus,
     status: AcademySessionStatus,
     taskUpdate?: Partial<AcademySessionTaskRecord>,
+    unlockCategory?: AcademySessionTaskRecord["category"],
   ): Promise<AcademySessionRecord | null>;
   updateSession(
     id: string,
@@ -536,11 +544,15 @@ export function createAcademyService(
         });
         const done = sorted.filter((task) => ["DONE", "SKIPPED"].includes(task.status)).length;
         const publicTasks = sorted.map((task, index) => ({
-          ...(task.assigneeUserId === actor.id ? { taskId: task.id } : {}),
-          ...(task.assigneeUserId === actor.id ? { templateKey: task.templateKey, acceptanceCriteria: task.acceptanceCriteria || undefined, completionMode: task.completionMode || "NOTE", requiresReview: task.requiresReview === true, note: task.note || undefined, submissionNote: task.submissionNote || undefined, completedAt: task.completedAt?.toISOString(), reviewedAt: task.reviewedAt?.toISOString(), submittedAt: task.submittedAt?.toISOString() } : {}),
+          ...(task.assigneeUserId === actor.id && task.isUnlocked ? { taskId: task.id } : {}),
+          ...(task.assigneeUserId === actor.id && task.isUnlocked ? { templateKey: task.templateKey, acceptanceCriteria: task.acceptanceCriteria || undefined, completionMode: task.completionMode || "NOTE", requiresReview: task.requiresReview === true, note: task.note || undefined, submissionNote: task.submissionNote || undefined, completedAt: task.completedAt?.toISOString(), reviewedAt: task.reviewedAt?.toISOString(), submittedAt: task.submittedAt?.toISOString() } : {}),
           stepNumber: Number(task.sortOrder || 0) || index + 1,
           title: task.title.replace(/^T(?:[+-][^\s]+|日)?\s*/, ""),
           category: task.category,
+          stageKey: task.stageKey,
+          stageName: task.stageName,
+          stageOrder: task.stageOrder,
+          isUnlocked: task.isUnlocked,
           isRequired: task.isRequired,
           reviewerUserName: task.requiresReview ? session.taskReviewerUserName || undefined : undefined,
           assigneeUserName: task.assigneeUserName || undefined,
@@ -555,7 +567,25 @@ export function createAcademyService(
             : session.status === "POST_COURSE"
               ? "AFTER"
               : null;
-        const currentStep = publicTasks.find((task) => task.category === activeCategory && !["DONE", "SKIPPED"].includes(task.status));
+        const currentStage = [...new Map(
+          publicTasks
+            .filter((task) => task.category === activeCategory && task.isUnlocked)
+            .sort((left, right) => Number(left.stageOrder || 0) - Number(right.stageOrder || 0))
+            .map((task) => [task.stageKey || `${task.category}-${task.stageOrder}`, task]),
+        ).values()].find((stage) => publicTasks.some((task) =>
+          task.category === stage.category
+          && task.stageKey === stage.stageKey
+          && task.isRequired
+          && task.status !== "DONE",
+        ));
+        const currentStep = currentStage
+          ? publicTasks.find((task) =>
+              task.category === currentStage.category
+              && task.stageKey === currentStage.stageKey
+              && task.isRequired
+              && task.status !== "DONE",
+            )
+          : undefined;
         return {
           id: session.id,
           title: session.title,
@@ -597,7 +627,7 @@ export function createAcademyService(
       const session = await repository.findSessionById(id, await resolveScope(actor));
       if (!session) return invalid("课程安排不存在", 404);
       const openTasks = (await repository.listSessionTasks(id))
-        .filter((task) => !["DONE", "SKIPPED"].includes(task.status));
+        .filter((task) => task.isUnlocked && !["DONE", "SKIPPED"].includes(task.status));
       const timestamp = now().getTime();
       const overdue = openTasks
         .filter((task) => task.dueAt && task.dueAt.getTime() < timestamp)
@@ -642,10 +672,16 @@ export function createAcademyService(
         const assigneeRole = String(item.assigneeRole || "PROJECT_OWNER") as AcademyTaskAssigneeRole;
         const dueAnchor = String(item.dueAnchor || "STARTS_AT") as AcademySopTemplateStepRecord["dueAnchor"];
         const completionMode = String(item.completionMode || "CONFIRM") as AcademyTaskCompletionMode;
+        const stageKey = String(item.stageKey || stepKey).trim();
+        const stageName = String(item.stageName || title).trim();
+        const stageOrder = Number(item.stageOrder || index + 1);
         const dueOffsetMinutes = item.dueOffsetMinutes === "" || item.dueOffsetMinutes == null ? null : Number(item.dueOffsetMinutes);
         if (!title) return invalid(`第${index + 1}个步骤名称不能为空`);
         if (stepKey.length > 40) return invalid(`第${index + 1}个步骤标识不能超过40个字符`);
         if (title.length > 200) return invalid(`第${index + 1}个步骤名称不能超过200个字符`);
+        if (!stageKey || stageKey.length > 64) return invalid(`第${index + 1}个步骤所属环节标识无效`);
+        if (!stageName || stageName.length > 160) return invalid(`第${index + 1}个步骤所属环节名称无效`);
+        if (!Number.isInteger(stageOrder) || stageOrder < 1 || stageOrder > 30) return invalid(`第${index + 1}个步骤所属环节顺序无效`);
         if (!TASK_CATEGORIES.has(category)) return invalid(`第${index + 1}个步骤阶段无效`);
         if (!ASSIGNEE_ROLES.has(assigneeRole)) return invalid(`第${index + 1}个步骤负责人角色无效`);
         if (!DUE_ANCHORS.has(dueAnchor)) return invalid(`第${index + 1}个步骤时间基准无效`);
@@ -657,6 +693,9 @@ export function createAcademyService(
           stepKey,
           title,
           category,
+          stageKey,
+          stageName,
+          stageOrder,
           sortOrder: index + 1,
           assigneeRole,
           dueAnchor,
@@ -668,6 +707,28 @@ export function createAcademyService(
           createdAt: existing?.steps.find((step) => step.stepKey === item.stepKey)?.createdAt || timestamp,
           updatedAt: timestamp,
         });
+      }
+      const stageDefinitions = new Map<string, { name: string; category: AcademySopTemplateStepRecord["category"] }>();
+      const closedStageKeys = new Set<string>();
+      let previousStageKey = "";
+      let normalizedStageOrder = 0;
+      let previousCategoryRank = -1;
+      const categoryRank = { BEFORE: 0, DURING: 1, AFTER: 2 } as const;
+      for (const step of steps) {
+        const existingStage = stageDefinitions.get(step.stageKey);
+        if (existingStage && (existingStage.name !== step.stageName || existingStage.category !== step.category))
+          return invalid(`环节“${step.stageName}”的名称和阶段必须保持一致`);
+        if (step.stageKey !== previousStageKey) {
+          if (closedStageKeys.has(step.stageKey)) return invalid(`环节“${step.stageName}”的任务必须连续排列`);
+          if (previousStageKey) closedStageKeys.add(previousStageKey);
+          previousStageKey = step.stageKey;
+          normalizedStageOrder += 1;
+        }
+        if (categoryRank[step.category] < previousCategoryRank)
+          return invalid("课程流程必须按课前准备、课程执行、课后跟进的顺序配置");
+        previousCategoryRank = categoryRank[step.category];
+        step.stageOrder = normalizedStageOrder;
+        stageDefinitions.set(step.stageKey, { name: step.stageName, category: step.category });
       }
       return success(await repository.saveSopTemplate({
         id,
@@ -1226,6 +1287,11 @@ export function createAcademyService(
         LECTURER: lecturer || projectOwner,
         REVIEW_OWNER: reviewOwner || projectOwner,
       };
+      const beforeSteps = template.steps.filter((item) => item.category === "BEFORE");
+      const firstRequiredBeforeStageOrder = Math.min(...beforeSteps.filter((item) => item.isRequired).map((item) => item.stageOrder));
+      const initialBeforeUnlockOrder = Number.isFinite(firstRequiredBeforeStageOrder)
+        ? firstRequiredBeforeStageOrder
+        : Math.max(...beforeSteps.map((item) => item.stageOrder));
       const checklist: AcademySessionTaskRecord[] = template.steps.map((item) => {
         const assignee = assigneeForRole[item.assigneeRole];
         const anchor = item.dueAnchor === "ENDS_AT" ? endsAt : startsAt;
@@ -1235,6 +1301,10 @@ export function createAcademyService(
           templateKey: item.stepKey,
           title: item.title,
           category: item.category,
+          stageKey: item.stageKey,
+          stageName: item.stageName,
+          stageOrder: item.stageOrder,
+          isUnlocked: item.category === "BEFORE" && item.stageOrder <= initialBeforeUnlockOrder,
           isRequired: item.isRequired,
           status: "PENDING",
           assigneeUserId: assignee.id,
@@ -1374,6 +1444,7 @@ export function createAcademyService(
               updatedAt: now(),
             }
           : undefined,
+        nextStatus === "IN_PROGRESS" ? "DURING" : nextStatus === "POST_COURSE" ? "AFTER" : undefined,
       );
       return updated
         ? success(updated)
@@ -1417,6 +1488,8 @@ export function createAcademyService(
             : null;
       if (current.category !== activeCategory)
         return invalid(`当前课程阶段不能处理${current.category === "BEFORE" ? "课前" : current.category === "DURING" ? "课中" : "课后"}任务`, 409);
+      if (!current.isUnlocked)
+        return invalid("上一环节尚未完成，当前任务还不能处理", 409);
       const completionMode = current.completionMode || (TASKS_REQUIRING_EVIDENCE.has(current.templateKey) ? "ATTACHMENT" : "NOTE");
       if (raw.status === "SUBMITTED" && ["NOTE", "ATTACHMENT", "CHECKLIST"].includes(completionMode) && !String(raw.submissionNote || raw.note || "").trim())
         return invalid(completionMode === "CHECKLIST" ? "请确认检查结果并填写说明" : "请填写完成说明");

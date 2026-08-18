@@ -28,6 +28,9 @@ export interface AcademySopTemplateStep {
   stepKey: string;
   title: string;
   category: "BEFORE" | "DURING" | "AFTER";
+  stageKey?: string;
+  stageName?: string;
+  stageOrder?: number;
   sortOrder: number;
   assigneeRole: AcademyTaskAssigneeRole;
   dueAnchor: "STARTS_AT" | "ENDS_AT";
@@ -162,6 +165,10 @@ export interface AcademyPublicCalendarItem {
     completionMode?: AcademyTaskCompletionMode;
     requiresReview?: boolean;
     category: "BEFORE" | "DURING" | "AFTER";
+    stageKey?: string;
+    stageName?: string;
+    stageOrder?: number;
+    isUnlocked?: boolean;
     isRequired: boolean;
     reviewerUserName?: string;
     stepNumber: number;
@@ -183,6 +190,10 @@ export interface AcademyPublicCalendarItem {
     completionMode?: AcademyTaskCompletionMode;
     requiresReview?: boolean;
     category: "BEFORE" | "DURING" | "AFTER";
+    stageKey?: string;
+    stageName?: string;
+    stageOrder?: number;
+    isUnlocked?: boolean;
     isRequired: boolean;
     reviewerUserName?: string;
     stepNumber: number;
@@ -205,6 +216,10 @@ export interface AcademySessionTask {
   templateKey: string;
   title: string;
   category: "BEFORE" | "DURING" | "AFTER";
+  stageKey?: string;
+  stageName?: string;
+  stageOrder?: number;
+  isUnlocked?: boolean;
   isRequired: boolean;
   status: AcademyTaskStatus;
   note?: string;

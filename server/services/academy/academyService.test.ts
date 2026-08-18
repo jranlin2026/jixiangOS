@@ -145,7 +145,7 @@ function createRepository(): AcademyRepository {
       tasks.push(...checklist);
       return { ...session, tasks: checklist };
     },
-    updateSessionStatus: async (id, expectedStatus, status, taskUpdate) => {
+    updateSessionStatus: async (id, expectedStatus, status, taskUpdate, unlockCategory) => {
       const session = sessions.find(
         (item) => item.id === id && item.status === expectedStatus,
       );
@@ -155,6 +155,11 @@ function createRepository(): AcademyRepository {
         tasks
           .filter((task) => task.sessionId === id && !["DONE", "SKIPPED"].includes(task.status))
           .forEach((task) => Object.assign(task, taskUpdate));
+      }
+      if (unlockCategory) {
+        const categoryTasks = tasks.filter((task) => task.sessionId === id && task.category === unlockCategory);
+        const firstStageOrder = Math.min(...categoryTasks.map((task) => task.stageOrder));
+        categoryTasks.filter((task) => task.stageOrder === firstStageOrder).forEach((task) => { task.isUnlocked = true; });
       }
       return session;
     },
@@ -185,7 +190,7 @@ function createRepository(): AcademyRepository {
           );
         }
         if (task.assigneeUserId !== userId || session.status === "CANCELLED") return false;
-        if (status === "OPEN") return task.category === activeCategory && !["DONE", "SKIPPED", "SUBMITTED"].includes(task.status);
+        if (status === "OPEN") return task.category === activeCategory && task.isUnlocked && !["DONE", "SKIPPED", "SUBMITTED"].includes(task.status);
         return !status || task.status === status;
       }).map((task) => {
         const session = sessions.find((item) => item.id === task.sessionId)!;
@@ -209,9 +214,19 @@ function createRepository(): AcademyRepository {
       return task.id === id && session && sessionVisible(session, scope);
     }) || null,
     updateTaskStatus: async (id, expectedStatus, update, allowedSessionStatuses) => {
-      const task = tasks.find((item) => item.id === id && item.status === expectedStatus && allowedSessionStatuses.includes(sessions.find((session) => session.id === item.sessionId)?.status));
+      const task = tasks.find((item) => item.id === id && item.status === expectedStatus && item.isUnlocked && allowedSessionStatuses.includes(sessions.find((session) => session.id === item.sessionId)?.status));
       if (!task) return null;
       Object.assign(task, update);
+      if (task.status === "DONE") {
+        const stageTasks = tasks.filter((item) => item.sessionId === task.sessionId && item.category === task.category && item.stageOrder === task.stageOrder);
+        if (stageTasks.filter((item) => item.isRequired).every((item) => item.status === "DONE")) {
+          const nextStageOrder = Math.min(...tasks
+            .filter((item) => item.sessionId === task.sessionId && item.category === task.category && item.stageOrder > task.stageOrder)
+            .map((item) => item.stageOrder));
+          tasks.filter((item) => item.sessionId === task.sessionId && item.category === task.category && item.stageOrder === nextStageOrder)
+            .forEach((item) => { item.isUnlocked = true; });
+        }
+      }
       return task;
     },
     listTaskAttachments: async (taskId) => structuredClone(taskAttachments.get(taskId) || []),
@@ -656,6 +671,62 @@ assert.equal(compactSession.data?.tasks[0]?.completionMode, "CONFIRM");
 assert.equal(compactSession.data?.tasks[0]?.sopTemplateId, compactTemplate.data!.id);
 assert.equal(compactSession.data?.tasks[0]?.assigneeRole, "PROJECT_OWNER");
 assert.equal(compactSession.data?.tasks[1]?.dueAt?.toISOString(), "2026-08-20T11:30:00.000Z");
+const parallelTemplate = await service.saveSopTemplate({
+  name: "并行物料准备流程",
+  steps: [
+    { stepKey: "PUBLISH_COURSE", title: "发布课程", category: "BEFORE", stageKey: "COURSE_READY", stageName: "课程确认", stageOrder: 4, assigneeRole: "PROJECT_OWNER", completionMode: "CONFIRM", requiresReview: false, isRequired: true },
+    { stepKey: "CREATE_LIVE_ROOM", title: "创建直播间链接", category: "BEFORE", stageKey: "MATERIAL_READY", stageName: "开课物料准备", stageOrder: 8, assigneeRole: "PROJECT_OWNER", completionMode: "CONFIRM", requiresReview: false, isRequired: true },
+    { stepKey: "CREATE_POSTER", title: "制作宣传海报", category: "BEFORE", stageKey: "MATERIAL_READY", stageName: "开课物料准备", stageOrder: 8, assigneeRole: "MATERIAL_OWNER", completionMode: "CONFIRM", requiresReview: false, isRequired: true },
+    { stepKey: "CREATE_INVITATION", title: "编写邀约话术", category: "BEFORE", stageKey: "MATERIAL_READY", stageName: "开课物料准备", stageOrder: 8, assigneeRole: "CONTENT_OWNER", completionMode: "CONFIRM", requiresReview: false, isRequired: true },
+    { stepKey: "INVITE_CUSTOMERS", title: "客户邀约", category: "BEFORE", stageKey: "CUSTOMER_INVITE", stageName: "客户邀约", stageOrder: 12, assigneeRole: "PROJECT_OWNER", completionMode: "CONFIRM", requiresReview: false, isRequired: true },
+  ],
+}, actor);
+assert.equal(parallelTemplate.code, 0);
+const parallelSession = await service.createSession({
+  courseId: courseResult.data!.id,
+  sopTemplateId: parallelTemplate.data!.id,
+  title: "并行流程测试课程安排",
+  startsAt: "2026-08-22T09:00:00.000Z",
+  endsAt: "2026-08-22T11:00:00.000Z",
+  venue: "极享直播间",
+  capacity: 20,
+  projectOwnerUserId: actor.id,
+  contentOwnerUserId: "user-content",
+  materialOwnerUserId: "user-material",
+}, actor);
+assert.equal(parallelSession.code, 0);
+assert.deepEqual(
+  parallelSession.data?.tasks.map((task: any) => [task.stageName, task.stageOrder, task.isUnlocked]),
+  [
+    ["课程确认", 1, true],
+    ["开课物料准备", 2, false],
+    ["开课物料准备", 2, false],
+    ["开课物料准备", 2, false],
+    ["客户邀约", 3, false],
+  ],
+  "同一环节任务应共享环节顺序，只有首个环节初始解锁",
+);
+const publishTask = parallelSession.data!.tasks.find((task: any) => task.templateKey === "PUBLISH_COURSE")!;
+const liveRoomTask = parallelSession.data!.tasks.find((task: any) => task.templateKey === "CREATE_LIVE_ROOM")!;
+const posterTask = parallelSession.data!.tasks.find((task: any) => task.templateKey === "CREATE_POSTER")!;
+const invitationCopyTask = parallelSession.data!.tasks.find((task: any) => task.templateKey === "CREATE_INVITATION")!;
+const inviteCustomersTask = parallelSession.data!.tasks.find((task: any) => task.templateKey === "INVITE_CUSTOMERS")!;
+assert.equal((await service.updateTask(liveRoomTask.id, { status: "IN_PROGRESS" }, actor)).code, 409, "上一环节未完成时并行任务不得提前处理");
+assert.equal((await service.updateTask(publishTask.id, { status: "IN_PROGRESS" }, actor)).code, 0);
+assert.equal((await service.updateTask(publishTask.id, { status: "SUBMITTED" }, actor)).code, 0);
+assert.equal(liveRoomTask.isUnlocked, true);
+assert.equal(posterTask.isUnlocked, true);
+assert.equal(invitationCopyTask.isUnlocked, true, "首环节完成后同一物料环节的三个任务必须同时解锁");
+for (const [task, taskActor] of [
+  [liveRoomTask, actor],
+  [posterTask, { ...actor, id: "user-material", name: "素材负责人", permissions: [] }],
+  [invitationCopyTask, { ...actor, id: "user-content", name: "课程内容负责人", permissions: [] }],
+] as const) {
+  assert.equal((await service.updateTask(task.id, { status: "IN_PROGRESS" }, taskActor)).code, 0);
+  assert.equal((await service.updateTask(task.id, { status: "SUBMITTED" }, taskActor)).code, 0);
+  if (task !== invitationCopyTask) assert.equal(inviteCustomersTask.isUnlocked, false, "并行环节必须全部必做任务完成后才解锁下一环节");
+}
+assert.equal(inviteCustomersTask.isUnlocked, true, "并行环节全部完成后应自动解锁客户邀约");
 const oneStepTemplate = await service.saveSopTemplate({
   name: "单步确认流程",
   steps: [
@@ -709,6 +780,7 @@ const taskAuthorizationSession = await repository.createSession({
   id: "task-authorization-task",
   sessionId: "task-authorization-session",
   status: "PENDING",
+  isUnlocked: true,
   requiresReview: true,
   assigneeUserId: "task-worker",
   assigneeUserName: "任务执行人",
@@ -749,8 +821,8 @@ assert.equal(
   ((await (service as any).listMyTasks({ page: 1, pageSize: 10, status: "OPEN" }, { ...actor, id: "user-content", name: "课程内容负责人" })).data?.items || []).some(
     (task: any) => task.templateKey === "COURSE_DEVELOPMENT",
   ),
-  true,
-  "OPEN待办必须包含未关闭的本人SOP任务",
+  false,
+  "后续环节解锁前不得提前进入负责人OPEN待办",
 );
 
 const cancellationSession = await service.createSession({
@@ -789,6 +861,7 @@ assert.equal((await service.updateTask(directConfirmTask.id, { status: "SUBMITTE
 assert.equal((await repository.findTaskById(directConfirmTask.id))?.status, "DONE", "无需验收的直接确认任务应立即完成");
 
 const contentTask = sessionResult.data!.tasks.find((task: any) => task.templateKey === "COURSE_DEVELOPMENT")!;
+contentTask.isUnlocked = true;
 const contentOwner = { ...actor, id: "user-content", name: "课程内容负责人", permissions: [] };
 businessAttachments.get("task-file-1")!.draftKey = `academy-task:${contentTask.id}`;
 assert.equal((await (service as any).listTaskAttachments(contentTask.id, contentOwner)).code, 0, "任务负责人可查看本人交付附件");
@@ -828,6 +901,7 @@ assert.equal(
 (await repository.findTaskById(contentTask.id))!.assigneeUserName = contentOwner.name;
 
 const materialTask = sessionResult.data!.tasks.find((task: any) => task.templateKey === "COURSE_PACKAGING")!;
+materialTask.isUnlocked = true;
 const materialOwner = { ...actor, id: "user-material", name: "素材负责人", permissions: [] };
 businessAttachments.get("task-file-2")!.draftKey = `academy-task:${materialTask.id}`;
 assert.equal((await service.updateTask(materialTask.id, { status: "IN_PROGRESS" }, materialOwner)).code, 0);
@@ -883,6 +957,7 @@ assert.equal(invalidTaskTransition.code, 409, "待处理任务不能绕过执行
 for (const task of sessionResult.data!.tasks.filter(
   (item: any) => item.category === "BEFORE" && ![contentTask.id, materialTask.id].includes(item.id),
 )) {
+  task.isUnlocked = true;
   const taskActor = task.assigneeUserId === actor.id
     ? actor
     : { ...actor, id: task.assigneeUserId, name: task.assigneeUserName, permissions: [] };

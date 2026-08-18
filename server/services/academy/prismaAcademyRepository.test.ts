@@ -108,6 +108,10 @@ const client: any = {
   $transaction: async (arg: any) => {
     if (Array.isArray(arg)) return Promise.all(arg);
     return arg({
+      $queryRawUnsafe: async (...args: any[]) => (
+        calls.push({ model: "transaction", method: "queryRawUnsafe", args }),
+        [{ id: "session-1" }]
+      ),
       academySopTemplate: {
         updateMany: async (args: any) => (calls.push({ model: "sopTemplate", method: "updateMany", args }), { count: 1 }),
         upsert: async (args: any) => (calls.push({ model: "sopTemplate", method: "upsert", args }), args.create),
@@ -133,7 +137,9 @@ const client: any = {
         ),
         update: async (args: any) => (calls.push({ model: "task", method: "update", args }), args.data),
         updateMany: async (args: any) => (calls.push({ model: "transactionTask", method: "updateMany", args }), { count: 1 }),
-        findUnique: async ({ where }: any) => ({ id: where.id, title: "测试任务", status: "DONE", updatedAt: now, session: transactionSessionRow }),
+        findUnique: async ({ where, select }: any) => select?.sessionId
+          ? { sessionId: "session-1" }
+          : { id: where.id, sessionId: "session-1", category: "BEFORE", stageKey: "STAGE_1", stageOrder: 1, title: "测试任务", status: "DONE", updatedAt: now, session: transactionSessionRow },
       },
       businessRecord: {
         create: async (args: any) => (
@@ -262,6 +268,10 @@ const created = await repository.createSession(
       templateKey: "MATERIALS",
       title: "物料",
       category: "BEFORE",
+      stageKey: "MATERIALS",
+      stageName: "物料准备",
+      stageOrder: 1,
+      isUnlocked: true,
       isRequired: true,
       status: "PENDING",
       createdAt: now,
@@ -294,6 +304,10 @@ assert.deepEqual(publicCalendarCall.select, {
       templateKey: true,
       title: true,
       category: true,
+      stageKey: true,
+      stageName: true,
+      stageOrder: true,
+      isUnlocked: true,
       isRequired: true,
       assigneeUserId: true,
       assigneeUserName: true,
@@ -303,7 +317,7 @@ assert.deepEqual(publicCalendarCall.select, {
       completionMode: true,
       requiresReview: true,
     },
-    orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+    orderBy: [{ category: "asc" }, { stageOrder: "asc" }, { sortOrder: "asc" }],
   },
   course: { select: { title: true } },
 }, "全员周历查询必须使用不含客户、附件和提交说明的安全进度投影");
@@ -314,6 +328,7 @@ const myTaskCall = calls.find((call) => call.model === "task" && call.method ===
 assert.deepEqual(myTaskCall.where, {
   assigneeUserId: "user-assignee",
   session: { status: { not: "CANCELLED" } },
+  isUnlocked: true,
   status: { notIn: ["DONE", "SKIPPED", "SUBMITTED"] },
   OR: [
     { category: "BEFORE", session: { status: { in: ["PLANNED", "READY"] } } },
@@ -329,6 +344,10 @@ assert.equal(myTaskCall.select.sortOrder, true);
 assert.equal(myTaskCall.select.sopTemplateId, true);
 assert.equal(myTaskCall.select.sopTemplateStepId, true);
 assert.equal(myTaskCall.select.assigneeRole, true);
+assert.equal(myTaskCall.select.stageKey, true);
+assert.equal(myTaskCall.select.stageName, true);
+assert.equal(myTaskCall.select.stageOrder, true);
+assert.equal(myTaskCall.select.isUnlocked, true);
 assert.deepEqual(myTaskCall.select.session.select, {
   id: true,
   title: true,
@@ -355,8 +374,9 @@ assert.deepEqual(historyTaskCall.where, {
 
 calls.length = 0;
 await repository.updateTaskStatus("task-conditional", "PENDING", { status: "SUBMITTED" }, ["PLANNED", "READY"]);
+assert.ok(calls.some((call) => call.model === "transaction" && call.method === "queryRawUnsafe"), "任务状态推进前必须锁定所属课程安排，避免并行任务同时完成后漏解锁下一环节");
 const conditionalTaskUpdate = calls.find((call) => call.model === "transactionTask" && call.method === "updateMany")?.args;
-assert.deepEqual(conditionalTaskUpdate.where, { id: "task-conditional", status: "PENDING", session: { status: { in: ["PLANNED", "READY"] } } }, "任务提交必须原子校验旧状态和课程当前阶段");
+assert.deepEqual(conditionalTaskUpdate.where, { id: "task-conditional", status: "PENDING", isUnlocked: true, session: { status: { in: ["PLANNED", "READY"] } } }, "任务提交必须原子校验旧状态、环节解锁和课程当前阶段");
 assert.ok(calls.some((call) => call.model === "transactionBusinessRecord" && call.method === "create"), "每次任务状态变化必须写入不可覆盖的操作事件");
 
 transactionSessionRow = { id: "session-1", status: "PLANNED", collaboratorUserIds: [], capacity: 10 };

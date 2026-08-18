@@ -8,6 +8,10 @@ import {
   getAcademyPriorityTask,
   getAcademyWorkbenchSummary,
   getCoursePhaseProgress,
+  getCourseStageProgress,
+  changeAcademySopStageCategory,
+  moveAcademySopStage,
+  splitAcademySopTaskToStage,
   getAcademyTaskStep,
   getAcademyPrivateLoadPlan,
   getMyAcademyTodos,
@@ -139,6 +143,95 @@ assert.deepEqual(
     { category: "AFTER", label: "课后跟进", done: 0, total: 0, percent: 0 },
   ],
   "课程进度应收敛为课前、课中、课后三阶段摘要",
+);
+
+assert.deepEqual(
+  getCoursePhaseProgress({
+    tasks: [
+      { title: "必做", category: "BEFORE", isRequired: true, stepNumber: 1, status: "DONE", isMine: true },
+      { title: "选做", category: "BEFORE", isRequired: false, stepNumber: 2, status: "PENDING", isMine: true },
+    ],
+  })[0],
+  { category: "BEFORE", label: "课前准备", done: 1, total: 1, percent: 100 },
+  "阶段进度应以必做任务为准，选做任务未完成不能让已通过阶段继续显示未完成",
+);
+
+assert.deepEqual(
+  getCourseStageProgress({
+    tasks: [
+      { title: "创建直播间", category: "BEFORE", stageKey: "MATERIAL", stageName: "物料准备", stageOrder: 2, isUnlocked: true, isRequired: true, stepNumber: 2, status: "DONE", isMine: true },
+      { title: "制作海报", category: "BEFORE", stageKey: "MATERIAL", stageName: "物料准备", stageOrder: 2, isUnlocked: true, isRequired: true, stepNumber: 3, status: "PENDING", isMine: false },
+      { title: "客户邀约", category: "BEFORE", stageKey: "INVITE", stageName: "客户邀约", stageOrder: 3, isUnlocked: false, isRequired: true, stepNumber: 4, status: "PENDING", isMine: true },
+    ],
+  }).map(({ name, order, isUnlocked, done, total, requiredDone, requiredTotal }) => ({ name, order, isUnlocked, done, total, requiredDone, requiredTotal })),
+  [
+    { name: "物料准备", order: 2, isUnlocked: true, done: 1, total: 2, requiredDone: 1, requiredTotal: 2 },
+    { name: "客户邀约", order: 3, isUnlocked: false, done: 0, total: 1, requiredDone: 0, requiredTotal: 1 },
+  ],
+  "同一环节的并行任务应合并展示，并保留下一环节锁定状态",
+);
+
+assert.deepEqual(
+  getCourseStageProgress({
+    tasks: [
+      { title: "选做补充", category: "BEFORE", stageKey: "OPTIONAL", stageName: "补充准备", stageOrder: 1, isUnlocked: true, isRequired: false, stepNumber: 1, status: "PENDING", isMine: true },
+      { title: "发起邀约", category: "BEFORE", stageKey: "INVITE", stageName: "客户邀约", stageOrder: 2, isUnlocked: true, isRequired: true, stepNumber: 2, status: "PENDING", isMine: true },
+    ],
+  }).map(({ name, requiredDone, requiredTotal }) => ({ name, requiredDone, requiredTotal })),
+  [
+    { name: "补充准备", requiredDone: 0, requiredTotal: 0 },
+    { name: "客户邀约", requiredDone: 0, requiredTotal: 1 },
+  ],
+  "选做任务应独立统计，不能阻塞后续必做环节成为当前环节",
+);
+
+const movedStages = moveAcademySopStage([
+  { stepKey: "PUBLISH", title: "发布课程", stageKey: "PUBLISH", stageName: "课程发布", stageOrder: 1 },
+  { stepKey: "POSTER", title: "制作海报", stageKey: "MATERIAL", stageName: "物料准备", stageOrder: 2 },
+  { stepKey: "SCRIPT", title: "邀约话术", stageKey: "MATERIAL", stageName: "物料准备", stageOrder: 2 },
+  { stepKey: "INVITE", title: "客户邀约", stageKey: "INVITE", stageName: "客户邀约", stageOrder: 3 },
+] as any, "MATERIAL", -1);
+assert.deepEqual(
+  movedStages.map((step) => [step.stepKey, step.stageOrder, step.sortOrder]),
+  [
+    ["POSTER", 1, 1],
+    ["SCRIPT", 1, 2],
+    ["PUBLISH", 2, 3],
+    ["INVITE", 3, 4],
+  ],
+  "环节移动必须整组移动并同步重排真实执行顺序",
+);
+
+const splitStages = splitAcademySopTaskToStage([
+  { stepKey: "A", title: "A", stageKey: "PARALLEL", stageName: "并行准备", stageOrder: 1 },
+  { stepKey: "B", title: "B", stageKey: "PARALLEL", stageName: "并行准备", stageOrder: 1 },
+  { stepKey: "C", title: "C", stageKey: "PARALLEL", stageName: "并行准备", stageOrder: 1 },
+  { stepKey: "D", title: "D", stageKey: "NEXT", stageName: "下一环节", stageOrder: 2 },
+] as any, 1, "SPLIT", "B环节");
+assert.deepEqual(
+  splitStages.map((step) => [step.stepKey, step.stageKey, step.stageOrder]),
+  [
+    ["A", "PARALLEL", 1],
+    ["C", "PARALLEL", 1],
+    ["B", "SPLIT", 2],
+    ["D", "NEXT", 3],
+  ],
+  "从并行环节中拆出中间任务后，原环节必须继续保持连续且新环节插在其后",
+);
+
+const recategorizedStages = changeAcademySopStageCategory([
+  { stepKey: "BEFORE", title: "课前", category: "BEFORE", stageKey: "BEFORE", stageName: "课前", stageOrder: 1 },
+  { stepKey: "AFTER", title: "课后", category: "AFTER", stageKey: "AFTER", stageName: "课后", stageOrder: 2 },
+  { stepKey: "DURING", title: "课中", category: "BEFORE", stageKey: "DURING", stageName: "课中", stageOrder: 3 },
+] as any, "DURING", "DURING");
+assert.deepEqual(
+  recategorizedStages.map((step) => [step.stepKey, step.category, step.stageOrder]),
+  [
+    ["BEFORE", "BEFORE", 1],
+    ["DURING", "DURING", 2],
+    ["AFTER", "AFTER", 3],
+  ],
+  "修改流程阶段时必须自动恢复课前、课中、课后的真实执行顺序",
 );
 
 console.log("academy MVP model tests passed");

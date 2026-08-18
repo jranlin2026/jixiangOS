@@ -80,6 +80,7 @@ const mapSopTemplate = (record: any): AcademySopTemplateRecord => ({
   ...record,
   steps: (record.steps || []).map((step: any) => ({
     ...step,
+    stageOrder: Number(step.stageOrder),
     sortOrder: Number(step.sortOrder),
     dueOffsetMinutes: step.dueOffsetMinutes == null ? null : Number(step.dueOffsetMinutes),
   })).sort((left: any, right: any) => left.sortOrder - right.sortOrder),
@@ -425,6 +426,10 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
               templateKey: true,
               title: true,
               category: true,
+              stageKey: true,
+              stageName: true,
+              stageOrder: true,
+              isUnlocked: true,
               isRequired: true,
               assigneeUserId: true,
               assigneeUserName: true,
@@ -434,7 +439,7 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
               completionMode: true,
               requiresReview: true,
             },
-            orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+            orderBy: [{ category: "asc" }, { stageOrder: "asc" }, { sortOrder: "asc" }],
           },
           course: { select: { title: true } },
         },
@@ -495,6 +500,7 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
       expectedStatus,
       status: AcademySessionStatus,
       taskUpdate,
+      unlockCategory,
     ) {
       const record = await prisma.$transaction(async (tx: any) => {
         const result = await tx.academySession.updateMany({
@@ -519,6 +525,20 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
               });
             }),
           );
+        }
+        if (unlockCategory) {
+          const categoryTasks = await tx.academySessionTask.findMany({
+            where: { sessionId: id, category: unlockCategory },
+            orderBy: [{ stageOrder: "asc" }, { sortOrder: "asc" }],
+            select: { stageOrder: true, isRequired: true },
+          });
+          const stageOrders = [...new Set(categoryTasks.map((task: any) => Number(task.stageOrder)))];
+          const firstRequiredStage = stageOrders.find((stageOrder) => categoryTasks.some((task: any) => task.stageOrder === stageOrder && task.isRequired));
+          const unlockThrough = firstRequiredStage ?? stageOrders[stageOrders.length - 1];
+          if (unlockThrough != null) await tx.academySessionTask.updateMany({
+            where: { sessionId: id, category: unlockCategory, stageOrder: { lte: unlockThrough } },
+            data: { isUnlocked: true },
+          });
         }
         return session;
       });
@@ -597,6 +617,7 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
               session: { status: { not: "CANCELLED" } },
               ...(status === "OPEN"
                 ? {
+                    isUnlocked: true,
                     status: { notIn: ["DONE", "SKIPPED", "SUBMITTED"] },
                     OR: [
                       { category: "BEFORE", session: { status: { in: ["PLANNED", "READY"] } } },
@@ -616,6 +637,10 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
         sortOrder: true,
         title: true,
         category: true,
+        stageKey: true,
+        stageName: true,
+        stageOrder: true,
+        isUnlocked: true,
         completionMode: true,
         requiresReview: true,
         isRequired: true,
@@ -672,10 +697,20 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
     },
     async updateTaskStatus(id, expectedStatus, update, allowedSessionStatuses) {
       return prisma.$transaction(async (tx: any) => {
+        const currentTask = await tx.academySessionTask.findUnique({
+          where: { id },
+          select: { sessionId: true },
+        });
+        if (!currentTask) return null;
+        await tx.$queryRawUnsafe(
+          "SELECT `id` FROM `academy_sessions` WHERE `id` = ? FOR UPDATE",
+          currentTask.sessionId,
+        );
         const changed = await tx.academySessionTask.updateMany({
           where: {
             id,
             status: expectedStatus,
+            isUnlocked: true,
             session: { status: { in: allowedSessionStatuses } },
           },
           data: update,
@@ -686,6 +721,33 @@ export function createPrismaAcademyRepository(prisma: any): AcademyRepository {
           include: { session: true },
         });
         if (!task) return null;
+        if (task.status === "DONE") {
+          const remainingRequired = await tx.academySessionTask.findMany({
+            where: {
+              sessionId: task.sessionId,
+              category: task.category,
+              stageKey: task.stageKey,
+              stageOrder: task.stageOrder,
+              isRequired: true,
+              status: { not: "DONE" },
+            },
+            select: { id: true },
+          });
+          if (!remainingRequired.length) {
+            const futureTasks = await tx.academySessionTask.findMany({
+              where: { sessionId: task.sessionId, category: task.category, stageOrder: { gt: task.stageOrder } },
+              orderBy: [{ stageOrder: "asc" }, { sortOrder: "asc" }],
+              select: { stageOrder: true, isRequired: true },
+            });
+            const futureStageOrders = [...new Set(futureTasks.map((item: any) => Number(item.stageOrder)))];
+            const nextRequiredStage = futureStageOrders.find((stageOrder) => futureTasks.some((item: any) => item.stageOrder === stageOrder && item.isRequired));
+            const unlockThrough = nextRequiredStage ?? futureStageOrders[futureStageOrders.length - 1];
+            if (unlockThrough != null) await tx.academySessionTask.updateMany({
+              where: { sessionId: task.sessionId, category: task.category, stageOrder: { gt: task.stageOrder, lte: unlockThrough } },
+              data: { isUnlocked: true },
+            });
+          }
+        }
         await tx.businessRecord.create({
           data: taskEventRecord(
             task,
