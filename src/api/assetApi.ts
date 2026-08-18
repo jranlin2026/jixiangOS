@@ -63,6 +63,15 @@ import {
   getCurrentDataVisibilityScope,
 } from '../shared/utils/dataVisibility';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
+import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
+import type { AuthSession } from '../types/auth';
+import { hasPermission, PERMISSION_KEYS, toAuthenticatedUser } from '../shared/utils/permissions';
+import {
+  deleteLocalAssetCredentials,
+  hasLocalAssetCredential,
+  revealLocalAssetCredential,
+  saveLocalAssetCredential,
+} from './localAssetCredentialVault';
 
 function ensureInit(): void {
   initializeMockData();
@@ -114,6 +123,15 @@ function phones(): AssetPhoneNumber[] {
 
 function accounts(): AssetInternetAccount[] {
   return (getStorageData<AssetInternetAccount[]>(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS) || []).map((account) => normalizeAssetAccount({ ...account }));
+}
+
+function canRevealLocalAssetCredential(): boolean {
+  const session = getStorageData<AuthSession>(AUTH_SESSION_STORAGE_KEY);
+  const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
+  const user = users.find((item) => item.id === session?.userId);
+  if (!user) return false;
+  const { roles } = ensureOrganizationConfigData();
+  return hasPermission(toAuthenticatedUser(user, roles), PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW, 'read');
 }
 
 function risks(): AssetRisk[] {
@@ -271,6 +289,14 @@ function rebuildRisksAndOffboarding(): void {
   const nextRisks: AssetRisk[] = [];
 
   accountRows.forEach((account) => {
+    if (account.loginMethod === '密码登录' && account.loginCredentialStatus !== '已设置') {
+      const key = `account-login-credential-missing-${account.id}`;
+      nextRisks.push(makeRisk(key, '登录凭证待补齐', 'account', account.id, `${account.platform} / ${account.accountName}`, '高', '账号采用密码登录，但登录密码尚未进入企业凭证库。', existingByKey.get(key)));
+    }
+    if (account.requiresPaymentPassword && account.paymentCredentialStatus !== '已设置') {
+      const key = `account-payment-credential-missing-${account.id}`;
+      nextRisks.push(makeRisk(key, '支付凭证待补齐', 'account', account.id, `${account.platform} / ${account.accountName}`, '高', '账号涉及支付，但支付密码尚未进入企业凭证库。', existingByKey.get(key)));
+    }
     if (!account.phoneId) {
       const key = `account-unbound-phone-${account.id}`;
       nextRisks.push(makeRisk(
@@ -1118,6 +1144,7 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
 }
 
 async function deleteDevice(id: string): Promise<ApiResponse<AssetDevice>> {
+  if (shouldUseBackendApi()) return backendRequest<AssetDevice>(`/assets/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
   return guarded(() => {
     const rows = devices();
     const existing = rows.find((device) => device.id === id);
@@ -1273,6 +1300,7 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
 }
 
 async function deletePhoneNumber(id: string): Promise<ApiResponse<AssetPhoneNumber>> {
+  if (shouldUseBackendApi()) return backendRequest<AssetPhoneNumber>(`/assets/phones/${encodeURIComponent(id)}`, { method: 'DELETE' });
   return guarded(async () => {
     const rows = phones();
     const existing = rows.find((phone) => phone.id === id);
@@ -1320,12 +1348,19 @@ function assertAccountBinding(input: Partial<AssetInternetAccountInput>, exclude
   if (phoneId && !getPhone(phoneId)) throw new Error('绑定手机号不存在');
 }
 
-async function createInternetAccount(input: Partial<AssetInternetAccountInput>): Promise<ApiResponse<AssetInternetAccount>> {
-  return guarded(() => {
+async function createInternetAccount(input: Partial<AssetInternetAccountInput>, allowCredentialBackfill = false): Promise<ApiResponse<AssetInternetAccount>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<AssetInternetAccount>(allowCredentialBackfill ? '/assets/accounts/import-row' : '/assets/accounts', { method: 'POST', body: JSON.stringify(input) });
+  }
+  return guarded(async () => {
     assertAccountBinding(input);
     const rows = accounts();
     const loginAccount = requiredText(input.loginAccount, '登录账号不能为空');
     const createdAt = now();
+    const loginMethod = input.loginMethod || '密码登录';
+    const requiresPaymentPassword = input.requiresPaymentPassword === true || String(input.requiresPaymentPassword) === 'true';
+    if (loginMethod === '密码登录' && !allowCredentialBackfill && !String(input.loginPassword || '').trim()) throw new Error('密码登录必须填写登录密码');
+    if (requiresPaymentPassword && !String(input.paymentPassword || '').trim()) throw new Error('涉及支付的账号必须填写支付密码');
     const orgFields = resolveAssetOrgFields(input);
     const controlStatus = input.controlStatus || (input.permissionStatus === '离职待回收' || input.permissionStatus === '已回收' ? input.permissionStatus : '已掌控');
     const account = normalizeAssetAccount({
@@ -1357,11 +1392,18 @@ async function createInternetAccount(input: Partial<AssetInternetAccountInput>):
       expiresAt: input.expiresAt || '',
       purpose: input.purpose || '',
       businessScene: input.businessScene,
+      loginMethod,
+      requiresPaymentPassword,
+      loginCredentialStatus: loginMethod === '密码登录' ? (String(input.loginPassword || '').trim() ? '已设置' : '待补齐') : '不适用',
+      paymentCredentialStatus: requiresPaymentPassword ? '已设置' : '不适用',
+      credentialUpdatedAt: String(input.loginPassword || input.paymentPassword || '').trim() ? createdAt : undefined,
       twoFactorMethod: input.twoFactorMethod,
       remark: input.remark,
       createdAt,
       updatedAt: createdAt,
     });
+    await saveLocalAssetCredential(account.id, 'loginPassword', String(input.loginPassword || ''), createdAt);
+    await saveLocalAssetCredential(account.id, 'paymentPassword', String(input.paymentPassword || ''), createdAt);
     setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, [account, ...rows]);
     logAssetOperation('新增资产', '互联网账号', account.id, account.accountName, `新增账号 ${account.accountNo}`);
     if (account.phoneId) logAssetOperation('绑定资产', '互联网账号', account.id, account.accountName, `绑定手机号 ${getPhone(account.phoneId)?.phoneNumberMasked || account.phoneId}`);
@@ -1371,7 +1413,10 @@ async function createInternetAccount(input: Partial<AssetInternetAccountInput>):
 }
 
 async function updateInternetAccount(id: string, input: Partial<AssetInternetAccountInput>): Promise<ApiResponse<AssetInternetAccount>> {
-  return guarded(() => {
+  if (shouldUseBackendApi()) {
+    return backendRequest<AssetInternetAccount>(`/assets/accounts/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) });
+  }
+  return guarded(async () => {
     const rows = accounts();
     const existing = rows.find((account) => account.id === id);
     if (!existing) throw new Error('互联网账号不存在');
@@ -1379,6 +1424,17 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
     const loginAccount = input.loginAccount === undefined ? existing.loginAccount : requiredText(input.loginAccount, '登录账号不能为空');
     const nextPhoneId = input.phoneId === undefined ? existing.phoneId : normalizePhoneId(input.phoneId);
     const orgFields = resolveAssetOrgFields(input, existing);
+    const loginMethod = input.loginMethod || existing.loginMethod || '密码登录';
+    const requiresPaymentPassword = input.requiresPaymentPassword === undefined
+      ? Boolean(existing.requiresPaymentPassword)
+      : input.requiresPaymentPassword === true || String(input.requiresPaymentPassword) === 'true';
+    const credentialChangedAt = now();
+    const loginChanged = await saveLocalAssetCredential(id, 'loginPassword', String(input.loginPassword || ''), credentialChangedAt);
+    const paymentChanged = await saveLocalAssetCredential(id, 'paymentPassword', String(input.paymentPassword || ''), credentialChangedAt);
+    if (loginMethod !== '密码登录') await deleteLocalAssetCredentials(id, 'loginPassword');
+    if (!requiresPaymentPassword) await deleteLocalAssetCredentials(id, 'paymentPassword');
+    const hasLoginCredential = await hasLocalAssetCredential(id, 'loginPassword');
+    const hasPaymentCredential = await hasLocalAssetCredential(id, 'paymentPassword');
     const controlStatus = input.controlStatus || (input.permissionStatus ? readAccountControlStatus({ permissionStatus: input.permissionStatus }) : readAccountControlStatus(existing));
     const updated = normalizeAssetAccount({
       ...existing,
@@ -1389,6 +1445,11 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
       realNameMasked: maskRealName(input.realName ?? existing.realName),
       boundEmailMasked: maskEmail(input.boundEmail ?? existing.boundEmail),
       controlStatus,
+      loginMethod,
+      requiresPaymentPassword,
+      loginCredentialStatus: loginMethod === '密码登录' ? (hasLoginCredential ? '已设置' : '待补齐') : '不适用',
+      paymentCredentialStatus: requiresPaymentPassword ? (hasPaymentCredential ? '已设置' : '待补齐') : '不适用',
+      credentialUpdatedAt: loginChanged || paymentChanged ? credentialChangedAt : existing.credentialUpdatedAt,
       permissionStatus: controlStatus === '已掌控' || controlStatus === '待交接' ? '正常' : controlStatus,
       departmentId: orgFields.departmentId,
       department: orgFields.department,
@@ -1399,6 +1460,8 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
       monthlyFee: Number(input.monthlyFee ?? existing.monthlyFee),
       updatedAt: now(),
     });
+    delete (updated as AssetInternetAccount & { loginPassword?: string }).loginPassword;
+    delete (updated as AssetInternetAccount & { paymentPassword?: string }).paymentPassword;
     setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, rows.map((account) => (account.id === id ? updated : account)));
     logAssetOperation('编辑资料', '互联网账号', updated.id, updated.accountName, `编辑账号 ${updated.accountNo}`);
     if (existing.phoneId !== updated.phoneId) {
@@ -1416,12 +1479,16 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
 }
 
 async function deleteInternetAccount(id: string): Promise<ApiResponse<AssetInternetAccount>> {
-  return guarded(() => {
+  if (shouldUseBackendApi()) {
+    return backendRequest<AssetInternetAccount>(`/assets/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+  return guarded(async () => {
     const rows = accounts();
     const existing = rows.find((account) => account.id === id);
     if (!existing) throw new Error('互联网账号不存在');
 
     setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, rows.filter((account) => account.id !== id));
+    await deleteLocalAssetCredentials(id);
     setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, offboardingTasks().filter((task) => (
       !(task.assetType === '互联网账号' && task.assetId === id)
     )));
@@ -1432,7 +1499,7 @@ async function deleteInternetAccount(id: string): Promise<ApiResponse<AssetInter
 }
 
 async function createOffboardingTasksForEmployee(employeeName: string, department = ''): Promise<ApiResponse<AssetOffboardingTask[]>> {
-  return guarded(() => {
+  return guarded(async () => {
     const name = requiredText(employeeName, '员工姓名不能为空');
     const deviceRows = devices();
     const phoneRows = phones();
@@ -1476,6 +1543,7 @@ async function createOffboardingTasksForEmployee(employeeName: string, departmen
       });
 
     let accountChanged = false;
+    const changedAccountIds = new Set<string>();
     const nextAccounts = accountRows.map((account) => {
       if (!assetBelongsToEmployee(account, name)) return account;
       const marked: AssetInternetAccount = {
@@ -1484,7 +1552,10 @@ async function createOffboardingTasksForEmployee(employeeName: string, departmen
         permissionStatus: '离职待回收',
         updatedAt: now(),
       };
-      accountChanged = accountChanged || readAccountControlStatus(account) !== '离职待回收';
+      if (readAccountControlStatus(account) !== '离职待回收') {
+        accountChanged = true;
+        changedAccountIds.add(account.id);
+      }
       upsertTask(makeOffboardingTask({
         assetId: marked.id,
         assetType: '互联网账号',
@@ -1496,7 +1567,15 @@ async function createOffboardingTasksForEmployee(employeeName: string, departmen
       return marked;
     });
 
-    if (accountChanged) setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, nextAccounts);
+    if (accountChanged) {
+      if (shouldUseBackendApi()) {
+        const result = await backendRequest<AssetInternetAccount[]>('/assets/accounts/mark-offboarding', {
+          method: 'POST',
+          body: JSON.stringify({ accountIds: Array.from(changedAccountIds) }),
+        });
+        if (result.code !== 0) throw new Error(result.message);
+      } else setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, nextAccounts);
+    }
     if (touchedTasks.length) {
       setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, nextTasks);
       logAssetOperation('生成离职回收', '离职回收', name, name, `为${name}生成${touchedTasks.length}条资产回收任务`);
@@ -1641,11 +1720,21 @@ async function completeOffboardingTask(taskId: string): Promise<ApiResponse<Asse
     return updated;
   });
   if (targetTask?.assetType === '互联网账号') {
-    setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((account) => (
-      account.id === targetTask.assetId
-        ? { ...account, controlStatus: '已回收', permissionStatus: '已回收', accountStatus: account.accountStatus === '已注销' ? account.accountStatus : '闲置', updatedAt: now() }
-        : account
-    )));
+    const account = accounts().find((item) => item.id === targetTask.assetId);
+    if (shouldUseBackendApi()) {
+      const result = await updateInternetAccount(targetTask.assetId, {
+        controlStatus: '已回收',
+        permissionStatus: '已回收',
+        accountStatus: account?.accountStatus === '已注销' ? '已注销' : '闲置',
+      });
+      if (result.code !== 0) return createErrorResponse(result.message);
+    } else {
+      setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((item) => (
+        item.id === targetTask.assetId
+          ? { ...item, controlStatus: '已回收', permissionStatus: '已回收', accountStatus: item.accountStatus === '已注销' ? item.accountStatus : '闲置', updatedAt: now() }
+          : item
+      )));
+    }
   }
   if (targetTask?.assetType === '设备资产') {
     setStorageData(STORAGE_KEYS.ASSET_DEVICES, devices().map((device) => (
@@ -1805,7 +1894,13 @@ async function revealSensitiveField(
       { method: 'POST' },
     );
   }
-  return guarded(() => {
+  if (shouldUseBackendApi() && type === 'account' && (field === 'loginPassword' || field === 'paymentPassword')) {
+    return backendRequest<AssetSensitiveRevealResult>(
+      `/assets/accounts/${encodeURIComponent(id)}/reveal/${field}`,
+      { method: 'POST' },
+    );
+  }
+  return guarded(async () => {
     if (type === 'device') {
       const device = visibleDevices().find((item) => item.id === id);
       if (!device) throw new Error('设备不存在');
@@ -1860,6 +1955,14 @@ async function revealSensitiveField(
       logAssetOperation('查看敏感字段', '互联网账号', account.id, account.accountName, '查看敏感字段：绑定邮箱');
       return { field, label: '绑定邮箱', value: account.boundEmail || '' };
     }
+    if (field === 'loginPassword' || field === 'paymentPassword') {
+      if (!canRevealLocalAssetCredential()) throw new Error('无权查看账号密码');
+      const credential = await revealLocalAssetCredential(id, field);
+      if (!credential) throw new Error(field === 'loginPassword' ? '该账号未保存登录密码' : '该账号未保存支付密码');
+      const label = field === 'loginPassword' ? '登录密码' : '支付密码';
+      logAssetOperation('查看敏感字段', '互联网账号', account.id, account.accountName, `查看敏感字段：${label}`);
+      return { field, label, value: credential };
+    }
     throw new Error('该字段不属于互联网账号');
   });
 }
@@ -1879,7 +1982,7 @@ async function importAssetsFromCsv(type: AssetImportType, csvText: string): Prom
           ? await createDevice(deviceInputFromCsv(row.raw))
           : type === 'phones'
             ? await createPhoneNumber(phoneInputFromCsv(row.raw))
-            : await createInternetAccount(accountInputFromCsv(row.raw));
+            : await createInternetAccount(accountInputFromCsv(row.raw), true);
         if (response.code !== 0) {
           failedRows.push({ rowNumber: row.rowNumber, raw: row.raw, reason: response.message });
         } else {

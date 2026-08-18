@@ -34,6 +34,7 @@ import type {
 import type { Department } from '../../src/types/department';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
+import { createAssetCredentialCrypto, type AssetCredentialCrypto, type AssetEncryptedCredential } from './assetCredentialCrypto';
 
 type AssetCommandPrisma = Pick<PrismaClient, 'appStorage' | 'user' | 'role' | 'department' | '$transaction'>;
 type LockedStorageRow = { key: string; value: unknown };
@@ -51,6 +52,7 @@ type AssetState = {
   devices: AssetDevice[];
   phones: AssetPhoneNumber[];
   accounts: AssetInternetAccount[];
+  accountCredentials: AssetAccountCredentialRecord[];
   risks: AssetRisk[];
   logs: AssetOperationLog[];
   offboardingTasks: AssetOffboardingTask[];
@@ -60,7 +62,16 @@ type AssetState = {
 export interface AssetCommandServiceOptions {
   now?: () => Date;
   id?: (prefix: string) => string;
+  credentialCrypto?: AssetCredentialCrypto;
 }
+
+type AssetAccountCredentialRecord = AssetEncryptedCredential & {
+  id: string;
+  accountId: string;
+  type: 'loginPassword' | 'paymentPassword';
+  updatedAt: string;
+  updatedBy: string;
+};
 
 class AssetCommandError extends Error {
   constructor(readonly responseCode: number, message: string) {
@@ -73,6 +84,7 @@ const STATE_KEYS = [
   STORAGE_KEYS.ASSET_DEVICES,
   STORAGE_KEYS.ASSET_PHONE_NUMBERS,
   STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS,
+  STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS,
   STORAGE_KEYS.ASSET_RISKS,
   STORAGE_KEYS.ASSET_OPERATION_LOGS,
   STORAGE_KEYS.ASSET_OFFBOARDING_TASKS,
@@ -109,6 +121,7 @@ async function lockState(transaction: Prisma.TransactionClient): Promise<AssetSt
     devices: readArray<AssetDevice>(values, STORAGE_KEYS.ASSET_DEVICES).map((device) => normalizeAssetDevice({ ...device })),
     phones: readArray<AssetPhoneNumber>(values, STORAGE_KEYS.ASSET_PHONE_NUMBERS).map((phone) => normalizeAssetPhone({ ...phone })),
     accounts: readArray<AssetInternetAccount>(values, STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS).map((account) => normalizeAssetAccount({ ...account })),
+    accountCredentials: readArray<AssetAccountCredentialRecord>(values, STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS),
     risks: readArray<AssetRisk>(values, STORAGE_KEYS.ASSET_RISKS),
     logs: readArray<AssetOperationLog>(values, STORAGE_KEYS.ASSET_OPERATION_LOGS),
     offboardingTasks: readArray<AssetOffboardingTask>(values, STORAGE_KEYS.ASSET_OFFBOARDING_TASKS),
@@ -121,6 +134,7 @@ async function persistState(transaction: Prisma.TransactionClient, state: AssetS
     [STORAGE_KEYS.ASSET_DEVICES, state.devices],
     [STORAGE_KEYS.ASSET_PHONE_NUMBERS, state.phones],
     [STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, state.accounts],
+    [STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS, state.accountCredentials],
     [STORAGE_KEYS.ASSET_RISKS, state.risks],
     [STORAGE_KEYS.ASSET_OPERATION_LOGS, state.logs],
     [STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, state.offboardingTasks],
@@ -407,6 +421,8 @@ function syncAccountRisks(state: AssetState, changedAt: string): void {
     risk.riskKey.startsWith('account-unbound-phone-')
     || risk.riskKey.startsWith('offboarding-account-')
     || risk.riskKey.startsWith('account-no-owner-')
+    || risk.riskKey.startsWith('account-login-credential-missing-')
+    || risk.riskKey.startsWith('account-payment-credential-missing-')
   );
   const existing = new Map(state.risks.filter(managed).map((risk) => [risk.riskKey, risk]));
   const derived: AssetRisk[] = [];
@@ -435,6 +451,12 @@ function syncAccountRisks(state: AssetState, changedAt: string): void {
     });
   };
   state.accounts.forEach((account) => {
+    if (account.loginMethod === '密码登录' && account.loginCredentialStatus !== '已设置') {
+      add(account, `account-login-credential-missing-${account.id}`, '登录凭证待补齐', '高', '账号采用密码登录，但登录密码尚未进入企业凭证库。');
+    }
+    if (account.requiresPaymentPassword && account.paymentCredentialStatus !== '已设置') {
+      add(account, `account-payment-credential-missing-${account.id}`, '支付凭证待补齐', '高', '账号涉及支付，但支付密码尚未进入企业凭证库。');
+    }
     if (!account.phoneId) {
       add(
         account,
@@ -497,8 +519,66 @@ export function createAssetCommandService(
 ) {
   const now = options.now || (() => new Date());
   const makeId = options.id || ((prefix: string) => `${prefix}-${randomUUID()}`);
+  const credentialCrypto = options.credentialCrypto || createAssetCredentialCrypto();
+
+  const saveCredential = (
+    state: AssetState,
+    accountId: string,
+    type: AssetAccountCredentialRecord['type'],
+    secret: unknown,
+    actor: AuthenticatedUser,
+    changedAt: string,
+  ) => {
+    const value = cleanText(secret);
+    if (!value) return false;
+    const encrypted = credentialCrypto.encrypt(value, `${accountId}:${type}`);
+    const previous = state.accountCredentials.find((item) => item.accountId === accountId && item.type === type);
+    const record: AssetAccountCredentialRecord = {
+      id: previous?.id || makeId('asset-credential'),
+      accountId,
+      type,
+      ...encrypted,
+      updatedAt: changedAt,
+      updatedBy: actor.id,
+    };
+    state.accountCredentials = [
+      ...state.accountCredentials.filter((item) => !(item.accountId === accountId && item.type === type)),
+      record,
+    ];
+    return true;
+  };
 
   return {
+    async revealAccountCredential(
+      id: string,
+      field: 'loginPassword' | 'paymentPassword',
+      actor: AuthenticatedUser,
+    ): Promise<ApiResponse<AssetSensitiveRevealResult | null>> {
+      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW, 'read')) {
+        return failure('无权查看账号密码', 403);
+      }
+      try {
+        const directory = await loadDirectory(prisma);
+        const scope = buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'assets');
+        const result = await prisma.$transaction(async (transaction) => {
+          const state = await lockState(transaction);
+          const account = state.accounts.find((item) => item.id === id);
+          if (!account) throw new AssetCommandError(404, '互联网账号不存在');
+          if (!visibleToScope(account, scope, directory)) throw new AssetCommandError(403, '无权查看该互联网账号');
+          const credential = state.accountCredentials.find((item) => item.accountId === id && item.type === field);
+          if (!credential) throw new AssetCommandError(404, field === 'loginPassword' ? '该账号未保存登录密码' : '该账号未保存支付密码');
+          const revealedAt = now().toISOString();
+          const label = field === 'loginPassword' ? '登录密码' : '支付密码';
+          addLog(state, makeId('asset-log'), revealedAt, actor, '查看敏感字段', '互联网账号', account.id, account.accountName, `查看敏感字段：${label}`);
+          await persistState(transaction, state);
+          return { field, label, value: credentialCrypto.decrypt(credential, `${id}:${field}`) };
+        });
+        return success(result);
+      } catch (error) {
+        if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
+        throw error;
+      }
+    },
     async revealPhoneServicePassword(
       id: string,
       actor: AuthenticatedUser,
@@ -741,7 +821,7 @@ export function createAssetCommandService(
       id: string,
       actor: AuthenticatedUser,
     ): Promise<ApiResponse<AssetDevice | null>> {
-      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_DEVICES, 'write')) {
+      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_DEVICES, 'delete')) {
         return failure('无权删除设备资产', 403);
       }
       try {
@@ -756,6 +836,12 @@ export function createAssetCommandService(
           const relatedPhones = state.phones.filter((phone) => phone.deviceId === id);
           const relatedPhoneIds = new Set(relatedPhones.map((phone) => phone.id));
           const relatedAccounts = state.accounts.filter((account) => Boolean(account.phoneId && relatedPhoneIds.has(account.phoneId)));
+          if (relatedPhones.length && !hasPermission(actor, PERMISSION_KEYS.ASSETS_PHONES, 'delete')) {
+            throw new AssetCommandError(403, '删除该设备会同步删除手机号，需要手机号删除权限');
+          }
+          if (relatedAccounts.length && !hasPermission(actor, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'write')) {
+            throw new AssetCommandError(403, '删除该设备会解绑互联网账号，需要账号编辑权限');
+          }
           if (!scope.unrestricted && relatedPhones.some((phone) => !visibleToScope(phone, scope, directory))) {
             throw new AssetCommandError(403, '设备关联了无权删除的手机号资产');
           }
@@ -774,6 +860,8 @@ export function createAssetCommandService(
             && !(task.assetType === '手机号资产' && relatedPhoneIds.has(task.assetId))
           ));
           syncDeviceRisks(state, deletedAt);
+          syncPhoneRisks(state, deletedAt);
+          syncAccountRisks(state, deletedAt);
           addLog(
             state,
             makeId('asset-log'),
@@ -1028,9 +1116,48 @@ export function createAssetCommandService(
       }
     },
 
+    async deletePhoneNumber(id: string, actor: AuthenticatedUser): Promise<ApiResponse<AssetPhoneNumber | null>> {
+      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_PHONES, 'delete')) return failure('无权删除手机号资产', 403);
+      try {
+        const directory = await loadDirectory(prisma);
+        const scope = buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'assets');
+        const deleted = await prisma.$transaction(async (transaction) => {
+          const state = await lockState(transaction);
+          const phone = state.phones.find((item) => item.id === id);
+          if (!phone) throw new AssetCommandError(404, '手机号不存在');
+          const linkedDevice = phone.deviceId ? state.devices.find((item) => item.id === phone.deviceId) : undefined;
+          if (!visibleToScope(phone, scope, directory) && !(linkedDevice && visibleToScope(linkedDevice, scope, directory))) {
+            throw new AssetCommandError(403, '无权删除该手机号资产');
+          }
+          const relatedAccounts = state.accounts.filter((account) => account.phoneId === id);
+          if (relatedAccounts.length && !hasPermission(actor, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'write')) {
+            throw new AssetCommandError(403, '删除该手机号会解绑互联网账号，需要账号编辑权限');
+          }
+          if (!scope.unrestricted && relatedAccounts.some((account) => !visibleToScope(account, scope, directory))) {
+            throw new AssetCommandError(403, '手机号关联了无权修改的互联网账号');
+          }
+          const changedAt = now().toISOString();
+          state.phones = state.phones.filter((item) => item.id !== id);
+          state.accounts = state.accounts.map((account) => account.phoneId === id ? { ...account, phoneId: undefined, updatedAt: changedAt } : account);
+          state.offboardingTasks = state.offboardingTasks.filter((item) => !(item.assetType === '手机号资产' && item.assetId === id));
+          syncPhoneRisks(state, changedAt);
+          syncAccountRisks(state, changedAt);
+          syncDeviceRisks(state, changedAt);
+          addLog(state, makeId('asset-log'), changedAt, actor, '删除资产', '手机号资产', phone.id, phone.phoneNumberMasked, `删除手机号 ${phone.phoneNumberMasked}`);
+          await persistState(transaction, state);
+          return sanitizePhoneCommandResult(phone);
+        });
+        return success(deleted);
+      } catch (error) {
+        if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
+        throw error;
+      }
+    },
+
     async createInternetAccount(
       input: Partial<AssetInternetAccountInput>,
       actor: AuthenticatedUser,
+      allowCredentialBackfill = false,
     ): Promise<ApiResponse<AssetInternetAccount | null>> {
       if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'write')) {
         return failure('无权新增互联网账号', 403);
@@ -1048,6 +1175,14 @@ export function createAssetCommandService(
         const org = resolveOrgFields(input, directory);
         const platform = requiredText(input.platform, '平台不能为空');
         const loginAccount = requiredText(input.loginAccount, '登录账号不能为空');
+        const loginMethod = input.loginMethod || '密码登录';
+        const requiresPaymentPassword = input.requiresPaymentPassword === true || String(input.requiresPaymentPassword) === 'true';
+        if (loginMethod === '密码登录' && !allowCredentialBackfill && !cleanText(input.loginPassword)) {
+          throw new AssetCommandError(400, '密码登录必须填写登录密码');
+        }
+        if (requiresPaymentPassword && !cleanText(input.paymentPassword)) {
+          throw new AssetCommandError(400, '涉及支付的账号必须填写支付密码');
+        }
         const created = await prisma.$transaction(async (transaction) => {
           const state = await lockState(transaction);
           if (state.accounts.some((account) => account.platform === platform && account.loginAccount === loginAccount)) {
@@ -1090,6 +1225,11 @@ export function createAssetCommandService(
             expiresAt: cleanText(input.expiresAt) || undefined,
             purpose: cleanText(input.purpose),
             businessScene: cleanText(input.businessScene) || undefined,
+            loginMethod,
+            requiresPaymentPassword,
+            loginCredentialStatus: loginMethod === '密码登录' ? (cleanText(input.loginPassword) ? '已设置' : '待补齐') : '不适用',
+            paymentCredentialStatus: requiresPaymentPassword ? '已设置' : '不适用',
+            credentialUpdatedAt: cleanText(input.loginPassword) || cleanText(input.paymentPassword) ? createdAt : undefined,
             twoFactorMethod: cleanText(input.twoFactorMethod) || undefined,
             remark: cleanText(input.remark) || undefined,
             createdAt,
@@ -1099,6 +1239,8 @@ export function createAssetCommandService(
             throw new AssetCommandError(403, '无权为该员工或部门新增互联网账号');
           }
           state.accounts.unshift(account);
+          saveCredential(state, account.id, 'loginPassword', input.loginPassword, actor, createdAt);
+          saveCredential(state, account.id, 'paymentPassword', input.paymentPassword, actor, createdAt);
           syncAccountRisks(state, createdAt);
           syncAccountOffboardingTasks(state, createdAt);
           syncDeviceRisks(state, createdAt);
@@ -1135,6 +1277,177 @@ export function createAssetCommandService(
           timeout: 10_000,
         });
         return success(created);
+      } catch (error) {
+        if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
+        throw error;
+      }
+    },
+
+    async updateInternetAccount(
+      id: string,
+      input: Partial<AssetInternetAccountInput>,
+      actor: AuthenticatedUser,
+    ): Promise<ApiResponse<AssetInternetAccount | null>> {
+      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'write')) return failure('无权编辑互联网账号', 403);
+      try {
+        const directory = await loadDirectory(prisma);
+        const scope = buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'assets');
+        const changedAt = now().toISOString();
+        const updated = await prisma.$transaction(async (transaction) => {
+          const state = await lockState(transaction);
+          const existing = state.accounts.find((item) => item.id === id);
+          if (!existing) throw new AssetCommandError(404, '互联网账号不存在');
+          if (!visibleToScope(existing, scope, directory)) throw new AssetCommandError(403, '无权编辑该互联网账号');
+          const platform = cleanText(input.platform) || existing.platform;
+          const loginAccount = cleanText(input.loginAccount) || existing.loginAccount;
+          if (state.accounts.some((item) => item.id !== id && item.platform === platform && item.loginAccount === loginAccount)) {
+            throw new AssetCommandError(409, '同一平台下登录账号已存在');
+          }
+          const org = resolveOrgFields({ ...existing, ...input }, directory);
+          const phoneId = input.phoneId === undefined ? existing.phoneId : cleanText(input.phoneId) || undefined;
+          if (phoneId && !state.phones.some((item) => item.id === phoneId)) throw new AssetCommandError(400, '绑定手机号不存在');
+          const loginMethod = input.loginMethod || existing.loginMethod || '密码登录';
+          const requiresPaymentPassword = input.requiresPaymentPassword === undefined
+            ? Boolean(existing.requiresPaymentPassword)
+            : input.requiresPaymentPassword === true || String(input.requiresPaymentPassword) === 'true';
+          const loginChanged = saveCredential(state, id, 'loginPassword', input.loginPassword, actor, changedAt);
+          const paymentChanged = saveCredential(state, id, 'paymentPassword', input.paymentPassword, actor, changedAt);
+          if (loginMethod !== '密码登录') {
+            state.accountCredentials = state.accountCredentials.filter((item) => !(item.accountId === id && item.type === 'loginPassword'));
+          }
+          if (!requiresPaymentPassword) {
+            state.accountCredentials = state.accountCredentials.filter((item) => !(item.accountId === id && item.type === 'paymentPassword'));
+          }
+          const hasLoginCredential = state.accountCredentials.some((item) => item.accountId === id && item.type === 'loginPassword');
+          const hasPaymentCredential = state.accountCredentials.some((item) => item.accountId === id && item.type === 'paymentPassword');
+          const next = normalizeAssetAccount({
+            ...existing,
+            ...input,
+            platform,
+            loginAccount,
+            loginAccountMasked: maskLogin(loginAccount),
+            accountName: cleanText(input.accountName) || existing.accountName,
+            realNameMasked: maskRealName(input.realName ?? existing.realName),
+            boundEmailMasked: maskEmail(input.boundEmail ?? existing.boundEmail),
+            phoneId,
+            loginMethod,
+            requiresPaymentPassword,
+            loginCredentialStatus: loginMethod === '密码登录' ? (hasLoginCredential ? '已设置' : '待补齐') : '不适用',
+            paymentCredentialStatus: requiresPaymentPassword ? (hasPaymentCredential ? '已设置' : '待补齐') : '不适用',
+            credentialUpdatedAt: loginChanged || paymentChanged ? changedAt : existing.credentialUpdatedAt,
+            departmentId: org.departmentId,
+            department: org.department,
+            ownerId: org.ownerId,
+            owner: org.owner,
+            currentUserId: org.currentUserId,
+            currentUser: org.currentUser,
+            monthlyFee: Number(input.monthlyFee ?? existing.monthlyFee),
+            updatedAt: changedAt,
+          });
+          delete (next as AssetInternetAccount & { loginPassword?: string }).loginPassword;
+          delete (next as AssetInternetAccount & { paymentPassword?: string }).paymentPassword;
+          const index = state.accounts.findIndex((item) => item.id === id);
+          state.accounts[index] = next;
+          if (!visibleToScope(next, scope, directory)) throw new AssetCommandError(403, '无权将账号转移到当前数据范围之外');
+          if (phoneId) {
+            const phone = state.phones.find((item) => item.id === phoneId)!;
+            const linkedDevice = phone.deviceId ? state.devices.find((item) => item.id === phone.deviceId) : undefined;
+            if (!visibleToScope(phone, scope, directory) && !(linkedDevice && visibleToScope(linkedDevice, scope, directory))) {
+              throw new AssetCommandError(403, '无权绑定该手机号');
+            }
+          }
+          syncAccountRisks(state, changedAt);
+          syncAccountOffboardingTasks(state, changedAt);
+          syncDeviceRisks(state, changedAt);
+          addLog(state, makeId('asset-log'), changedAt, actor, '编辑资料', '互联网账号', next.id, next.accountName, `编辑账号 ${next.accountNo}`);
+          await persistState(transaction, state);
+          return next;
+        });
+        return success(updated);
+      } catch (error) {
+        if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
+        throw error;
+      }
+    },
+
+    async markInternetAccountsForOffboarding(
+      accountIds: string[],
+      actor: AuthenticatedUser,
+    ): Promise<ApiResponse<AssetInternetAccount[] | null>> {
+      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'write')) {
+        return failure('无权执行离职回收', 403);
+      }
+      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'write')) {
+        return failure('无权编辑互联网账号', 403);
+      }
+      const ids = Array.from(new Set((Array.isArray(accountIds) ? accountIds : [])
+        .map((id) => cleanText(id))
+        .filter(Boolean)));
+      if (!ids.length) return success([]);
+      try {
+        const directory = await loadDirectory(prisma);
+        const scope = buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'assets');
+        const changedAt = now().toISOString();
+        const updated = await prisma.$transaction(async (transaction) => {
+          const state = await lockState(transaction);
+          const selected = ids.map((id) => {
+            const account = state.accounts.find((item) => item.id === id);
+            if (!account) throw new AssetCommandError(404, '互联网账号不存在');
+            if (!visibleToScope(account, scope, directory)) throw new AssetCommandError(403, '无权处理该互联网账号的离职回收');
+            return account;
+          });
+          const idSet = new Set(ids);
+          state.accounts = state.accounts.map((account) => idSet.has(account.id) ? normalizeAssetAccount({
+            ...account,
+            controlStatus: '离职待回收',
+            permissionStatus: '离职待回收',
+            updatedAt: changedAt,
+          }) : account);
+          syncAccountRisks(state, changedAt);
+          syncAccountOffboardingTasks(state, changedAt);
+          syncDeviceRisks(state, changedAt);
+          addLog(
+            state,
+            makeId('asset-log'),
+            changedAt,
+            actor,
+            '生成离职回收',
+            '互联网账号',
+            ids.join(','),
+            `${selected.length}个互联网账号`,
+            `批量标记${selected.length}个账号为离职待回收`,
+          );
+          await persistState(transaction, state);
+          return state.accounts.filter((account) => idSet.has(account.id));
+        });
+        return success(updated);
+      } catch (error) {
+        if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
+        throw error;
+      }
+    },
+
+    async deleteInternetAccount(id: string, actor: AuthenticatedUser): Promise<ApiResponse<AssetInternetAccount | null>> {
+      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'delete')) return failure('无权删除互联网账号', 403);
+      try {
+        const directory = await loadDirectory(prisma);
+        const scope = buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'assets');
+        const deleted = await prisma.$transaction(async (transaction) => {
+          const state = await lockState(transaction);
+          const existing = state.accounts.find((item) => item.id === id);
+          if (!existing) throw new AssetCommandError(404, '互联网账号不存在');
+          if (!visibleToScope(existing, scope, directory)) throw new AssetCommandError(403, '无权删除该互联网账号');
+          state.accounts = state.accounts.filter((item) => item.id !== id);
+          state.accountCredentials = state.accountCredentials.filter((item) => item.accountId !== id);
+          state.offboardingTasks = state.offboardingTasks.filter((item) => !(item.assetType === '互联网账号' && item.assetId === id));
+          const changedAt = now().toISOString();
+          syncAccountRisks(state, changedAt);
+          syncDeviceRisks(state, changedAt);
+          addLog(state, makeId('asset-log'), changedAt, actor, '删除资产', '互联网账号', existing.id, existing.accountName, `删除账号 ${existing.accountNo}`);
+          await persistState(transaction, state);
+          return existing;
+        });
+        return success(deleted);
       } catch (error) {
         if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
         throw error;

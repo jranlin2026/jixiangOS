@@ -45,9 +45,9 @@ const assetAdmin: AuthenticatedUser = {
   role: '资产管理员',
   roleId: 'role-asset-admin',
   permissions: [
-    { module: PERMISSION_KEYS.ASSETS_DEVICES, actions: ['read', 'write'] },
-    { module: PERMISSION_KEYS.ASSETS_PHONES, actions: ['read', 'write'] },
-    { module: PERMISSION_KEYS.ASSETS_ACCOUNTS, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.ASSETS_DEVICES, actions: ['read', 'write', 'delete'] },
+    { module: PERMISSION_KEYS.ASSETS_PHONES, actions: ['read', 'write', 'delete'] },
+    { module: PERMISSION_KEYS.ASSETS_ACCOUNTS, actions: ['read', 'write', 'delete'] },
     { module: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.ASSETS_OFFBOARDING, actions: ['read', 'write'] },
   ],
@@ -113,6 +113,7 @@ const ASSET_KEYS = [
   STORAGE_KEYS.ASSET_DEVICES,
   STORAGE_KEYS.ASSET_PHONE_NUMBERS,
   STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS,
+  STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS,
   STORAGE_KEYS.ASSET_RISKS,
   STORAGE_KEYS.ASSET_OPERATION_LOGS,
   STORAGE_KEYS.ASSET_OFFBOARDING_TASKS,
@@ -298,6 +299,12 @@ assert.ok(
   prisma.read<AssetDevice[]>(STORAGE_KEYS.ASSET_DEVICES).some((item) => item.id === oldDevice.id),
   'self 范围不得删除其他员工的设备',
 );
+const forbiddenOwnDeleteWithoutDeletePermission = await service.deleteDevice(created.data!.id, deviceWriter);
+assert.equal(forbiddenOwnDeleteWithoutDeletePermission.code, 403);
+assert.ok(
+  prisma.read<AssetDevice[]>(STORAGE_KEYS.ASSET_DEVICES).some((item) => item.id === created.data!.id),
+  '只有设备编辑权时不得删除本人范围设备',
+);
 
 const riskPrisma = new FakePrisma();
 const riskService = createAssetCommandService(riskPrisma as any, {
@@ -358,6 +365,8 @@ const createdAccount = await riskService.createInternetAccount({
   platform: '抖音',
   accountName: '官方号',
   loginAccount: 'jx_official_001',
+  loginMethod: '密码登录',
+  loginPassword: 'test-password',
   realName: '资产管理员',
   phoneId: createdPhone.data!.id,
   boundEmail: 'asset-admin@example.com',
@@ -378,6 +387,29 @@ assert.equal(createdAccount.data?.loginAccountMasked.includes('*'), true);
 assert.equal(createdAccount.data?.boundEmailMasked?.includes('*'), true);
 assert.ok(
   riskPrisma.read<AssetInternetAccount[]>(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS).some((account) => account.id === createdAccount.data?.id),
+);
+const storedCredentials = riskPrisma.read<any[]>(STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS);
+assert.equal(storedCredentials.length, 1);
+assert.equal(JSON.stringify(storedCredentials).includes('test-password'), false);
+const revealedLoginPassword = await riskService.revealAccountCredential(createdAccount.data!.id, 'loginPassword', sensitiveAssetAdmin);
+assert.equal(revealedLoginPassword.code, 0);
+assert.equal(revealedLoginPassword.data?.value, 'test-password');
+const rejectedPasswordlessAccount = await riskService.createInternetAccount({
+  platform: 'Apple ID',
+  accountName: '不能绕过密码',
+  loginAccount: 'no-password@example.com',
+}, assetAdmin);
+assert.equal(rejectedPasswordlessAccount.code, 400);
+const deniedOffboarding = await riskService.markInternetAccountsForOffboarding([createdAccount.data!.id], deviceWriter);
+assert.equal(deniedOffboarding.code, 403);
+const markedOffboarding = await riskService.markInternetAccountsForOffboarding([createdAccount.data!.id], assetAdmin);
+assert.equal(markedOffboarding.code, 0);
+assert.deepEqual(markedOffboarding.data?.map((account) => account.id), [createdAccount.data!.id]);
+assert.equal(markedOffboarding.data?.[0]?.controlStatus, '离职待回收');
+assert.ok(
+  riskPrisma.read<AssetOffboardingTask[]>(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS)
+    .some((task) => task.assetId === createdAccount.data!.id),
+  '批量标记离职账号必须在同一事务中同步回收任务',
 );
 
 const noSimDevice = await riskService.createDevice({
@@ -467,6 +499,7 @@ const pendingAccount = await riskService.createInternetAccount({
   accountCategory: '直播号',
   accountName: '待回收账号',
   loginAccount: 'pending_recycle_account',
+  loginPassword: 'test-password',
   ownerSubject: '公司',
   departmentId: 'dept-assets',
   ownerId: assetAdmin.id,
@@ -478,4 +511,55 @@ assert.equal(pendingAccount.code, 0);
 assert.equal(pendingAccount.data?.controlStatus, '离职待回收');
 assert.ok(
   riskPrisma.read<AssetOffboardingTask[]>(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS).some((task) => task.assetId === pendingAccount.data?.id),
+);
+
+const ownerlessPhone = await riskService.createPhoneNumber({
+  phoneNumber: '13900008888',
+  simForm: '实体SIM',
+  ownerSubject: '公司',
+  departmentId: 'dept-assets',
+  monthlyFee: 0,
+  status: '待启用',
+}, assetAdmin);
+assert.equal(ownerlessPhone.code, 0);
+assert.ok(
+  riskPrisma.read<AssetRisk[]>(STORAGE_KEYS.ASSET_RISKS)
+    .some((risk) => risk.riskKey === `phone-no-owner-${ownerlessPhone.data!.id}`),
+);
+const deletedOwnerlessPhone = await riskService.deletePhoneNumber(ownerlessPhone.data!.id, assetAdmin);
+assert.equal(deletedOwnerlessPhone.code, 0);
+assert.equal(
+  riskPrisma.read<AssetRisk[]>(STORAGE_KEYS.ASSET_RISKS)
+    .some((risk) => risk.riskKey === `phone-no-owner-${ownerlessPhone.data!.id}`),
+  false,
+  '删除手机号后必须同步清理其派生风险',
+);
+
+const relatedOwnerlessPhone = await riskService.createPhoneNumber({
+  phoneNumber: '13900007777',
+  simForm: '实体SIM',
+  deviceId: oldDevice.id,
+  slotType: '卡槽2',
+  ownerSubject: '公司',
+  departmentId: 'dept-assets',
+  monthlyFee: 0,
+  status: '待启用',
+}, assetAdmin);
+assert.equal(relatedOwnerlessPhone.code, 0);
+assert.ok(
+  riskPrisma.read<AssetRisk[]>(STORAGE_KEYS.ASSET_RISKS)
+    .some((risk) => risk.riskKey === `phone-no-owner-${relatedOwnerlessPhone.data!.id}`),
+);
+const deletedDeviceWithRelations = await riskService.deleteDevice(oldDevice.id, assetAdmin);
+assert.equal(deletedDeviceWithRelations.code, 0);
+assert.equal(
+  riskPrisma.read<AssetRisk[]>(STORAGE_KEYS.ASSET_RISKS)
+    .some((risk) => risk.riskKey === `phone-no-owner-${relatedOwnerlessPhone.data!.id}`),
+  false,
+  '级联删除手机号后不得残留手机号风险',
+);
+assert.ok(
+  riskPrisma.read<AssetRisk[]>(STORAGE_KEYS.ASSET_RISKS)
+    .some((risk) => risk.riskKey === `account-unbound-phone-${createdAccount.data!.id}`),
+  '设备删除导致账号解绑后必须生成账号风险',
 );

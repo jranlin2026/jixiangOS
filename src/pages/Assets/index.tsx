@@ -929,6 +929,12 @@ const AssetManagement: React.FC = () => {
       return acc;
     }, {});
     if (type === 'phone') values.servicePassword = '';
+    if (type === 'account') {
+      const account = item as AssetInternetAccount;
+      values.loginPassword = '';
+      values.paymentPassword = '';
+      values.requiresPaymentPassword = account.requiresPaymentPassword ? 'true' : 'false';
+    }
     setFormState({ open: true, type, mode: 'edit', id: item.id, values: normalizeAssetFormValues(values), validationAttempted: false });
   };
 
@@ -971,7 +977,7 @@ const AssetManagement: React.FC = () => {
         ? (/IMEI|通信/.test(error) ? 2 : 1)
         : formState.type === 'phone'
           ? (/设备|卡槽|绑定/.test(error) ? 2 : 1)
-          : (/手机号|邮箱|二次验证|绑定/.test(error) ? 2 : 1);
+          : (/密码|登录方式|手机号|邮箱|二次验证|绑定/.test(error) ? 2 : 1);
       setFormState((current) => ({ ...current, validationErrorSection }));
       showFeedback(error);
       return;
@@ -2269,6 +2275,20 @@ const AssetManagement: React.FC = () => {
                 : '-',
             },
             { label: '绑定邮箱', value: renderSensitiveInline('account', account.id, 'boundEmail', account.boundEmailMasked || account.boundEmail || '-') },
+            { label: '登录方式', value: account.loginMethod || '密码登录' },
+            {
+              label: '登录密码',
+              value: account.loginCredentialStatus === '已设置'
+                ? renderSensitiveInline('account', account.id, 'loginPassword', '••••••')
+                : <Chip size="small" label={account.loginCredentialStatus || '待补齐'} sx={chipSx(statusTone(account.loginCredentialStatus || '待补齐'))} />,
+            },
+            {
+              label: '支付密码',
+              value: account.paymentCredentialStatus === '已设置'
+                ? renderSensitiveInline('account', account.id, 'paymentPassword', '••••••')
+                : <Chip size="small" label={account.paymentCredentialStatus || '不适用'} sx={chipSx(statusTone(account.paymentCredentialStatus || '不适用'))} />,
+            },
+            { label: '凭证更新时间', value: account.credentialUpdatedAt ? formatDate(account.credentialUpdatedAt, 'yyyy-MM-dd HH:mm') : '-' },
             { label: '控制权状态', value: <Chip size="small" label={readAccountControlStatus(account)} sx={chipSx(statusTone(readAccountControlStatus(account)))} /> },
             { label: '账号状态', value: <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} /> },
             { label: '所属部门', value: account.department || '-' },
@@ -2399,7 +2419,7 @@ const AssetManagement: React.FC = () => {
     );
   };
 
-  const renderTextField = (name: string, label: string, props: { required?: boolean; type?: string; multiline?: boolean } = {}) => (
+  const renderTextField = (name: string, label: string, props: { required?: boolean; type?: string; multiline?: boolean; helperText?: string } = {}) => (
     <TextField
       size="small"
       label={label}
@@ -2409,6 +2429,7 @@ const AssetManagement: React.FC = () => {
       type={props.type}
       multiline={props.multiline}
       minRows={props.multiline ? 2 : undefined}
+      helperText={props.helperText}
       InputLabelProps={props.type === 'date' ? { shrink: true } : undefined}
       fullWidth
     />
@@ -2669,7 +2690,22 @@ const AssetManagement: React.FC = () => {
         {renderTextField('realNameSubject', '实名主体')}
         {renderTextField('realName', '实名信息')}
       </BusinessFormSection>
-      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.account[1].title} summary={sectionSummary(['phoneId', 'boundEmail', 'twoFactorMethod'], ASSET_FORM_SECTIONS.account[1].summary)} errorCount={formState.validationErrorSection === 2 ? 1 : 0}>
+      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.account[1].title} summary={sectionSummary(['loginMethod', 'loginPassword', 'paymentPassword', 'twoFactorMethod'], ASSET_FORM_SECTIONS.account[1].summary)} errorCount={formState.validationErrorSection === 2 ? 1 : 0}>
+        {renderSelectField('loginMethod', '登录方式', ['密码登录', '手机验证码', '扫码登录', 'SSO'], { required: true })}
+        {formState.values.loginMethod === '密码登录' ? renderTextField('loginPassword', '登录密码', {
+          type: 'password',
+          required: formState.mode === 'create',
+          helperText: formState.mode === 'edit' ? '留空表示不修改原登录密码' : '加密保存，仅授权人员可查看',
+        }) : <Box />}
+        <FormControlLabel
+          control={<Checkbox checked={formState.values.requiresPaymentPassword === 'true'} onChange={(event) => updateFormValue('requiresPaymentPassword', event.target.checked ? 'true' : 'false')} />}
+          label="该账号涉及支付，需要保存支付密码"
+        />
+        {formState.values.requiresPaymentPassword === 'true' ? renderTextField('paymentPassword', '支付密码', {
+          type: 'password',
+          required: formState.mode === 'create',
+          helperText: formState.mode === 'edit' ? '留空表示不修改原支付密码' : '与登录密码独立加密保存',
+        }) : <Box />}
       <FormControl size="small" fullWidth>
         <InputLabel>绑定手机号</InputLabel>
         <Select

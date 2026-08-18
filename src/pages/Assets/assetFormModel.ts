@@ -48,7 +48,7 @@ export const ASSET_FORM_SECTIONS: Record<AssetFormType, Array<{ title: string; s
   ],
   account: [
     { title: '平台与账号', summary: '平台 / 类型 / 登录账号 / 实名主体' },
-    { title: '安全与绑定', summary: '手机号 / 邮箱 / 二次验证 / 控制权' },
+    { title: '登录与安全', summary: '登录方式 / 登录密码 / 支付密码 / 二次验证' },
     { title: '归属与使用', summary: '主体 / 部门 / 负责人 / 使用人' },
     { title: '经营与状态', summary: '业务场景 / 服务商 / 费用 / 状态' },
   ],
@@ -78,6 +78,8 @@ export function createAssetFormDefaults(type: AssetFormType): Record<string, str
     platform: '',
     accountCategory: '主账号',
     phoneId: '',
+    loginMethod: '密码登录',
+    requiresPaymentPassword: 'false',
     ownerSubject: '公司',
     controlStatus: '已掌控',
     accountStatus: '使用中',

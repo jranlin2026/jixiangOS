@@ -43,10 +43,41 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
 }
 
 {
+  const missingLoginPassword = await assetApi.createInternetAccount({
+    platform: 'Apple ID',
+    accountName: '缺少密码',
+    loginAccount: 'missing-password@example.com',
+  });
+  assert.notEqual(missingLoginPassword.code, 0);
+  assert.match(missingLoginPassword.message, /登录密码/);
+
+  const created = await assetApi.createInternetAccount({
+    platform: 'Google账号',
+    accountName: '凭证测试账号',
+    loginAccount: 'credential-test@example.com',
+    loginMethod: '密码登录',
+    loginPassword: 'login-secret',
+    requiresPaymentPassword: true,
+    paymentPassword: 'pay-secret',
+  });
+  assert.equal(created.code, 0);
+  assert.equal(created.data.loginCredentialStatus, '已设置');
+  assert.equal(created.data.paymentCredentialStatus, '已设置');
+  assert.equal('loginPassword' in created.data, false);
+  const storedAccounts = JSON.stringify(JSON.parse(localStorage.getItem(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS) || '[]'));
+  assert.equal(storedAccounts.includes('login-secret'), false);
+  assert.equal(storedAccounts.includes('pay-secret'), false);
+  const revealed = await assetApi.revealSensitiveField('account', created.data.id, 'loginPassword');
+  assert.equal(revealed.data.value, 'login-secret');
+  await assetApi.deleteInternetAccount(created.data.id);
+}
+
+{
   const unassigned = await assetApi.createInternetAccount({
     platform: 'Douyin',
     accountName: 'No Assignee Matrix Account',
     loginAccount: 'matrix_no_assignee',
+    loginPassword: 'test-password',
     ownerSubject: '公司',
     department: 'Market',
     owner: 'Market Owner',
@@ -268,6 +299,7 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
     platform: '测试平台',
     accountName: '未绑定账号',
     loginAccount: 'unbound_account',
+    loginPassword: 'test-password',
     ownerSubject: '公司',
     department: '运营管理部',
     owner: '测试员',
@@ -330,6 +362,7 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
     platform: '实名测试平台',
     accountName: '实名测试账号',
     loginAccount: 'real_name_account',
+    loginPassword: 'test-password',
     realName: '张三',
     phoneId: realNamePhone.data.id,
     ownerSubject: '公司',
@@ -401,6 +434,7 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
     platform: 'Delete Phone Platform',
     accountName: 'Delete Phone Account',
     loginAccount: 'delete_phone_account',
+    loginPassword: 'test-password',
     phoneId: phone.data.id,
     ownerSubject: '公司',
     department: 'Ops',
@@ -462,6 +496,7 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
     platform: 'Delete Device Platform',
     accountName: 'Delete Device Account',
     loginAccount: 'delete_device_account',
+    loginPassword: 'test-password',
     phoneId: phone.data.id,
     ownerSubject: '公司',
     department: 'Ops',
@@ -498,6 +533,7 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
     platform: 'Delete Account Platform',
     accountName: 'Delete Account Only',
     loginAccount: 'delete_account_only',
+    loginPassword: 'test-password',
     ownerSubject: '公司',
     department: 'Ops',
     owner: 'Asset Tester',
@@ -533,7 +569,7 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
 
   assert.equal(imported.code, 0);
   assert.equal(imported.data.totalRows, 2);
-  assert.equal(imported.data.successCount, 1);
+  assert.equal(imported.data.successCount, 1, JSON.stringify(imported.data.failedRows));
   assert.equal(imported.data.failedCount, 1);
   assert.equal(imported.data.createdIds.length, 1);
   assert.equal(imported.data.failedRows[0].rowNumber, 3);
@@ -560,7 +596,7 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
 
   assert.equal(imported.code, 0);
   assert.equal(imported.data.totalRows, 2);
-  assert.equal(imported.data.successCount, 1);
+  assert.equal(imported.data.successCount, 1, JSON.stringify(imported.data.failedRows));
   assert.equal(imported.data.failedCount, 1);
   assert.match(imported.data.failedRows[0].reason, /设备不存在/);
 
@@ -580,7 +616,7 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
 
   assert.equal(imported.code, 0);
   assert.equal(imported.data.totalRows, 2);
-  assert.equal(imported.data.successCount, 1);
+  assert.equal(imported.data.successCount, 1, JSON.stringify(imported.data.failedRows));
   assert.equal(imported.data.failedCount, 1);
   assert.match(imported.data.failedRows[0].reason, /绑定手机号不存在/);
 
@@ -641,6 +677,7 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
     platform: '离职测试平台',
     accountName: '离职测试账号',
     loginAccount: 'asset_leave_account',
+    loginPassword: 'test-password',
     phoneId: phone.data.id,
     ownerSubject: '公司',
     department: '运营管理部',
@@ -763,6 +800,7 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
     accountCategory: '直播号',
     accountName: '待回收账号',
     loginAccount: 'pending_recycle_account',
+    loginPassword: 'test-password',
     ownerSubject: '公司',
     controlStatus: '离职待回收',
     accountStatus: '闲置',

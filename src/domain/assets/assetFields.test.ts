@@ -91,6 +91,7 @@ const legacyAccount = normalizeAssetAccount({
   serviceProvider: '',
   monthlyFee: 0,
   purpose: '',
+  loginPassword: 'legacy-plaintext-must-be-removed',
   createdAt: '2026-01-01',
   updatedAt: '2026-01-01',
 });
@@ -98,4 +99,8 @@ const legacyAccount = normalizeAssetAccount({
 assert.equal(legacyAccount.accountCategory, '主账号');
 assert.equal(legacyAccount.controlStatus, '已掌控');
 assert.equal(legacyAccount.accountStatus, '使用中');
+assert.equal(legacyAccount.loginMethod, '密码登录');
+assert.equal(legacyAccount.loginCredentialStatus, '待补齐');
+assert.equal(legacyAccount.paymentCredentialStatus, '不适用');
+assert.equal('loginPassword' in legacyAccount, false);
 assert.equal(readAccountControlStatus({ permissionStatus: '离职待回收' }), '离职待回收');

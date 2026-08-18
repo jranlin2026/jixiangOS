@@ -28,6 +28,7 @@ const ASSET_STORAGE_KEYS = new Set<string>([
   STORAGE_KEYS.ASSET_DEVICES,
   STORAGE_KEYS.ASSET_PHONE_NUMBERS,
   STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS,
+  STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS,
   STORAGE_KEYS.ASSET_RISKS,
   STORAGE_KEYS.ASSET_OPERATION_LOGS,
   STORAGE_KEYS.ASSET_OFFBOARDING_TASKS,
@@ -76,11 +77,14 @@ function hasAnyExactPermission(user: AuthenticatedUser, permissions: string[], a
 }
 
 export function canReadStorageKey(user: AuthenticatedUser, key: string): boolean {
+  if (key === STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS) return false;
   if (!isAssetStorageKey(key)) return true;
   return hasPermission(user, PERMISSION_KEYS.ASSETS, 'read');
 }
 
 export function canWriteStorageKey(user: AuthenticatedUser, key: string): boolean {
+  if (key === STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS) return false;
+  if (key === STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS) return false;
   if (!isAssetStorageKey(key)) return true;
   return hasAnyExactPermission(user, ASSET_WRITE_PERMISSIONS[key] || [PERMISSION_KEYS.ASSETS], 'write');
 }
@@ -149,9 +153,15 @@ function sanitizePhone(phone: AssetPhoneNumber, canViewSensitive: boolean): Asse
 }
 
 function sanitizeAccount(account: AssetInternetAccount, canViewSensitive: boolean): AssetInternetAccount {
-  if (canViewSensitive) return account;
+  const {
+    loginPassword: _loginPassword,
+    paymentPassword: _paymentPassword,
+    credentialBackfill: _credentialBackfill,
+    ...safeAccount
+  } = account as AssetInternetAccount & { loginPassword?: unknown; paymentPassword?: unknown; credentialBackfill?: unknown };
+  if (canViewSensitive) return safeAccount;
   return {
-    ...account,
+    ...safeAccount,
     loginAccount: account.loginAccountMasked || '',
     boundEmail: account.boundEmailMasked || undefined,
   };
@@ -202,8 +212,9 @@ export function filterAssetStorageData(
     }))
     .filter((task) => scope.unrestricted || task.targets.length);
 
+  const { [STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS]: _credentials, ...safeData } = data;
   return {
-    ...data,
+    ...safeData,
     [STORAGE_KEYS.ASSET_DEVICES]: devices,
     [STORAGE_KEYS.ASSET_PHONE_NUMBERS]: phones,
     [STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS]: accounts,

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  canReadStorageKey,
   canWriteStorageKey,
   filterAssetStorageData,
   filterRecoveryOrderStorageData,
@@ -107,7 +108,7 @@ const opsAuth: AuthenticatedUser = {
 const resolvedOpsAuth = toAuthenticatedUser(users[2], [salesRole, opsRole]);
 assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_DEVICES), true);
 assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_PHONE_NUMBERS), true);
-assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS), true);
+assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS), false);
 assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_RISKS), true);
 assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_OPERATION_LOGS), true);
 assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_OFFBOARDING_TASKS), true);
@@ -153,6 +154,7 @@ const storageData = {
       currentUser: '童双全',
       phoneId: 'phone-self',
       loginAccount: 'self_raw',
+      loginPassword: 'must-never-leak',
       loginAccountMasked: 'self_***',
       boundEmail: 'self@example.com',
       boundEmailMasked: 'se***@example.com',
@@ -166,6 +168,7 @@ const storageData = {
       loginAccountMasked: 'other_***',
     },
   ],
+  [STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS]: [{ accountId: 'account-self', ciphertext: 'encrypted-secret' }],
   [STORAGE_KEYS.ASSET_RISKS]: [
     { id: 'risk-self', targetId: 'account-self' },
     { id: 'risk-other', targetId: 'account-other' },
@@ -197,7 +200,11 @@ assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei1, 'IMEI-RAW-
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei2, 'IMEI-RAW-2');
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[1].imei1, 'OTHER-RAW');
 assert.equal((opsData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePassword, undefined);
+assert.equal((opsData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginPassword, undefined);
+assert.equal(STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS in opsData, false);
 assert.equal(canWriteStorageKey(opsAuth, STORAGE_KEYS.ASSET_DEVICES), true);
+assert.equal(canReadStorageKey(opsAuth, STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS), false);
+assert.equal(canWriteStorageKey(opsAuth, STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS), false);
 
 const recoveryStorageData = {
   [STORAGE_KEYS.RECOVERY_ORDERS]: [

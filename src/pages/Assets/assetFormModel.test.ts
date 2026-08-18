@@ -13,7 +13,7 @@ assert.deepEqual(ASSET_FORM_SECTIONS.phone.map((section) => section.title), [
   '号码与SIM', '设备绑定', '归属与使用', '套餐与状态',
 ]);
 assert.deepEqual(ASSET_FORM_SECTIONS.account.map((section) => section.title), [
-  '平台与账号', '安全与绑定', '归属与使用', '经营与状态',
+  '平台与账号', '登录与安全', '归属与使用', '经营与状态',
 ]);
 
 const device = createAssetFormDefaults('device');

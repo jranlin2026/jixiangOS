@@ -18,6 +18,7 @@ const COMMAND_ONLY_STORAGE_KEYS = new Set<string>([
   STORAGE_KEYS.FINANCE_TRANSACTIONS,
   STORAGE_KEYS.FINANCE,
   STORAGE_KEYS.REFUNDS,
+  STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS,
 ]);
 
 export function isBackendCommandOnlyStorageKey(key: string): boolean {

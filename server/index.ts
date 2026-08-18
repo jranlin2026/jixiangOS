@@ -524,6 +524,7 @@ const requireFinanceFlowExportAccess = createRequireAuth(authService, PERMISSION
 const requireMatrixPublishUploadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
 const requireAssetReadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS);
 const requireAssetSensitiveViewAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW);
+const requireAssetImportExportAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write');
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
 const requireEnablementRead = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE);
@@ -2085,6 +2086,51 @@ app.get('/api/assets/dashboard', requireAssetReadAccess, async (req: Authenticat
 
 app.post('/api/assets/phones/:id/reveal/service-password', requireAssetSensitiveViewAccess, async (req: AuthenticatedRequest, res) => {
   const result = await assetCommandService.revealPhoneServicePassword(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.delete('/api/assets/devices/:id', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await assetCommandService.deleteDevice(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.delete('/api/assets/phones/:id', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await assetCommandService.deletePhoneNumber(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.post('/api/assets/accounts', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await assetCommandService.createInternetAccount(req.body || {}, req.currentUser!, false);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.post('/api/assets/accounts/import-row', requireAssetImportExportAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await assetCommandService.createInternetAccount(req.body || {}, req.currentUser!, true);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.post('/api/assets/accounts/mark-offboarding', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await assetCommandService.markInternetAccountsForOffboarding(req.body?.accountIds, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.put('/api/assets/accounts/:id', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await assetCommandService.updateInternetAccount(routeParam(req.params.id), req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.delete('/api/assets/accounts/:id', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await assetCommandService.deleteInternetAccount(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.post('/api/assets/accounts/:id/reveal/:field', requireAssetSensitiveViewAccess, async (req: AuthenticatedRequest, res) => {
+  const field = routeParam(req.params.field);
+  if (field !== 'loginPassword' && field !== 'paymentPassword') {
+    res.status(404).json({ code: 404, data: null, message: 'Unknown account credential' });
+    return;
+  }
+  const result = await assetCommandService.revealAccountCredential(routeParam(req.params.id), field, req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code).json(result);
 });
 

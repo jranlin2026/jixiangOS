@@ -153,7 +153,9 @@ function normalizeAccountStatus(value: unknown): AssetAccountStatus {
 
 export function normalizeAssetAccount<T extends LooseAsset>(source: T): T & AssetInternetAccount {
   const controlStatus = readAccountControlStatus(source);
-  return {
+  const loginMethod = (text(source.loginMethod) || '密码登录') as AssetInternetAccount['loginMethod'];
+  const requiresPaymentPassword = source.requiresPaymentPassword === true || source.requiresPaymentPassword === 'true';
+  const normalized = {
     ...source,
     accountCategory: (text(source.accountCategory) || '主账号') as AssetInternetAccount['accountCategory'],
     realNameSubject: text(source.realNameSubject) || undefined,
@@ -161,7 +163,18 @@ export function normalizeAssetAccount<T extends LooseAsset>(source: T): T & Asse
     permissionStatus: controlStatus === '已掌控' ? '正常' : controlStatus === '待交接' ? '正常' : controlStatus,
     accountStatus: normalizeAccountStatus(source.accountStatus),
     businessScene: text(source.businessScene) || undefined,
+    loginMethod,
+    requiresPaymentPassword,
+    loginCredentialStatus: (text(source.loginCredentialStatus)
+      || (loginMethod === '密码登录' ? '待补齐' : '不适用')) as AssetInternetAccount['loginCredentialStatus'],
+    paymentCredentialStatus: (text(source.paymentCredentialStatus)
+      || (requiresPaymentPassword ? '待补齐' : '不适用')) as AssetInternetAccount['paymentCredentialStatus'],
+    credentialUpdatedAt: text(source.credentialUpdatedAt) || undefined,
     twoFactorMethod: text(source.twoFactorMethod) || undefined,
     remark: text(source.remark) || undefined,
   } as T & AssetInternetAccount;
+  delete (normalized as AssetInternetAccount & { loginPassword?: unknown }).loginPassword;
+  delete (normalized as AssetInternetAccount & { paymentPassword?: unknown }).paymentPassword;
+  delete (normalized as AssetInternetAccount & { credentialBackfill?: unknown }).credentialBackfill;
+  return normalized;
 }

@@ -303,6 +303,7 @@ export const STORAGE_KEYS = {
   ASSET_DEVICES: `${STORAGE_PREFIX}asset_devices`,
   ASSET_PHONE_NUMBERS: `${STORAGE_PREFIX}asset_phone_numbers`,
   ASSET_INTERNET_ACCOUNTS: `${STORAGE_PREFIX}asset_internet_accounts`,
+  ASSET_ACCOUNT_CREDENTIALS: `${STORAGE_PREFIX}asset_account_credentials_v1`,
   ASSET_RISKS: `${STORAGE_PREFIX}asset_risks`,
   ASSET_OPERATION_LOGS: `${STORAGE_PREFIX}asset_operation_logs`,
   ASSET_OFFBOARDING_TASKS: `${STORAGE_PREFIX}asset_offboarding_tasks`,

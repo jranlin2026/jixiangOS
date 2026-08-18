@@ -22,11 +22,15 @@ export type AssetAccountCategory = '主账号' | '员工号' | '直播号' | '�
 
 export type AssetAccountStatus = '使用中' | '闲置' | '异常' | '封禁' | '已注销' | '正常';
 
+export type AssetAccountLoginMethod = '密码登录' | '手机验证码' | '扫码登录' | 'SSO';
+
+export type AssetAccountCredentialStatus = '已设置' | '待补齐' | '不适用';
+
 export type AssetRiskStatus = 'open' | 'resolved' | 'ignored';
 
 export type AssetType = 'device' | 'phone' | 'account';
 
-export type AssetSensitiveField = 'imei' | 'imei1' | 'imei2' | 'phoneNumber' | 'phoneRealName' | 'iccid' | 'imsi' | 'servicePassword' | 'loginAccount' | 'accountRealName' | 'boundEmail';
+export type AssetSensitiveField = 'imei' | 'imei1' | 'imei2' | 'phoneNumber' | 'phoneRealName' | 'iccid' | 'imsi' | 'servicePassword' | 'loginAccount' | 'accountRealName' | 'boundEmail' | 'loginPassword' | 'paymentPassword';
 
 export type AssetImportType = 'devices' | 'phones' | 'accounts';
 
@@ -134,6 +138,11 @@ export interface AssetInternetAccount {
   expiresAt?: string;
   purpose: string;
   businessScene?: string;
+  loginMethod?: AssetAccountLoginMethod;
+  requiresPaymentPassword?: boolean;
+  loginCredentialStatus?: AssetAccountCredentialStatus;
+  paymentCredentialStatus?: AssetAccountCredentialStatus;
+  credentialUpdatedAt?: string;
   twoFactorMethod?: string;
   remark?: string;
   createdAt: string;
@@ -300,4 +309,7 @@ export type AssetPhoneNumberInput = Omit<AssetPhoneNumber, 'id' | 'phoneNumberMa
 
 export type AssetInternetAccountInput = Omit<AssetInternetAccount, 'id' | 'accountNo' | 'loginAccountMasked' | 'boundEmailMasked' | 'createdAt' | 'updatedAt'> & {
   accountNo?: string;
+  /** Command-only secrets. They are stored separately from the account asset. */
+  loginPassword?: string;
+  paymentPassword?: string;
 };
