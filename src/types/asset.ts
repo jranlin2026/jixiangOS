@@ -14,7 +14,7 @@ export type AssetRiskStatus = 'open' | 'resolved' | 'ignored';
 
 export type AssetType = 'device' | 'phone' | 'account';
 
-export type AssetSensitiveField = 'imei' | 'phoneNumber' | 'phoneRealName' | 'loginAccount' | 'accountRealName' | 'boundEmail';
+export type AssetSensitiveField = 'imei' | 'imei1' | 'imei2' | 'phoneNumber' | 'phoneRealName' | 'loginAccount' | 'accountRealName' | 'boundEmail';
 
 export type AssetImportType = 'devices' | 'phones' | 'accounts';
 
@@ -23,8 +23,14 @@ export interface AssetDevice {
   deviceCode: string;
   deviceName: string;
   brandModel: string;
-  imei: string;
-  imeiMasked: string;
+  imei1: string;
+  imei1Masked: string;
+  imei2?: string;
+  imei2Masked?: string;
+  /** Legacy read alias. New writes use imei1. */
+  imei?: string;
+  /** Legacy read alias. New writes use imei1Masked. */
+  imeiMasked?: string;
   simType: '单卡' | '双卡';
   ownerSubject: '公司' | '法人' | '员工个人';
   departmentId?: string;
@@ -243,7 +249,7 @@ export interface AssetImportResult {
   failedRows: AssetImportFailedRow[];
 }
 
-export type AssetDeviceInput = Omit<AssetDevice, 'id' | 'deviceCode' | 'imeiMasked' | 'createdAt' | 'updatedAt'> & {
+export type AssetDeviceInput = Omit<AssetDevice, 'id' | 'deviceCode' | 'imei1Masked' | 'imei2Masked' | 'imeiMasked' | 'createdAt' | 'updatedAt'> & {
   deviceCode?: string;
 };
 
