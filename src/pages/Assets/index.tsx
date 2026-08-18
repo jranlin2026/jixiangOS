@@ -84,7 +84,7 @@ import type { User } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { readAccountControlStatus, readDeviceCommunicationType } from '../../domain/assets/assetFields';
-import { ASSET_FORM_SECTIONS, createAssetFormDefaults, formatPhoneSlotImeiLabel, type AssetFormType } from './assetFormModel';
+import { ASSET_FORM_SECTIONS, buildDeviceSlotRows, createAssetFormDefaults, formatPhoneSlotImeiLabel, type AssetFormType } from './assetFormModel';
 
 type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'matrix' | 'logs' | 'offboarding';
 
@@ -186,8 +186,8 @@ const DEVICE_COLUMNS: AssetColumnConfig[] = [
   { id: 'deviceCode', label: '设备编号', width: 130 },
   { id: 'deviceName', label: '设备名称', width: 130 },
   { id: 'brandModel', label: '类型 / 品牌型号', width: 180 },
-  { id: 'imei', label: 'IMEI 1 / 2', width: 190 },
-  { id: 'simType', label: '手机号', width: 190 },
+  { id: 'imei', label: '卡槽 / IMEI', width: 250 },
+  { id: 'simType', label: '对应手机号', width: 210 },
   { id: 'accountCount', label: '账号数', width: 100 },
   { id: 'department', label: '所属部门', width: 130 },
   { id: 'owner', label: '负责人', width: 120 },
@@ -1381,6 +1381,23 @@ const AssetManagement: React.FC = () => {
     </Box>
   );
 
+  const renderDeviceImeis = (device: AssetDevice) => {
+    const slotRows = buildDeviceSlotRows(device, phonesByDeviceId.get(device.id) || []);
+    if (!slotRows.length) return <Typography variant="caption" sx={{ color: shell.muted }}>无 SIM</Typography>;
+    return (
+      <Stack spacing={0.5}>
+        {slotRows.map((row) => (
+          <Stack key={row.slotType} direction="row" spacing={0.75} alignItems="center" sx={{ minHeight: 24, whiteSpace: 'nowrap' }}>
+            <Typography variant="caption" sx={{ color: shell.muted, width: 96, flexShrink: 0 }}>
+              {row.slotType} / {row.imeiLabel}
+            </Typography>
+            <Box>{row.imeiMasked || '-'}</Box>
+          </Stack>
+        ))}
+      </Stack>
+    );
+  };
+
   const renderDeviceCell = (device: AssetDevice, columnId: string) => {
     switch (columnId) {
       case 'deviceCode':
@@ -1390,12 +1407,7 @@ const AssetManagement: React.FC = () => {
       case 'brandModel':
         return `${device.deviceCategory || '手机'} / ${device.brand || ''} ${device.model || ''}`.trim();
       case 'imei':
-        return (
-          <Stack spacing={0.25}>
-            <Box><Box component="span" sx={{ color: shell.muted, mr: 0.5 }}>1</Box>{device.imei1Masked}</Box>
-            {device.imei2Masked ? <Box><Box component="span" sx={{ color: shell.muted, mr: 0.5 }}>2</Box>{device.imei2Masked}</Box> : null}
-          </Stack>
-        );
+        return renderDeviceImeis(device);
       case 'simType':
         return renderDevicePhones(device);
       case 'accountCount': {
@@ -1417,36 +1429,29 @@ const AssetManagement: React.FC = () => {
 
   const renderDevicePhones = (device: AssetDevice) => {
     const linkedPhones = phonesByDeviceId.get(device.id) || [];
-    const communicationType = readDeviceCommunicationType(device);
-    const expectedSlots = communicationType === '无SIM' ? [] : communicationType === '双卡' ? ['卡槽1', '卡槽2'] : ['卡槽1'];
-    if (!expectedSlots.length) return <Typography variant="caption" sx={{ color: shell.muted }}>无 SIM</Typography>;
-    const slotLabelMap: Record<string, string> = {
-      卡槽1: 'A',
-      卡槽2: 'B',
-    };
+    const slotRows = buildDeviceSlotRows(device, linkedPhones);
+    if (!slotRows.length) return <Typography variant="caption" sx={{ color: shell.muted }}>无 SIM</Typography>;
     return (
-      <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0, whiteSpace: 'nowrap' }}>
-        {expectedSlots.map((slot, index) => {
-          const phone = linkedPhones.find((item) => item.slotType === slot);
-          const slotLabel = slotLabelMap[slot] || slot;
-          const prefix = `${slotLabel} `;
+      <Stack spacing={0.5} sx={{ minWidth: 0 }}>
+        {slotRows.map((row) => {
+          const phone = row.phoneId ? linkedPhones.find((item) => item.id === row.phoneId) : undefined;
           if (!phone) {
             return (
-              <React.Fragment key={slot}>
-                {index > 0 ? <Typography variant="caption" sx={{ color: shell.muted }}>/</Typography> : null}
+              <Stack key={row.slotType} direction="row" spacing={0.75} alignItems="center" sx={{ minHeight: 24, whiteSpace: 'nowrap' }}>
+                <Typography variant="caption" sx={{ color: shell.muted, width: 42, flexShrink: 0 }}>{row.slotType}</Typography>
                 <Typography variant="caption" sx={{ color: shell.muted, lineHeight: 1.3 }}>
-                  {prefix}未绑定
+                  未绑定
                 </Typography>
-              </React.Fragment>
+              </Stack>
             );
           }
           return (
-            <React.Fragment key={phone.id}>
-              {index > 0 ? <Typography variant="caption" sx={{ color: shell.muted }}>/</Typography> : null}
+            <Stack key={row.slotType} direction="row" spacing={0.75} alignItems="center" sx={{ minHeight: 24, whiteSpace: 'nowrap' }}>
+              <Typography variant="caption" sx={{ color: shell.muted, width: 42, flexShrink: 0 }}>{row.slotType}</Typography>
               <Tooltip title="查看手机号资料">
-                {renderRelationLink(`${prefix}${phone.phoneNumberMasked}`, () => openDetail('phone', phone.id))}
+                {renderRelationLink(phone.phoneNumberMasked, () => openDetail('phone', phone.id))}
               </Tooltip>
-            </React.Fragment>
+            </Stack>
           );
         })}
       </Stack>

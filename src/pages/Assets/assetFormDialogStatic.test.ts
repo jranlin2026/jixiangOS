@@ -21,5 +21,7 @@ assert.ok(
   '服务密码应放在套餐与状态分区的归属地后面',
 );
 assert.match(source, /formatPhoneSlotImeiLabel/, '设备卡槽选项应显示对应的 IMEI 标识');
+assert.match(source, /id: 'imei', label: '卡槽 \/ IMEI'/, '设备列表应将 IMEI 字段明确配置到卡槽');
+assert.match(source, /id: 'simType', label: '对应手机号'/, '设备列表手机号字段应表达与卡槽的对应关系');
 assert.match(assetApiSource, /reveal\/service-password/, '后端模式应通过独立接口查看服务密码');
 assert.match(serverSource, /requireAssetSensitiveViewAccess[\s\S]*?revealPhoneServicePassword/, '服务密码查看接口应校验敏感字段权限');
