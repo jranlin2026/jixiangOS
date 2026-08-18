@@ -5,6 +5,10 @@ import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { buildDataVisibilityScopeForUser, type DataVisibilityScope } from '../../src/shared/utils/dataVisibility';
 import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
+import {
+  DeviceImeiValidationError,
+  validateDeviceImeis,
+} from '../../src/domain/assets/deviceImei';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   AssetDevice,
@@ -149,8 +153,19 @@ function masked(value: unknown): boolean {
   return /[*•]/.test(cleanText(value));
 }
 
-function maskLongValue(value: string): string {
-  return value.length > 8 ? `${value.slice(0, 6)}******${value.slice(-4)}` : value;
+function validateCommandDeviceImeis(
+  input: Parameters<typeof validateDeviceImeis>[0],
+  devices: AssetDevice[],
+  currentDeviceId?: string,
+) {
+  try {
+    return validateDeviceImeis(input, devices, currentDeviceId);
+  } catch (error) {
+    if (error instanceof DeviceImeiValidationError) {
+      throw new AssetCommandError(error.kind === 'duplicate' ? 409 : 400, error.message);
+    }
+    throw error;
+  }
 }
 
 function maskPhone(value: string): string {
@@ -472,22 +487,17 @@ export function createAssetCommandService(
       try {
         const directory = await loadDirectory(prisma);
         const scope = buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'assets');
-        const imei = requiredText(input.imei, 'IMEI不能为空');
-        if (masked(imei)) throw new AssetCommandError(400, 'IMEI不能使用掩码值');
         const createdAt = now().toISOString();
         const org = resolveOrgFields(input, directory);
         const created = await prisma.$transaction(async (transaction) => {
           const state = await lockState(transaction);
-          if (state.devices.some((device) => device.imei === imei)) {
-            throw new AssetCommandError(409, 'IMEI已存在');
-          }
+          const imeiFields = validateCommandDeviceImeis(input, state.devices);
           const device: AssetDevice = {
             id: makeId('asset-device'),
             deviceCode: cleanText(input.deviceCode) || nextNumber(state.devices),
             deviceName: requiredText(input.deviceName, '设备名称不能为空'),
             brandModel: requiredText(input.brandModel, '品牌型号不能为空'),
-            imei,
-            imeiMasked: maskLongValue(imei),
+            ...imeiFields,
             simType: input.simType || '双卡',
             ownerSubject: input.ownerSubject || '公司',
             departmentId: org.departmentId,
@@ -544,9 +554,6 @@ export function createAssetCommandService(
       if (!input || typeof input !== 'object' || Array.isArray(input)) {
         return failure('设备资产数据无效', 400);
       }
-      if (input.imei !== undefined && masked(input.imei)) {
-        return failure('IMEI不能使用掩码值覆盖', 400);
-      }
       try {
         const directory = await loadDirectory(prisma);
         const scope = buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'assets');
@@ -556,22 +563,30 @@ export function createAssetCommandService(
           const existing = state.devices.find((device) => device.id === id);
           if (!existing) throw new AssetCommandError(404, '设备不存在');
           if (!visibleToScope(existing, scope, directory)) throw new AssetCommandError(403, '无权编辑该设备资产');
-          const imei = input.imei === undefined ? existing.imei : requiredText(input.imei, 'IMEI不能为空');
-          if (state.devices.some((device) => device.id !== id && device.imei === imei)) {
-            throw new AssetCommandError(409, 'IMEI已存在');
-          }
           const simType = input.simType || existing.simType;
           if (simType === '单卡' && state.phones.some((phone) => phone.deviceId === id && phone.slotType === '卡槽2')) {
             throw new AssetCommandError(409, '单卡设备不能保留卡槽2手机号');
           }
           const org = resolveOrgFields({ ...existing, ...input }, directory);
-          const next: AssetDevice = {
+          const imeiFields = validateCommandDeviceImeis({
             ...existing,
+            ...input,
+            simType,
+            imei1: input.imei1 === undefined
+              ? input.imei === undefined ? existing.imei1 || existing.imei : input.imei
+              : input.imei1,
+          }, state.devices, id);
+          const {
+            imei: _legacyImei,
+            imeiMasked: _legacyImeiMasked,
+            ...existingWithoutLegacyImei
+          } = existing;
+          const next: AssetDevice = {
+            ...existingWithoutLegacyImei,
             deviceCode: input.deviceCode === undefined ? existing.deviceCode : requiredText(input.deviceCode, '设备编号不能为空'),
             deviceName: input.deviceName === undefined ? existing.deviceName : requiredText(input.deviceName, '设备名称不能为空'),
             brandModel: input.brandModel === undefined ? existing.brandModel : requiredText(input.brandModel, '品牌型号不能为空'),
-            imei,
-            imeiMasked: maskLongValue(imei),
+            ...imeiFields,
             simType,
             ownerSubject: input.ownerSubject || existing.ownerSubject,
             departmentId: org.departmentId,

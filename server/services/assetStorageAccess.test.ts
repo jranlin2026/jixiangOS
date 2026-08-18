@@ -131,7 +131,15 @@ assert.equal(canWriteStorageKey(matrixPublisherAuth, STORAGE_KEYS.ASSET_OFFBOARD
 
 const storageData = {
   [STORAGE_KEYS.ASSET_DEVICES]: [
-    { id: 'device-self', owner: '童双全', currentUser: '童双全', imei: 'IMEI-RAW', imeiMasked: 'IMEI-***' },
+    {
+      id: 'device-self',
+      owner: '童双全',
+      currentUser: '童双全',
+      imei1: 'IMEI-RAW-1',
+      imei1Masked: 'IMEI-***-1',
+      imei2: 'IMEI-RAW-2',
+      imei2Masked: 'IMEI-***-2',
+    },
     { id: 'device-other', owner: '其他员工', currentUser: '其他员工', imei: 'OTHER-RAW', imeiMasked: 'OTHER-***' },
   ],
   [STORAGE_KEYS.ASSET_PHONE_NUMBERS]: [
@@ -174,7 +182,9 @@ const storageData = {
 
 const salesData = filterAssetStorageData(storageData, salesAuth, { roles: [salesRole, opsRole], users });
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[]).map((item) => item.id), ['device-self']);
-assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei, 'IMEI-***');
+assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei1, 'IMEI-***-1');
+assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei2, 'IMEI-***-2');
+assert.equal(JSON.stringify((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0]).includes('IMEI-RAW'), false);
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[]).map((item) => item.id), ['account-self']);
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginAccount, 'self_***');
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_RISKS] as any[]).map((item) => item.id), ['risk-self']);
@@ -182,7 +192,9 @@ assert.equal(canWriteStorageKey(salesAuth, STORAGE_KEYS.ASSET_DEVICES), false);
 
 const opsData = filterAssetStorageData(storageData, opsAuth, { roles: [salesRole, opsRole], users });
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[]).length, 2);
-assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei, 'IMEI-RAW');
+assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei1, 'IMEI-RAW-1');
+assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei2, 'IMEI-RAW-2');
+assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[1].imei1, 'OTHER-RAW');
 assert.equal(canWriteStorageKey(opsAuth, STORAGE_KEYS.ASSET_DEVICES), true);
 
 const recoveryStorageData = {

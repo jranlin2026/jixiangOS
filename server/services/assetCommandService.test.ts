@@ -78,7 +78,7 @@ function dbUser(user: AuthenticatedUser) {
   };
 }
 
-const oldDevice: AssetDevice = {
+const oldDevice = {
   id: 'asset-device-other',
   deviceCode: 'DEV-0009',
   deviceName: '其他人设备',
@@ -98,7 +98,7 @@ const oldDevice: AssetDevice = {
   monthlyCost: 0,
   createdAt: NOW,
   updatedAt: NOW,
-};
+} as unknown as AssetDevice;
 
 const ASSET_KEYS = [
   STORAGE_KEYS.ASSET_DEVICES,
@@ -191,7 +191,8 @@ const service = createAssetCommandService(prisma as any, {
 const created = await service.createDevice({
   deviceName: '新设备',
   brandModel: 'iPhone 16',
-  imei: 'RAW-NEW-IMEI',
+  imei1: 'RAW-NEW-IMEI-1',
+  imei2: 'RAW-NEW-IMEI-2',
   simType: '双卡',
   ownerSubject: '公司',
   departmentId: 'dept-assets',
@@ -205,7 +206,10 @@ const created = await service.createDevice({
 assert.equal(created.code, 0);
 assert.equal(created.data?.deviceCode, 'DEV-0010', '编号必须基于未裁剪全量数据生成');
 assert.equal(created.data?.owner, deviceWriter.name, '组织字段必须由服务端目录解析');
-assert.equal(created.data?.imeiMasked.includes('*'), true);
+assert.equal(created.data?.imei1, 'RAW-NEW-IMEI-1');
+assert.equal(created.data?.imei2, 'RAW-NEW-IMEI-2');
+assert.equal(created.data?.imei1Masked.includes('*'), true);
+assert.equal(created.data?.imei2Masked?.includes('*'), true);
 assert.deepEqual(
   prisma.read<AssetDevice[]>(STORAGE_KEYS.ASSET_DEVICES).map((item) => item.id).sort(),
   ['asset-device-created', oldDevice.id].sort(),
@@ -214,15 +218,69 @@ assert.deepEqual(
 assert.equal(prisma.read<AssetOperationLog[]>(STORAGE_KEYS.ASSET_OPERATION_LOGS)[0]?.operator, deviceWriter.name);
 assert.equal(prisma.read<AssetRisk[]>(STORAGE_KEYS.ASSET_RISKS).length, 0);
 
+const missingSecondImei = await service.createDevice({
+  deviceName: '缺少第二标识设备',
+  brandModel: 'iPhone 16',
+  imei1: 'RAW-MISSING-IMEI-2',
+  simType: '双卡',
+  ownerSubject: '公司',
+  departmentId: 'dept-assets',
+  ownerId: deviceWriter.id,
+  currentUserId: deviceWriter.id,
+}, deviceWriter);
+assert.equal(missingSecondImei.code, 400);
+assert.match(missingSecondImei.message, /IMEI 2不能为空/);
+
+const singleWithSecondImei = await service.createDevice({
+  deviceName: '单卡错误设备',
+  brandModel: 'iPhone SE',
+  imei1: 'RAW-SINGLE-IMEI-1',
+  imei2: 'RAW-SINGLE-IMEI-2',
+  simType: '单卡',
+  ownerSubject: '公司',
+  departmentId: 'dept-assets',
+  ownerId: deviceWriter.id,
+  currentUserId: deviceWriter.id,
+}, deviceWriter);
+assert.equal(singleWithSecondImei.code, 400);
+assert.match(singleWithSecondImei.message, /单卡设备不能填写IMEI 2/);
+
+const duplicateAcrossSlots = await service.createDevice({
+  deviceName: '跨卡槽重复设备',
+  brandModel: 'Android Test',
+  imei1: 'RAW-NEW-IMEI-2',
+  simType: '单卡',
+  ownerSubject: '公司',
+  departmentId: 'dept-assets',
+  ownerId: deviceWriter.id,
+  currentUserId: deviceWriter.id,
+}, deviceWriter);
+assert.equal(duplicateAcrossSlots.code, 409);
+assert.match(duplicateAcrossSlots.message, /IMEI 1已存在/);
+
+const sameImeis = await service.createDevice({
+  deviceName: '同标识错误设备',
+  brandModel: 'Android Test',
+  imei1: 'RAW-SAME-IMEI',
+  imei2: 'RAW-SAME-IMEI',
+  simType: '双卡',
+  ownerSubject: '公司',
+  departmentId: 'dept-assets',
+  ownerId: deviceWriter.id,
+  currentUserId: deviceWriter.id,
+}, deviceWriter);
+assert.equal(sameImeis.code, 409);
+assert.match(sameImeis.message, /不能相同/);
+
 const maskedUpdate = await service.updateDevice(created.data!.id, {
-  imei: created.data!.imeiMasked,
+  imei1: created.data!.imei1Masked,
   remark: '这次更新不得覆盖原始 IMEI',
 }, deviceWriter);
 assert.equal(maskedUpdate.code, 400);
 assert.match(maskedUpdate.message, /掩码/);
 assert.equal(
-  prisma.read<AssetDevice[]>(STORAGE_KEYS.ASSET_DEVICES).find((item) => item.id === created.data!.id)?.imei,
-  'RAW-NEW-IMEI',
+  prisma.read<AssetDevice[]>(STORAGE_KEYS.ASSET_DEVICES).find((item) => item.id === created.data!.id)?.imei1,
+  'RAW-NEW-IMEI-1',
 );
 
 const forbiddenDelete = await service.deleteDevice(oldDevice.id, deviceWriter);

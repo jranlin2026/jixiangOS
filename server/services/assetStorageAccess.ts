@@ -21,6 +21,7 @@ import {
   normalizePermissionKey,
 } from '../../src/shared/utils/permissions';
 import { normalizeRoleDataScopes } from '../../src/shared/utils/organizationConfig';
+import { readDeviceImeis } from '../../src/domain/assets/deviceImei';
 
 const ASSET_STORAGE_KEYS = new Set<string>([
   STORAGE_KEYS.ASSET_DEVICES,
@@ -123,8 +124,16 @@ function visibleAccount(account: Pick<AssetInternetAccount, 'owner' | 'currentUs
 }
 
 function sanitizeDevice(device: AssetDevice, canViewSensitive: boolean): AssetDevice {
-  if (canViewSensitive) return device;
-  return { ...device, imei: device.imeiMasked || '' };
+  const { imei: _legacyImei, imeiMasked: _legacyImeiMasked, ...canonicalDevice } = device;
+  const values = readDeviceImeis(device);
+  if (canViewSensitive) return { ...canonicalDevice, ...values };
+  return {
+    ...canonicalDevice,
+    imei1: values.imei1Masked,
+    imei1Masked: values.imei1Masked,
+    imei2: values.imei2 ? values.imei2Masked : undefined,
+    imei2Masked: values.imei2Masked,
+  };
 }
 
 function sanitizePhone(phone: AssetPhoneNumber, canViewSensitive: boolean): AssetPhoneNumber {
