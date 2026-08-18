@@ -28,6 +28,8 @@ import {
   TextField,
   Tooltip,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
@@ -55,6 +57,9 @@ import {
   moduleTokens,
 } from '../../shared/components/ModuleShell';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
+import BusinessFormSection from '../../shared/components/BusinessFormSection';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
 import type { TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
@@ -77,10 +82,10 @@ import type { Department } from '../../types/department';
 import type { User } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { readAccountControlStatus, readDeviceCommunicationType } from '../../domain/assets/assetFields';
+import { ASSET_FORM_SECTIONS, createAssetFormDefaults, type AssetFormType } from './assetFormModel';
 
 type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'matrix' | 'logs' | 'offboarding';
-
-type AssetFormType = 'device' | 'phone' | 'account';
 
 type ConfigurableAssetTab = Extract<AssetTab, 'devices' | 'phones' | 'accounts'>;
 
@@ -177,7 +182,7 @@ const platformLogoMeta = (platform: string) => {
 const DEVICE_COLUMNS: AssetColumnConfig[] = [
   { id: 'deviceCode', label: '设备编号', width: 130 },
   { id: 'deviceName', label: '设备名称', width: 130 },
-  { id: 'brandModel', label: '品牌型号', width: 130 },
+  { id: 'brandModel', label: '类型 / 品牌型号', width: 180 },
   { id: 'imei', label: 'IMEI 1 / 2', width: 190 },
   { id: 'simType', label: '手机号', width: 190 },
   { id: 'accountCount', label: '账号数', width: 100 },
@@ -214,7 +219,7 @@ const ACCOUNT_COLUMNS: AssetColumnConfig[] = [
   { id: 'phone', label: '绑定手机号', width: 150 },
   { id: 'device', label: '所属设备', width: 180 },
   { id: 'owner', label: '负责人', width: 120 },
-  { id: 'permissionStatus', label: '权限状态', width: 130 },
+  { id: 'permissionStatus', label: '控制权状态', width: 140 },
 ];
 const DEFAULT_ACCOUNT_VISIBLE_COLUMN_IDS = ACCOUNT_COLUMNS.map((column) => column.id);
 
@@ -404,6 +409,8 @@ function downloadCsv(filename: string, csv: string) {
 }
 
 const AssetManagement: React.FC = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = getTabFromSearch(searchParams.get('tab'));
   const [search, setSearch] = useState('');
@@ -867,30 +874,7 @@ const AssetManagement: React.FC = () => {
       showFeedback('当前账号没有编辑资产权限');
       return;
     }
-    const defaults: Record<AssetFormType, Record<string, string>> = {
-      device: {
-        simType: '双卡',
-        ownerSubject: '公司',
-        status: '正常',
-        monthlyCost: '0',
-      },
-      phone: {
-        operator: '',
-        attributionLocation: '',
-        deviceId: lookupDevices[0]?.id || '',
-        slotType: '卡槽1',
-        monthlyFee: '0',
-        status: '使用中',
-      },
-      account: {
-        platform: '',
-        phoneId: '',
-        ownerSubject: '公司',
-        permissionStatus: '正常',
-        accountStatus: '正常',
-      },
-    };
-    setFormState({ open: true, type, mode: 'create', values: defaults[type] });
+    setFormState({ open: true, type, mode: 'create', values: createAssetFormDefaults(type) });
   };
 
   const normalizeAssetFormValues = (values: Record<string, string>) => {
@@ -1052,8 +1036,12 @@ const AssetManagement: React.FC = () => {
       overview: [],
       devices: devices.map((device) => ({
         设备编号: device.deviceCode,
+        设备类型: device.deviceCategory,
         设备名称: device.deviceName,
-        品牌型号: device.brandModel,
+        品牌: device.brand,
+        型号: device.model,
+        序列号: device.serialNumber || '',
+        通信方式: readDeviceCommunicationType(device),
         'IMEI 1': device.imei1Masked,
         'IMEI 2': device.imei2Masked || '',
         手机号: (phonesByDeviceId.get(device.id) || []).map((phone) => `${phone.slotType}:${phone.phoneNumberMasked}`).join(' / '),
@@ -1067,12 +1055,15 @@ const AssetManagement: React.FC = () => {
         const device = deviceById.get(phone.deviceId || '');
         return {
           手机号: phone.phoneNumberMasked,
+          SIM形态: phone.simForm,
+          ICCID: phone.iccidMasked || '',
+          IMSI: phone.imsiMasked || '',
           实名信息: phone.realNameMasked || '',
           运营商: phone.operator,
           归属地: phone.attributionLocation || '',
           所属设备: device?.deviceCode || '-',
           关联账号: (accountsByPhoneId.get(phone.id) || []).map((account) => `${account.platform}/${account.accountName}`).join(' / '),
-          卡槽: phone.slotType,
+          卡槽: phone.slotType || '',
           套餐: phone.packageName,
           月费用: phone.monthlyFee,
           所属部门: phone.department || '',
@@ -1087,13 +1078,15 @@ const AssetManagement: React.FC = () => {
         return {
           账号编号: account.accountNo,
           平台: account.platform,
+          账号类型: account.accountCategory,
           账号名称: account.accountName,
           登录账号: account.loginAccountMasked,
           实名信息: account.realNameMasked || '',
           绑定手机号: phone?.phoneNumberMasked || '未绑定',
           所属设备: device?.deviceCode || '-',
           负责人: account.owner,
-          权限状态: account.permissionStatus,
+          控制权状态: readAccountControlStatus(account),
+          账号状态: account.accountStatus,
         };
       }),
       matrix: matrixPublishTasks.flatMap((task) => task.targets.map((target) => ({
@@ -1373,7 +1366,7 @@ const AssetManagement: React.FC = () => {
       case 'deviceName':
         return device.deviceName;
       case 'brandModel':
-        return device.brandModel;
+        return `${device.deviceCategory || '手机'} / ${device.brand || ''} ${device.model || ''}`.trim();
       case 'imei':
         return (
           <Stack spacing={0.25}>
@@ -1402,7 +1395,9 @@ const AssetManagement: React.FC = () => {
 
   const renderDevicePhones = (device: AssetDevice) => {
     const linkedPhones = phonesByDeviceId.get(device.id) || [];
-    const expectedSlots = device.simType === '双卡' ? ['卡槽1', '卡槽2'] : ['卡槽1'];
+    const communicationType = readDeviceCommunicationType(device);
+    const expectedSlots = communicationType === '无SIM' ? [] : communicationType === '双卡' ? ['卡槽1', '卡槽2'] : ['卡槽1'];
+    if (!expectedSlots.length) return <Typography variant="caption" sx={{ color: shell.muted }}>无 SIM</Typography>;
     const slotLabelMap: Record<string, string> = {
       卡槽1: 'A',
       卡槽2: 'B',
@@ -1438,7 +1433,8 @@ const AssetManagement: React.FC = () => {
 
   const phoneSlotOptionsForDevice = (deviceId?: string) => {
     const device = deviceId ? deviceById.get(deviceId) : undefined;
-    return device?.simType === '双卡' ? ['卡槽1', '卡槽2'] : ['卡槽1'];
+    if (!device || readDeviceCommunicationType(device) === '无SIM') return [];
+    return readDeviceCommunicationType(device) === '双卡' ? ['卡槽1', '卡槽2'] : ['卡槽1'];
   };
 
   const renderPhoneCell = (phone: AssetPhoneNumber, columnId: string) => {
@@ -1472,7 +1468,7 @@ const AssetManagement: React.FC = () => {
         );
       }
       case 'slotType':
-        return phone.slotType;
+        return phone.slotType || '-';
       case 'packageName':
         return phone.packageName;
       case 'monthlyFee':
@@ -1515,7 +1511,7 @@ const AssetManagement: React.FC = () => {
       case 'owner':
         return account.owner || '-';
       case 'permissionStatus':
-        return <Chip size="small" label={account.permissionStatus} sx={chipSx(statusTone(account.permissionStatus))} />;
+        return <Chip size="small" label={readAccountControlStatus(account)} sx={chipSx(statusTone(readAccountControlStatus(account)))} />;
       default:
         return null;
     }
@@ -2040,16 +2036,19 @@ const AssetManagement: React.FC = () => {
       renderInfoRows([
         { label: '设备名称', value: device.deviceName },
         { label: '设备编号', value: <Stack direction="row" alignItems="center" spacing={0.5}>{device.deviceCode}{renderCopyButton(device.deviceCode, '设备编号')}</Stack> },
-        { label: '品牌/型号', value: device.brandModel },
-        { label: 'IMEI 1', value: renderSensitiveInline('device', device.id, 'imei1', device.imei1Masked) },
+        { label: '设备类型', value: device.deviceCategory || '手机' },
+        { label: '品牌/型号', value: `${device.brand || ''} ${device.model || ''}`.trim() || device.brandModel },
+        { label: '序列号', value: device.serialNumber || '-' },
+        ...(device.imei1Masked ? [{ label: 'IMEI 1', value: renderSensitiveInline('device', device.id, 'imei1', device.imei1Masked) }] : []),
         ...(device.imei2Masked ? [{ label: 'IMEI 2', value: renderSensitiveInline('device', device.id, 'imei2', device.imei2Masked) }] : []),
-        { label: 'SIM 类型', value: device.simType },
+        { label: '通信方式', value: readDeviceCommunicationType(device) },
         { label: '状态', value: <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} /> },
         { label: '所属主体', value: device.ownerSubject },
         { label: '所属部门', value: device.department || '-' },
         { label: '负责人', value: device.owner || '-' },
         { label: '当前使用人', value: device.currentUser || '-' },
-        { label: '月费用', value: formatCurrency(device.monthlyCost) },
+        { label: '取得方式', value: device.acquisitionType || '-' },
+        { label: device.acquisitionType === '租赁' ? '月租金' : '购买金额', value: formatCurrency(device.acquisitionType === '租赁' ? device.monthlyRent || 0 : device.purchaseAmount || 0) },
         { label: '更新时间', value: formatDate(device.updatedAt, 'yyyy-MM-dd') },
         { label: '备注', value: device.remark || '-' },
       ], 2)
@@ -2063,14 +2062,16 @@ const AssetManagement: React.FC = () => {
         { label: '实名信息', value: renderSensitiveInline('phone', phone.id, 'phoneRealName', phone.realNameMasked || '-') },
         { label: '运营商', value: phone.operator },
         { label: '归属地', value: phone.attributionLocation || '-' },
-        { label: '卡类型', value: '实体 SIM 卡' },
+        { label: 'SIM 形态', value: phone.simForm || '实体SIM' },
+        { label: 'ICCID', value: phone.iccidMasked ? renderSensitiveInline('phone', phone.id, 'iccid', phone.iccidMasked) : '-' },
+        { label: 'IMSI', value: phone.imsiMasked ? renderSensitiveInline('phone', phone.id, 'imsi', phone.imsiMasked) : '-' },
         {
           label: '所属设备',
           value: primaryDevice
             ? renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))
             : '-',
         },
-        { label: 'SIM 卡槽', value: phone.slotType },
+        { label: 'SIM 卡槽', value: phone.slotType || '-' },
         { label: '套餐', value: phone.packageName || '-' },
         { label: '月费用', value: formatCurrency(phone.monthlyFee) },
         { label: '所属部门', value: phone.department || primaryDevice?.department || '-' },
@@ -2105,11 +2106,12 @@ const AssetManagement: React.FC = () => {
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.2 }}>
             <Typography sx={{ color: shell.ink, fontSize: 22, fontWeight: 950 }}>{account.platform} - {account.accountName}</Typography>
-            <Chip size="small" label={account.permissionStatus} sx={chipSx(statusTone(account.permissionStatus))} />
+            <Chip size="small" label={readAccountControlStatus(account)} sx={chipSx(statusTone(readAccountControlStatus(account)))} />
           </Stack>
           {renderInfoRows([
             { label: '账号编号', value: <Stack direction="row" alignItems="center" spacing={0.5}>{account.accountNo}{renderCopyButton(account.accountNo, '账号编号')}</Stack> },
             { label: '平台', value: account.platform },
+            { label: '账号类型', value: account.accountCategory || '主账号' },
             { label: '所属主体', value: account.ownerSubject },
             { label: '登录账号', value: renderSensitiveInline('account', account.id, 'loginAccount', account.loginAccountMasked) },
             { label: '实名信息', value: renderSensitiveInline('account', account.id, 'accountRealName', account.realNameMasked || '-') },
@@ -2126,12 +2128,13 @@ const AssetManagement: React.FC = () => {
                 : '-',
             },
             { label: '绑定邮箱', value: renderSensitiveInline('account', account.id, 'boundEmail', account.boundEmailMasked || account.boundEmail || '-') },
-            { label: '权限状态', value: <Chip size="small" label={account.permissionStatus} sx={chipSx(statusTone(account.permissionStatus))} /> },
+            { label: '控制权状态', value: <Chip size="small" label={readAccountControlStatus(account)} sx={chipSx(statusTone(readAccountControlStatus(account)))} /> },
             { label: '账号状态', value: <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} /> },
             { label: '所属部门', value: account.department || '-' },
             { label: '负责人', value: account.owner || '-' },
             { label: '当前使用人', value: account.currentUser || '-' },
             { label: '用途', value: account.purpose || '-' },
+            { label: '业务场景', value: account.businessScene || '-' },
           ], 2)}
         </Box>
       </Stack>
@@ -2344,46 +2347,45 @@ const AssetManagement: React.FC = () => {
 
   const renderDeviceFields = () => (
     <>
-      {renderTextField('deviceName', '设备名称', { required: true })}
-      {renderTextField('brandModel', '品牌型号', { required: true })}
-      {renderSelectField('simType', 'SIM类型', ['单卡', '双卡'], { required: true })}
-      {renderTextField('imei1', 'IMEI 1', { required: true })}
-      {formState.values.simType === '双卡' || Boolean(formState.values.imei2) ? (
-        <TextField
-          size="small"
-          label="IMEI 2"
-          value={formState.values.imei2 || ''}
-          onChange={(event) => updateFormValue('imei2', event.target.value)}
-          required={formState.values.simType === '双卡'}
-          helperText={formState.values.simType === '单卡' && formState.values.imei2 ? '改为单卡前请先清空 IMEI 2' : undefined}
-          error={formState.values.simType === '单卡' && Boolean(formState.values.imei2)}
-          fullWidth
-        />
-      ) : null}
-      {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
-      {renderDepartmentSelectField()}
-      {renderUserSelectField('owner', '负责人')}
-      {renderUserSelectField('currentUser', '当前使用人')}
-      {renderSelectField('status', '状态', ['正常', '使用中', '闲置', '已注销'], { required: true })}
-      {renderTextField('monthlyCost', '月费用', { type: 'number' })}
-      {renderTextField('remark', '备注', { multiline: true })}
+      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.device[0].title} summary={ASSET_FORM_SECTIONS.device[0].summary}>
+        {renderSelectField('deviceCategory', '设备类型', ['手机', '平板', '电脑', '摄影设备', '其他'], { required: true })}
+        {renderTextField('deviceName', '设备名称', { required: true })}
+        {renderTextField('brand', '品牌', { required: true })}
+        {renderTextField('model', '型号', { required: true })}
+      </BusinessFormSection>
+      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.device[1].title} summary={ASSET_FORM_SECTIONS.device[1].summary}>
+        {renderTextField('serialNumber', '序列号')}
+        {renderSelectField('communicationType', '通信方式', ['无SIM', '单卡', '双卡', 'eSIM'], { required: true })}
+        {formState.values.communicationType !== '无SIM' ? renderTextField('imei1', 'IMEI 1', { required: true }) : null}
+        {formState.values.communicationType === '双卡' ? renderTextField('imei2', 'IMEI 2', { required: true }) : null}
+      </BusinessFormSection>
+      <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.device[2].title} summary={ASSET_FORM_SECTIONS.device[2].summary}>
+        {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
+        {renderDepartmentSelectField()}
+        {renderUserSelectField('owner', '资产负责人')}
+        {renderUserSelectField('currentUser', '当前使用人')}
+      </BusinessFormSection>
+      <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.device[3].title} summary={ASSET_FORM_SECTIONS.device[3].summary}>
+        {renderSelectField('acquisitionType', '取得方式', ['购买', '租赁', '借用'], { required: true })}
+        {formState.values.acquisitionType === '租赁' ? renderTextField('monthlyRent', '月租金', { type: 'number' }) : renderTextField('purchaseAmount', '购买金额', { type: 'number' })}
+        {renderTextField('acquiredAt', '取得日期', { type: 'date' })}
+        {renderTextField('warrantyExpiresAt', '保修到期日', { type: 'date' })}
+        {renderSelectField('status', '设备状态', ['库存中', '使用中', '维修中', '待回收', '已报废'], { required: true })}
+        {renderTextField('remark', '备注', { multiline: true })}
+      </BusinessFormSection>
     </>
   );
 
   const renderPhoneFields = () => (
     <>
-      <TextField
-        size="small"
-        label="完整手机号"
-        value={formState.values.phoneNumber || ''}
-        onChange={(event) => updatePhoneNumberValue(event.target.value)}
-        required
-        fullWidth
-      />
-      {renderTextField('realName', '实名信息')}
-      {renderSelectField('operator', '运营商', ['移动', '联通', '电信', '广电', '未知'])}
-      {renderTextField('attributionLocation', '归属地')}
-      <FormControl size="small" fullWidth required>
+      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.phone[0].title} summary={ASSET_FORM_SECTIONS.phone[0].summary}>
+        <TextField size="small" label="完整手机号" value={formState.values.phoneNumber || ''} onChange={(event) => updatePhoneNumberValue(event.target.value)} required fullWidth />
+        {renderSelectField('simForm', 'SIM形态', ['实体SIM', 'eSIM'], { required: true })}
+        {renderTextField('iccid', 'ICCID')}
+        {renderTextField('imsi', 'IMSI')}
+      </BusinessFormSection>
+      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.phone[1].title} summary={ASSET_FORM_SECTIONS.phone[1].summary}>
+      <FormControl size="small" fullWidth>
         <InputLabel>所属设备</InputLabel>
         <Select
           label="所属设备"
@@ -2402,12 +2404,12 @@ const AssetManagement: React.FC = () => {
           }}
         >
           <MenuItem value="">未选择</MenuItem>
-          {lookupDevices.map((device) => (
-            <MenuItem key={device.id} value={device.id}>{device.deviceCode} / {device.deviceName} / {device.simType}</MenuItem>
+          {lookupDevices.filter((device) => readDeviceCommunicationType(device) !== '无SIM').map((device) => (
+            <MenuItem key={device.id} value={device.id}>{device.deviceCode} / {device.deviceName} / {readDeviceCommunicationType(device)}</MenuItem>
           ))}
         </Select>
       </FormControl>
-      <FormControl size="small" fullWidth required disabled={!formState.values.deviceId}>
+      <FormControl size="small" fullWidth required={Boolean(formState.values.deviceId)} disabled={!formState.values.deviceId}>
         <InputLabel>SIM卡槽</InputLabel>
         <Select
           label="SIM卡槽"
@@ -2417,24 +2419,39 @@ const AssetManagement: React.FC = () => {
           {phoneSlotOptionsForDevice(formState.values.deviceId).map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
         </Select>
         <Typography variant="caption" sx={{ color: shell.muted, mt: 0.5 }}>
-          单卡设备仅支持卡槽1，双卡设备支持卡槽1/卡槽2。
+          可先不绑定设备；单卡/eSIM 仅支持卡槽1。
         </Typography>
       </FormControl>
-      {renderTextField('packageName', '套餐')}
-      {renderTextField('monthlyFee', '月费用', { type: 'number' })}
-      {renderDepartmentSelectField()}
-      {renderUserSelectField('owner', '负责人')}
-      {renderUserSelectField('currentUser', '当前使用人')}
-      {renderSelectField('status', '状态', ['使用中', '闲置', '已停用'], { required: true })}
+      </BusinessFormSection>
+      <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.phone[2].title} summary={ASSET_FORM_SECTIONS.phone[2].summary}>
+        {renderTextField('realName', '实名信息')}
+        {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
+        {renderDepartmentSelectField()}
+        {renderUserSelectField('owner', '资产负责人')}
+        {renderUserSelectField('currentUser', '当前使用人')}
+      </BusinessFormSection>
+      <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.phone[3].title} summary={ASSET_FORM_SECTIONS.phone[3].summary}>
+        {renderSelectField('operator', '运营商', ['移动', '联通', '电信', '广电', '未知'])}
+        {renderTextField('attributionLocation', '归属地')}
+        {renderTextField('packageName', '套餐名称')}
+        {renderTextField('monthlyFee', '月费用', { type: 'number' })}
+        {renderTextField('contractExpiresAt', '合约到期日', { type: 'date' })}
+        {renderSelectField('status', '号码状态', ['待启用', '使用中', '停机', '待过户', '已注销'], { required: true })}
+        {renderTextField('remark', '备注', { multiline: true })}
+      </BusinessFormSection>
     </>
   );
 
   const renderAccountFields = () => (
     <>
-      {renderTextField('platform', '平台', { required: true })}
-      {renderTextField('accountName', '账号名称', { required: true })}
-      {renderTextField('loginAccount', '登录账号', { required: true })}
-      {renderTextField('realName', '实名信息')}
+      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.account[0].title} summary={ASSET_FORM_SECTIONS.account[0].summary}>
+        {renderTextField('platform', '平台', { required: true })}
+        {renderSelectField('accountCategory', '账号类型', ['主账号', '员工号', '直播号', '投放号', '客服号', '其他'], { required: true })}
+        {renderTextField('accountName', '账号名称', { required: true })}
+        {renderTextField('loginAccount', '登录账号', { required: true })}
+        {renderTextField('realName', '实名信息')}
+      </BusinessFormSection>
+      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.account[1].title} summary={ASSET_FORM_SECTIONS.account[1].summary}>
       <FormControl size="small" fullWidth>
         <InputLabel>绑定手机号</InputLabel>
         <Select
@@ -2453,14 +2470,25 @@ const AssetManagement: React.FC = () => {
           })}
         </Select>
       </FormControl>
-      {renderTextField('boundEmail', '绑定邮箱')}
-      {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
-      {renderDepartmentSelectField()}
-      {renderUserSelectField('owner', '负责人')}
-      {renderUserSelectField('currentUser', '当前使用人')}
-      {renderSelectField('permissionStatus', '权限状态', ['正常', '离职待回收', '已回收'], { required: true })}
-      {renderSelectField('accountStatus', '账号状态', ['使用中', '正常', '闲置', '异常', '已注销'], { required: true })}
-      {renderTextField('purpose', '用途', { multiline: true })}
+        {renderTextField('boundEmail', '绑定邮箱')}
+        {renderTextField('twoFactorMethod', '二次验证方式')}
+        {renderSelectField('controlStatus', '账号控制权', ['已掌控', '待交接', '离职待回收', '已回收', '控制权异常'], { required: true })}
+      </BusinessFormSection>
+      <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.account[2].title} summary={ASSET_FORM_SECTIONS.account[2].summary}>
+        {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
+        {renderDepartmentSelectField()}
+        {renderUserSelectField('owner', '资产负责人')}
+        {renderUserSelectField('currentUser', '当前使用人')}
+      </BusinessFormSection>
+      <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.account[3].title} summary={ASSET_FORM_SECTIONS.account[3].summary}>
+        {renderTextField('businessScene', '业务场景')}
+        {renderTextField('serviceProvider', '服务商')}
+        {renderTextField('monthlyFee', '月费用', { type: 'number' })}
+        {renderTextField('expiresAt', '到期日', { type: 'date' })}
+        {renderSelectField('accountStatus', '账号状态', ['使用中', '闲置', '异常', '封禁', '已注销'], { required: true })}
+        {renderTextField('purpose', '用途', { multiline: true })}
+        {renderTextField('remark', '备注', { multiline: true })}
+      </BusinessFormSection>
     </>
   );
 
@@ -2698,34 +2726,38 @@ const AssetManagement: React.FC = () => {
     };
     const title = formState.mode === 'edit' ? `编辑${formTypeLabel[formState.type]}` : `新增${formTypeLabel[formState.type]}`;
     return (
-      <Dialog open={formState.open && canEditAssetType(formState.type)} onClose={closeForm} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>
-          {title}
-        </DialogTitle>
-        <DialogContent dividers sx={{ bgcolor: '#FBFCFE' }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5, pt: 0.5 }}>
-            <FormControl size="small" fullWidth disabled>
-              <InputLabel>资产类型</InputLabel>
-              <Select
-                label="资产类型"
-                value={formState.type}
-              >
-                <MenuItem value="device">设备资产</MenuItem>
-                <MenuItem value="phone">手机号资产</MenuItem>
-                <MenuItem value="account">互联网账号</MenuItem>
-              </Select>
-            </FormControl>
-            <Box sx={{ display: { xs: 'none', md: 'block' } }} />
+      <ProtectedFormDialog
+        open={formState.open && canEditAssetType(formState.type)}
+        onClose={closeForm}
+        submitting={loading}
+        resetKey={`${formState.type}:${formState.mode}:${formState.id || 'new'}`}
+        maxWidth="lg"
+        fullWidth
+        fullScreen={isMobile}
+        PaperProps={{ sx: { maxHeight: { xs: '100%', sm: '92vh' }, m: { xs: 0, sm: 2 }, borderRadius: { xs: 0, sm: 2 } } }}
+      >
+        {({ requestClose }) => <>
+          <DialogCloseTitle onClose={() => void requestClose()} sx={{ px: { xs: 2, sm: 3 }, py: 2 }}>
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 900 }}>{title}</Typography>
+              <Typography variant="body2" sx={{ color: shell.muted, mt: 0.25 }}>
+                分段录入资产身份、绑定关系与管理责任，保存后统一进入资产台账。
+              </Typography>
+            </Box>
+          </DialogCloseTitle>
+          <DialogContent dividers sx={{ bgcolor: '#F8FAFC', p: { xs: 1.5, sm: 2.5 } }}>
+            <Box sx={{ pt: 0.25 }}>
             {formState.type === 'device' && renderDeviceFields()}
             {formState.type === 'phone' && renderPhoneFields()}
             {formState.type === 'account' && renderAccountFields()}
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, py: 1.5 }}>
-          <Button onClick={closeForm}>取消</Button>
-          {canEditAssetType(formState.type) ? <Button variant="contained" onClick={submitForm}>保存</Button> : null}
-        </DialogActions>
-      </Dialog>
+            </Box>
+          </DialogContent>
+          <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 1.5, borderTop: `1px solid ${shell.softLine}`, bgcolor: '#fff' }}>
+            <Button onClick={() => void requestClose()} disabled={loading}>取消</Button>
+            {canEditAssetType(formState.type) ? <Button variant="contained" onClick={submitForm} disabled={loading}>保存</Button> : null}
+          </DialogActions>
+        </>}
+      </ProtectedFormDialog>
     );
   };
 

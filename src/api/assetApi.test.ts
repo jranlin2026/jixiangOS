@@ -519,7 +519,7 @@ await resetAssets();
 
 {
   const template = assetApi.getImportTemplateCsv('devices');
-  assert.match(template.split('\n')[0], /^设备名称\*,品牌型号\*,IMEI 1\*,IMEI 2,SIM类型/);
+  assert.match(template.split('\n')[0], /^设备类型\*,设备名称\*,品牌\*,型号\*,序列号,通信方式\*/);
 
   const imported = await assetApi.importAssetsFromCsv('devices', [
     '设备名称*,品牌型号*,IMEI 1*,IMEI 2,SIM类型,所属主体,所属部门,负责人,当前使用人,状态,风险等级,月费用,备注',

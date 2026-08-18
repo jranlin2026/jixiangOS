@@ -436,16 +436,19 @@ const ASSET_IMPORT_LABELS: Record<AssetImportType, string> = {
 };
 
 export const ASSET_IMPORT_TEMPLATES: Record<AssetImportType, string[]> = {
-  devices: ['设备名称*', '品牌型号*', 'IMEI 1*', 'IMEI 2', 'SIM类型', '所属主体', '所属部门', '负责人', '当前使用人', '状态', '月费用', '备注'],
-  phones: ['手机号*', '实名信息', '运营商', '归属地', '所属设备编号*', 'SIM卡槽', '套餐', '月费用', '所属部门', '负责人', '当前使用人', '状态'],
-  accounts: ['平台*', '账号名称*', '登录账号*', '实名信息', '绑定手机号', '绑定邮箱', '所属主体', '所属部门', '负责人', '当前使用人', '权限状态', '账号状态', '用途'],
+  devices: ['设备类型*', '设备名称*', '品牌*', '型号*', '序列号', '通信方式*', 'IMEI 1', 'IMEI 2', '取得方式', '购买金额', '月租金', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
+  phones: ['手机号*', 'SIM形态*', 'ICCID', 'IMSI', '实名信息', '运营商', '归属地', '所属设备编号', 'SIM卡槽', '套餐', '月费用', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
+  accounts: ['平台*', '账号类型*', '账号名称*', '登录账号*', '实名信息', '绑定手机号', '绑定邮箱', '二次验证', '账号控制权*', '所属主体', '所属部门', '资产负责人', '当前使用人', '账号状态', '业务场景', '服务商', '月费用', '用途', '备注'],
 };
 
 const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> = {
   devices: {
+    '设备类型*': '手机',
     '设备名称*': '业务备用机',
-    '品牌型号*': 'iPhone 15',
-    'IMEI 1*': 'IMPORT-IMEI-0001',
+    '品牌*': 'Apple',
+    '型号*': 'iPhone 15',
+    '通信方式*': '双卡',
+    'IMEI 1': 'IMPORT-IMEI-0001',
     'IMEI 2': 'IMPORT-IMEI-0002',
     SIM类型: '双卡',
     所属主体: '公司',
@@ -458,10 +461,11 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
   },
   phones: {
     '手机号*': '13900001111',
+    'SIM形态*': '实体SIM',
     实名信息: '张三',
     运营商: '',
     归属地: '',
-    '所属设备编号*': 'DEV-0001',
+    '所属设备编号': '',
     SIM卡槽: '卡槽1',
     套餐: '商务套餐',
     月费用: '59',
@@ -472,6 +476,7 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
   },
   accounts: {
     '平台*': '抖音企业号',
+    '账号类型*': '主账号',
     '账号名称*': '极享本地生活',
     '登录账号*': 'jx_import_demo',
     实名信息: '张三',
@@ -481,8 +486,8 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
     所属部门: '运营管理部',
     负责人: '张三',
     当前使用人: '李四',
-    权限状态: '正常',
-    账号状态: '正常',
+    '账号控制权*': '已掌控',
+    账号状态: '使用中',
     用途: '示例行，导入前可删除',
   },
 };
@@ -605,16 +610,24 @@ function findPhoneForImport(value: string): AssetPhoneNumber | undefined {
 
 function deviceInputFromCsv(raw: Record<string, string>): Partial<AssetDeviceInput> {
   return {
+    deviceCategory: (csvCell(raw, '设备类型*', '设备类型') || '手机') as AssetDeviceInput['deviceCategory'],
     deviceName: csvCell(raw, '设备名称*', '设备名称'),
+    brand: csvCell(raw, '品牌*', '品牌'),
+    model: csvCell(raw, '型号*', '型号'),
     brandModel: csvCell(raw, '品牌型号*', '品牌型号'),
+    serialNumber: csvCell(raw, '序列号'),
     imei1: csvCell(raw, 'IMEI 1*', 'IMEI 1', 'IMEI*', 'IMEI'),
     imei2: csvCell(raw, 'IMEI 2'),
     simType: (csvCell(raw, 'SIM类型') || '双卡') as AssetDeviceInput['simType'],
+    communicationType: (csvCell(raw, '通信方式*', '通信方式', 'SIM类型') || '无SIM') as AssetDeviceInput['communicationType'],
+    acquisitionType: (csvCell(raw, '取得方式') || '购买') as AssetDeviceInput['acquisitionType'],
+    purchaseAmount: importNumber(csvCell(raw, '购买金额')),
+    monthlyRent: importNumber(csvCell(raw, '月租金', '月费用')),
     ownerSubject: (csvCell(raw, '所属主体') || '公司') as AssetDeviceInput['ownerSubject'],
     department: csvCell(raw, '所属部门'),
-    owner: csvCell(raw, '负责人'),
+    owner: csvCell(raw, '资产负责人', '负责人'),
     currentUser: csvCell(raw, '当前使用人'),
-    status: (csvCell(raw, '状态') || '正常') as AssetDeviceInput['status'],
+    status: (csvCell(raw, '状态') || '库存中') as AssetDeviceInput['status'],
     monthlyCost: importNumber(csvCell(raw, '月费用')),
     remark: csvCell(raw, '备注'),
   };
@@ -626,17 +639,22 @@ function phoneInputFromCsv(raw: Record<string, string>): Partial<AssetPhoneNumbe
   const phoneNumber = csvCell(raw, '手机号*', '手机号');
   return {
     phoneNumber,
+    simForm: (csvCell(raw, 'SIM形态*', 'SIM形态') || '实体SIM') as AssetPhoneNumberInput['simForm'],
+    iccid: csvCell(raw, 'ICCID'),
+    imsi: csvCell(raw, 'IMSI'),
     realName: csvCell(raw, '实名信息'),
     operator: (csvCell(raw, '运营商') || inferPhoneOperator(phoneNumber)) as AssetPhoneNumberInput['operator'],
     attributionLocation: csvCell(raw, '归属地') || inferPhoneAttributionLocation(phoneNumber),
-    deviceId: device?.id || deviceCode,
-    slotType: (csvCell(raw, 'SIM卡槽') || '卡槽1') as AssetPhoneNumberInput['slotType'],
+    deviceId: device?.id || deviceCode || undefined,
+    slotType: deviceCode ? (csvCell(raw, 'SIM卡槽') || '卡槽1') as AssetPhoneNumberInput['slotType'] : undefined,
     packageName: csvCell(raw, '套餐'),
     monthlyFee: importNumber(csvCell(raw, '月费用')),
     department: csvCell(raw, '所属部门'),
-    owner: csvCell(raw, '负责人'),
+    ownerSubject: (csvCell(raw, '所属主体') || '公司') as AssetPhoneNumberInput['ownerSubject'],
+    owner: csvCell(raw, '资产负责人', '负责人'),
     currentUser: csvCell(raw, '当前使用人'),
-    status: (csvCell(raw, '状态') || '使用中') as AssetPhoneNumberInput['status'],
+    status: (csvCell(raw, '状态') || '待启用') as AssetPhoneNumberInput['status'],
+    remark: csvCell(raw, '备注'),
   };
 }
 
@@ -646,6 +664,7 @@ function accountInputFromCsv(raw: Record<string, string>): Partial<AssetInternet
   if (phoneKeyword && !phone) throw new Error('绑定手机号不存在');
   return {
     platform: csvCell(raw, '平台*', '平台'),
+    accountCategory: (csvCell(raw, '账号类型*', '账号类型') || '主账号') as AssetInternetAccountInput['accountCategory'],
     accountName: csvCell(raw, '账号名称*', '账号名称'),
     loginAccount: csvCell(raw, '登录账号*', '登录账号'),
     realName: csvCell(raw, '实名信息'),
@@ -653,14 +672,18 @@ function accountInputFromCsv(raw: Record<string, string>): Partial<AssetInternet
     boundEmail: csvCell(raw, '绑定邮箱'),
     ownerSubject: (csvCell(raw, '所属主体') || '公司') as AssetInternetAccountInput['ownerSubject'],
     department: csvCell(raw, '所属部门'),
-    owner: csvCell(raw, '负责人'),
+    owner: csvCell(raw, '资产负责人', '负责人'),
     currentUser: csvCell(raw, '当前使用人'),
     permissionStatus: (csvCell(raw, '权限状态') || '正常') as AssetInternetAccountInput['permissionStatus'],
-    accountStatus: (csvCell(raw, '账号状态') || '正常') as AssetInternetAccountInput['accountStatus'],
+    controlStatus: (csvCell(raw, '账号控制权*', '账号控制权') || '已掌控') as AssetInternetAccountInput['controlStatus'],
+    accountStatus: (csvCell(raw, '账号状态') || '使用中') as AssetInternetAccountInput['accountStatus'],
+    businessScene: csvCell(raw, '业务场景'),
+    twoFactorMethod: csvCell(raw, '二次验证'),
     serviceProvider: csvCell(raw, '服务商'),
     monthlyFee: importNumber(csvCell(raw, '月费用')),
     expiresAt: csvCell(raw, '到期时间'),
     purpose: csvCell(raw, '用途'),
+    remark: csvCell(raw, '备注'),
   };
 }
 
@@ -764,7 +787,11 @@ function filterDevices(rows: AssetDevice[], filters?: AssetFilters): AssetDevice
     const matchesKeyword = !keyword || [
       row.deviceCode,
       row.deviceName,
+      row.deviceCategory,
+      row.brand,
+      row.model,
       row.brandModel,
+      row.serialNumber,
       row.imei1Masked,
       row.imei2Masked,
       row.department,
@@ -789,6 +816,10 @@ function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPh
       row.realNameMasked,
       row.operator,
       row.attributionLocation,
+      row.iccid,
+      row.iccidMasked,
+      row.imsi,
+      row.imsiMasked,
       row.packageName,
       row.owner,
       row.status,
@@ -809,6 +840,7 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
       row.accountNo,
       row.platform,
       row.accountName,
+      row.accountCategory,
       row.loginAccountMasked,
       row.realName,
       row.realNameMasked,
@@ -816,6 +848,7 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
       row.owner,
       row.currentUser,
       row.permissionStatus,
+      row.controlStatus,
       row.accountStatus,
       phone?.phoneNumberMasked,
       device?.deviceCode,
@@ -1744,6 +1777,14 @@ async function revealSensitiveField(
       if (field === 'phoneRealName') {
         logAssetOperation('查看敏感字段', '手机号资产', phone.id, phone.phoneNumberMasked, '查看敏感字段：实名信息');
         return { field, label: '实名信息', value: phone.realName || '' };
+      }
+      if (field === 'iccid' && phone.iccid) {
+        logAssetOperation('查看敏感字段', '手机号资产', phone.id, phone.phoneNumberMasked, '查看敏感字段：ICCID');
+        return { field, label: 'ICCID', value: phone.iccid };
+      }
+      if (field === 'imsi' && phone.imsi) {
+        logAssetOperation('查看敏感字段', '手机号资产', phone.id, phone.phoneNumberMasked, '查看敏感字段：IMSI');
+        return { field, label: 'IMSI', value: phone.imsi };
       }
       throw new Error('该字段不属于手机号资产');
     }

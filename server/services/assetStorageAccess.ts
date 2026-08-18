@@ -138,7 +138,12 @@ function sanitizeDevice(device: AssetDevice, canViewSensitive: boolean): AssetDe
 
 function sanitizePhone(phone: AssetPhoneNumber, canViewSensitive: boolean): AssetPhoneNumber {
   if (canViewSensitive) return phone;
-  return { ...phone, phoneNumber: phone.phoneNumberMasked || '' };
+  return {
+    ...phone,
+    phoneNumber: phone.phoneNumberMasked || '',
+    iccid: phone.iccidMasked || undefined,
+    imsi: phone.imsiMasked || undefined,
+  };
 }
 
 function sanitizeAccount(account: AssetInternetAccount, canViewSensitive: boolean): AssetInternetAccount {
