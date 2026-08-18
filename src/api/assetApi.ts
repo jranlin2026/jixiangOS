@@ -861,7 +861,7 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
       device?.deviceName,
     ].some((value) => includesKeyword(value, keyword));
     const matchesPlatform = !filters?.platform || row.platform === filters.platform;
-    const matchesPermission = !filters?.permissionStatus || row.permissionStatus === filters.permissionStatus;
+    const matchesPermission = !filters?.permissionStatus || readAccountControlStatus(row) === filters.permissionStatus;
     const matchesRisk = !filters?.riskLevel || row.riskLevel === filters.riskLevel;
     const matchesStatus = !filters?.status || row.accountStatus === filters.status;
     return matchesKeyword && matchesPlatform && matchesPermission && matchesRisk && matchesStatus;
@@ -1005,7 +1005,6 @@ async function createDevice(input: Partial<AssetDeviceInput>): Promise<ApiRespon
       serialNumber: normalized.serialNumber,
       acquisitionType: normalized.acquisitionType,
       purchaseAmount: normalized.purchaseAmount,
-      monthlyRent: normalized.monthlyRent,
       acquiredAt: normalized.acquiredAt,
       warrantyExpiresAt: normalized.warrantyExpiresAt,
       ownerSubject: input.ownerSubject || '公司',
@@ -1017,7 +1016,8 @@ async function createDevice(input: Partial<AssetDeviceInput>): Promise<ApiRespon
       currentUser: orgFields.currentUser,
       status: input.status || '库存中',
       riskLevel: input.riskLevel || '低',
-      monthlyCost: Number(input.monthlyCost ?? normalized.monthlyRent),
+      monthlyRent: normalized.acquisitionType === '租赁' ? normalized.monthlyRent : 0,
+      monthlyCost: normalized.acquisitionType === '租赁' ? normalized.monthlyRent : 0,
       remark: input.remark || '',
       createdAt,
       updatedAt: createdAt,
@@ -1076,7 +1076,8 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
       owner: orgFields.owner,
       currentUserId: orgFields.currentUserId,
       currentUser: orgFields.currentUser,
-      monthlyCost: Number(input.monthlyCost ?? (input.monthlyRent !== undefined ? normalized.monthlyRent : existing.monthlyCost)),
+      monthlyRent: normalized.acquisitionType === '租赁' ? normalized.monthlyRent : 0,
+      monthlyCost: normalized.acquisitionType === '租赁' ? normalized.monthlyRent : 0,
       updatedAt: now(),
     });
     setStorageData(STORAGE_KEYS.ASSET_DEVICES, rows.map((device) => (device.id === id ? updated : device)));

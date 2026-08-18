@@ -693,11 +693,19 @@ await resetAssets();
     serialNumber: 'FX3-SN-001',
     acquisitionType: '租赁',
     monthlyRent: 880,
+    monthlyCost: 0,
   });
   assert.equal(updated.code, 0);
   assert.equal(updated.data.serialNumber, 'FX3-SN-001');
   assert.equal(updated.data.monthlyRent, 880);
   assert.equal(updated.data.monthlyCost, 880);
+  const purchased = await assetApi.updateDevice(device.data.id, {
+    acquisitionType: '购买',
+    monthlyRent: 880,
+    monthlyCost: 880,
+  });
+  assert.equal(purchased.data.monthlyRent, 0);
+  assert.equal(purchased.data.monthlyCost, 0);
 }
 
 {

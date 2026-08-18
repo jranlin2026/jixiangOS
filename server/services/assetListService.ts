@@ -13,6 +13,7 @@ import type {
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { readAccountControlStatus } from '../../src/domain/assets/assetFields';
 import { success } from '../api/response';
 import { filterAssetStorageData } from './assetStorageAccess';
 
@@ -62,7 +63,7 @@ function matchesFilters(kind: AssetListKind, row: AssetRow, filters: AssetFilter
   if (filters.platform && (kind === 'matrix-publish'
     ? !(value.targets as AssetMatrixPublishTask['targets']).some((target) => target.platform === filters.platform)
     : value.platform !== filters.platform)) return false;
-  if (filters.permissionStatus && value.permissionStatus !== filters.permissionStatus) return false;
+  if (filters.permissionStatus && (kind !== 'accounts' || readAccountControlStatus(value) !== filters.permissionStatus)) return false;
   if (filters.riskLevel && value.riskLevel !== filters.riskLevel && value.level !== filters.riskLevel) return false;
   if (filters.status) {
     const matchesStatus = kind === 'matrix-publish'

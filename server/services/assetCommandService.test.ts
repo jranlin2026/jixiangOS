@@ -391,11 +391,19 @@ const updatedNoSimDevice = await riskService.updateDevice(noSimDevice.data!.id, 
   serialNumber: 'FX3-SN-001',
   acquisitionType: '租赁',
   monthlyRent: 880,
+  monthlyCost: 0,
 }, assetAdmin);
 assert.equal(updatedNoSimDevice.code, 0);
 assert.equal(updatedNoSimDevice.data?.serialNumber, 'FX3-SN-001');
 assert.equal(updatedNoSimDevice.data?.monthlyRent, 880);
 assert.equal(updatedNoSimDevice.data?.monthlyCost, 880);
+const purchasedNoSimDevice = await riskService.updateDevice(noSimDevice.data!.id, {
+  acquisitionType: '购买',
+  monthlyRent: 880,
+  monthlyCost: 880,
+}, assetAdmin);
+assert.equal(purchasedNoSimDevice.data?.monthlyRent, 0);
+assert.equal(purchasedNoSimDevice.data?.monthlyCost, 0);
 
 const unboundPhone = await riskService.createPhoneNumber({
   phoneNumber: '13900009999',

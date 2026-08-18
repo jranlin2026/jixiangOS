@@ -100,6 +100,7 @@ type AssetFormState = {
   id?: string;
   values: Record<string, string>;
   validationAttempted: boolean;
+  validationErrorSection?: number;
 };
 
 type AssetImportState = {
@@ -810,6 +811,7 @@ const AssetManagement: React.FC = () => {
     setFormState((current) => ({
       ...current,
       values: { ...current.values, [field]: value },
+      validationErrorSection: undefined,
     }));
   };
 
@@ -940,7 +942,14 @@ const AssetManagement: React.FC = () => {
       if (saved) await fetchDetail('account', saved.id);
     }
     if (!saved) {
-      showFeedback(useAssetStore.getState().error || '保存失败');
+      const error = useAssetStore.getState().error || '保存失败';
+      const validationErrorSection = formState.type === 'device'
+        ? (/IMEI|通信/.test(error) ? 2 : 1)
+        : formState.type === 'phone'
+          ? (/设备|卡槽|绑定/.test(error) ? 2 : 1)
+          : (/手机号|邮箱|二次验证|绑定/.test(error) ? 2 : 1);
+      setFormState((current) => ({ ...current, validationErrorSection }));
+      showFeedback(error);
       return;
     }
     closeForm();
@@ -1261,9 +1270,9 @@ const AssetManagement: React.FC = () => {
       offboarding: '搜索员工、资产名称',
     };
     const statusOptionsMap: Partial<Record<AssetTab, string[]>> = {
-      devices: ['正常', '使用中', '闲置', '已注销'],
-      phones: ['使用中', '闲置', '已停用'],
-      accounts: ['使用中', '正常', '闲置', '异常', '已注销'],
+      devices: ['库存中', '使用中', '维修中', '闲置', '已停用', '已报废'],
+      phones: ['待启用', '使用中', '停机保号', '已停用', '已注销'],
+      accounts: ['使用中', '闲置', '异常', '封禁', '已注销'],
       matrix: ['pending', 'completed'],
       offboarding: ['待回收', '已回收'],
     };
@@ -1285,13 +1294,15 @@ const AssetManagement: React.FC = () => {
                 {platformOptions.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
               </Select>
             </FormControl>
-            <FormControl size="small" sx={{ minWidth: 150 }}>
-              <InputLabel>权限状态</InputLabel>
-              <Select value={permissionStatus} label="权限状态" onChange={(event) => setPermissionStatus(event.target.value)}>
-                <MenuItem value="">全部</MenuItem>
-                {['正常', '离职待回收', '已回收'].map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
-              </Select>
-            </FormControl>
+            {activeTab === 'accounts' ? (
+              <FormControl size="small" sx={{ minWidth: 150 }}>
+                <InputLabel>账号控制权</InputLabel>
+                <Select value={permissionStatus} label="账号控制权" onChange={(event) => setPermissionStatus(event.target.value)}>
+                  <MenuItem value="">全部</MenuItem>
+                  {['已掌控', '待交接', '离职待回收', '已回收'].map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
+                </Select>
+              </FormControl>
+            ) : null}
           </>
         )}
         {statusOptionsMap[activeTab] && (
@@ -2356,27 +2367,32 @@ const AssetManagement: React.FC = () => {
     ? requiredFields.filter((field) => !String(formState.values[field] || '').trim()).length
     : 0;
 
+  const sectionSummary = (fields: string[], fallback: string) => {
+    const filled = fields.filter((field) => String(formState.values[field] || '').trim()).length;
+    return filled ? `已填 ${filled}/${fields.length} 项` : fallback;
+  };
+
   const renderDeviceFields = () => (
     <>
-      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.device[0].title} summary={ASSET_FORM_SECTIONS.device[0].summary} errorCount={sectionErrorCount(['deviceCategory', 'deviceName', 'brand', 'model'])}>
+      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.device[0].title} summary={sectionSummary(['deviceCategory', 'deviceName', 'brand', 'model'], ASSET_FORM_SECTIONS.device[0].summary)} errorCount={sectionErrorCount(['deviceCategory', 'deviceName', 'brand', 'model']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
         {renderSelectField('deviceCategory', '设备类型', ['手机', '平板', '电脑', '摄影设备', '其他'], { required: true })}
         {renderTextField('deviceName', '设备名称', { required: true })}
         {renderTextField('brand', '品牌', { required: true })}
         {renderTextField('model', '型号', { required: true })}
       </BusinessFormSection>
-      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.device[1].title} summary={ASSET_FORM_SECTIONS.device[1].summary} errorCount={sectionErrorCount(formState.values.communicationType === '无SIM' ? ['communicationType'] : formState.values.communicationType === '双卡' ? ['communicationType', 'imei1', 'imei2'] : ['communicationType', 'imei1'])}>
+      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.device[1].title} summary={sectionSummary(['serialNumber', 'communicationType', 'imei1', 'imei2'], ASSET_FORM_SECTIONS.device[1].summary)} errorCount={sectionErrorCount(formState.values.communicationType === '无SIM' ? ['communicationType'] : formState.values.communicationType === '双卡' ? ['communicationType', 'imei1', 'imei2'] : ['communicationType', 'imei1']) + (formState.validationErrorSection === 2 ? 1 : 0)}>
         {renderTextField('serialNumber', '序列号')}
         {renderSelectField('communicationType', '通信方式', ['无SIM', '单卡', '双卡', 'eSIM'], { required: true })}
         {formState.values.communicationType !== '无SIM' ? renderTextField('imei1', 'IMEI 1', { required: true }) : null}
         {formState.values.communicationType === '双卡' ? renderTextField('imei2', 'IMEI 2', { required: true }) : null}
       </BusinessFormSection>
-      <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.device[2].title} summary={ASSET_FORM_SECTIONS.device[2].summary} errorCount={sectionErrorCount(['ownerSubject'])}>
+      <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.device[2].title} summary={sectionSummary(['ownerSubject', 'department', 'owner', 'currentUser'], ASSET_FORM_SECTIONS.device[2].summary)} errorCount={sectionErrorCount(['ownerSubject'])}>
         {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
         {renderDepartmentSelectField()}
         {renderUserSelectField('owner', '资产负责人')}
         {renderUserSelectField('currentUser', '当前使用人')}
       </BusinessFormSection>
-      <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.device[3].title} summary={ASSET_FORM_SECTIONS.device[3].summary} errorCount={sectionErrorCount(['acquisitionType', 'status'])}>
+      <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.device[3].title} summary={sectionSummary(['acquisitionType', 'purchaseAmount', 'monthlyRent', 'status'], ASSET_FORM_SECTIONS.device[3].summary)} errorCount={sectionErrorCount(['acquisitionType', 'status'])}>
         {renderSelectField('acquisitionType', '取得方式', ['购买', '租赁', '借用'], { required: true })}
         {formState.values.acquisitionType === '租赁' ? renderTextField('monthlyRent', '月租金', { type: 'number' }) : renderTextField('purchaseAmount', '购买金额', { type: 'number' })}
         {renderTextField('acquiredAt', '取得日期', { type: 'date' })}
@@ -2389,13 +2405,13 @@ const AssetManagement: React.FC = () => {
 
   const renderPhoneFields = () => (
     <>
-      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.phone[0].title} summary={ASSET_FORM_SECTIONS.phone[0].summary} errorCount={sectionErrorCount(['phoneNumber', 'simForm'])}>
+      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.phone[0].title} summary={sectionSummary(['phoneNumber', 'simForm', 'iccid', 'imsi'], ASSET_FORM_SECTIONS.phone[0].summary)} errorCount={sectionErrorCount(['phoneNumber', 'simForm']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
         <TextField size="small" label="完整手机号" value={formState.values.phoneNumber || ''} onChange={(event) => updatePhoneNumberValue(event.target.value)} required fullWidth />
         {renderSelectField('simForm', 'SIM形态', ['实体SIM', 'eSIM'], { required: true })}
         {renderTextField('iccid', 'ICCID')}
         {renderTextField('imsi', 'IMSI')}
       </BusinessFormSection>
-      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.phone[1].title} summary={ASSET_FORM_SECTIONS.phone[1].summary}>
+      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.phone[1].title} summary={sectionSummary(['deviceId', 'slotType'], ASSET_FORM_SECTIONS.phone[1].summary)} errorCount={formState.validationErrorSection === 2 ? 1 : 0}>
       <FormControl size="small" fullWidth>
         <InputLabel>所属设备</InputLabel>
         <Select
@@ -2434,7 +2450,7 @@ const AssetManagement: React.FC = () => {
         </Typography>
       </FormControl>
       </BusinessFormSection>
-      <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.phone[2].title} summary={ASSET_FORM_SECTIONS.phone[2].summary} errorCount={sectionErrorCount(['ownerSubject'])}>
+      <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.phone[2].title} summary={sectionSummary(['realNameSubject', 'realName', 'ownerSubject', 'department', 'owner'], ASSET_FORM_SECTIONS.phone[2].summary)} errorCount={sectionErrorCount(['ownerSubject'])}>
         {renderTextField('realNameSubject', '实名主体')}
         {renderTextField('realName', '实名信息')}
         {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
@@ -2442,7 +2458,7 @@ const AssetManagement: React.FC = () => {
         {renderUserSelectField('owner', '资产负责人')}
         {renderUserSelectField('currentUser', '当前使用人')}
       </BusinessFormSection>
-      <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.phone[3].title} summary={ASSET_FORM_SECTIONS.phone[3].summary} errorCount={sectionErrorCount(['status'])}>
+      <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.phone[3].title} summary={sectionSummary(['operator', 'packageName', 'monthlyFee', 'status'], ASSET_FORM_SECTIONS.phone[3].summary)} errorCount={sectionErrorCount(['status'])}>
         {renderSelectField('operator', '运营商', ['移动', '联通', '电信', '广电', '未知'])}
         {renderTextField('attributionLocation', '归属地')}
         {renderTextField('packageName', '套餐名称')}
@@ -2456,7 +2472,7 @@ const AssetManagement: React.FC = () => {
 
   const renderAccountFields = () => (
     <>
-      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.account[0].title} summary={ASSET_FORM_SECTIONS.account[0].summary} errorCount={sectionErrorCount(['platform', 'accountCategory', 'accountName', 'loginAccount'])}>
+      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.account[0].title} summary={sectionSummary(['platform', 'accountCategory', 'accountName', 'loginAccount', 'realNameSubject'], ASSET_FORM_SECTIONS.account[0].summary)} errorCount={sectionErrorCount(['platform', 'accountCategory', 'accountName', 'loginAccount']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
         {renderSelectField('platform', '业务平台', platformOptions.length ? platformOptions : ['抖音', '快手', '小红书', '微信', '视频号'], { required: true })}
         {renderSelectField('accountCategory', '账号类型', ['主账号', '员工号', '直播号', '投放号', '客服号', '其他'], { required: true })}
         {renderTextField('accountName', '账号名称', { required: true })}
@@ -2464,7 +2480,7 @@ const AssetManagement: React.FC = () => {
         {renderTextField('realNameSubject', '实名主体')}
         {renderTextField('realName', '实名信息')}
       </BusinessFormSection>
-      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.account[1].title} summary={ASSET_FORM_SECTIONS.account[1].summary}>
+      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.account[1].title} summary={sectionSummary(['phoneId', 'boundEmail', 'twoFactorMethod'], ASSET_FORM_SECTIONS.account[1].summary)} errorCount={formState.validationErrorSection === 2 ? 1 : 0}>
       <FormControl size="small" fullWidth>
         <InputLabel>绑定手机号</InputLabel>
         <Select
@@ -2486,14 +2502,14 @@ const AssetManagement: React.FC = () => {
         {renderTextField('boundEmail', '绑定邮箱')}
         {renderTextField('twoFactorMethod', '二次验证方式')}
       </BusinessFormSection>
-      <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.account[2].title} summary={ASSET_FORM_SECTIONS.account[2].summary} errorCount={sectionErrorCount(['ownerSubject'])}>
+      <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.account[2].title} summary={sectionSummary(['ownerSubject', 'department', 'owner', 'currentUser'], ASSET_FORM_SECTIONS.account[2].summary)} errorCount={sectionErrorCount(['ownerSubject'])}>
         {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
         {renderDepartmentSelectField()}
         {renderUserSelectField('owner', '资产负责人')}
         {renderUserSelectField('currentUser', '当前使用人')}
         {renderTextField('serviceProvider', '外部服务商')}
       </BusinessFormSection>
-      <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.account[3].title} summary={ASSET_FORM_SECTIONS.account[3].summary} errorCount={sectionErrorCount(['controlStatus', 'accountStatus'])}>
+      <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.account[3].title} summary={sectionSummary(['businessScene', 'controlStatus', 'monthlyFee', 'accountStatus'], ASSET_FORM_SECTIONS.account[3].summary)} errorCount={sectionErrorCount(['controlStatus', 'accountStatus'])}>
         {renderTextField('businessScene', '业务场景')}
         {renderSelectField('controlStatus', '账号控制权', ['已掌控', '待交接', '离职待回收', '已回收'], { required: true })}
         {renderTextField('monthlyFee', '月费用', { type: 'number' })}
