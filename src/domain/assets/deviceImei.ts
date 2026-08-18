@@ -1,8 +1,10 @@
 export type DeviceSimType = '单卡' | '双卡';
+export type DeviceCommunicationType = '无SIM' | '单卡' | '双卡' | 'eSIM';
 
 export type DeviceImeiLike = {
   id?: string;
   simType?: DeviceSimType | string;
+  communicationType?: DeviceCommunicationType | string;
   imei1?: unknown;
   imei1Masked?: unknown;
   imei2?: unknown;
@@ -64,17 +66,29 @@ export function validateDeviceImeis(
   currentDeviceId?: string,
 ): DeviceImeiFields {
   const { imei1, imei2 } = readDeviceImeis(input);
-  const simType = input.simType === '单卡' ? '单卡' : '双卡';
+  const communicationType: DeviceCommunicationType = input.communicationType === '无SIM'
+    || input.communicationType === '单卡'
+    || input.communicationType === 'eSIM'
+    || input.communicationType === '双卡'
+    ? input.communicationType
+    : input.simType === '单卡' ? '单卡' : '双卡';
+
+  if (communicationType === '无SIM') {
+    if (imei1 || imei2) {
+      throw new DeviceImeiValidationError('无SIM设备不能填写IMEI', 'cardinality');
+    }
+    return { imei1: '', imei1Masked: '', imei2: undefined, imei2Masked: undefined };
+  }
 
   if (!imei1) throw new DeviceImeiValidationError('IMEI 1不能为空', 'required');
   assertRawImei(imei1, 'IMEI 1');
   if (imei2) assertRawImei(imei2, 'IMEI 2');
 
-  if (simType === '双卡' && !imei2) {
+  if (communicationType === '双卡' && !imei2) {
     throw new DeviceImeiValidationError('双卡设备的IMEI 2不能为空', 'required');
   }
-  if (simType === '单卡' && imei2) {
-    throw new DeviceImeiValidationError('单卡设备不能填写IMEI 2，请先清空', 'cardinality');
+  if ((communicationType === '单卡' || communicationType === 'eSIM') && imei2) {
+    throw new DeviceImeiValidationError(`${communicationType}设备不能填写IMEI 2，请先清空`, 'cardinality');
   }
   if (imei2 && imei1 === imei2) {
     throw new DeviceImeiValidationError('IMEI 1和IMEI 2不能相同', 'duplicate');

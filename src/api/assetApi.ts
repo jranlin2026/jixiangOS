@@ -682,7 +682,7 @@ function visiblePhones(scope = getCurrentDataVisibilityScope('assets')): AssetPh
   const rows = phones();
   if (scope.unrestricted) return rows;
   const visibleDeviceIds = new Set(visibleDevices(scope).map((device) => device.id));
-  return rows.filter((phone) => canViewAssetPhone(phone, scope) || visibleDeviceIds.has(phone.deviceId));
+  return rows.filter((phone) => canViewAssetPhone(phone, scope) || Boolean(phone.deviceId && visibleDeviceIds.has(phone.deviceId)));
 }
 
 function visibleAccounts(scope = getCurrentDataVisibilityScope('assets')): AssetInternetAccount[] {

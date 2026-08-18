@@ -511,11 +511,12 @@ const AssetManagement: React.FC = () => {
   const phonesByDeviceId = useMemo(() => {
     const map = new Map<string, AssetPhoneNumber[]>();
     lookupPhones.forEach((phone) => {
+      if (!phone.deviceId) return;
       const list = map.get(phone.deviceId) || [];
       list.push(phone);
       map.set(phone.deviceId, list);
     });
-    map.forEach((list) => list.sort((a, b) => a.slotType.localeCompare(b.slotType, 'zh-CN')));
+    map.forEach((list) => list.sort((a, b) => (a.slotType || '').localeCompare(b.slotType || '', 'zh-CN')));
     return map;
   }, [lookupPhones]);
   const accountsByPhoneId = useMemo(() => {
@@ -541,7 +542,7 @@ const AssetManagement: React.FC = () => {
     return map;
   }, [lookupAccounts, phoneById]);
   const assetRelationshipSummary = useMemo(() => {
-    const boundPhoneCount = lookupPhones.filter((phone) => Boolean(deviceById.get(phone.deviceId))).length;
+    const boundPhoneCount = lookupPhones.filter((phone) => Boolean(phone.deviceId && deviceById.get(phone.deviceId))).length;
     const boundAccountCount = lookupAccounts.filter((account) => Boolean(account.phoneId && phoneById.get(account.phoneId))).length;
     const devicesWithPhones = lookupDevices.filter((device) => (phonesByDeviceId.get(device.id) || []).length).length;
     return {
@@ -1063,7 +1064,7 @@ const AssetManagement: React.FC = () => {
         状态: device.status,
       })),
       phones: phones.map((phone) => {
-        const device = deviceById.get(phone.deviceId);
+        const device = deviceById.get(phone.deviceId || '');
         return {
           手机号: phone.phoneNumberMasked,
           实名信息: phone.realNameMasked || '',
@@ -1441,7 +1442,7 @@ const AssetManagement: React.FC = () => {
   };
 
   const renderPhoneCell = (phone: AssetPhoneNumber, columnId: string) => {
-    const device = deviceById.get(phone.deviceId);
+    const device = deviceById.get(phone.deviceId || '');
     switch (columnId) {
       case 'phoneNumber':
         return <Box sx={{ color: shell.tableLink, fontWeight: 900 }}>{phone.phoneNumberMasked}</Box>;
@@ -2443,7 +2444,7 @@ const AssetManagement: React.FC = () => {
         >
           <MenuItem value="">暂不绑定</MenuItem>
           {lookupPhones.map((phone) => {
-            const device = deviceById.get(phone.deviceId);
+            const device = deviceById.get(phone.deviceId || '');
             return (
               <MenuItem key={phone.id} value={phone.id}>
                 {phone.phoneNumberMasked} / {device?.deviceCode || '未关联设备'} / {phone.slotType}

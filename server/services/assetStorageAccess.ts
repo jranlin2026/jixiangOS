@@ -116,7 +116,7 @@ function visibleDevice(device: Pick<AssetDevice, 'owner' | 'currentUser'>, scope
 }
 
 function visiblePhone(phone: Pick<AssetPhoneNumber, 'owner' | 'deviceId'>, visibleDeviceIds: Set<string>, scope: AssetVisibilityScope): boolean {
-  return scope.unrestricted || hasVisibleName(scope, phone.owner) || visibleDeviceIds.has(phone.deviceId);
+  return scope.unrestricted || hasVisibleName(scope, phone.owner) || Boolean(phone.deviceId && visibleDeviceIds.has(phone.deviceId));
 }
 
 function visibleAccount(account: Pick<AssetInternetAccount, 'owner' | 'currentUser' | 'phoneId'>, visiblePhoneIds: Set<string>, scope: AssetVisibilityScope): boolean {

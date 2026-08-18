@@ -40,6 +40,28 @@ assert.deepEqual(
   'single-SIM devices must be valid with exactly one IMEI',
 );
 
+assert.deepEqual(
+  validateDeviceImeis({ communicationType: '无SIM' }, []),
+  {
+    imei1: '',
+    imei1Masked: '',
+    imei2: undefined,
+    imei2Masked: undefined,
+  },
+  'devices without communication capability must not require an IMEI',
+);
+
+assert.doesNotThrow(
+  () => validateDeviceImeis({ communicationType: 'eSIM', imei1: 'ESIM-IMEI-0001' }, []),
+  'eSIM devices require only IMEI 1',
+);
+
+assert.throws(
+  () => validateDeviceImeis({ communicationType: '无SIM', imei1: 'UNEXPECTED-IMEI' }, []),
+  /无SIM设备不能填写IMEI/,
+  'devices without communication capability must reject IMEI values',
+);
+
 assert.throws(
   () => validateDeviceImeis({ simType: '双卡', imei1: 'DUAL-IMEI-0001' }, []),
   /IMEI 2不能为空/,

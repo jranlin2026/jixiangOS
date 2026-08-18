@@ -303,6 +303,7 @@ function syncDeviceRisks(state: AssetState, changedAt: string): void {
   const existing = new Map(state.risks.filter(managed).map((risk) => [risk.riskKey, risk]));
   const phoneIdsByDevice = new Map<string, Set<string>>();
   state.phones.forEach((phone) => {
+    if (!phone.deviceId) return;
     const ids = phoneIdsByDevice.get(phone.deviceId) || new Set<string>();
     ids.add(phone.id);
     phoneIdsByDevice.set(phone.deviceId, ids);

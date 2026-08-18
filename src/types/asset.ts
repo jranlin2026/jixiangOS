@@ -1,20 +1,32 @@
 export type AssetRiskLevel = '低' | '中' | '高';
 
-export type AssetDeviceStatus = '正常' | '使用中' | '闲置' | '已注销';
+export type AssetDeviceCategory = '手机' | '平板' | '电脑' | '摄影设备' | '其他';
 
-export type AssetPhoneStatus = '使用中' | '闲置' | '已停用';
+export type AssetDeviceCommunicationType = '无SIM' | '单卡' | '双卡' | 'eSIM';
+
+export type AssetAcquisitionType = '购买' | '租赁' | '借用';
+
+export type AssetDeviceStatus = '库存中' | '使用中' | '维修中' | '闲置' | '已停用' | '已报废' | '正常' | '已注销';
+
+export type AssetPhoneStatus = '待启用' | '使用中' | '停机保号' | '已停用' | '已注销' | '闲置';
+
+export type AssetSimForm = '实体SIM' | 'eSIM';
 
 export type AssetPhoneOperator = '移动' | '联通' | '电信' | '广电' | '未知';
 
 export type AssetPermissionStatus = '正常' | '离职待回收' | '已回收';
 
-export type AssetAccountStatus = '使用中' | '正常' | '闲置' | '异常' | '已注销';
+export type AssetAccountControlStatus = '已掌控' | '待交接' | '离职待回收' | '已回收';
+
+export type AssetAccountCategory = '主账号' | '员工号' | '直播号' | '投放号' | '客服号' | '其他';
+
+export type AssetAccountStatus = '使用中' | '闲置' | '异常' | '封禁' | '已注销' | '正常';
 
 export type AssetRiskStatus = 'open' | 'resolved' | 'ignored';
 
 export type AssetType = 'device' | 'phone' | 'account';
 
-export type AssetSensitiveField = 'imei' | 'imei1' | 'imei2' | 'phoneNumber' | 'phoneRealName' | 'loginAccount' | 'accountRealName' | 'boundEmail';
+export type AssetSensitiveField = 'imei' | 'imei1' | 'imei2' | 'phoneNumber' | 'phoneRealName' | 'iccid' | 'imsi' | 'loginAccount' | 'accountRealName' | 'boundEmail';
 
 export type AssetImportType = 'devices' | 'phones' | 'accounts';
 
@@ -22,6 +34,17 @@ export interface AssetDevice {
   id: string;
   deviceCode: string;
   deviceName: string;
+  deviceCategory?: AssetDeviceCategory;
+  brand?: string;
+  model?: string;
+  serialNumber?: string;
+  communicationType?: AssetDeviceCommunicationType;
+  acquisitionType?: AssetAcquisitionType;
+  purchaseAmount?: number;
+  monthlyRent?: number;
+  acquiredAt?: string;
+  warrantyExpiresAt?: string;
+  /** Legacy read alias. Canonical writes use brand and model. */
   brandModel: string;
   imei1: string;
   imei1Masked: string;
@@ -51,14 +74,21 @@ export interface AssetPhoneNumber {
   id: string;
   phoneNumber: string;
   phoneNumberMasked: string;
+  simForm?: AssetSimForm;
+  iccid?: string;
+  iccidMasked?: string;
+  imsi?: string;
+  imsiMasked?: string;
   realName?: string;
   realNameMasked?: string;
   operator: AssetPhoneOperator;
   attributionLocation?: string;
-  deviceId: string;
-  slotType: '卡槽1' | '卡槽2';
+  deviceId?: string;
+  slotType?: '卡槽1' | '卡槽2';
   packageName: string;
   monthlyFee: number;
+  contractExpiresAt?: string;
+  ownerSubject?: '公司' | '法人' | '员工个人';
   departmentId?: string;
   department?: string;
   ownerId?: string;
@@ -66,6 +96,7 @@ export interface AssetPhoneNumber {
   currentUserId?: string;
   currentUser?: string;
   status: AssetPhoneStatus;
+  remark?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,6 +106,7 @@ export interface AssetInternetAccount {
   accountNo: string;
   platform: string;
   accountName: string;
+  accountCategory?: AssetAccountCategory;
   loginAccount: string;
   loginAccountMasked: string;
   realName?: string;
@@ -90,12 +122,16 @@ export interface AssetInternetAccount {
   currentUserId?: string;
   currentUser: string;
   permissionStatus: AssetPermissionStatus;
+  controlStatus?: AssetAccountControlStatus;
   accountStatus: AssetAccountStatus;
   riskLevel: AssetRiskLevel;
   serviceProvider: string;
   monthlyFee: number;
   expiresAt?: string;
   purpose: string;
+  businessScene?: string;
+  twoFactorMethod?: string;
+  remark?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -253,7 +289,7 @@ export type AssetDeviceInput = Omit<AssetDevice, 'id' | 'deviceCode' | 'imei1Mas
   deviceCode?: string;
 };
 
-export type AssetPhoneNumberInput = Omit<AssetPhoneNumber, 'id' | 'phoneNumberMasked' | 'createdAt' | 'updatedAt'>;
+export type AssetPhoneNumberInput = Omit<AssetPhoneNumber, 'id' | 'phoneNumberMasked' | 'iccidMasked' | 'imsiMasked' | 'createdAt' | 'updatedAt'>;
 
 export type AssetInternetAccountInput = Omit<AssetInternetAccount, 'id' | 'accountNo' | 'loginAccountMasked' | 'boundEmailMasked' | 'createdAt' | 'updatedAt'> & {
   accountNo?: string;
