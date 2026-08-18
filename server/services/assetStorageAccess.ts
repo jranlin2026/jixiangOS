@@ -138,13 +138,13 @@ function sanitizeDevice(device: AssetDevice, canViewSensitive: boolean): AssetDe
 }
 
 function sanitizePhone(phone: AssetPhoneNumber, canViewSensitive: boolean): AssetPhoneNumber {
-  if (canViewSensitive) return phone;
+  const withoutServicePassword = { ...phone, servicePassword: undefined };
+  if (canViewSensitive) return withoutServicePassword;
   return {
-    ...phone,
+    ...withoutServicePassword,
     phoneNumber: phone.phoneNumberMasked || '',
     iccid: phone.iccidMasked || undefined,
     imsi: phone.imsiMasked || undefined,
-    servicePassword: phone.servicePasswordMasked || undefined,
   };
 }
 

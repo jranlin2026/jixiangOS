@@ -293,7 +293,10 @@ export type AssetDeviceInput = Omit<AssetDevice, 'id' | 'deviceCode' | 'imei1Mas
   deviceCode?: string;
 };
 
-export type AssetPhoneNumberInput = Omit<AssetPhoneNumber, 'id' | 'phoneNumberMasked' | 'iccidMasked' | 'imsiMasked' | 'servicePasswordMasked' | 'createdAt' | 'updatedAt'>;
+export type AssetPhoneNumberInput = Omit<AssetPhoneNumber, 'id' | 'phoneNumberMasked' | 'iccidMasked' | 'imsiMasked' | 'servicePasswordMasked' | 'createdAt' | 'updatedAt'> & {
+  /** Command-only flag. It is never persisted on the phone asset. */
+  clearServicePassword?: boolean;
+};
 
 export type AssetInternetAccountInput = Omit<AssetInternetAccount, 'id' | 'accountNo' | 'loginAccountMasked' | 'boundEmailMasked' | 'createdAt' | 'updatedAt'> & {
   accountNo?: string;

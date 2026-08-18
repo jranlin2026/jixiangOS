@@ -727,6 +727,7 @@ await resetAssets();
   assert.match(phone.data.iccidMasked || '', /\*/);
   assert.match(phone.data.imsiMasked || '', /\*/);
   assert.match((phone.data as any).servicePasswordMasked || '', /[*•]/);
+  assert.equal((phone.data as any).servicePassword, undefined);
   const revealedServicePassword = await assetApi.revealSensitiveField('phone', phone.data.id, 'servicePassword' as any);
   assert.equal(revealedServicePassword.code, 0);
   assert.equal(revealedServicePassword.data.value, '123456');
@@ -741,7 +742,15 @@ await resetAssets();
   assert.equal(updated.data.iccid, '89860099999999999999');
   assert.equal(updated.data.contractExpiresAt, '2027-08-18');
   assert.equal(updated.data.remark, '已更换SIM');
-  assert.equal((updated.data as any).servicePassword, '123456');
+  assert.equal((updated.data as any).servicePassword, undefined);
+  const preservedServicePassword = await assetApi.revealSensitiveField('phone', phone.data.id, 'servicePassword' as any);
+  assert.equal(preservedServicePassword.data.value, '123456');
+  const cleared = await assetApi.updatePhoneNumber(phone.data.id, { clearServicePassword: true });
+  assert.equal(cleared.code, 0);
+  assert.equal((cleared.data as any).servicePassword, undefined);
+  assert.equal((cleared.data as any).servicePasswordMasked, undefined);
+  const clearedReveal = await assetApi.revealSensitiveField('phone', phone.data.id, 'servicePassword' as any);
+  assert.notEqual(clearedReveal.code, 0);
 }
 
 {

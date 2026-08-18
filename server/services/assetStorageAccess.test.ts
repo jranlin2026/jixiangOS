@@ -185,7 +185,7 @@ assert.deepEqual((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[]).map((item) => 
 assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei1, 'IMEI-***-1');
 assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei2, 'IMEI-***-2');
 assert.equal(JSON.stringify((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0]).includes('IMEI-RAW'), false);
-assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePassword, '******');
+assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePassword, undefined);
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[]).map((item) => item.id), ['account-self']);
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginAccount, 'self_***');
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_RISKS] as any[]).map((item) => item.id), ['risk-self']);
@@ -196,7 +196,7 @@ assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[]).length, 2);
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei1, 'IMEI-RAW-1');
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei2, 'IMEI-RAW-2');
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[1].imei1, 'OTHER-RAW');
-assert.equal((opsData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePassword, '123456');
+assert.equal((opsData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePassword, undefined);
 assert.equal(canWriteStorageKey(opsAuth, STORAGE_KEYS.ASSET_DEVICES), true);
 
 const recoveryStorageData = {

@@ -53,6 +53,14 @@ const assetAdmin: AuthenticatedUser = {
   ],
 };
 
+const sensitiveAssetAdmin: AuthenticatedUser = {
+  ...assetAdmin,
+  permissions: [
+    ...assetAdmin.permissions,
+    { module: PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW, actions: ['read'] },
+  ],
+};
+
 function dbUser(user: AuthenticatedUser) {
   return {
     id: user.id,
@@ -423,6 +431,16 @@ assert.equal(unboundPhone.data?.deviceId, undefined);
 assert.equal(unboundPhone.data?.slotType, undefined);
 assert.match(unboundPhone.data?.iccidMasked || '', /\*/);
 assert.match((unboundPhone.data as any)?.servicePasswordMasked || '', /[*•]/);
+assert.equal((unboundPhone.data as any)?.servicePassword, undefined);
+const deniedServicePassword = await riskService.revealPhoneServicePassword(unboundPhone.data!.id, assetAdmin);
+assert.equal(deniedServicePassword.code, 403);
+const revealedServicePassword = await riskService.revealPhoneServicePassword(unboundPhone.data!.id, sensitiveAssetAdmin);
+assert.equal(revealedServicePassword.code, 0);
+assert.equal(revealedServicePassword.data?.value, '123456');
+assert.ok(
+  riskPrisma.read<AssetOperationLog[]>(STORAGE_KEYS.ASSET_OPERATION_LOGS)
+    .some((log) => log.targetId === unboundPhone.data!.id && log.detail === '查看敏感字段：服务密码'),
+);
 const updatedUnboundPhone = await riskService.updatePhoneNumber(unboundPhone.data!.id, {
   simForm: '实体SIM',
   iccid: '89860099999999999999',
@@ -434,7 +452,15 @@ assert.equal(updatedUnboundPhone.code, 0);
 assert.equal(updatedUnboundPhone.data?.iccid, '89860099999999999999');
 assert.equal(updatedUnboundPhone.data?.contractExpiresAt, '2027-08-18');
 assert.equal(updatedUnboundPhone.data?.remark, '已更换SIM');
-assert.equal((updatedUnboundPhone.data as any)?.servicePassword, '123456');
+assert.equal((updatedUnboundPhone.data as any)?.servicePassword, undefined);
+const clearedUnboundPhone = await riskService.updatePhoneNumber(unboundPhone.data!.id, {
+  clearServicePassword: true,
+}, assetAdmin);
+assert.equal(clearedUnboundPhone.code, 0);
+assert.equal((clearedUnboundPhone.data as any)?.servicePassword, undefined);
+assert.equal((clearedUnboundPhone.data as any)?.servicePasswordMasked, undefined);
+const clearedServicePasswordReveal = await riskService.revealPhoneServicePassword(unboundPhone.data!.id, sensitiveAssetAdmin);
+assert.notEqual(clearedServicePasswordReveal.code, 0);
 
 const pendingAccount = await riskService.createInternetAccount({
   platform: '小红书',

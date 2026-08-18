@@ -725,11 +725,19 @@ function visibleDevices(scope = getCurrentDataVisibilityScope('assets')): AssetD
   return rows.filter((device) => canViewAssetDevice(device, scope));
 }
 
-function visiblePhones(scope = getCurrentDataVisibilityScope('assets')): AssetPhoneNumber[] {
+function visibleRawPhones(scope = getCurrentDataVisibilityScope('assets')): AssetPhoneNumber[] {
   const rows = phones();
   if (scope.unrestricted) return rows;
   const visibleDeviceIds = new Set(visibleDevices(scope).map((device) => device.id));
   return rows.filter((phone) => canViewAssetPhone(phone, scope) || Boolean(phone.deviceId && visibleDeviceIds.has(phone.deviceId)));
+}
+
+function sanitizePhoneForRead(phone: AssetPhoneNumber): AssetPhoneNumber {
+  return { ...phone, servicePassword: undefined };
+}
+
+function visiblePhones(scope = getCurrentDataVisibilityScope('assets')): AssetPhoneNumber[] {
+  return visibleRawPhones(scope).map(sanitizePhoneForRead);
 }
 
 function visibleAccounts(scope = getCurrentDataVisibilityScope('assets')): AssetInternetAccount[] {
@@ -1200,7 +1208,7 @@ async function createPhoneNumber(input: Partial<AssetPhoneNumberInput>): Promise
     await setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, [phone, ...rows]);
     logAssetOperation('新增资产', '手机号资产', phone.id, phone.phoneNumberMasked, `新增手机号 ${phone.phoneNumberMasked}`);
     rebuildRisksAndOffboarding();
-    return phone;
+    return sanitizePhoneForRead(phone);
   });
 }
 
@@ -1214,10 +1222,13 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
     if (rows.some((phone) => phone.id !== id && phone.phoneNumber === phoneNumber)) throw new Error('手机号已存在');
     const orgFields = resolveAssetOrgFields(input, existing);
     const nextDeviceId = input.deviceId === undefined ? existing.deviceId : String(input.deviceId || '').trim() || undefined;
-    const nextServicePassword = String(input.servicePassword || '').trim() ? input.servicePassword : existing.servicePassword;
+    const { clearServicePassword, ...phoneChanges } = input;
+    const nextServicePassword = clearServicePassword
+      ? undefined
+      : String(input.servicePassword || '').trim() ? input.servicePassword : existing.servicePassword;
     const updated = normalizeAssetPhone({
       ...existing,
-      ...input,
+      ...phoneChanges,
       phoneNumber,
       phoneNumberMasked: maskPhone(phoneNumber),
       realNameMasked: maskRealName(input.realName ?? existing.realName),
@@ -1241,7 +1252,7 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
     await setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, rows.map((phone) => (phone.id === id ? updated : phone)));
     logAssetOperation('编辑资料', '手机号资产', updated.id, updated.phoneNumberMasked, `编辑手机号 ${updated.phoneNumberMasked}`);
     rebuildRisksAndOffboarding();
-    return updated;
+    return sanitizePhoneForRead(updated);
   });
 }
 
@@ -1769,6 +1780,12 @@ async function revealSensitiveField(
   id: string,
   field: AssetSensitiveField,
 ): Promise<ApiResponse<AssetSensitiveRevealResult>> {
+  if (shouldUseBackendApi() && type === 'phone' && field === 'servicePassword') {
+    return backendRequest<AssetSensitiveRevealResult>(
+      `/assets/phones/${encodeURIComponent(id)}/reveal/service-password`,
+      { method: 'POST' },
+    );
+  }
   return guarded(() => {
     if (type === 'device') {
       const device = visibleDevices().find((item) => item.id === id);
@@ -1786,7 +1803,7 @@ async function revealSensitiveField(
       throw new Error('该设备没有IMEI 2');
     }
     if (type === 'phone') {
-      const phone = visiblePhones().find((item) => item.id === id);
+      const phone = visibleRawPhones().find((item) => item.id === id);
       if (!phone) throw new Error('手机号不存在');
       if (field === 'phoneNumber') {
         logAssetOperation('查看敏感字段', '手机号资产', phone.id, phone.phoneNumberMasked, '查看敏感字段：完整手机号');

@@ -12,6 +12,7 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputLabel,
   ListItemText,
@@ -930,7 +931,10 @@ const AssetManagement: React.FC = () => {
       if (saved) await fetchDetail('device', saved.id);
     }
     if (formState.type === 'phone') {
-      const input = formState.values as Partial<AssetPhoneNumberInput>;
+      const input = {
+        ...formState.values,
+        clearServicePassword: formState.values.clearServicePassword === 'true',
+      } as Partial<AssetPhoneNumberInput>;
       saved = formState.mode === 'edit' && formState.id
         ? await updatePhone(formState.id, input)
         : await createPhone(input);
@@ -2413,7 +2417,30 @@ const AssetManagement: React.FC = () => {
         {renderSelectField('simForm', 'SIM形态', ['实体SIM', 'eSIM'], { required: true })}
         {renderTextField('iccid', 'ICCID')}
         {renderTextField('imsi', 'IMSI')}
-        {renderTextField('servicePassword', '服务密码', { type: 'password' })}
+        <TextField
+          size="small"
+          label={formState.mode === 'edit' ? '新服务密码（留空不修改）' : '服务密码'}
+          value={formState.values.servicePassword || ''}
+          onChange={(event) => updateFormValue('servicePassword', event.target.value)}
+          type="password"
+          autoComplete="new-password"
+          disabled={formState.values.clearServicePassword === 'true'}
+          fullWidth
+        />
+        {formState.mode === 'edit' && formState.values.servicePasswordMasked ? (
+          <FormControlLabel
+            control={(
+              <Checkbox
+                checked={formState.values.clearServicePassword === 'true'}
+                onChange={(event) => {
+                  updateFormValue('clearServicePassword', event.target.checked ? 'true' : '');
+                  if (event.target.checked) updateFormValue('servicePassword', '');
+                }}
+              />
+            )}
+            label="清除已存服务密码"
+          />
+        ) : <Box />}
       </BusinessFormSection>
       <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.phone[1].title} summary={sectionSummary(['deviceId', 'slotType'], ASSET_FORM_SECTIONS.phone[1].summary)} errorCount={formState.validationErrorSection === 2 ? 1 : 0}>
       <FormControl size="small" fullWidth>

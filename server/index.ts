@@ -75,6 +75,7 @@ import { createOrderTypeConfigCommandService } from './services/orderTypeConfigC
 import { createStorageService } from './services/storageService';
 import { createBusinessAttachmentService, createPrismaBusinessAttachmentRepository } from './services/businessAttachmentService';
 import { createAssetListService, isAssetListKind } from './services/assetListService';
+import { createAssetCommandService } from './services/assetCommandService';
 import { createOrderApplicationService } from './services/orderApplicationService';
 import {
   buildOrderCommissionRecords,
@@ -293,6 +294,7 @@ const businessAttachmentService = createBusinessAttachmentService({
   listLinkedAcademyTaskEvidenceIds: (taskIds) => academyService.listLinkedTaskAttachmentIds(taskIds),
 });
 const assetListService = createAssetListService(storageService, assetStorageContext);
+const assetCommandService = createAssetCommandService(prisma);
 const deliveryAssignmentService = createDeliveryAssignmentService(prisma);
 const financeTransactionService = createFinanceTransactionService(prisma);
 const orderApprovalEffects = createOrderApprovalDownstreamEffects(deliveryAssignmentService);
@@ -521,6 +523,7 @@ const requireFinanceFlowReadAccess = createRequireAuth(authService, PERMISSION_K
 const requireFinanceFlowExportAccess = createRequireAuth(authService, PERMISSION_KEYS.FINANCE_FLOW_EXPORT);
 const requireMatrixPublishUploadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
 const requireAssetReadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS);
+const requireAssetSensitiveViewAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW);
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
 const requireEnablementRead = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE);
@@ -2078,6 +2081,11 @@ app.post('/api/ai/config/test', requireAiConfigWriteAccess, async (_req, res) =>
 
 app.get('/api/assets/dashboard', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
   res.json(await assetListService.dashboard(req.currentUser!));
+});
+
+app.post('/api/assets/phones/:id/reveal/service-password', requireAssetSensitiveViewAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await assetCommandService.revealPhoneServicePassword(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
 });
 
 app.get('/api/assets/:kind', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {

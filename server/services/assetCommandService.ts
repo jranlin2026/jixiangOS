@@ -28,6 +28,7 @@ import type {
   AssetPhoneNumber,
   AssetPhoneNumberInput,
   AssetRisk,
+  AssetSensitiveRevealResult,
 } from '../../src/types/asset';
 import type { Department } from '../../src/types/department';
 import type { Role } from '../../src/types/role';
@@ -208,6 +209,10 @@ function maskIdentifier(value: unknown): string | undefined {
 
 function maskSecret(value: unknown): string | undefined {
   return cleanText(value) ? '••••••' : undefined;
+}
+
+function sanitizePhoneCommandResult(phone: AssetPhoneNumber): AssetPhoneNumber {
+  return { ...phone, servicePassword: undefined };
 }
 
 function nextNumber(rows: AssetDevice[]): string {
@@ -493,6 +498,51 @@ export function createAssetCommandService(
   const makeId = options.id || ((prefix: string) => `${prefix}-${randomUUID()}`);
 
   return {
+    async revealPhoneServicePassword(
+      id: string,
+      actor: AuthenticatedUser,
+    ): Promise<ApiResponse<AssetSensitiveRevealResult | null>> {
+      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW, 'read')) {
+        return failure('无权查看服务密码', 403);
+      }
+      try {
+        const directory = await loadDirectory(prisma);
+        const scope = buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'assets');
+        const revealed = await prisma.$transaction(async (transaction) => {
+          const state = await lockState(transaction);
+          const phone = state.phones.find((item) => item.id === id);
+          if (!phone) throw new AssetCommandError(404, '手机号不存在');
+          const linkedDevice = phone.deviceId ? state.devices.find((device) => device.id === phone.deviceId) : undefined;
+          const canViewPhone = visibleToScope(phone, scope, directory)
+            || Boolean(linkedDevice && visibleToScope(linkedDevice, scope, directory));
+          if (!canViewPhone) throw new AssetCommandError(403, '无权查看该手机号资产');
+          if (!phone.servicePassword) throw new AssetCommandError(404, '该手机号未保存服务密码');
+          const revealedAt = now().toISOString();
+          addLog(
+            state,
+            makeId('asset-log'),
+            revealedAt,
+            actor,
+            '查看敏感字段',
+            '手机号资产',
+            phone.id,
+            phone.phoneNumberMasked,
+            '查看敏感字段：服务密码',
+          );
+          await persistState(transaction, state);
+          return { field: 'servicePassword' as const, label: '服务密码', value: phone.servicePassword };
+        }, {
+          isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+          maxWait: 5_000,
+          timeout: 10_000,
+        });
+        return success(revealed);
+      } catch (error) {
+        if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
+        throw error;
+      }
+    },
+
     async createDevice(
       input: Partial<AssetDeviceInput>,
       actor: AuthenticatedUser,
@@ -842,7 +892,7 @@ export function createAssetCommandService(
           maxWait: 5_000,
           timeout: 10_000,
         });
-        return success(created);
+        return success(sanitizePhoneCommandResult(created));
       } catch (error) {
         if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
         throw error;
@@ -900,11 +950,14 @@ export function createAssetCommandService(
             throw new AssetCommandError(409, `${communicationType}设备最多绑定${maxPhoneCount}个手机号`);
           }
           const realName = input.realName === undefined ? existing.realName : cleanText(input.realName) || undefined;
-          const servicePassword = cleanText(input.servicePassword) || existing.servicePassword;
-          const org = resolveOrgFields({ ...existing, ...input }, directory);
+          const { clearServicePassword, ...phoneChanges } = input;
+          const servicePassword = clearServicePassword
+            ? undefined
+            : cleanText(input.servicePassword) || existing.servicePassword;
+          const org = resolveOrgFields({ ...existing, ...phoneChanges }, directory);
           const next = normalizeAssetPhone({
             ...existing,
-            ...input,
+            ...phoneChanges,
             phoneNumber,
             phoneNumberMasked: maskPhone(phoneNumber),
             realNameSubject: input.realNameSubject === undefined ? existing.realNameSubject : cleanText(input.realNameSubject) || undefined,
@@ -961,7 +1014,7 @@ export function createAssetCommandService(
           maxWait: 5_000,
           timeout: 10_000,
         });
-        return success(updated);
+        return success(sanitizePhoneCommandResult(updated));
       } catch (error) {
         if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
         throw error;
