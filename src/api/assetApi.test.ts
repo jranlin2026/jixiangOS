@@ -671,3 +671,58 @@ await resetAssets();
   const accountAfterComplete = await assetApi.fetchInternetAccounts({ search: '离职测试账号', pageSize: 20 });
   assert.equal(accountAfterComplete.data.items[0].permissionStatus, '已回收');
 }
+
+{
+  const device = await assetApi.createDevice({
+    deviceName: '无SIM摄影机',
+    deviceCategory: '摄影设备',
+    brand: 'Sony',
+    model: 'FX3',
+    communicationType: '无SIM',
+    acquisitionType: '购买',
+    purchaseAmount: 20_000,
+    ownerSubject: '公司',
+    status: '库存中',
+  });
+  assert.equal(device.code, 0);
+  assert.equal(device.data.brand, 'Sony');
+  assert.equal(device.data.model, 'FX3');
+  assert.equal(device.data.communicationType, '无SIM');
+  assert.equal(device.data.imei1, '');
+}
+
+{
+  const phone = await assetApi.createPhoneNumber({
+    phoneNumber: '13900009999',
+    simForm: 'eSIM',
+    iccid: '89860012345678901234',
+    imsi: '460001234567890',
+    ownerSubject: '公司',
+    packageName: '备用套餐',
+    monthlyFee: 0,
+    owner: '测试员',
+    status: '待启用',
+  });
+  assert.equal(phone.code, 0);
+  assert.equal(phone.data.deviceId, undefined);
+  assert.equal(phone.data.slotType, undefined);
+  assert.match(phone.data.iccidMasked || '', /\*/);
+  assert.match(phone.data.imsiMasked || '', /\*/);
+}
+
+{
+  const account = await assetApi.createInternetAccount({
+    platform: '小红书',
+    accountCategory: '直播号',
+    accountName: '待回收账号',
+    loginAccount: 'pending_recycle_account',
+    ownerSubject: '公司',
+    controlStatus: '离职待回收',
+    accountStatus: '闲置',
+    monthlyFee: 0,
+  });
+  assert.equal(account.code, 0);
+  assert.equal(account.data.controlStatus, '离职待回收');
+  const tasks = await assetApi.fetchOffboardingTasks({ search: '待回收账号', pageSize: 20 });
+  assert.ok(tasks.data.items.some((task) => task.assetId === account.data.id));
+}

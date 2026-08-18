@@ -5,6 +5,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   AssetDevice,
   AssetInternetAccount,
+  AssetOffboardingTask,
   AssetOperationLog,
   AssetPhoneNumber,
   AssetRisk,
@@ -369,4 +370,55 @@ assert.equal(createdAccount.data?.loginAccountMasked.includes('*'), true);
 assert.equal(createdAccount.data?.boundEmailMasked?.includes('*'), true);
 assert.ok(
   riskPrisma.read<AssetInternetAccount[]>(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS).some((account) => account.id === createdAccount.data?.id),
+);
+
+const noSimDevice = await riskService.createDevice({
+  deviceName: '无SIM摄影机',
+  deviceCategory: '摄影设备',
+  brand: 'Sony',
+  model: 'FX3',
+  communicationType: '无SIM',
+  acquisitionType: '购买',
+  purchaseAmount: 20_000,
+  ownerSubject: '公司',
+  departmentId: 'dept-assets',
+  status: '库存中',
+}, assetAdmin);
+assert.equal(noSimDevice.code, 0);
+assert.equal(noSimDevice.data?.communicationType, '无SIM');
+assert.equal(noSimDevice.data?.imei1, '');
+
+const unboundPhone = await riskService.createPhoneNumber({
+  phoneNumber: '13900009999',
+  simForm: 'eSIM',
+  iccid: '89860012345678901234',
+  imsi: '460001234567890',
+  ownerSubject: '公司',
+  departmentId: 'dept-assets',
+  ownerId: assetAdmin.id,
+  packageName: '备用套餐',
+  monthlyFee: 0,
+  status: '待启用',
+}, assetAdmin);
+assert.equal(unboundPhone.code, 0);
+assert.equal(unboundPhone.data?.deviceId, undefined);
+assert.equal(unboundPhone.data?.slotType, undefined);
+assert.match(unboundPhone.data?.iccidMasked || '', /\*/);
+
+const pendingAccount = await riskService.createInternetAccount({
+  platform: '小红书',
+  accountCategory: '直播号',
+  accountName: '待回收账号',
+  loginAccount: 'pending_recycle_account',
+  ownerSubject: '公司',
+  departmentId: 'dept-assets',
+  ownerId: assetAdmin.id,
+  controlStatus: '离职待回收',
+  accountStatus: '闲置',
+  monthlyFee: 0,
+}, assetAdmin);
+assert.equal(pendingAccount.code, 0);
+assert.equal(pendingAccount.data?.controlStatus, '离职待回收');
+assert.ok(
+  riskPrisma.read<AssetOffboardingTask[]>(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS).some((task) => task.assetId === pendingAccount.data?.id),
 );

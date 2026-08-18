@@ -9,6 +9,13 @@ import {
   DeviceImeiValidationError,
   validateDeviceImeis,
 } from '../../src/domain/assets/deviceImei';
+import {
+  normalizeAssetAccount,
+  normalizeAssetDevice,
+  normalizeAssetPhone,
+  readAccountControlStatus,
+  readDeviceCommunicationType,
+} from '../../src/domain/assets/assetFields';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   AssetDevice,
@@ -97,9 +104,9 @@ async function lockState(transaction: Prisma.TransactionClient): Promise<AssetSt
   `);
   const values = new Map(rows.map((row) => [row.key, row.value]));
   return {
-    devices: readArray<AssetDevice>(values, STORAGE_KEYS.ASSET_DEVICES),
-    phones: readArray<AssetPhoneNumber>(values, STORAGE_KEYS.ASSET_PHONE_NUMBERS),
-    accounts: readArray<AssetInternetAccount>(values, STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS),
+    devices: readArray<AssetDevice>(values, STORAGE_KEYS.ASSET_DEVICES).map((device) => normalizeAssetDevice({ ...device })),
+    phones: readArray<AssetPhoneNumber>(values, STORAGE_KEYS.ASSET_PHONE_NUMBERS).map((phone) => normalizeAssetPhone({ ...phone })),
+    accounts: readArray<AssetInternetAccount>(values, STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS).map((account) => normalizeAssetAccount({ ...account })),
     risks: readArray<AssetRisk>(values, STORAGE_KEYS.ASSET_RISKS),
     logs: readArray<AssetOperationLog>(values, STORAGE_KEYS.ASSET_OPERATION_LOGS),
     offboardingTasks: readArray<AssetOffboardingTask>(values, STORAGE_KEYS.ASSET_OFFBOARDING_TASKS),
@@ -190,6 +197,13 @@ function maskEmail(value: unknown): string | undefined {
   const [name, domain] = text.split('@');
   if (!domain) return maskLogin(text);
   return `${name.slice(0, 2)}***@${domain}`;
+}
+
+function maskIdentifier(value: unknown): string | undefined {
+  const raw = cleanText(value);
+  if (!raw) return undefined;
+  if (raw.length <= 8) return `${raw.slice(0, 2)}****${raw.slice(-2)}`;
+  return `${raw.slice(0, 6)}${'*'.repeat(Math.min(8, raw.length - 10))}${raw.slice(-4)}`;
 }
 
 function nextNumber(rows: AssetDevice[]): string {
@@ -420,7 +434,7 @@ function syncAccountRisks(state: AssetState, changedAt: string): void {
         '互联网账号未绑定手机号，后续登录、验证和回收链路不完整。',
       );
     }
-    if (account.permissionStatus === '离职待回收') {
+    if (readAccountControlStatus(account) === '离职待回收') {
       add(
         account,
         `offboarding-account-${account.id}`,
@@ -448,7 +462,7 @@ function syncAccountOffboardingTasks(state: AssetState, changedAt: string): void
     task.assetType !== '互联网账号'
     || task.status === '已回收'
   ));
-  const pending = state.accounts.filter((account) => account.permissionStatus === '离职待回收').map((account) => {
+  const pending = state.accounts.filter((account) => readAccountControlStatus(account) === '离职待回收').map((account) => {
     const previous = existingByAssetId.get(account.id);
     return {
       id: previous?.id || `asset-offboarding-${account.id}`,
@@ -492,14 +506,27 @@ export function createAssetCommandService(
         const org = resolveOrgFields(input, directory);
         const created = await prisma.$transaction(async (transaction) => {
           const state = await lockState(transaction);
-          const imeiFields = validateCommandDeviceImeis(input, state.devices);
-          const device: AssetDevice = {
+          const normalized = normalizeAssetDevice(input);
+          const brand = requiredText(normalized.brand, '设备品牌不能为空');
+          const model = requiredText(normalized.model, '设备型号不能为空');
+          const imeiFields = validateCommandDeviceImeis(normalized, state.devices);
+          const device = normalizeAssetDevice({
             id: makeId('asset-device'),
             deviceCode: cleanText(input.deviceCode) || nextNumber(state.devices),
             deviceName: requiredText(input.deviceName, '设备名称不能为空'),
-            brandModel: requiredText(input.brandModel, '品牌型号不能为空'),
+            deviceCategory: normalized.deviceCategory,
+            brand,
+            model,
+            brandModel: [brand, model].join(' '),
             ...imeiFields,
-            simType: input.simType || '双卡',
+            communicationType: normalized.communicationType,
+            simType: normalized.simType,
+            serialNumber: normalized.serialNumber,
+            acquisitionType: normalized.acquisitionType,
+            purchaseAmount: normalized.purchaseAmount,
+            monthlyRent: normalized.monthlyRent,
+            acquiredAt: normalized.acquiredAt,
+            warrantyExpiresAt: normalized.warrantyExpiresAt,
             ownerSubject: input.ownerSubject || '公司',
             departmentId: org.departmentId,
             department: org.department,
@@ -507,13 +534,13 @@ export function createAssetCommandService(
             owner: org.owner,
             currentUserId: org.currentUserId,
             currentUser: org.currentUser,
-            status: input.status || '正常',
+            status: input.status || '库存中',
             riskLevel: input.riskLevel || '低',
-            monthlyCost: Number(input.monthlyCost || 0),
+            monthlyCost: Number(input.monthlyCost ?? normalized.monthlyRent),
             remark: cleanText(input.remark) || undefined,
             createdAt,
             updatedAt: createdAt,
-          };
+          });
           if (!visibleToScope(device, scope, directory)) {
             throw new AssetCommandError(403, '无权为该员工或部门新增设备资产');
           }
@@ -564,15 +591,23 @@ export function createAssetCommandService(
           const existing = state.devices.find((device) => device.id === id);
           if (!existing) throw new AssetCommandError(404, '设备不存在');
           if (!visibleToScope(existing, scope, directory)) throw new AssetCommandError(403, '无权编辑该设备资产');
-          const simType = input.simType || existing.simType;
-          if (simType === '单卡' && state.phones.some((phone) => phone.deviceId === id && phone.slotType === '卡槽2')) {
-            throw new AssetCommandError(409, '单卡设备不能保留卡槽2手机号');
+          const normalized = normalizeAssetDevice({
+            ...existing,
+            ...input,
+            communicationType: input.communicationType ?? (input.simType ? input.simType : existing.communicationType),
+          });
+          const communicationType = readDeviceCommunicationType(normalized);
+          if (communicationType !== '双卡' && state.phones.some((phone) => phone.deviceId === id && phone.slotType === '卡槽2')) {
+            throw new AssetCommandError(409, '非双卡设备不能保留卡槽2手机号');
+          }
+          if (communicationType === '无SIM' && state.phones.some((phone) => phone.deviceId === id)) {
+            throw new AssetCommandError(409, '无SIM设备不能保留已绑定手机号');
           }
           const org = resolveOrgFields({ ...existing, ...input }, directory);
           const imeiFields = validateCommandDeviceImeis({
             ...existing,
             ...input,
-            simType,
+            communicationType,
             imei1: input.imei1 === undefined
               ? input.imei === undefined ? existing.imei1 || existing.imei : input.imei
               : input.imei1,
@@ -582,13 +617,15 @@ export function createAssetCommandService(
             imeiMasked: _legacyImeiMasked,
             ...existingWithoutLegacyImei
           } = existing;
-          const next: AssetDevice = {
+          const next = normalizeAssetDevice({
             ...existingWithoutLegacyImei,
             deviceCode: input.deviceCode === undefined ? existing.deviceCode : requiredText(input.deviceCode, '设备编号不能为空'),
             deviceName: input.deviceName === undefined ? existing.deviceName : requiredText(input.deviceName, '设备名称不能为空'),
-            brandModel: input.brandModel === undefined ? existing.brandModel : requiredText(input.brandModel, '品牌型号不能为空'),
+            brand: requiredText(normalized.brand, '设备品牌不能为空'),
+            model: requiredText(normalized.model, '设备型号不能为空'),
+            brandModel: [normalized.brand, normalized.model].join(' '),
             ...imeiFields,
-            simType,
+            communicationType,
             ownerSubject: input.ownerSubject || existing.ownerSubject,
             departmentId: org.departmentId,
             department: org.department,
@@ -601,7 +638,7 @@ export function createAssetCommandService(
             monthlyCost: Number(input.monthlyCost ?? existing.monthlyCost),
             remark: input.remark === undefined ? existing.remark : cleanText(input.remark) || undefined,
             updatedAt,
-          };
+          });
           if (!visibleToScope(next, scope, directory)) {
             throw new AssetCommandError(403, '无权将设备资产转移给该员工或部门');
           }
@@ -716,25 +753,28 @@ export function createAssetCommandService(
         const org = resolveOrgFields(input, directory);
         const created = await prisma.$transaction(async (transaction) => {
           const state = await lockState(transaction);
-          const deviceId = requiredText(input.deviceId, '所属设备不能为空');
-          const device = state.devices.find((item) => item.id === deviceId);
-          if (!device) throw new AssetCommandError(400, '所属设备不存在');
-          if (!visibleToScope(device, scope, directory)) throw new AssetCommandError(403, '无权绑定该设备');
+          const deviceId = cleanText(input.deviceId) || undefined;
+          const device = deviceId ? state.devices.find((item) => item.id === deviceId) : undefined;
+          if (deviceId && !device) throw new AssetCommandError(400, '所属设备不存在');
+          if (device && !visibleToScope(device, scope, directory)) throw new AssetCommandError(403, '无权绑定该设备');
           if (state.phones.some((phone) => phone.phoneNumber === phoneNumber)) {
             throw new AssetCommandError(409, '手机号已存在');
           }
-          const slotType = input.slotType || '卡槽1';
-          if (device.simType === '单卡' && slotType === '卡槽2') {
+          if (!deviceId && input.slotType) throw new AssetCommandError(400, '未选择设备时不能指定卡槽');
+          const slotType = deviceId ? input.slotType || '卡槽1' : undefined;
+          const communicationType = device ? readDeviceCommunicationType(device) : undefined;
+          if (communicationType === '无SIM') throw new AssetCommandError(409, '无SIM设备不能绑定手机号');
+          if (communicationType && communicationType !== '双卡' && slotType === '卡槽2') {
             throw new AssetCommandError(409, '单卡设备只能绑定卡槽1手机号');
           }
-          if (state.phones.some((phone) => phone.deviceId === deviceId && phone.slotType === slotType)) {
+          if (deviceId && state.phones.some((phone) => phone.deviceId === deviceId && phone.slotType === slotType)) {
             throw new AssetCommandError(409, '该设备卡槽已绑定手机号');
           }
-          const maxPhoneCount = device.simType === '双卡' ? 2 : 1;
-          if (state.phones.filter((phone) => phone.deviceId === deviceId).length >= maxPhoneCount) {
-            throw new AssetCommandError(409, `${device.simType}设备最多绑定${maxPhoneCount}个手机号`);
+          const maxPhoneCount = communicationType === '双卡' ? 2 : 1;
+          if (deviceId && state.phones.filter((phone) => phone.deviceId === deviceId).length >= maxPhoneCount) {
+            throw new AssetCommandError(409, `${communicationType}设备最多绑定${maxPhoneCount}个手机号`);
           }
-          const phone: AssetPhoneNumber = {
+          const phone = normalizeAssetPhone({
             id: makeId('asset-phone'),
             phoneNumber,
             phoneNumberMasked: maskPhone(phoneNumber),
@@ -742,20 +782,28 @@ export function createAssetCommandService(
             realNameMasked: maskRealName(input.realName),
             operator: input.operator || '未知',
             attributionLocation: cleanText(input.attributionLocation) || undefined,
+            simForm: input.simForm || '实体SIM',
+            iccid: cleanText(input.iccid) || undefined,
+            iccidMasked: maskIdentifier(input.iccid),
+            imsi: cleanText(input.imsi) || undefined,
+            imsiMasked: maskIdentifier(input.imsi),
             deviceId,
             slotType,
             packageName: cleanText(input.packageName),
             monthlyFee: Number(input.monthlyFee || 0),
+            ownerSubject: input.ownerSubject || '公司',
             departmentId: org.departmentId,
             department: org.department,
             ownerId: org.ownerId,
             owner: org.owner,
             currentUserId: org.currentUserId,
             currentUser: org.currentUser,
-            status: input.status || '使用中',
+            status: input.status || '待启用',
+            contractExpiresAt: cleanText(input.contractExpiresAt) || undefined,
+            remark: cleanText(input.remark) || undefined,
             createdAt,
             updatedAt: createdAt,
-          };
+          });
           if (!visibleToScope(phone, scope, directory)) {
             throw new AssetCommandError(403, '无权为该员工或部门新增手机号资产');
           }
@@ -819,29 +867,33 @@ export function createAssetCommandService(
           if (state.phones.some((phone) => phone.id !== id && phone.phoneNumber === phoneNumber)) {
             throw new AssetCommandError(409, '手机号已存在');
           }
-          const deviceId = input.deviceId === undefined ? existing.deviceId : requiredText(input.deviceId, '所属设备不能为空');
-          const device = state.devices.find((item) => item.id === deviceId);
-          if (!device) throw new AssetCommandError(400, '所属设备不存在');
-          if (!visibleToScope(device, scope, directory)) throw new AssetCommandError(403, '无权绑定该设备');
-          const slotType = input.slotType || existing.slotType;
-          if (device.simType === '单卡' && slotType === '卡槽2') {
+          const deviceId = input.deviceId === undefined ? existing.deviceId : cleanText(input.deviceId) || undefined;
+          const device = deviceId ? state.devices.find((item) => item.id === deviceId) : undefined;
+          if (deviceId && !device) throw new AssetCommandError(400, '所属设备不存在');
+          if (device && !visibleToScope(device, scope, directory)) throw new AssetCommandError(403, '无权绑定该设备');
+          const slotType = deviceId ? input.slotType || existing.slotType || '卡槽1' : undefined;
+          const communicationType = device ? readDeviceCommunicationType(device) : undefined;
+          if (communicationType === '无SIM') throw new AssetCommandError(409, '无SIM设备不能绑定手机号');
+          if (communicationType && communicationType !== '双卡' && slotType === '卡槽2') {
             throw new AssetCommandError(409, '单卡设备只能绑定卡槽1手机号');
           }
-          if (state.phones.some((phone) => phone.id !== id && phone.deviceId === deviceId && phone.slotType === slotType)) {
+          if (deviceId && state.phones.some((phone) => phone.id !== id && phone.deviceId === deviceId && phone.slotType === slotType)) {
             throw new AssetCommandError(409, '该设备卡槽已绑定手机号');
           }
-          const maxPhoneCount = device.simType === '双卡' ? 2 : 1;
-          if (state.phones.filter((phone) => phone.id !== id && phone.deviceId === deviceId).length >= maxPhoneCount) {
-            throw new AssetCommandError(409, `${device.simType}设备最多绑定${maxPhoneCount}个手机号`);
+          const maxPhoneCount = communicationType === '双卡' ? 2 : 1;
+          if (deviceId && state.phones.filter((phone) => phone.id !== id && phone.deviceId === deviceId).length >= maxPhoneCount) {
+            throw new AssetCommandError(409, `${communicationType}设备最多绑定${maxPhoneCount}个手机号`);
           }
           const realName = input.realName === undefined ? existing.realName : cleanText(input.realName) || undefined;
           const org = resolveOrgFields({ ...existing, ...input }, directory);
-          const next: AssetPhoneNumber = {
+          const next = normalizeAssetPhone({
             ...existing,
             phoneNumber,
             phoneNumberMasked: maskPhone(phoneNumber),
             realName,
             realNameMasked: maskRealName(realName),
+            iccidMasked: maskIdentifier(input.iccid ?? existing.iccid),
+            imsiMasked: maskIdentifier(input.imsi ?? existing.imsi),
             operator: input.operator || existing.operator,
             attributionLocation: input.attributionLocation === undefined
               ? existing.attributionLocation
@@ -858,7 +910,7 @@ export function createAssetCommandService(
             currentUser: org.currentUser,
             status: input.status || existing.status,
             updatedAt,
-          };
+          });
           if (!visibleToScope(next, scope, directory)) {
             throw new AssetCommandError(403, '无权将手机号资产转移给该员工或部门');
           }
@@ -921,7 +973,8 @@ export function createAssetCommandService(
             if (!phone) throw new AssetCommandError(400, '绑定手机号不存在');
             if (!visibleToScope(phone, scope, directory)) throw new AssetCommandError(403, '无权绑定该手机号');
           }
-          const account: AssetInternetAccount = {
+          const controlStatus = input.controlStatus || (input.permissionStatus === '离职待回收' || input.permissionStatus === '已回收' ? input.permissionStatus : '已掌控');
+          const account = normalizeAssetAccount({
             id: makeId('asset-account'),
             accountNo: cleanText(input.accountNo) || nextAccountNumber(state.accounts),
             platform,
@@ -933,6 +986,7 @@ export function createAssetCommandService(
             phoneId,
             boundEmail: cleanText(input.boundEmail) || undefined,
             boundEmailMasked: maskEmail(input.boundEmail),
+            accountCategory: input.accountCategory || '主账号',
             ownerSubject: input.ownerSubject || '公司',
             departmentId: org.departmentId,
             department: org.department,
@@ -940,16 +994,20 @@ export function createAssetCommandService(
             owner: org.owner,
             currentUserId: org.currentUserId,
             currentUser: org.currentUser,
-            permissionStatus: input.permissionStatus || '正常',
-            accountStatus: input.accountStatus || '正常',
+            controlStatus,
+            permissionStatus: controlStatus === '已掌控' || controlStatus === '待交接' ? '正常' : controlStatus,
+            accountStatus: input.accountStatus || '使用中',
             riskLevel: input.riskLevel || '低',
             serviceProvider: cleanText(input.serviceProvider),
             monthlyFee: Number(input.monthlyFee || 0),
             expiresAt: cleanText(input.expiresAt) || undefined,
             purpose: cleanText(input.purpose),
+            businessScene: cleanText(input.businessScene) || undefined,
+            twoFactorMethod: cleanText(input.twoFactorMethod) || undefined,
+            remark: cleanText(input.remark) || undefined,
             createdAt,
             updatedAt: createdAt,
-          };
+          });
           if (!visibleToScope(account, scope, directory)) {
             throw new AssetCommandError(403, '无权为该员工或部门新增互联网账号');
           }

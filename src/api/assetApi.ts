@@ -32,6 +32,13 @@ import { backendRequest, getBackendBaseUrl, readBackendToken, shouldUseBackendAp
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { readDeviceImeis, validateDeviceImeis } from '../domain/assets/deviceImei';
+import {
+  normalizeAssetAccount,
+  normalizeAssetDevice,
+  normalizeAssetPhone,
+  readAccountControlStatus,
+  readDeviceCommunicationType,
+} from '../domain/assets/assetFields';
 
 const delay = (ms?: number) => baseDelay(ms, 'assets');
 import {
@@ -81,18 +88,18 @@ function includesKeyword(value: unknown, keyword: string): boolean {
 }
 
 function devices(): AssetDevice[] {
-  return (getStorageData<AssetDevice[]>(STORAGE_KEYS.ASSET_DEVICES) || []).map((device) => ({
+  return (getStorageData<AssetDevice[]>(STORAGE_KEYS.ASSET_DEVICES) || []).map((device) => normalizeAssetDevice({
     ...device,
     ...readDeviceImeis(device),
   }));
 }
 
 function phones(): AssetPhoneNumber[] {
-  return getStorageData<AssetPhoneNumber[]>(STORAGE_KEYS.ASSET_PHONE_NUMBERS) || [];
+  return (getStorageData<AssetPhoneNumber[]>(STORAGE_KEYS.ASSET_PHONE_NUMBERS) || []).map((phone) => normalizeAssetPhone({ ...phone }));
 }
 
 function accounts(): AssetInternetAccount[] {
-  return getStorageData<AssetInternetAccount[]>(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS) || [];
+  return (getStorageData<AssetInternetAccount[]>(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS) || []).map((account) => normalizeAssetAccount({ ...account }));
 }
 
 function risks(): AssetRisk[] {
@@ -135,6 +142,13 @@ function maskRealName(value?: string): string | undefined {
   if (!text) return undefined;
   if (text.length === 1) return '*';
   return `${text.slice(0, 1)}*${text.slice(2)}`;
+}
+
+function maskIdentifier(value?: string): string | undefined {
+  const raw = String(value || '').trim();
+  if (!raw) return undefined;
+  if (raw.length <= 8) return `${raw.slice(0, 2)}****${raw.slice(-2)}`;
+  return `${raw.slice(0, 6)}${'*'.repeat(Math.min(8, raw.length - 10))}${raw.slice(-4)}`;
 }
 
 function nextNumber<T>(rows: T[], readValue: (row: T) => string, prefix: string): string {
@@ -252,7 +266,7 @@ function rebuildRisksAndOffboarding(): void {
         existingByKey.get(key),
       ));
     }
-    if (account.permissionStatus === '离职待回收') {
+    if (readAccountControlStatus(account) === '离职待回收') {
       const key = `offboarding-account-${account.id}`;
       nextRisks.push(makeRisk(
         key,
@@ -309,7 +323,7 @@ function rebuildRisksAndOffboarding(): void {
   ) && assetStillExistsForTask(task, deviceRows, phoneRows, accountRows));
   const preservedIds = new Set(preservedTasks.map((task) => task.assetId));
   const accountTasks = accountRows
-    .filter((account) => account.permissionStatus === '离职待回收')
+    .filter((account) => readAccountControlStatus(account) === '离职待回收')
     .filter((account) => !preservedIds.has(account.id))
     .map((account) => {
       const existing = existingTasks.get(account.id);
@@ -932,16 +946,29 @@ async function fetchDevices(filters?: AssetFilters): Promise<ApiResponse<Paginat
 async function createDevice(input: Partial<AssetDeviceInput>): Promise<ApiResponse<AssetDevice>> {
   return guarded(() => {
     const rows = devices();
-    const imeiFields = validateDeviceImeis(input, rows);
+    const normalized = normalizeAssetDevice(input);
+    const brand = requiredText(normalized.brand, '设备品牌不能为空');
+    const model = requiredText(normalized.model, '设备型号不能为空');
+    const imeiFields = validateDeviceImeis(normalized, rows);
     const createdAt = now();
     const orgFields = resolveAssetOrgFields(input);
-    const device: AssetDevice = {
+    const device = normalizeAssetDevice({
       id: `asset-device-${Date.now()}`,
       deviceCode: input.deviceCode || nextNumber(rows, (device) => device.deviceCode, 'DEV'),
       deviceName: requiredText(input.deviceName, '设备名称不能为空'),
-      brandModel: requiredText(input.brandModel, '品牌型号不能为空'),
+      deviceCategory: normalized.deviceCategory,
+      brand,
+      model,
+      brandModel: [brand, model].join(' '),
       ...imeiFields,
-      simType: input.simType || '双卡',
+      communicationType: normalized.communicationType,
+      simType: normalized.simType,
+      serialNumber: normalized.serialNumber,
+      acquisitionType: normalized.acquisitionType,
+      purchaseAmount: normalized.purchaseAmount,
+      monthlyRent: normalized.monthlyRent,
+      acquiredAt: normalized.acquiredAt,
+      warrantyExpiresAt: normalized.warrantyExpiresAt,
       ownerSubject: input.ownerSubject || '公司',
       departmentId: orgFields.departmentId,
       department: orgFields.department,
@@ -949,13 +976,13 @@ async function createDevice(input: Partial<AssetDeviceInput>): Promise<ApiRespon
       owner: orgFields.owner,
       currentUserId: orgFields.currentUserId,
       currentUser: orgFields.currentUser,
-      status: input.status || '正常',
+      status: input.status || '库存中',
       riskLevel: input.riskLevel || '低',
-      monthlyCost: Number(input.monthlyCost || 0),
+      monthlyCost: Number(input.monthlyCost ?? normalized.monthlyRent),
       remark: input.remark || '',
       createdAt,
       updatedAt: createdAt,
-    };
+    });
     setStorageData(STORAGE_KEYS.ASSET_DEVICES, [device, ...rows]);
     logAssetOperation('新增资产', '设备资产', device.id, device.deviceName, `新增设备 ${device.deviceCode}`);
     rebuildRisksAndOffboarding();
@@ -968,15 +995,23 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
     const rows = devices();
     const existing = rows.find((device) => device.id === id);
     if (!existing) throw new Error('设备不存在');
-    const nextSimType = input.simType || existing.simType;
-    if (nextSimType === '单卡' && phones().some((phone) => phone.deviceId === id && phone.slotType === '卡槽2')) {
-      throw new Error('单卡设备不能保留卡槽2手机号，请先解绑或迁移卡槽2手机号');
+    const normalized = normalizeAssetDevice({
+      ...existing,
+      ...input,
+      communicationType: input.communicationType ?? (input.simType ? input.simType : existing.communicationType),
+    });
+    const communicationType = readDeviceCommunicationType(normalized);
+    if (communicationType !== '双卡' && phones().some((phone) => phone.deviceId === id && phone.slotType === '卡槽2')) {
+      throw new Error('非双卡设备不能保留卡槽2手机号，请先解绑或迁移');
+    }
+    if (communicationType === '无SIM' && phones().some((phone) => phone.deviceId === id)) {
+      throw new Error('无SIM设备不能保留已绑定手机号，请先解绑');
     }
     const orgFields = resolveAssetOrgFields(input, existing);
     const imeiFields = validateDeviceImeis({
       ...existing,
       ...input,
-      simType: nextSimType,
+      communicationType,
       imei1: input.imei1 === undefined
         ? input.imei === undefined ? existing.imei1 || existing.imei : input.imei
         : input.imei1,
@@ -986,12 +1021,16 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
       imeiMasked: _legacyImeiMasked,
       ...existingWithoutLegacyImei
     } = existing;
-    const updated: AssetDevice = {
+    const updated = normalizeAssetDevice({
       ...existingWithoutLegacyImei,
       ...input,
       imei: undefined,
       imeiMasked: undefined,
       ...imeiFields,
+      brand: requiredText(normalized.brand, '设备品牌不能为空'),
+      model: requiredText(normalized.model, '设备型号不能为空'),
+      brandModel: [normalized.brand, normalized.model].join(' '),
+      communicationType,
       departmentId: orgFields.departmentId,
       department: orgFields.department,
       ownerId: orgFields.ownerId,
@@ -1000,7 +1039,7 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
       currentUser: orgFields.currentUser,
       monthlyCost: Number(input.monthlyCost ?? existing.monthlyCost),
       updatedAt: now(),
-    };
+    });
     setStorageData(STORAGE_KEYS.ASSET_DEVICES, rows.map((device) => (device.id === id ? updated : device)));
     logAssetOperation('编辑资料', '设备资产', updated.id, updated.deviceName, `编辑设备 ${updated.deviceCode}`);
     rebuildRisksAndOffboarding();
@@ -1050,19 +1089,25 @@ async function fetchPhoneNumbers(filters?: AssetFilters): Promise<ApiResponse<Pa
 }
 
 function assertPhoneBinding(input: Partial<AssetPhoneNumberInput>, excludeId?: string): void {
-  const deviceId = requiredText(input.deviceId, '所属设备不能为空');
+  const deviceId = String(input.deviceId || '').trim();
+  if (!deviceId) {
+    if (input.slotType) throw new Error('未选择设备时不能指定卡槽');
+    return;
+  }
   const device = getDevice(deviceId);
   if (!device) throw new Error('所属设备不存在');
   const slotType = input.slotType || '卡槽1';
-  if (device.simType === '单卡' && slotType === '卡槽2') {
+  const communicationType = readDeviceCommunicationType(device);
+  if (communicationType === '无SIM') throw new Error('无SIM设备不能绑定手机号');
+  if (communicationType !== '双卡' && slotType === '卡槽2') {
     throw new Error('单卡设备只能绑定卡槽1手机号');
   }
   if (phones().some((phone) => phone.id !== excludeId && phone.deviceId === deviceId && phone.slotType === slotType)) {
     throw new Error('该设备卡槽已绑定手机号');
   }
   const boundCount = phones().filter((phone) => phone.id !== excludeId && phone.deviceId === deviceId).length;
-  const maxPhoneCount = device.simType === '双卡' ? 2 : 1;
-  if (boundCount >= maxPhoneCount) throw new Error(`${device.simType}设备最多绑定${maxPhoneCount}个手机号`);
+  const maxPhoneCount = communicationType === '双卡' ? 2 : 1;
+  if (boundCount >= maxPhoneCount) throw new Error(`${communicationType}设备最多绑定${maxPhoneCount}个手机号`);
 }
 
 async function createPhoneNumber(input: Partial<AssetPhoneNumberInput>): Promise<ApiResponse<AssetPhoneNumber>> {
@@ -1073,7 +1118,8 @@ async function createPhoneNumber(input: Partial<AssetPhoneNumberInput>): Promise
     if (rows.some((phone) => phone.phoneNumber === phoneNumber)) throw new Error('手机号已存在');
     const createdAt = now();
     const orgFields = resolveAssetOrgFields(input);
-    const phone: AssetPhoneNumber = {
+    const deviceId = String(input.deviceId || '').trim() || undefined;
+    const phone = normalizeAssetPhone({
       id: `asset-phone-${Date.now()}`,
       phoneNumber,
       phoneNumberMasked: maskPhone(phoneNumber),
@@ -1081,20 +1127,28 @@ async function createPhoneNumber(input: Partial<AssetPhoneNumberInput>): Promise
       realNameMasked: maskRealName(input.realName),
       operator: input.operator || inferPhoneOperator(phoneNumber),
       attributionLocation: input.attributionLocation || inferPhoneAttributionLocation(phoneNumber),
-      deviceId: requiredText(input.deviceId, '所属设备不能为空'),
-      slotType: input.slotType || '卡槽1',
+      simForm: input.simForm || '实体SIM',
+      iccid: input.iccid,
+      iccidMasked: maskIdentifier(input.iccid),
+      imsi: input.imsi,
+      imsiMasked: maskIdentifier(input.imsi),
+      deviceId,
+      slotType: deviceId ? input.slotType || '卡槽1' : undefined,
       packageName: input.packageName || '',
       monthlyFee: Number(input.monthlyFee || 0),
+      ownerSubject: input.ownerSubject || '公司',
       departmentId: orgFields.departmentId,
       department: orgFields.department,
       ownerId: orgFields.ownerId,
       owner: orgFields.owner,
       currentUserId: orgFields.currentUserId,
       currentUser: orgFields.currentUser,
-      status: input.status || '使用中',
+      status: input.status || '待启用',
+      contractExpiresAt: input.contractExpiresAt,
+      remark: input.remark,
       createdAt,
       updatedAt: createdAt,
-    };
+    });
     await setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, [phone, ...rows]);
     logAssetOperation('新增资产', '手机号资产', phone.id, phone.phoneNumberMasked, `新增手机号 ${phone.phoneNumberMasked}`);
     rebuildRisksAndOffboarding();
@@ -1111,12 +1165,17 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
     const phoneNumber = input.phoneNumber === undefined ? existing.phoneNumber : requiredText(input.phoneNumber, '手机号不能为空');
     if (rows.some((phone) => phone.id !== id && phone.phoneNumber === phoneNumber)) throw new Error('手机号已存在');
     const orgFields = resolveAssetOrgFields(input, existing);
-    const updated: AssetPhoneNumber = {
+    const nextDeviceId = input.deviceId === undefined ? existing.deviceId : String(input.deviceId || '').trim() || undefined;
+    const updated = normalizeAssetPhone({
       ...existing,
       ...input,
       phoneNumber,
       phoneNumberMasked: maskPhone(phoneNumber),
       realNameMasked: maskRealName(input.realName ?? existing.realName),
+      iccidMasked: maskIdentifier(input.iccid ?? existing.iccid),
+      imsiMasked: maskIdentifier(input.imsi ?? existing.imsi),
+      deviceId: nextDeviceId,
+      slotType: nextDeviceId ? input.slotType || existing.slotType || '卡槽1' : undefined,
       operator: input.operator || (input.phoneNumber !== undefined ? inferPhoneOperator(phoneNumber) : existing.operator),
       attributionLocation: input.attributionLocation || (input.phoneNumber !== undefined ? inferPhoneAttributionLocation(phoneNumber) : existing.attributionLocation),
       departmentId: orgFields.departmentId,
@@ -1127,7 +1186,7 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
       currentUser: orgFields.currentUser,
       monthlyFee: Number(input.monthlyFee ?? existing.monthlyFee),
       updatedAt: now(),
-    };
+    });
     await setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, rows.map((phone) => (phone.id === id ? updated : phone)));
     logAssetOperation('编辑资料', '手机号资产', updated.id, updated.phoneNumberMasked, `编辑手机号 ${updated.phoneNumberMasked}`);
     rebuildRisksAndOffboarding();
@@ -1190,7 +1249,8 @@ async function createInternetAccount(input: Partial<AssetInternetAccountInput>):
     const loginAccount = requiredText(input.loginAccount, '登录账号不能为空');
     const createdAt = now();
     const orgFields = resolveAssetOrgFields(input);
-    const account: AssetInternetAccount = {
+    const controlStatus = input.controlStatus || (input.permissionStatus === '离职待回收' || input.permissionStatus === '已回收' ? input.permissionStatus : '已掌控');
+    const account = normalizeAssetAccount({
       id: `asset-account-${Date.now()}`,
       accountNo: input.accountNo || nextNumber(rows, (account) => account.accountNo, 'A'),
       platform: requiredText(input.platform, '平台不能为空'),
@@ -1209,16 +1269,21 @@ async function createInternetAccount(input: Partial<AssetInternetAccountInput>):
       owner: orgFields.owner,
       currentUserId: orgFields.currentUserId,
       currentUser: orgFields.currentUser,
-      permissionStatus: input.permissionStatus || '正常',
-      accountStatus: input.accountStatus || '正常',
+      accountCategory: input.accountCategory || '主账号',
+      controlStatus,
+      permissionStatus: controlStatus === '已掌控' || controlStatus === '待交接' ? '正常' : controlStatus,
+      accountStatus: input.accountStatus || '使用中',
       riskLevel: input.riskLevel || '低',
       serviceProvider: input.serviceProvider || '',
       monthlyFee: Number(input.monthlyFee || 0),
       expiresAt: input.expiresAt || '',
       purpose: input.purpose || '',
+      businessScene: input.businessScene,
+      twoFactorMethod: input.twoFactorMethod,
+      remark: input.remark,
       createdAt,
       updatedAt: createdAt,
-    };
+    });
     setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, [account, ...rows]);
     logAssetOperation('新增资产', '互联网账号', account.id, account.accountName, `新增账号 ${account.accountNo}`);
     if (account.phoneId) logAssetOperation('绑定资产', '互联网账号', account.id, account.accountName, `绑定手机号 ${getPhone(account.phoneId)?.phoneNumberMasked || account.phoneId}`);
@@ -1236,7 +1301,8 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
     const loginAccount = input.loginAccount === undefined ? existing.loginAccount : requiredText(input.loginAccount, '登录账号不能为空');
     const nextPhoneId = input.phoneId === undefined ? existing.phoneId : normalizePhoneId(input.phoneId);
     const orgFields = resolveAssetOrgFields(input, existing);
-    const updated: AssetInternetAccount = {
+    const controlStatus = input.controlStatus || (input.permissionStatus ? readAccountControlStatus({ permissionStatus: input.permissionStatus }) : readAccountControlStatus(existing));
+    const updated = normalizeAssetAccount({
       ...existing,
       ...input,
       phoneId: nextPhoneId,
@@ -1244,6 +1310,8 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
       loginAccountMasked: maskLogin(loginAccount),
       realNameMasked: maskRealName(input.realName ?? existing.realName),
       boundEmailMasked: maskEmail(input.boundEmail ?? existing.boundEmail),
+      controlStatus,
+      permissionStatus: controlStatus === '已掌控' || controlStatus === '待交接' ? '正常' : controlStatus,
       departmentId: orgFields.departmentId,
       department: orgFields.department,
       ownerId: orgFields.ownerId,
@@ -1252,7 +1320,7 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
       currentUser: orgFields.currentUser,
       monthlyFee: Number(input.monthlyFee ?? existing.monthlyFee),
       updatedAt: now(),
-    };
+    });
     setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, rows.map((account) => (account.id === id ? updated : account)));
     logAssetOperation('编辑资料', '互联网账号', updated.id, updated.accountName, `编辑账号 ${updated.accountNo}`);
     if (existing.phoneId !== updated.phoneId) {
@@ -1334,10 +1402,11 @@ async function createOffboardingTasksForEmployee(employeeName: string, departmen
       if (!assetBelongsToEmployee(account, name)) return account;
       const marked: AssetInternetAccount = {
         ...account,
+        controlStatus: '离职待回收',
         permissionStatus: '离职待回收',
         updatedAt: now(),
       };
-      accountChanged = accountChanged || marked.permissionStatus !== account.permissionStatus;
+      accountChanged = accountChanged || readAccountControlStatus(account) !== '离职待回收';
       upsertTask(makeOffboardingTask({
         assetId: marked.id,
         assetType: '互联网账号',
@@ -1496,7 +1565,7 @@ async function completeOffboardingTask(taskId: string): Promise<ApiResponse<Asse
   if (targetTask?.assetType === '互联网账号') {
     setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((account) => (
       account.id === targetTask.assetId
-        ? { ...account, permissionStatus: '已回收', accountStatus: account.accountStatus === '已注销' ? account.accountStatus : '闲置', updatedAt: now() }
+        ? { ...account, controlStatus: '已回收', permissionStatus: '已回收', accountStatus: account.accountStatus === '已注销' ? account.accountStatus : '闲置', updatedAt: now() }
         : account
     )));
   }
