@@ -343,6 +343,11 @@ assert.match(source, /app\.get\('\/api\/recovery-orders\/:id\/correction-prechec
 assert.match(source, /app\.post\('\/api\/recovery-orders\/:id\/correct', requireRecoveryCorrectAccess,/);
 assert.match(source, /canAccessLegacyStorageKey\(req\.currentUser, key, 'read'\)/);
 assert.match(source, /canAccessLegacyStorageKey\(req\.currentUser, key, 'write'\)/);
+assert.match(
+  source,
+  /result\.code === 0 && isAssetStorageKey\(key\)[\s\S]*assetListService\.invalidate\(\)/,
+  '资产存储写入成功后必须失效列表快照',
+);
 assert.match(source, /getScopedStorageKeys\('assets'\)/);
 assert.match(
   source,

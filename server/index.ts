@@ -2257,6 +2257,9 @@ app.put('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequ
     }
   }
   const result = await storageService.set(key, req.body?.value);
+  if (result.code === 0 && isAssetStorageKey(key)) {
+    assetListService.invalidate();
+  }
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 

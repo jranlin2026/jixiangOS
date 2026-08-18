@@ -650,11 +650,11 @@ function accountInputFromCsv(raw: Record<string, string>): Partial<AssetInternet
   };
 }
 
-async function guarded<T>(task: () => T): Promise<ApiResponse<T>> {
+async function guarded<T>(task: () => T | Promise<T>): Promise<ApiResponse<T>> {
   ensureInit();
   await delay(120);
   try {
-    return createSuccessResponse(task());
+    return createSuccessResponse(await task());
   } catch (error: any) {
     return createErrorResponse(error.message || '资产操作失败');
   }
@@ -1066,7 +1066,7 @@ function assertPhoneBinding(input: Partial<AssetPhoneNumberInput>, excludeId?: s
 }
 
 async function createPhoneNumber(input: Partial<AssetPhoneNumberInput>): Promise<ApiResponse<AssetPhoneNumber>> {
-  return guarded(() => {
+  return guarded(async () => {
     assertPhoneBinding(input);
     const rows = phones();
     const phoneNumber = requiredText(input.phoneNumber, '手机号不能为空');
@@ -1095,7 +1095,7 @@ async function createPhoneNumber(input: Partial<AssetPhoneNumberInput>): Promise
       createdAt,
       updatedAt: createdAt,
     };
-    setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, [phone, ...rows]);
+    await setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, [phone, ...rows]);
     logAssetOperation('新增资产', '手机号资产', phone.id, phone.phoneNumberMasked, `新增手机号 ${phone.phoneNumberMasked}`);
     rebuildRisksAndOffboarding();
     return phone;
@@ -1103,7 +1103,7 @@ async function createPhoneNumber(input: Partial<AssetPhoneNumberInput>): Promise
 }
 
 async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInput>): Promise<ApiResponse<AssetPhoneNumber>> {
-  return guarded(() => {
+  return guarded(async () => {
     const rows = phones();
     const existing = rows.find((phone) => phone.id === id);
     if (!existing) throw new Error('手机号不存在');
@@ -1128,7 +1128,7 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
       monthlyFee: Number(input.monthlyFee ?? existing.monthlyFee),
       updatedAt: now(),
     };
-    setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, rows.map((phone) => (phone.id === id ? updated : phone)));
+    await setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, rows.map((phone) => (phone.id === id ? updated : phone)));
     logAssetOperation('编辑资料', '手机号资产', updated.id, updated.phoneNumberMasked, `编辑手机号 ${updated.phoneNumberMasked}`);
     rebuildRisksAndOffboarding();
     return updated;
@@ -1136,21 +1136,24 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
 }
 
 async function deletePhoneNumber(id: string): Promise<ApiResponse<AssetPhoneNumber>> {
-  return guarded(() => {
+  return guarded(async () => {
     const rows = phones();
     const existing = rows.find((phone) => phone.id === id);
     if (!existing) throw new Error('手机号不存在');
     const relatedAccounts = accounts().filter((account) => account.phoneId === id);
 
-    setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, rows.filter((phone) => phone.id !== id));
+    const persistenceWrites = [
+      setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, rows.filter((phone) => phone.id !== id)),
+      setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, offboardingTasks().filter((task) => (
+        !(task.assetType === '手机号资产' && task.assetId === id)
+      ))),
+    ];
     if (relatedAccounts.length) {
-      setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((account) => (
+      persistenceWrites.push(setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((account) => (
         account.phoneId === id ? { ...account, phoneId: undefined, updatedAt: now() } : account
-      )));
+      ))));
     }
-    setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, offboardingTasks().filter((task) => (
-      !(task.assetType === '手机号资产' && task.assetId === id)
-    )));
+    await Promise.all(persistenceWrites);
     logAssetOperation(
       '删除资产',
       '手机号资产',

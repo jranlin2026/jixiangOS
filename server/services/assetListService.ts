@@ -102,6 +102,10 @@ export function createAssetListService(
   );
 
   return {
+    invalidate() {
+      bundlePromise = null;
+      bundleLoadedAt = 0;
+    },
     async list(kind: AssetListKind, filters: AssetFilters, user: AuthenticatedUser) {
       const visible = await loadVisible(user);
       const rows = (Array.isArray(visible[KEY_BY_KIND[kind]]) ? visible[KEY_BY_KIND[kind]] : []) as AssetRow[];
