@@ -167,6 +167,11 @@ const accountDeleteLabel = (account: AssetInternetAccount) => {
 };
 
 const PLATFORM_LOGOS = [
+  { keyword: 'Apple ID', label: 'A', color: '#111827' },
+  { keyword: 'Google账号', label: 'G', color: '#4285F4' },
+  { keyword: 'LINE', label: 'L', color: '#06C755' },
+  { keyword: 'Instagram', label: 'IG', color: '#E4405F' },
+  { keyword: 'TikTok', label: 'TK', color: '#111827' },
   { keyword: '快手', label: '快', color: '#FF5B22' },
   { keyword: '抖音', label: '抖', color: '#111827' },
   { keyword: '微信', label: '微', color: '#18B566' },
@@ -433,7 +438,7 @@ const AssetManagement: React.FC = () => {
   const showFeedback = (message: React.ReactNode, title = '提示') => {
     void showSystemAlert(message, title);
   };
-  const [platformOptions, setPlatformOptions] = useState<string[]>([]);
+  const [platformOptions, setPlatformOptions] = useState<string[]>(() => assetApi.getAccountPlatformOptions());
   const [lookupDevices, setLookupDevices] = useState<AssetDevice[]>([]);
   const [lookupPhones, setLookupPhones] = useState<AssetPhoneNumber[]>([]);
   const [lookupAccounts, setLookupAccounts] = useState<AssetInternetAccount[]>([]);
@@ -2657,7 +2662,7 @@ const AssetManagement: React.FC = () => {
   const renderAccountFields = () => (
     <>
       <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.account[0].title} summary={sectionSummary(['platform', 'accountCategory', 'accountName', 'loginAccount', 'realNameSubject'], ASSET_FORM_SECTIONS.account[0].summary)} errorCount={sectionErrorCount(['platform', 'accountCategory', 'accountName', 'loginAccount']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
-        {renderSelectField('platform', '业务平台', platformOptions.length ? platformOptions : ['抖音', '快手', '小红书', '微信', '视频号'], { required: true })}
+        {renderSelectField('platform', '业务平台', platformOptions, { required: true })}
         {renderSelectField('accountCategory', '账号类型', ['主账号', '员工号', '直播号', '投放号', '客服号', '其他'], { required: true })}
         {renderTextField('accountName', '账号名称', { required: true })}
         {renderTextField('loginAccount', '登录账号', { required: true })}

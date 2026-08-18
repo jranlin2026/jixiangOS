@@ -42,6 +42,19 @@ import {
 } from '../domain/assets/assetFields';
 
 const delay = (ms?: number) => baseDelay(ms, 'assets');
+
+const DEFAULT_ACCOUNT_PLATFORM_OPTIONS = [
+  '抖音',
+  '快手',
+  '小红书',
+  '微信',
+  '视频号',
+  'Apple ID',
+  'Google账号',
+  'LINE',
+  'Instagram',
+  'TikTok',
+];
 import {
   canViewAssetAccount,
   canViewAssetDevice,
@@ -1775,7 +1788,10 @@ async function fetchMatrixPublishStats(nowIso = now()): Promise<ApiResponse<Asse
 }
 
 function getAccountPlatformOptions(): string[] {
-  return Array.from(new Set(visibleAccounts().map((account) => account.platform))).filter(Boolean);
+  return Array.from(new Set([
+    ...DEFAULT_ACCOUNT_PLATFORM_OPTIONS,
+    ...visibleAccounts().map((account) => account.platform),
+  ])).filter(Boolean);
 }
 
 async function revealSensitiveField(

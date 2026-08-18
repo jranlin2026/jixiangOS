@@ -38,6 +38,10 @@ async function resetAssets() {
 
 await resetAssets();
 
+for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok']) {
+  assert.ok(assetApi.getAccountPlatformOptions().includes(platform), `互联网账号平台应包含 ${platform}`);
+}
+
 {
   const unassigned = await assetApi.createInternetAccount({
     platform: 'Douyin',
