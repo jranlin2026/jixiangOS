@@ -22,6 +22,7 @@ import {
 } from '../../src/shared/utils/permissions';
 import { normalizeRoleDataScopes } from '../../src/shared/utils/organizationConfig';
 import { readDeviceImeis } from '../../src/domain/assets/deviceImei';
+import { normalizeAssetAccount, normalizeAssetDevice, normalizeAssetPhone } from '../../src/domain/assets/assetFields';
 
 const ASSET_STORAGE_KEYS = new Set<string>([
   STORAGE_KEYS.ASSET_DEVICES,
@@ -167,14 +168,17 @@ export function filterAssetStorageData(
   const scope = assetScopeForUser(user, context);
   const canViewSensitive = hasPermission(user, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW, 'read');
   const devices = asArray<AssetDevice>(data[STORAGE_KEYS.ASSET_DEVICES])
+    .map((device) => normalizeAssetDevice({ ...device }))
     .filter((device) => visibleDevice(device, scope))
     .map((device) => sanitizeDevice(device, canViewSensitive));
   const visibleDeviceIds = new Set(devices.map((device) => device.id));
   const phones = asArray<AssetPhoneNumber>(data[STORAGE_KEYS.ASSET_PHONE_NUMBERS])
+    .map((phone) => normalizeAssetPhone({ ...phone }))
     .filter((phone) => visiblePhone(phone, visibleDeviceIds, scope))
     .map((phone) => sanitizePhone(phone, canViewSensitive));
   const visiblePhoneIds = new Set(phones.map((phone) => phone.id));
   const accounts = asArray<AssetInternetAccount>(data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS])
+    .map((account) => normalizeAssetAccount({ ...account }))
     .filter((account) => visibleAccount(account, visiblePhoneIds, scope))
     .map((account) => sanitizeAccount(account, canViewSensitive));
   const visibleAssetIds = new Set<string>([

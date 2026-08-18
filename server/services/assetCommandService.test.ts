@@ -387,6 +387,15 @@ const noSimDevice = await riskService.createDevice({
 assert.equal(noSimDevice.code, 0);
 assert.equal(noSimDevice.data?.communicationType, '无SIM');
 assert.equal(noSimDevice.data?.imei1, '');
+const updatedNoSimDevice = await riskService.updateDevice(noSimDevice.data!.id, {
+  serialNumber: 'FX3-SN-001',
+  acquisitionType: '租赁',
+  monthlyRent: 880,
+}, assetAdmin);
+assert.equal(updatedNoSimDevice.code, 0);
+assert.equal(updatedNoSimDevice.data?.serialNumber, 'FX3-SN-001');
+assert.equal(updatedNoSimDevice.data?.monthlyRent, 880);
+assert.equal(updatedNoSimDevice.data?.monthlyCost, 880);
 
 const unboundPhone = await riskService.createPhoneNumber({
   phoneNumber: '13900009999',
@@ -404,6 +413,16 @@ assert.equal(unboundPhone.code, 0);
 assert.equal(unboundPhone.data?.deviceId, undefined);
 assert.equal(unboundPhone.data?.slotType, undefined);
 assert.match(unboundPhone.data?.iccidMasked || '', /\*/);
+const updatedUnboundPhone = await riskService.updatePhoneNumber(unboundPhone.data!.id, {
+  simForm: '实体SIM',
+  iccid: '89860099999999999999',
+  contractExpiresAt: '2027-08-18',
+  remark: '已更换SIM',
+}, assetAdmin);
+assert.equal(updatedUnboundPhone.code, 0);
+assert.equal(updatedUnboundPhone.data?.iccid, '89860099999999999999');
+assert.equal(updatedUnboundPhone.data?.contractExpiresAt, '2027-08-18');
+assert.equal(updatedUnboundPhone.data?.remark, '已更换SIM');
 
 const pendingAccount = await riskService.createInternetAccount({
   platform: '小红书',

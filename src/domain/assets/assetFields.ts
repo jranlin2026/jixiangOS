@@ -84,6 +84,7 @@ export function normalizeAssetPhone<T extends LooseAsset>(source: T): T & AssetP
     iccidMasked: text(source.iccidMasked) || undefined,
     imsi: text(source.imsi) || undefined,
     imsiMasked: text(source.imsiMasked) || undefined,
+    realNameSubject: text(source.realNameSubject) || undefined,
     deviceId,
     slotType: deviceId ? (text(source.slotType) || '卡槽1') as AssetPhoneNumber['slotType'] : undefined,
     ownerSubject: (text(source.ownerSubject) || '公司') as AssetPhoneNumber['ownerSubject'],
@@ -113,6 +114,7 @@ export function normalizeAssetAccount<T extends LooseAsset>(source: T): T & Asse
   return {
     ...source,
     accountCategory: (text(source.accountCategory) || '主账号') as AssetInternetAccount['accountCategory'],
+    realNameSubject: text(source.realNameSubject) || undefined,
     controlStatus,
     permissionStatus: controlStatus === '已掌控' ? '正常' : controlStatus === '待交接' ? '正常' : controlStatus,
     accountStatus: normalizeAccountStatus(source.accountStatus),

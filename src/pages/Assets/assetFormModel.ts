@@ -10,11 +10,11 @@ export const ASSET_FORM_SECTIONS: Record<AssetFormType, Array<{ title: string; s
   phone: [
     { title: '号码与SIM', summary: '手机号 / SIM形态 / ICCID / IMSI' },
     { title: '设备绑定', summary: '可先建档，后绑定设备卡槽' },
-    { title: '归属与使用', summary: '实名 / 主体 / 部门 / 负责人' },
+    { title: '归属与使用', summary: '实名主体 / 实名信息 / 部门 / 负责人' },
     { title: '套餐与状态', summary: '运营商 / 套餐 / 费用 / 状态' },
   ],
   account: [
-    { title: '平台与账号', summary: '平台 / 类型 / 名称 / 登录账号' },
+    { title: '平台与账号', summary: '平台 / 类型 / 登录账号 / 实名主体' },
     { title: '安全与绑定', summary: '手机号 / 邮箱 / 二次验证 / 控制权' },
     { title: '归属与使用', summary: '主体 / 部门 / 负责人 / 使用人' },
     { title: '经营与状态', summary: '业务场景 / 服务商 / 费用 / 状态' },

@@ -437,8 +437,8 @@ const ASSET_IMPORT_LABELS: Record<AssetImportType, string> = {
 
 export const ASSET_IMPORT_TEMPLATES: Record<AssetImportType, string[]> = {
   devices: ['设备类型*', '设备名称*', '品牌*', '型号*', '序列号', '通信方式*', 'IMEI 1', 'IMEI 2', '取得方式', '购买金额', '月租金', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
-  phones: ['手机号*', 'SIM形态*', 'ICCID', 'IMSI', '实名信息', '运营商', '归属地', '所属设备编号', 'SIM卡槽', '套餐', '月费用', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
-  accounts: ['平台*', '账号类型*', '账号名称*', '登录账号*', '实名信息', '绑定手机号', '绑定邮箱', '二次验证', '账号控制权*', '所属主体', '所属部门', '资产负责人', '当前使用人', '账号状态', '业务场景', '服务商', '月费用', '用途', '备注'],
+  phones: ['手机号*', 'SIM形态*', 'ICCID', 'IMSI', '实名主体', '实名信息', '运营商', '归属地', '所属设备编号', 'SIM卡槽', '套餐', '月费用', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
+  accounts: ['平台*', '账号类型*', '账号名称*', '登录账号*', '实名主体', '实名信息', '绑定手机号', '绑定邮箱', '二次验证', '账号控制权*', '所属主体', '所属部门', '资产负责人', '当前使用人', '账号状态', '业务场景', '服务商', '月费用', '用途', '备注'],
 };
 
 const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> = {
@@ -462,6 +462,7 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
   phones: {
     '手机号*': '13900001111',
     'SIM形态*': '实体SIM',
+    实名主体: '张三',
     实名信息: '张三',
     运营商: '',
     归属地: '',
@@ -479,6 +480,7 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
     '账号类型*': '主账号',
     '账号名称*': '极享本地生活',
     '登录账号*': 'jx_import_demo',
+    实名主体: '深圳极享科技有限公司',
     实名信息: '张三',
     绑定手机号: '13900001111',
     绑定邮箱: 'ops@example.com',
@@ -642,6 +644,7 @@ function phoneInputFromCsv(raw: Record<string, string>): Partial<AssetPhoneNumbe
     simForm: (csvCell(raw, 'SIM形态*', 'SIM形态') || '实体SIM') as AssetPhoneNumberInput['simForm'],
     iccid: csvCell(raw, 'ICCID'),
     imsi: csvCell(raw, 'IMSI'),
+    realNameSubject: csvCell(raw, '实名主体'),
     realName: csvCell(raw, '实名信息'),
     operator: (csvCell(raw, '运营商') || inferPhoneOperator(phoneNumber)) as AssetPhoneNumberInput['operator'],
     attributionLocation: csvCell(raw, '归属地') || inferPhoneAttributionLocation(phoneNumber),
@@ -667,6 +670,7 @@ function accountInputFromCsv(raw: Record<string, string>): Partial<AssetInternet
     accountCategory: (csvCell(raw, '账号类型*', '账号类型') || '主账号') as AssetInternetAccountInput['accountCategory'],
     accountName: csvCell(raw, '账号名称*', '账号名称'),
     loginAccount: csvCell(raw, '登录账号*', '登录账号'),
+    realNameSubject: csvCell(raw, '实名主体'),
     realName: csvCell(raw, '实名信息'),
     phoneId: phone?.id,
     boundEmail: csvCell(raw, '绑定邮箱'),
@@ -812,6 +816,7 @@ function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPh
     const matchesKeyword = !keyword || [
       row.phoneNumber,
       row.phoneNumberMasked,
+      row.realNameSubject,
       row.realName,
       row.realNameMasked,
       row.operator,
@@ -842,6 +847,7 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
       row.accountName,
       row.accountCategory,
       row.loginAccountMasked,
+      row.realNameSubject,
       row.realName,
       row.realNameMasked,
       row.department,
@@ -1070,7 +1076,7 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
       owner: orgFields.owner,
       currentUserId: orgFields.currentUserId,
       currentUser: orgFields.currentUser,
-      monthlyCost: Number(input.monthlyCost ?? existing.monthlyCost),
+      monthlyCost: Number(input.monthlyCost ?? (input.monthlyRent !== undefined ? normalized.monthlyRent : existing.monthlyCost)),
       updatedAt: now(),
     });
     setStorageData(STORAGE_KEYS.ASSET_DEVICES, rows.map((device) => (device.id === id ? updated : device)));

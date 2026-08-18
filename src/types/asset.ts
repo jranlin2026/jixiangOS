@@ -79,6 +79,7 @@ export interface AssetPhoneNumber {
   iccidMasked?: string;
   imsi?: string;
   imsiMasked?: string;
+  realNameSubject?: string;
   realName?: string;
   realNameMasked?: string;
   operator: AssetPhoneOperator;
@@ -109,6 +110,7 @@ export interface AssetInternetAccount {
   accountCategory?: AssetAccountCategory;
   loginAccount: string;
   loginAccountMasked: string;
+  realNameSubject?: string;
   realName?: string;
   realNameMasked?: string;
   phoneId?: string;

@@ -689,6 +689,15 @@ await resetAssets();
   assert.equal(device.data.model, 'FX3');
   assert.equal(device.data.communicationType, '无SIM');
   assert.equal(device.data.imei1, '');
+  const updated = await assetApi.updateDevice(device.data.id, {
+    serialNumber: 'FX3-SN-001',
+    acquisitionType: '租赁',
+    monthlyRent: 880,
+  });
+  assert.equal(updated.code, 0);
+  assert.equal(updated.data.serialNumber, 'FX3-SN-001');
+  assert.equal(updated.data.monthlyRent, 880);
+  assert.equal(updated.data.monthlyCost, 880);
 }
 
 {
@@ -708,6 +717,16 @@ await resetAssets();
   assert.equal(phone.data.slotType, undefined);
   assert.match(phone.data.iccidMasked || '', /\*/);
   assert.match(phone.data.imsiMasked || '', /\*/);
+  const updated = await assetApi.updatePhoneNumber(phone.data.id, {
+    simForm: '实体SIM',
+    iccid: '89860099999999999999',
+    contractExpiresAt: '2027-08-18',
+    remark: '已更换SIM',
+  });
+  assert.equal(updated.code, 0);
+  assert.equal(updated.data.iccid, '89860099999999999999');
+  assert.equal(updated.data.contractExpiresAt, '2027-08-18');
+  assert.equal(updated.data.remark, '已更换SIM');
 }
 
 {
