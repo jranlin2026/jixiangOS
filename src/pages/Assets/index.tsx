@@ -2412,35 +2412,11 @@ const AssetManagement: React.FC = () => {
 
   const renderPhoneFields = () => (
     <>
-      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.phone[0].title} summary={sectionSummary(['phoneNumber', 'simForm', 'iccid', 'imsi', 'servicePassword'], ASSET_FORM_SECTIONS.phone[0].summary)} errorCount={sectionErrorCount(['phoneNumber', 'simForm']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
+      <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.phone[0].title} summary={sectionSummary(['phoneNumber', 'simForm', 'iccid', 'imsi'], ASSET_FORM_SECTIONS.phone[0].summary)} errorCount={sectionErrorCount(['phoneNumber', 'simForm']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
         <TextField size="small" label="完整手机号" value={formState.values.phoneNumber || ''} onChange={(event) => updatePhoneNumberValue(event.target.value)} required fullWidth />
         {renderSelectField('simForm', 'SIM形态', ['实体SIM', 'eSIM'], { required: true })}
         {renderTextField('iccid', 'ICCID')}
         {renderTextField('imsi', 'IMSI')}
-        <TextField
-          size="small"
-          label={formState.mode === 'edit' ? '新服务密码（留空不修改）' : '服务密码'}
-          value={formState.values.servicePassword || ''}
-          onChange={(event) => updateFormValue('servicePassword', event.target.value)}
-          type="password"
-          autoComplete="new-password"
-          disabled={formState.values.clearServicePassword === 'true'}
-          fullWidth
-        />
-        {formState.mode === 'edit' && formState.values.servicePasswordMasked ? (
-          <FormControlLabel
-            control={(
-              <Checkbox
-                checked={formState.values.clearServicePassword === 'true'}
-                onChange={(event) => {
-                  updateFormValue('clearServicePassword', event.target.checked ? 'true' : '');
-                  if (event.target.checked) updateFormValue('servicePassword', '');
-                }}
-              />
-            )}
-            label="清除已存服务密码"
-          />
-        ) : <Box />}
       </BusinessFormSection>
       <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.phone[1].title} summary={sectionSummary(['deviceId', 'slotType'], ASSET_FORM_SECTIONS.phone[1].summary)} errorCount={formState.validationErrorSection === 2 ? 1 : 0}>
       <FormControl size="small" fullWidth>
@@ -2493,9 +2469,35 @@ const AssetManagement: React.FC = () => {
         {renderUserSelectField('owner', '资产负责人')}
         {renderUserSelectField('currentUser', '当前使用人')}
       </BusinessFormSection>
-      <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.phone[3].title} summary={sectionSummary(['operator', 'packageName', 'monthlyFee', 'status'], ASSET_FORM_SECTIONS.phone[3].summary)} errorCount={sectionErrorCount(['status'])}>
+      <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.phone[3].title} summary={sectionSummary(['operator', 'attributionLocation', 'servicePassword', 'packageName', 'monthlyFee', 'status'], ASSET_FORM_SECTIONS.phone[3].summary)} errorCount={sectionErrorCount(['status'])}>
         {renderSelectField('operator', '运营商', ['移动', '联通', '电信', '广电', '未知'])}
         {renderTextField('attributionLocation', '归属地')}
+        <Box>
+          <TextField
+            size="small"
+            label={formState.mode === 'edit' ? '新服务密码（留空不修改）' : '服务密码'}
+            value={formState.values.servicePassword || ''}
+            onChange={(event) => updateFormValue('servicePassword', event.target.value)}
+            type="password"
+            autoComplete="new-password"
+            disabled={formState.values.clearServicePassword === 'true'}
+            fullWidth
+          />
+          {formState.mode === 'edit' && formState.values.servicePasswordMasked ? (
+            <FormControlLabel
+              control={(
+                <Checkbox
+                  checked={formState.values.clearServicePassword === 'true'}
+                  onChange={(event) => {
+                    updateFormValue('clearServicePassword', event.target.checked ? 'true' : '');
+                    if (event.target.checked) updateFormValue('servicePassword', '');
+                  }}
+                />
+              )}
+              label="清除已存服务密码"
+            />
+          ) : null}
+        </Box>
         {renderTextField('packageName', '套餐名称')}
         {renderTextField('monthlyFee', '月费用', { type: 'number' })}
         {renderTextField('contractExpiresAt', '合约到期日', { type: 'date' })}
