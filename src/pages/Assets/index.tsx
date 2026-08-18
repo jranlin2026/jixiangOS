@@ -2370,7 +2370,7 @@ const AssetManagement: React.FC = () => {
         {formState.values.acquisitionType === '租赁' ? renderTextField('monthlyRent', '月租金', { type: 'number' }) : renderTextField('purchaseAmount', '购买金额', { type: 'number' })}
         {renderTextField('acquiredAt', '取得日期', { type: 'date' })}
         {renderTextField('warrantyExpiresAt', '保修到期日', { type: 'date' })}
-        {renderSelectField('status', '设备状态', ['库存中', '使用中', '维修中', '待回收', '已报废'], { required: true })}
+        {renderSelectField('status', '设备状态', ['库存中', '使用中', '维修中', '闲置', '已停用', '已报废'], { required: true })}
         {renderTextField('remark', '备注', { multiline: true })}
       </BusinessFormSection>
     </>
@@ -2436,7 +2436,7 @@ const AssetManagement: React.FC = () => {
         {renderTextField('packageName', '套餐名称')}
         {renderTextField('monthlyFee', '月费用', { type: 'number' })}
         {renderTextField('contractExpiresAt', '合约到期日', { type: 'date' })}
-        {renderSelectField('status', '号码状态', ['待启用', '使用中', '停机', '待过户', '已注销'], { required: true })}
+        {renderSelectField('status', '号码状态', ['待启用', '使用中', '停机保号', '已停用', '已注销'], { required: true })}
         {renderTextField('remark', '备注', { multiline: true })}
       </BusinessFormSection>
     </>
@@ -2445,7 +2445,7 @@ const AssetManagement: React.FC = () => {
   const renderAccountFields = () => (
     <>
       <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.account[0].title} summary={ASSET_FORM_SECTIONS.account[0].summary}>
-        {renderTextField('platform', '平台', { required: true })}
+        {renderSelectField('platform', '业务平台', platformOptions.length ? platformOptions : ['抖音', '快手', '小红书', '微信', '视频号'], { required: true })}
         {renderSelectField('accountCategory', '账号类型', ['主账号', '员工号', '直播号', '投放号', '客服号', '其他'], { required: true })}
         {renderTextField('accountName', '账号名称', { required: true })}
         {renderTextField('loginAccount', '登录账号', { required: true })}
@@ -2472,17 +2472,17 @@ const AssetManagement: React.FC = () => {
       </FormControl>
         {renderTextField('boundEmail', '绑定邮箱')}
         {renderTextField('twoFactorMethod', '二次验证方式')}
-        {renderSelectField('controlStatus', '账号控制权', ['已掌控', '待交接', '离职待回收', '已回收', '控制权异常'], { required: true })}
       </BusinessFormSection>
       <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.account[2].title} summary={ASSET_FORM_SECTIONS.account[2].summary}>
         {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
         {renderDepartmentSelectField()}
         {renderUserSelectField('owner', '资产负责人')}
         {renderUserSelectField('currentUser', '当前使用人')}
+        {renderTextField('serviceProvider', '外部服务商')}
       </BusinessFormSection>
       <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.account[3].title} summary={ASSET_FORM_SECTIONS.account[3].summary}>
         {renderTextField('businessScene', '业务场景')}
-        {renderTextField('serviceProvider', '服务商')}
+        {renderSelectField('controlStatus', '账号控制权', ['已掌控', '待交接', '离职待回收', '已回收'], { required: true })}
         {renderTextField('monthlyFee', '月费用', { type: 'number' })}
         {renderTextField('expiresAt', '到期日', { type: 'date' })}
         {renderSelectField('accountStatus', '账号状态', ['使用中', '闲置', '异常', '封禁', '已注销'], { required: true })}
