@@ -860,6 +860,7 @@ const AssetManagement: React.FC = () => {
     const inferredLocation = assetApi.inferPhoneAttributionLocation(value);
     setFormState((current) => ({
       ...current,
+      validationErrorSection: undefined,
       values: (() => {
         const previousInferredLocation = assetApi.inferPhoneAttributionLocation(current.values.phoneNumber);
         const shouldUpdateLocation = !current.values.attributionLocation || current.values.attributionLocation === previousInferredLocation;
@@ -2422,6 +2423,7 @@ const AssetManagement: React.FC = () => {
             const nextSlots = phoneSlotOptionsForDevice(nextDeviceId);
             setFormState((current) => ({
               ...current,
+              validationErrorSection: undefined,
               values: {
                 ...current.values,
                 deviceId: nextDeviceId,
