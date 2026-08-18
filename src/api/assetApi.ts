@@ -31,6 +31,7 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { backendRequest, getBackendBaseUrl, readBackendToken, shouldUseBackendApi } from './backendClient';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
+import { readDeviceImeis, validateDeviceImeis } from '../domain/assets/deviceImei';
 
 const delay = (ms?: number) => baseDelay(ms, 'assets');
 import {
@@ -80,7 +81,10 @@ function includesKeyword(value: unknown, keyword: string): boolean {
 }
 
 function devices(): AssetDevice[] {
-  return getStorageData<AssetDevice[]>(STORAGE_KEYS.ASSET_DEVICES) || [];
+  return (getStorageData<AssetDevice[]>(STORAGE_KEYS.ASSET_DEVICES) || []).map((device) => ({
+    ...device,
+    ...readDeviceImeis(device),
+  }));
 }
 
 function phones(): AssetPhoneNumber[] {
@@ -110,11 +114,6 @@ function matrixPublishTasks(): AssetMatrixPublishTask[] {
 function maskPhone(value: string): string {
   const text = String(value || '').trim();
   return text.length >= 7 ? `${text.slice(0, 3)}****${text.slice(-4)}` : text;
-}
-
-function maskLongValue(value: string): string {
-  const text = String(value || '').trim();
-  return text.length > 8 ? `${text.slice(0, 6)}******${text.slice(-4)}` : text;
 }
 
 function maskLogin(value: string): string {
@@ -423,7 +422,7 @@ const ASSET_IMPORT_LABELS: Record<AssetImportType, string> = {
 };
 
 export const ASSET_IMPORT_TEMPLATES: Record<AssetImportType, string[]> = {
-  devices: ['设备名称*', '品牌型号*', 'IMEI*', 'SIM类型', '所属主体', '所属部门', '负责人', '当前使用人', '状态', '月费用', '备注'],
+  devices: ['设备名称*', '品牌型号*', 'IMEI 1*', 'IMEI 2', 'SIM类型', '所属主体', '所属部门', '负责人', '当前使用人', '状态', '月费用', '备注'],
   phones: ['手机号*', '实名信息', '运营商', '归属地', '所属设备编号*', 'SIM卡槽', '套餐', '月费用', '所属部门', '负责人', '当前使用人', '状态'],
   accounts: ['平台*', '账号名称*', '登录账号*', '实名信息', '绑定手机号', '绑定邮箱', '所属主体', '所属部门', '负责人', '当前使用人', '权限状态', '账号状态', '用途'],
 };
@@ -432,7 +431,8 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
   devices: {
     '设备名称*': '业务备用机',
     '品牌型号*': 'iPhone 15',
-    'IMEI*': 'IMPORT-IMEI-0001',
+    'IMEI 1*': 'IMPORT-IMEI-0001',
+    'IMEI 2': 'IMPORT-IMEI-0002',
     SIM类型: '双卡',
     所属主体: '公司',
     所属部门: '运营管理部',
@@ -593,7 +593,8 @@ function deviceInputFromCsv(raw: Record<string, string>): Partial<AssetDeviceInp
   return {
     deviceName: csvCell(raw, '设备名称*', '设备名称'),
     brandModel: csvCell(raw, '品牌型号*', '品牌型号'),
-    imei: csvCell(raw, 'IMEI*', 'IMEI'),
+    imei1: csvCell(raw, 'IMEI 1*', 'IMEI 1', 'IMEI*', 'IMEI'),
+    imei2: csvCell(raw, 'IMEI 2'),
     simType: (csvCell(raw, 'SIM类型') || '双卡') as AssetDeviceInput['simType'],
     ownerSubject: (csvCell(raw, '所属主体') || '公司') as AssetDeviceInput['ownerSubject'],
     department: csvCell(raw, '所属部门'),
@@ -750,7 +751,8 @@ function filterDevices(rows: AssetDevice[], filters?: AssetFilters): AssetDevice
       row.deviceCode,
       row.deviceName,
       row.brandModel,
-      row.imeiMasked,
+      row.imei1Masked,
+      row.imei2Masked,
       row.department,
       row.owner,
       row.currentUser,
@@ -930,8 +932,7 @@ async function fetchDevices(filters?: AssetFilters): Promise<ApiResponse<Paginat
 async function createDevice(input: Partial<AssetDeviceInput>): Promise<ApiResponse<AssetDevice>> {
   return guarded(() => {
     const rows = devices();
-    const imei = requiredText(input.imei, 'IMEI不能为空');
-    if (rows.some((device) => device.imei === imei)) throw new Error('IMEI已存在');
+    const imeiFields = validateDeviceImeis(input, rows);
     const createdAt = now();
     const orgFields = resolveAssetOrgFields(input);
     const device: AssetDevice = {
@@ -939,8 +940,7 @@ async function createDevice(input: Partial<AssetDeviceInput>): Promise<ApiRespon
       deviceCode: input.deviceCode || nextNumber(rows, (device) => device.deviceCode, 'DEV'),
       deviceName: requiredText(input.deviceName, '设备名称不能为空'),
       brandModel: requiredText(input.brandModel, '品牌型号不能为空'),
-      imei,
-      imeiMasked: maskLongValue(imei),
+      ...imeiFields,
       simType: input.simType || '双卡',
       ownerSubject: input.ownerSubject || '公司',
       departmentId: orgFields.departmentId,
@@ -968,18 +968,30 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
     const rows = devices();
     const existing = rows.find((device) => device.id === id);
     if (!existing) throw new Error('设备不存在');
-    const imei = input.imei === undefined ? existing.imei : requiredText(input.imei, 'IMEI不能为空');
-    if (rows.some((device) => device.id !== id && device.imei === imei)) throw new Error('IMEI已存在');
     const nextSimType = input.simType || existing.simType;
     if (nextSimType === '单卡' && phones().some((phone) => phone.deviceId === id && phone.slotType === '卡槽2')) {
       throw new Error('单卡设备不能保留卡槽2手机号，请先解绑或迁移卡槽2手机号');
     }
     const orgFields = resolveAssetOrgFields(input, existing);
-    const updated: AssetDevice = {
+    const imeiFields = validateDeviceImeis({
       ...existing,
       ...input,
-      imei,
-      imeiMasked: maskLongValue(imei),
+      simType: nextSimType,
+      imei1: input.imei1 === undefined
+        ? input.imei === undefined ? existing.imei1 || existing.imei : input.imei
+        : input.imei1,
+    }, rows, id);
+    const {
+      imei: _legacyImei,
+      imeiMasked: _legacyImeiMasked,
+      ...existingWithoutLegacyImei
+    } = existing;
+    const updated: AssetDevice = {
+      ...existingWithoutLegacyImei,
+      ...input,
+      imei: undefined,
+      imeiMasked: undefined,
+      ...imeiFields,
       departmentId: orgFields.departmentId,
       department: orgFields.department,
       ownerId: orgFields.ownerId,
@@ -1638,9 +1650,17 @@ async function revealSensitiveField(
     if (type === 'device') {
       const device = visibleDevices().find((item) => item.id === id);
       if (!device) throw new Error('设备不存在');
-      if (field !== 'imei') throw new Error('该字段不属于设备资产');
-      logAssetOperation('查看敏感字段', '设备资产', device.id, device.deviceName, '查看敏感字段：IMEI');
-      return { field, label: 'IMEI', value: device.imei };
+      const values = readDeviceImeis(device);
+      const normalizedField = field === 'imei' ? 'imei1' : field;
+      if (normalizedField === 'imei1') {
+        logAssetOperation('查看敏感字段', '设备资产', device.id, device.deviceName, '查看敏感字段：IMEI 1');
+        return { field, label: 'IMEI 1', value: values.imei1 };
+      }
+      if (normalizedField === 'imei2' && values.imei2) {
+        logAssetOperation('查看敏感字段', '设备资产', device.id, device.deviceName, '查看敏感字段：IMEI 2');
+        return { field, label: 'IMEI 2', value: values.imei2 };
+      }
+      throw new Error('该设备没有IMEI 2');
     }
     if (type === 'phone') {
       const phone = visiblePhones().find((item) => item.id === id);

@@ -113,7 +113,8 @@ await resetAssets();
   const created = await assetApi.createDevice({
     deviceName: '测试资产机',
     brandModel: 'iPhone Test',
-    imei: 'TEST-IMEI-0001',
+    imei1: 'TEST-IMEI-0001',
+    imei2: 'TEST-IMEI-0002',
     simType: '双卡',
     ownerSubject: '公司',
     department: '运营管理部',
@@ -125,14 +126,33 @@ await resetAssets();
   });
   assert.equal(created.code, 0);
   assert.equal(created.data.deviceName, '测试资产机');
+  assert.equal(created.data.imei1, 'TEST-IMEI-0001');
+  assert.equal(created.data.imei2, 'TEST-IMEI-0002');
 
   const duplicate = await assetApi.createDevice({
     deviceName: '重复设备',
     brandModel: 'iPhone Test',
-    imei: 'TEST-IMEI-0001',
+    imei1: 'TEST-IMEI-0002',
+    simType: '单卡',
   });
   assert.notEqual(duplicate.code, 0);
-  assert.match(duplicate.message, /IMEI已存在/);
+  assert.match(duplicate.message, /IMEI 1已存在/);
+
+  const missingSecond = await assetApi.createDevice({
+    deviceName: '缺少第二IMEI设备',
+    brandModel: 'iPhone Test',
+    imei1: 'TEST-IMEI-MISSING-2',
+    simType: '双卡',
+  });
+  assert.notEqual(missingSecond.code, 0);
+  assert.match(missingSecond.message, /IMEI 2不能为空/);
+
+  const searchedBySecondImei = await assetApi.fetchDevices({ search: '0002', pageSize: 20 });
+  assert.ok(searchedBySecondImei.data.items.some((item) => item.id === created.data.id));
+
+  const revealedImei2 = await assetApi.revealSensitiveField('device', created.data.id, 'imei2');
+  assert.equal(revealedImei2.code, 0);
+  assert.equal(revealedImei2.data.value, 'TEST-IMEI-0002');
 }
 
 {
@@ -154,7 +174,7 @@ await resetAssets();
   const singleCardDevice = await assetApi.createDevice({
     deviceName: '单卡规则设备',
     brandModel: 'Single SIM Test',
-    imei: 'SINGLE-SIM-IMEI-0001',
+    imei1: 'SINGLE-SIM-IMEI-0001',
     simType: '单卡',
     ownerSubject: '公司',
     department: '运营管理部',
@@ -209,7 +229,8 @@ await resetAssets();
   const dualCardDevice = await assetApi.createDevice({
     deviceName: '双卡改单卡规则设备',
     brandModel: 'Dual SIM Test',
-    imei: 'DUAL-SIM-IMEI-0001',
+    imei1: 'DUAL-SIM-IMEI-0001',
+    imei2: 'DUAL-SIM-IMEI-0002',
     simType: '双卡',
     ownerSubject: '公司',
     department: '运营管理部',
@@ -274,7 +295,8 @@ await resetAssets();
   const realNameDevice = await assetApi.createDevice({
     deviceName: '实名测试设备',
     brandModel: 'Real Name Test',
-    imei: 'REAL-NAME-IMEI-0001',
+    imei1: 'REAL-NAME-IMEI-0001',
+    imei2: 'REAL-NAME-IMEI-0002',
     simType: '双卡',
     ownerSubject: '公司',
     department: '运营管理部',
@@ -346,7 +368,8 @@ await resetAssets();
   const device = await assetApi.createDevice({
     deviceName: 'Delete Phone Device',
     brandModel: 'iPhone Delete Phone',
-    imei: 'DELETE-PHONE-IMEI-0001',
+    imei1: 'DELETE-PHONE-IMEI-0001',
+    imei2: 'DELETE-PHONE-IMEI-0002',
     simType: '双卡',
     ownerSubject: '公司',
     department: 'Ops',
@@ -406,7 +429,8 @@ await resetAssets();
   const device = await assetApi.createDevice({
     deviceName: 'Delete Device Cascade',
     brandModel: 'iPhone Delete Device',
-    imei: 'DELETE-DEVICE-IMEI-0001',
+    imei1: 'DELETE-DEVICE-IMEI-0001',
+    imei2: 'DELETE-DEVICE-IMEI-0002',
     simType: '双卡',
     ownerSubject: '公司',
     department: 'Ops',
@@ -494,10 +518,13 @@ await resetAssets();
 }
 
 {
+  const template = assetApi.getImportTemplateCsv('devices');
+  assert.match(template.split('\n')[0], /^设备名称\*,品牌型号\*,IMEI 1\*,IMEI 2,SIM类型/);
+
   const imported = await assetApi.importAssetsFromCsv('devices', [
-    '设备名称*,品牌型号*,IMEI*,SIM类型,所属主体,所属部门,负责人,当前使用人,状态,风险等级,月费用,备注',
-    '导入测试设备,iPhone Import,IMPORT-IMEI-0001,双卡,公司,运营管理部,测试员,测试员,使用中,低,0,首批导入',
-    '重复导入设备,iPhone Import,IMPORT-IMEI-0001,双卡,公司,运营管理部,测试员,测试员,使用中,低,0,重复 IMEI',
+    '设备名称*,品牌型号*,IMEI 1*,IMEI 2,SIM类型,所属主体,所属部门,负责人,当前使用人,状态,风险等级,月费用,备注',
+    '导入测试设备,iPhone Import,IMPORT-IMEI-0001,IMPORT-IMEI-0002,双卡,公司,运营管理部,测试员,测试员,使用中,低,0,首批导入',
+    '缺少第二IMEI设备,iPhone Import,IMPORT-IMEI-0003,,双卡,公司,运营管理部,测试员,测试员,使用中,低,0,缺少 IMEI 2',
   ].join('\n'));
 
   assert.equal(imported.code, 0);
@@ -511,6 +538,13 @@ await resetAssets();
   const listed = await assetApi.fetchDevices({ search: '导入测试设备', pageSize: 20 });
   assert.equal(listed.code, 0);
   assert.equal(listed.data.items.length, 1);
+
+  const legacyImported = await assetApi.importAssetsFromCsv('devices', [
+    '设备名称*,品牌型号*,IMEI*,SIM类型,所属主体',
+    '旧模板单卡设备,Legacy Phone,LEGACY-IMPORT-IMEI-0001,单卡,公司',
+  ].join('\n'));
+  assert.equal(legacyImported.code, 0);
+  assert.equal(legacyImported.data.successCount, 1);
 }
 
 {
@@ -574,7 +608,8 @@ await resetAssets();
   const device = await assetApi.createDevice({
     deviceName: '离职回收设备',
     brandModel: 'iPhone Offboard',
-    imei: 'OFFBOARD-IMEI-0001',
+    imei1: 'OFFBOARD-IMEI-0001',
+    imei2: 'OFFBOARD-IMEI-0002',
     simType: '双卡',
     ownerSubject: '公司',
     department: '运营管理部',
