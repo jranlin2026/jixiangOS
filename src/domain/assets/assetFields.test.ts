@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {
+  formatDeviceBrandModel,
+  hasDuplicateDeviceBrandModel,
   normalizeAssetAccount,
   normalizeAssetDevice,
   normalizeAssetPhone,
@@ -29,13 +31,27 @@ const legacyDevice = normalizeAssetDevice({
 });
 
 assert.equal(legacyDevice.deviceCategory, '手机');
-assert.equal(legacyDevice.brand, 'HONOR');
+assert.equal(legacyDevice.brand, '荣耀');
 assert.equal(legacyDevice.model, '30 Pro');
 assert.equal(legacyDevice.communicationType, '双卡');
 assert.equal(legacyDevice.acquisitionType, '租赁');
 assert.equal(legacyDevice.monthlyRent, 199);
 assert.equal(legacyDevice.status, '库存中');
 assert.equal(readDeviceCommunicationType({ simType: '单卡' }), '单卡');
+
+const normalizedHonorDevice = normalizeAssetDevice({
+  brand: '荣耀 HONOR',
+  model: '  HONOR   30 Pro  ',
+  brandModel: '荣耀 HONOR HONOR 30 Pro',
+});
+assert.equal(normalizedHonorDevice.brand, '荣耀');
+assert.equal(normalizedHonorDevice.model, 'HONOR 30 Pro');
+assert.equal(normalizedHonorDevice.brandModel, '荣耀 HONOR 30 Pro');
+assert.equal(formatDeviceBrandModel(normalizedHonorDevice), '荣耀 / HONOR 30 Pro');
+assert.equal(hasDuplicateDeviceBrandModel('荣耀', 'HONOR'), true);
+assert.equal(hasDuplicateDeviceBrandModel('荣耀', 'HONOR 30 Pro'), false);
+assert.equal(normalizeAssetDevice({ brand: 'Samsung', model: 'Galaxy S24' }).brand, '三星');
+assert.equal(normalizeAssetDevice({ brand: 'iPhone', model: '15 Pro' }).brand, '苹果');
 
 const unboundPhone = normalizeAssetPhone({
   id: 'phone-legacy',

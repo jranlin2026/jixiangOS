@@ -10,6 +10,7 @@ import {
   validateDeviceImeis,
 } from '../../src/domain/assets/deviceImei';
 import {
+  hasDuplicateDeviceBrandModel,
   normalizeAssetAccount,
   normalizeAssetDevice,
   normalizeAssetPhone,
@@ -563,6 +564,9 @@ export function createAssetCommandService(
           const normalized = normalizeAssetDevice(input);
           const brand = requiredText(normalized.brand, '设备品牌不能为空');
           const model = requiredText(normalized.model, '设备型号不能为空');
+          if (hasDuplicateDeviceBrandModel(brand, model)) {
+            throw new AssetCommandError(400, '品牌和型号不能填写为同一内容');
+          }
           const imeiFields = validateCommandDeviceImeis(normalized, state.devices);
           const device = normalizeAssetDevice({
             id: makeId('asset-device'),
@@ -651,6 +655,9 @@ export function createAssetCommandService(
             communicationType: input.communicationType ?? (input.simType ? input.simType : existing.communicationType),
           });
           const communicationType = readDeviceCommunicationType(normalized);
+          if (hasDuplicateDeviceBrandModel(normalized.brand, normalized.model)) {
+            throw new AssetCommandError(400, '品牌和型号不能填写为同一内容');
+          }
           if (communicationType !== '双卡' && state.phones.some((phone) => phone.deviceId === id && phone.slotType === '卡槽2')) {
             throw new AssetCommandError(409, '非双卡设备不能保留卡槽2手机号');
           }

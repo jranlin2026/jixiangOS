@@ -11,6 +11,7 @@ const phonePackageSection = phoneFields.match(/<BusinessFormSection step=\{4\}[\
 
 assert.match(formDialog, /maxWidth="md"/, '资产录入弹窗应限制为中等桌面宽度，避免输入框过宽');
 assert.match(formDialog, /markButtonClicksDirty=\{false\}/, '关闭、取消和分区按钮不应把空白表单误判为已填写');
+assert.match(source, /createAssetFormDefaults\(formState\.type\)[\s\S]*?value !== String\(defaults\[field\]/, '新增表单的系统默认值不应被统计为用户已填写');
 assert.match(source, /label=\{formState\.mode === 'edit' \? '新服务密码（留空不修改）' : '服务密码'\}/, '编辑态应说明留空保留原服务密码');
 assert.match(source, /clearServicePassword/, '手机号表单应支持明确清除已存服务密码');
 assert.match(source, /servicePassword \|\| formState\.values\.servicePasswordMasked/, '编辑态分区统计应识别已存服务密码');
@@ -23,5 +24,9 @@ assert.ok(
 assert.match(source, /formatPhoneSlotImeiLabel/, '设备卡槽选项应显示对应的 IMEI 标识');
 assert.match(source, /id: 'imei', label: '卡槽 \/ IMEI'/, '设备列表应将 IMEI 字段明确配置到卡槽');
 assert.match(source, /id: 'simType', label: '对应手机号'/, '设备列表手机号字段应表达与卡槽的对应关系');
+assert.match(source, /<Autocomplete[\s\S]*?freeSolo[\s\S]*?normalizeDeviceBrand/, '设备品牌应使用可搜索且允许自定义的标准化输入');
+assert.match(source, /buildDeviceSlotRows[\s\S]*?卡槽与通信绑定/, '设备详情应按卡槽组织 IMEI 和手机号关系');
+assert.match(source, /设备身份[\s\S]*?归属与使用[\s\S]*?取得与状态/, '设备详情应按业务语义分区');
+assert.match(source, /detailSaveNotice[\s\S]*?资料已更新/, '编辑成功应在详情页内非阻断提示');
 assert.match(assetApiSource, /reveal\/service-password/, '后端模式应通过独立接口查看服务密码');
 assert.match(serverSource, /requireAssetSensitiveViewAccess[\s\S]*?revealPhoneServicePassword/, '服务密码查看接口应校验敏感字段权限');

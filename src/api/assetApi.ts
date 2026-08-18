@@ -33,6 +33,7 @@ import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { readDeviceImeis, validateDeviceImeis } from '../domain/assets/deviceImei';
 import {
+  hasDuplicateDeviceBrandModel,
   normalizeAssetAccount,
   normalizeAssetDevice,
   normalizeAssetPhone,
@@ -1002,6 +1003,7 @@ async function createDevice(input: Partial<AssetDeviceInput>): Promise<ApiRespon
     const normalized = normalizeAssetDevice(input);
     const brand = requiredText(normalized.brand, '设备品牌不能为空');
     const model = requiredText(normalized.model, '设备型号不能为空');
+    if (hasDuplicateDeviceBrandModel(brand, model)) throw new Error('品牌和型号不能填写为同一内容');
     const imeiFields = validateDeviceImeis(normalized, rows);
     const createdAt = now();
     const orgFields = resolveAssetOrgFields(input);
@@ -1054,6 +1056,7 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
       communicationType: input.communicationType ?? (input.simType ? input.simType : existing.communicationType),
     });
     const communicationType = readDeviceCommunicationType(normalized);
+    if (hasDuplicateDeviceBrandModel(normalized.brand, normalized.model)) throw new Error('品牌和型号不能填写为同一内容');
     if (communicationType !== '双卡' && phones().some((phone) => phone.deviceId === id && phone.slotType === '卡槽2')) {
       throw new Error('非双卡设备不能保留卡槽2手机号，请先解绑或迁移');
     }

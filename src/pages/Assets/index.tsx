@@ -2,6 +2,7 @@
 import {
   useSearchParams } from 'react-router-dom';
 import {
+  Autocomplete,
   Avatar,
   Box,
   Button,
@@ -83,7 +84,12 @@ import type { Department } from '../../types/department';
 import type { User } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
-import { readAccountControlStatus, readDeviceCommunicationType } from '../../domain/assets/assetFields';
+import {
+  formatDeviceBrandModel,
+  normalizeDeviceBrand,
+  readAccountControlStatus,
+  readDeviceCommunicationType,
+} from '../../domain/assets/assetFields';
 import { ASSET_FORM_SECTIONS, buildDeviceSlotRows, createAssetFormDefaults, formatPhoneSlotImeiLabel, type AssetFormType } from './assetFormModel';
 
 type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'matrix' | 'logs' | 'offboarding';
@@ -438,8 +444,15 @@ const AssetManagement: React.FC = () => {
   const [matrixForm, setMatrixForm] = useState<MatrixPublishFormState>(emptyMatrixPublishForm);
   const [deleteTarget, setDeleteTarget] = useState<AssetDeleteTarget>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [detailSaveNotice, setDetailSaveNotice] = useState('');
   const [viewSettingsOpen, setViewSettingsOpen] = useState<ConfigurableAssetTab | null>(null);
   const [revealedValues, setRevealedValues] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!detailSaveNotice) return undefined;
+    const timer = window.setTimeout(() => setDetailSaveNotice(''), 2400);
+    return () => window.clearTimeout(timer);
+  }, [detailSaveNotice]);
   const currentUser = useAuthStore((state) => state.currentUser);
   const {
     dashboard,
@@ -958,8 +971,11 @@ const AssetManagement: React.FC = () => {
       showFeedback(error);
       return;
     }
+    const wasEditing = formState.mode === 'edit';
     closeForm();
-    showFeedback(formState.mode === 'edit' ? '资产资料已更新' : '资产已新增');
+    if (wasEditing && detailDialogOpen) setDetailSaveNotice('资料已更新');
+    else if (wasEditing) showFeedback('资产资料已更新', '操作完成');
+    else showFeedback('资产已新增', '操作完成');
     await refreshActiveTab();
   };
 
@@ -1405,7 +1421,7 @@ const AssetManagement: React.FC = () => {
       case 'deviceName':
         return device.deviceName;
       case 'brandModel':
-        return `${device.deviceCategory || '手机'} / ${device.brand || ''} ${device.model || ''}`.trim();
+        return `${device.deviceCategory || '手机'} / ${formatDeviceBrandModel(device)}`;
       case 'imei':
         return renderDeviceImeis(device);
       case 'simType':
@@ -2058,28 +2074,118 @@ const AssetManagement: React.FC = () => {
     </Button>
   );
 
-  const renderDeviceBasicCard = (device: AssetDevice) => (
-    renderDetailCard('设备基本信息', (
-      renderInfoRows([
-        { label: '设备名称', value: device.deviceName },
+  const renderDeviceSummaryCard = (device: AssetDevice) => (
+    <Paper elevation={0} sx={{ ...detailCardSx, p: 2 }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography sx={{ color: shell.ink, fontSize: 22, fontWeight: 950 }}>{device.deviceName}</Typography>
+          <Typography variant="body2" sx={{ color: shell.muted, mt: 0.25 }}>{formatDeviceBrandModel(device)}</Typography>
+          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mt: 0.8 }}>
+            <Chip size="small" label={device.deviceCode} variant="outlined" />
+            <Chip size="small" label={device.deviceCategory || '手机'} variant="outlined" />
+            <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} />
+          </Stack>
+        </Box>
+        <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
+          <Typography variant="caption" sx={{ color: shell.muted }}>当前使用人</Typography>
+          <Typography sx={{ color: shell.ink, fontWeight: 900 }}>{device.currentUser || '未分配'}</Typography>
+        </Box>
+      </Stack>
+    </Paper>
+  );
+
+  const renderDeviceCommunicationCard = (device: AssetDevice) => {
+    const slots = buildDeviceSlotRows(device, detail?.relatedPhones || []);
+    return renderDetailCard('卡槽与通信绑定', slots.length ? (
+      <Stack spacing={1}>
+        {slots.map((slot) => {
+          const phone = detail?.relatedPhones.find((item) => item.id === slot.phoneId);
+          const accounts = slot.phoneId
+            ? detail?.relatedAccounts.filter((account) => account.phoneId === slot.phoneId) || []
+            : [];
+          const sensitiveField: AssetSensitiveField = slot.slotType === '卡槽2' ? 'imei2' : 'imei1';
+          return (
+            <Paper key={slot.slotType} variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.5 }}>
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'flex-start' }}>
+                <Box sx={{ minWidth: 92 }}>
+                  <Typography sx={{ color: shell.tableLink, fontWeight: 950 }}>{slot.slotType}</Typography>
+                  <Typography variant="caption" sx={{ color: shell.muted }}>{slot.imeiLabel}</Typography>
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="caption" sx={{ color: shell.muted }}>IMEI 标识</Typography>
+                  <Box sx={{ color: shell.ink, fontWeight: 800, mt: 0.25 }}>
+                    {slot.imeiMasked
+                      ? renderSensitiveInline('device', device.id, sensitiveField, slot.imeiMasked)
+                      : '未录入'}
+                  </Box>
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="caption" sx={{ color: shell.muted }}>对应手机号</Typography>
+                  <Box sx={{ mt: 0.25 }}>
+                    {phone
+                      ? renderAssetNameLink(phone.phoneNumberMasked, () => openDetail('phone', phone.id))
+                      : <Typography sx={{ color: shell.muted, fontWeight: 800 }}>未绑定</Typography>}
+                  </Box>
+                  {phone ? (
+                    <Typography variant="caption" sx={{ color: shell.muted }}>
+                      {[phone.operator, phone.packageName, phone.status].filter(Boolean).join(' / ')}
+                    </Typography>
+                  ) : null}
+                </Box>
+                <Box sx={{ flex: 1.2, minWidth: 0 }}>
+                  <Typography variant="caption" sx={{ color: shell.muted }}>互联网账号</Typography>
+                  <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mt: 0.5 }}>
+                    {accounts.length ? accounts.map((account) => (
+                      <Button
+                        key={account.id}
+                        size="small"
+                        variant="outlined"
+                        onClick={() => openDetail('account', account.id)}
+                        sx={{ minWidth: 0, px: 1, fontWeight: 800 }}
+                      >
+                        {account.platform} / {account.accountName}
+                      </Button>
+                    )) : <Typography variant="body2" sx={{ color: shell.muted }}>暂无关联账号</Typography>}
+                  </Stack>
+                </Box>
+              </Stack>
+            </Paper>
+          );
+        })}
+      </Stack>
+    ) : (
+      <Box sx={{ py: 1.5, textAlign: 'center', color: shell.muted }}>该设备无 SIM 通信能力，无需配置卡槽绑定。</Box>
+    ));
+  };
+
+  const renderDeviceDetailSections = (device: AssetDevice) => (
+    <Stack spacing={1.25}>
+      {renderDeviceSummaryCard(device)}
+      {renderDetailCard('设备身份', renderInfoRows([
         { label: '设备编号', value: <Stack direction="row" alignItems="center" spacing={0.5}>{device.deviceCode}{renderCopyButton(device.deviceCode, '设备编号')}</Stack> },
         { label: '设备类型', value: device.deviceCategory || '手机' },
-        { label: '品牌/型号', value: `${device.brand || ''} ${device.model || ''}`.trim() || device.brandModel },
-        { label: '序列号', value: device.serialNumber || '-' },
-        ...(device.imei1Masked ? [{ label: 'IMEI 1', value: renderSensitiveInline('device', device.id, 'imei1', device.imei1Masked) }] : []),
-        ...(device.imei2Masked ? [{ label: 'IMEI 2', value: renderSensitiveInline('device', device.id, 'imei2', device.imei2Masked) }] : []),
+        { label: '品牌', value: normalizeDeviceBrand(device.brand) || '-' },
+        { label: '型号', value: device.model || '-' },
+        ...(device.serialNumber ? [{ label: '序列号', value: device.serialNumber }] : []),
         { label: '通信方式', value: readDeviceCommunicationType(device) },
-        { label: '状态', value: <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} /> },
+      ], 2))}
+      {renderDeviceCommunicationCard(device)}
+      {renderDetailCard('归属与使用', renderInfoRows([
         { label: '所属主体', value: device.ownerSubject },
-        { label: '所属部门', value: device.department || '-' },
-        { label: '负责人', value: device.owner || '-' },
-        { label: '当前使用人', value: device.currentUser || '-' },
+        ...(device.department ? [{ label: '所属部门', value: device.department }] : []),
+        ...(device.owner ? [{ label: '资产负责人', value: device.owner }] : []),
+        ...(device.currentUser ? [{ label: '当前使用人', value: device.currentUser }] : []),
+      ], 2))}
+      {renderDetailCard('取得与状态', renderInfoRows([
         { label: '取得方式', value: device.acquisitionType || '-' },
         { label: device.acquisitionType === '租赁' ? '月租金' : '购买金额', value: formatCurrency(device.acquisitionType === '租赁' ? device.monthlyRent || 0 : device.purchaseAmount || 0) },
+        ...(device.acquiredAt ? [{ label: '取得日期', value: formatDate(device.acquiredAt, 'yyyy-MM-dd') }] : []),
+        ...(device.warrantyExpiresAt ? [{ label: '保修到期', value: formatDate(device.warrantyExpiresAt, 'yyyy-MM-dd') }] : []),
+        { label: '设备状态', value: <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} /> },
         { label: '更新时间', value: formatDate(device.updatedAt, 'yyyy-MM-dd') },
-        { label: '备注', value: device.remark || '-' },
-      ], 2)
-    ))
+        ...(device.remark ? [{ label: '备注', value: device.remark }] : []),
+      ], 2))}
+    </Stack>
   );
 
   const renderPhoneBasicCard = (phone: AssetPhoneNumber) => (
@@ -2221,15 +2327,8 @@ const AssetManagement: React.FC = () => {
 
   const renderDetailBody = () => {
     if (!detail) return null;
-    const basicCard = detail.device ? renderDeviceBasicCard(detail.device) : detail.phone ? renderPhoneBasicCard(detail.phone) : detail.account ? renderAccountBasicCard(detail.account) : null;
-    if (detail.type === 'device') {
-      return (
-        <Stack spacing={1.25}>
-          {basicCard}
-          {renderRelatedAssetsSection()}
-        </Stack>
-      );
-    }
+    if (detail.device) return renderDeviceDetailSections(detail.device);
+    const basicCard = detail.phone ? renderPhoneBasicCard(detail.phone) : detail.account ? renderAccountBasicCard(detail.account) : null;
     return (
       <Stack spacing={1.25}>
         {basicCard}
@@ -2255,7 +2354,10 @@ const AssetManagement: React.FC = () => {
       >
         <DialogTitle sx={{ p: 0 }}>
           <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between" sx={{ px: 2.25, py: 1.5, borderBottom: `1px solid ${shell.softLine}` }}>
-            <Typography sx={{ color: shell.ink, fontSize: 20, fontWeight: 950 }}>{detail ? detailTitleMap[detail.type] : '查看资产资料'}</Typography>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography sx={{ color: shell.ink, fontSize: 20, fontWeight: 950 }}>{detail ? detailTitleMap[detail.type] : '查看资产资料'}</Typography>
+              {detailSaveNotice ? <Chip size="small" color="success" label={detailSaveNotice} /> : null}
+            </Stack>
             <Stack direction="row" spacing={1} alignItems="center">
               {detail && canEditAssetType(detail.type) ? (
                 <Button
@@ -2380,23 +2482,57 @@ const AssetManagement: React.FC = () => {
     : 0;
 
   const sectionSummary = (fields: string[], fallback: string) => {
+    const defaults = formState.mode === 'create' ? createAssetFormDefaults(formState.type) : {};
     const filled = fields.filter((field) => {
       if (field === 'servicePassword') {
         return formState.values.clearServicePassword !== 'true'
           && Boolean(String(formState.values.servicePassword || formState.values.servicePasswordMasked || '').trim());
       }
-      return Boolean(String(formState.values[field] || '').trim());
+      const value = String(formState.values[field] || '').trim();
+      if (!value) return false;
+      return formState.mode === 'edit' || value !== String(defaults[field] || '').trim();
     }).length;
     return filled ? `已填 ${filled}/${fields.length} 项` : fallback;
   };
+
+  const renderDeviceBrandField = () => (
+    <Autocomplete
+      freeSolo
+      options={['荣耀', '华为', '苹果', '小米', '红米', 'OPPO', 'vivo', '三星']}
+      value={formState.values.brand || ''}
+      inputValue={formState.values.brand || ''}
+      onChange={(_event, value) => updateFormValue('brand', normalizeDeviceBrand(value || ''))}
+      onInputChange={(_event, value, reason) => {
+        if (reason !== 'reset') updateFormValue('brand', value);
+      }}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          size="small"
+          label="品牌"
+          required
+          helperText="选择标准品牌或自定义，如：荣耀"
+          onBlur={() => updateFormValue('brand', normalizeDeviceBrand(formState.values.brand))}
+        />
+      )}
+    />
+  );
 
   const renderDeviceFields = () => (
     <>
       <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.device[0].title} summary={sectionSummary(['deviceCategory', 'deviceName', 'brand', 'model'], ASSET_FORM_SECTIONS.device[0].summary)} errorCount={sectionErrorCount(['deviceCategory', 'deviceName', 'brand', 'model']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
         {renderSelectField('deviceCategory', '设备类型', ['手机', '平板', '电脑', '摄影设备', '其他'], { required: true })}
         {renderTextField('deviceName', '设备名称', { required: true })}
-        {renderTextField('brand', '品牌', { required: true })}
-        {renderTextField('model', '型号', { required: true })}
+        {renderDeviceBrandField()}
+        <TextField
+          size="small"
+          label="型号"
+          value={formState.values.model || ''}
+          onChange={(event) => updateFormValue('model', event.target.value)}
+          helperText="填写厂商完整型号，如：HONOR 30 Pro"
+          required
+          fullWidth
+        />
       </BusinessFormSection>
       <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.device[1].title} summary={sectionSummary(['serialNumber', 'communicationType', 'imei1', 'imei2'], ASSET_FORM_SECTIONS.device[1].summary)} errorCount={sectionErrorCount(formState.values.communicationType === '无SIM' ? ['communicationType'] : formState.values.communicationType === '双卡' ? ['communicationType', 'imei1', 'imei2'] : ['communicationType', 'imei1']) + (formState.validationErrorSection === 2 ? 1 : 0)}>
         {renderTextField('serialNumber', '序列号')}

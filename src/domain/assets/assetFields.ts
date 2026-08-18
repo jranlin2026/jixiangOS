@@ -15,6 +15,46 @@ function text(value: unknown): string {
   return String(value ?? '').trim();
 }
 
+function compactText(value: unknown): string {
+  return text(value).replace(/\s+/g, ' ');
+}
+
+const DEVICE_BRAND_ALIASES: Array<{ aliases: string[]; canonical: string }> = [
+  { aliases: ['荣耀', 'honor', '荣耀honor', 'honor荣耀'], canonical: '荣耀' },
+  { aliases: ['华为', 'huawei', '华为huawei', 'huawei华为'], canonical: '华为' },
+  { aliases: ['苹果', 'apple', 'iphone', '苹果apple', 'apple苹果'], canonical: '苹果' },
+  { aliases: ['小米', 'xiaomi', '小米xiaomi', 'xiaomi小米'], canonical: '小米' },
+  { aliases: ['红米', 'redmi', '红米redmi', 'redmi红米'], canonical: '红米' },
+  { aliases: ['oppo'], canonical: 'OPPO' },
+  { aliases: ['vivo'], canonical: 'vivo' },
+  { aliases: ['三星', 'samsung', '三星samsung', 'samsung三星'], canonical: '三星' },
+];
+
+function brandKey(value: unknown): string {
+  return compactText(value).toLocaleLowerCase().replace(/[\s/|+·_-]+/g, '');
+}
+
+export function normalizeDeviceBrand(value: unknown): string {
+  const normalized = compactText(value);
+  const key = brandKey(normalized);
+  return DEVICE_BRAND_ALIASES.find((item) => item.aliases.includes(key))?.canonical || normalized;
+}
+
+export function formatDeviceBrandModel(
+  device: Pick<AssetDevice, 'brand' | 'model' | 'brandModel'> | LooseAsset,
+): string {
+  const brand = normalizeDeviceBrand(device.brand);
+  const model = compactText(device.model);
+  if (brand && model) return `${brand} / ${model}`;
+  return brand || model || compactText(device.brandModel);
+}
+
+export function hasDuplicateDeviceBrandModel(brand: unknown, model: unknown): boolean {
+  const normalizedBrand = brandKey(normalizeDeviceBrand(brand));
+  const normalizedModel = brandKey(normalizeDeviceBrand(model));
+  return Boolean(normalizedBrand && normalizedModel && normalizedBrand === normalizedModel);
+}
+
 function numberValue(value: unknown): number {
   const number = Number(value || 0);
   return Number.isFinite(number) ? number : 0;
@@ -45,8 +85,8 @@ function normalizeDeviceStatus(value: unknown, currentUser: unknown): AssetDevic
 
 export function normalizeAssetDevice<T extends LooseAsset>(source: T): T & AssetDevice {
   const legacy = splitBrandModel(source.brandModel);
-  const brand = text(source.brand) || legacy.brand;
-  const model = text(source.model) || legacy.model;
+  const brand = normalizeDeviceBrand(source.brand || legacy.brand);
+  const model = compactText(source.model || legacy.model);
   const communicationType = readDeviceCommunicationType(source);
   const legacyMonthlyCost = numberValue(source.monthlyCost);
   const monthlyRent = source.monthlyRent === undefined ? legacyMonthlyCost : numberValue(source.monthlyRent);
@@ -55,7 +95,7 @@ export function normalizeAssetDevice<T extends LooseAsset>(source: T): T & Asset
     deviceCategory: (text(source.deviceCategory) || '手机') as AssetDevice['deviceCategory'],
     brand,
     model,
-    brandModel: text(source.brandModel) || [brand, model].filter(Boolean).join(' '),
+    brandModel: [brand, model].filter(Boolean).join(' ') || compactText(source.brandModel),
     serialNumber: text(source.serialNumber) || undefined,
     communicationType,
     simType: communicationType === '双卡' ? '双卡' : '单卡',
