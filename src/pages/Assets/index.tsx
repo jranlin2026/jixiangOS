@@ -46,6 +46,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { assetApi } from '../../api';
 import { settingsApi } from '../../api';
 import useAssetStore from '../../store/useAssetStore';
@@ -2684,7 +2685,13 @@ const AssetManagement: React.FC = () => {
               {detailSaveNotice ? (
                 <>
                   <Tooltip title={detailSaveNotice}>
-                    <Chip size="small" color="success" label="✓" sx={{ display: { xs: 'inline-flex', sm: 'none' }, width: 28, flexShrink: 0, '& .MuiChip-label': { px: 0 } }} />
+                    <Box
+                      role="status"
+                      aria-label={detailSaveNotice}
+                      sx={{ display: { xs: 'inline-flex', sm: 'none' }, width: 28, flexShrink: 0, color: 'success.main', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <CheckCircleOutlineIcon sx={{ fontSize: 21 }} />
+                    </Box>
                   </Tooltip>
                   <Chip size="small" color="success" label={detailSaveNotice} sx={{ display: { xs: 'none', sm: 'inline-flex' }, flexShrink: 0 }} />
                 </>
