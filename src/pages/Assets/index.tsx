@@ -107,6 +107,7 @@ import {
 import { ASSET_FORM_SECTIONS, buildDeviceSlotRows, createAssetFormDefaults, formatPhoneSlotImeiLabel, type AssetFormType } from './assetFormModel';
 import PlatformBrandMark from './PlatformBrandMark';
 import DeviceBrandMark from './DeviceBrandMark';
+import CarrierBrandMark from './CarrierBrandMark';
 import {
   findIdentityAccountForProvider,
   normalizeIdentityAccountIds,
@@ -237,7 +238,7 @@ const DEFAULT_DEVICE_VISIBLE_COLUMN_IDS = DEVICE_COLUMNS.map((column) => column.
 const PHONE_COLUMNS: AssetColumnConfig[] = [
   { id: 'phoneNumber', label: '手机号', width: 140 },
   { id: 'realName', label: '实名信息', width: 110 },
-  { id: 'operator', label: '运营商', width: 100 },
+  { id: 'operator', label: '运营商', width: 130 },
   { id: 'attributionLocation', label: '归属地', width: 110 },
   { id: 'device', label: '所属设备', width: 180 },
   { id: 'accounts', label: '关联账号', width: 150 },
@@ -1536,7 +1537,16 @@ const AssetManagement: React.FC = () => {
                     <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1 }}>
                       <Box><Typography variant="caption" sx={{ color: shell.muted }}>设备编号</Typography>{renderRelationLink(row.device.deviceCode, () => openDetail('device', row.device.id))}</Box>
                       <Box><Typography variant="caption" sx={{ color: shell.muted }}>设备名称</Typography><Typography variant="body2" sx={{ fontWeight: 800 }}>{row.device.deviceName || '未命名'}</Typography></Box>
-                      <Box><Typography variant="caption" sx={{ color: shell.muted }}>品牌 / 型号</Typography><Typography variant="body2">{formatDeviceBrandModel(row.device)}</Typography></Box>
+                      <Box>
+                        <Typography variant="caption" sx={{ color: shell.muted }}>品牌 / 型号</Typography>
+                        <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.25, minWidth: 0 }}>
+                          <DeviceBrandMark brand={row.device.brand} size={30} />
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 800 }}>{normalizeDeviceBrand(row.device.brand) || '未录入品牌'}</Typography>
+                            <Typography variant="caption" sx={{ color: shell.muted }}>{row.device.model || '未录入型号'}</Typography>
+                          </Box>
+                        </Stack>
+                      </Box>
                       <Box><Typography variant="caption" sx={{ color: shell.muted }}>所属部门</Typography><Typography variant="body2">{row.device.department || '未填部门'}</Typography></Box>
                       <Box><Typography variant="caption" sx={{ color: shell.muted }}>负责人</Typography><Typography variant="body2">{row.device.owner || '未分配'}</Typography></Box>
                       <Box><Typography variant="caption" sx={{ color: shell.muted }}>当前使用人</Typography><Typography variant="body2">{row.device.currentUser || '未分配'}</Typography></Box>
@@ -1556,7 +1566,15 @@ const AssetManagement: React.FC = () => {
                     <TableRow key={row.device.id} hover>
                       <TableCell>{renderRelationLink(row.device.deviceCode, () => openDetail('device', row.device.id))}</TableCell>
                       <TableCell><Typography variant="body2" sx={{ fontWeight: 800 }}>{row.device.deviceName || '未命名'}</Typography></TableCell>
-                      <TableCell><Typography variant="body2">{formatDeviceBrandModel(row.device)}</Typography></TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                          <DeviceBrandMark brand={row.device.brand} size={34} />
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 900 }}>{normalizeDeviceBrand(row.device.brand) || '未录入品牌'}</Typography>
+                            <Typography variant="caption" sx={{ color: shell.muted, display: 'block', whiteSpace: 'nowrap' }}>{row.device.model || '未录入型号'}</Typography>
+                          </Box>
+                        </Stack>
+                      </TableCell>
                       <TableCell>{renderDeviceImeis(row.device)}</TableCell>
                       <TableCell>{renderPhoneBadges(row)}</TableCell>
                       <TableCell>{renderAccountBadges(row)}</TableCell>
@@ -1855,7 +1873,14 @@ const AssetManagement: React.FC = () => {
       case 'realName':
         return displayPhoneRealName(phone) || '未录入';
       case 'operator':
-        return phone.operator;
+        return (
+          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+            <CarrierBrandMark operator={phone.operator} size={28} />
+            <Tooltip title={phone.operator || '未知运营商'}>
+              <Typography variant="body2" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 800, whiteSpace: 'nowrap' }}>{phone.operator || '未知'}</Typography>
+            </Tooltip>
+          </Stack>
+        );
       case 'attributionLocation':
         return phone.attributionLocation || '-';
       case 'device':
