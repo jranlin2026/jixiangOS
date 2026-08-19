@@ -11,12 +11,36 @@ import {
   siXiaohongshu,
 } from 'simple-icons';
 
-type PlatformBrand = {
+export type PlatformBrandVariant = 'wechat-channels' | 'wecom';
+
+export type PlatformBrand = {
   title: string;
   hex: string;
   path?: string;
   fallbackLabel: string;
+  variant?: PlatformBrandVariant;
 };
+
+const CUSTOM_BRANDS: Array<{ keyword: string; brand: PlatformBrand }> = [
+  {
+    keyword: '企业微信',
+    brand: {
+      title: '企业微信',
+      hex: 'FFFFFF',
+      fallbackLabel: '企',
+      variant: 'wecom',
+    },
+  },
+  {
+    keyword: '视频号',
+    brand: {
+      title: '微信视频号',
+      hex: 'FA7D18',
+      fallbackLabel: '视',
+      variant: 'wechat-channels',
+    },
+  },
+];
 
 const BRANDS = [
   { keyword: 'Apple ID', icon: siApple },
@@ -27,7 +51,6 @@ const BRANDS = [
   { keyword: '抖音', icon: siTiktok },
   { keyword: '快手', icon: siKuaishou },
   { keyword: '小红书', icon: siXiaohongshu },
-  { keyword: '视频号', icon: siWechat },
   { keyword: '微信', icon: siWechat },
   { keyword: '美团', icon: siMeituan },
   { keyword: '百度', icon: siBaidu },
@@ -35,6 +58,8 @@ const BRANDS = [
 
 export function resolvePlatformBrand(platform: string): PlatformBrand {
   const name = String(platform || '').trim();
+  const custom = CUSTOM_BRANDS.find((item) => name.includes(item.keyword));
+  if (custom) return custom.brand;
   const matched = BRANDS.find((item) => name.includes(item.keyword));
   if (matched) {
     return {
