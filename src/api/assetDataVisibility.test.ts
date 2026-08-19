@@ -350,6 +350,12 @@ function ids<T extends { id: string }>(rows: T[]): string[] {
 
 seed('user-self');
 {
+  storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles.map((role) => (
+    role.id === 'role-asset-self' ? { ...role, permissions: [] } : role
+  ))));
+  const forbiddenPhoneOptions = await assetApi.fetchAssetFilterOptions('phones');
+  assert.equal(forbiddenPhoneOptions.code, 403, '本地模式不得越过叶子权限读取手机号筛选字典');
+  seed('user-self');
   const visibleDevices = await assetApi.fetchDevices({ pageSize: 10 });
   const visiblePhones = await assetApi.fetchPhoneNumbers({ pageSize: 10 });
   const visibleAccounts = await assetApi.fetchInternetAccounts({ pageSize: 10 });

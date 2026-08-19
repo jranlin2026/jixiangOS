@@ -495,6 +495,7 @@ const AssetManagement: React.FC = () => {
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
   const [filterOptions, setFilterOptions] = useState<AssetFilterOptions>(EMPTY_ASSET_FILTER_OPTIONS);
   const skipNextFilterUrlWriteRef = useRef(false);
+  const currentFilterSnapshotRef = useRef('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [overviewSearch, setOverviewSearch] = useState('');
@@ -530,6 +531,7 @@ const AssetManagement: React.FC = () => {
   const deviceAccountDrawerRequestId = useRef(0);
   const [viewSettingsOpen, setViewSettingsOpen] = useState<ConfigurableAssetTab | null>(null);
   const [revealedValues, setRevealedValues] = useState<Record<string, string>>({});
+  currentFilterSnapshotRef.current = JSON.stringify({ search, platform, permissionStatus, status, deviceCategory, profileStatus, advancedFilters });
 
   useEffect(() => {
     if (!detailSaveNotice) return undefined;
@@ -753,9 +755,19 @@ const AssetManagement: React.FC = () => {
   }, [search]);
 
   useEffect(() => {
-    skipNextFilterUrlWriteRef.current = true;
     const nextSearch = searchParams.get('search') || '';
     const nextAdvanced = readAdvancedAssetFilters(searchParams);
+    const nextSnapshot = JSON.stringify({
+      search: nextSearch,
+      platform: searchParams.get('platform') || '',
+      permissionStatus: searchParams.get('permissionStatus') || '',
+      status: searchParams.get('status') || '',
+      deviceCategory: searchParams.get('deviceCategory') || '',
+      profileStatus: searchParams.get('profileStatus') || '',
+      advancedFilters: nextAdvanced,
+    });
+    if (nextSnapshot === currentFilterSnapshotRef.current) return;
+    skipNextFilterUrlWriteRef.current = true;
     setSearch(nextSearch);
     setPlatform(searchParams.get('platform') || '');
     setPermissionStatus(searchParams.get('permissionStatus') || '');
@@ -1788,6 +1800,7 @@ const AssetManagement: React.FC = () => {
       + (activeTab === 'accounts' && loginDeviceIdFilter ? 1 : 0);
     const filterLabels: Partial<Record<keyof AssetFilters, string>> = {
       brand: '品牌', communicationType: '通信方式', acquisitionType: '取得方式', userAssignment: '使用人',
+      operator: '运营商', deviceBinding: '设备绑定',
       loginDeviceBinding: activeTab === 'devices' ? '登录账号' : '登录设备', departmentId: '部门', ownerId: '负责人',
       currentUserId: '当前使用人', riskLevel: '风险等级', attributionLocation: '归属地', simForm: 'SIM形态',
       accountBinding: '关联账号', servicePasswordStatus: '服务密码', accountCategory: '账号类型', phoneBinding: '绑定手机号',

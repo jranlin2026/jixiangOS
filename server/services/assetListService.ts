@@ -72,7 +72,9 @@ function matchesOrganizationFilter(value: Record<string, unknown>, idKey: string
     const [encodedId = '', encodedName = ''] = filterValue.slice(4).split(':');
     const id = decodeURIComponent(encodedId);
     const name = decodeURIComponent(encodedName);
-    return Boolean((id && String(value[idKey] || '') === id) || (name && String(value[nameKey] || '') === name));
+    const rowId = String(value[idKey] || '');
+    if (rowId) return Boolean(id && rowId === id);
+    return Boolean(name && String(value[nameKey] || '') === name);
   }
   return filterValue.startsWith('name:')
     ? String(value[nameKey] || '') === filterValue.slice(5)
@@ -89,6 +91,7 @@ function matchesSearch(
   keyword: string,
   accountById?: Map<string, AssetInternetAccount>,
   deviceById?: Map<string, AssetDevice>,
+  phoneById?: Map<string, AssetPhoneNumber>,
 ): boolean {
   if (!keyword) return true;
   const values = Object.values(row as unknown as Record<string, unknown>);
@@ -104,6 +107,14 @@ function matchesSearch(
       if (device) values.push(device.deviceCode, device.deviceName, device.brand, device.model);
     });
   }
+  if (deviceById && 'deviceId' in row && row.deviceId) {
+    const device = deviceById.get(row.deviceId);
+    if (device) values.push(device.deviceCode, device.deviceName, device.brand, device.model);
+  }
+  if (phoneById && 'phoneId' in row && row.phoneId) {
+    const phone = phoneById.get(row.phoneId);
+    if (phone) values.push(phone.phoneNumber, phone.phoneNumberMasked);
+  }
   return values.some((value) => {
     if (Array.isArray(value)) return value.some((entry) => text(JSON.stringify(entry)).includes(keyword));
     return typeof value !== 'object' && text(value).includes(keyword);
@@ -117,8 +128,9 @@ function matchesFilters(
   accountById?: Map<string, AssetInternetAccount>,
   deviceById?: Map<string, AssetDevice>,
   boundPhoneIds?: Set<string>,
+  phoneById?: Map<string, AssetPhoneNumber>,
 ): boolean {
-  if (!matchesSearch(row, text(filters.search).trim(), accountById, deviceById)) return false;
+  if (!matchesSearch(row, text(filters.search).trim(), accountById, deviceById, phoneById)) return false;
   const value = row as unknown as Record<string, unknown>;
   if (filters.platform && (kind === 'matrix-publish'
     ? !(value.targets as AssetMatrixPublishTask['targets']).some((target) => target.platform === filters.platform)
@@ -287,7 +299,7 @@ export function createAssetListService(
         ? new Set(visibleAccounts.map((account) => account.phoneId).filter((id): id is string => Boolean(id)))
         : undefined;
       const visibleDevices = canReadDevices ? (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[] : [];
-      const deviceById = kind === 'accounts' ? new Map(visibleDevices.map((device) => [device.id, device])) : undefined;
+      const deviceById = kind === 'accounts' || kind === 'phones' ? new Map(visibleDevices.map((device) => [device.id, device])) : undefined;
       const accountCountByDeviceId = kind === 'devices' && canReadAccounts
         ? visibleAccounts.reduce((counts, account) => {
           normalizeAccountLoginDeviceIds(account.loginDeviceIds).forEach((deviceId) => {
@@ -297,6 +309,7 @@ export function createAssetListService(
         }, new Map<string, number>())
         : undefined;
       const visiblePhones = canReadPhones ? (visible[STORAGE_KEYS.ASSET_PHONE_NUMBERS] || []) as AssetPhoneNumber[] : [];
+      const phoneById = kind === 'accounts' ? new Map(visiblePhones.map((phone) => [phone.id, phone])) : undefined;
       const phoneCountByDeviceId = kind === 'devices' && canReadPhones
         ? visiblePhones.reduce((counts, phone) => {
           if (phone.deviceId) counts.set(phone.deviceId, (counts.get(phone.deviceId) || 0) + 1);
@@ -333,7 +346,7 @@ export function createAssetListService(
         if (kind === 'phones') delete effectiveFilters.accountBinding;
         if (kind === 'devices') delete effectiveFilters.loginDeviceBinding;
       }
-      const filtered = rowsWithRelationshipCounts.filter((row) => matchesFilters(kind, row, effectiveFilters, accountById, deviceById, boundPhoneIds));
+      const filtered = rowsWithRelationshipCounts.filter((row) => matchesFilters(kind, row, effectiveFilters, accountById, deviceById, boundPhoneIds, phoneById));
       const page = Math.max(1, Number(filters.page) || 1);
       const pageSize = Math.min(500, Math.max(1, Number(filters.pageSize) || 20));
       const start = (page - 1) * pageSize;

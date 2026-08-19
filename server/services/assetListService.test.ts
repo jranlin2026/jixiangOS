@@ -134,6 +134,10 @@ assert.deepEqual(
   ['account-business'],
   '互联网账号应能通过独立配置的登录设备名称搜索',
 );
+const searchedPhoneByDevice = await service.list('phones', { search: '剪辑二号机', page: 1, pageSize: 20 }, authenticatedAdmin);
+assert.deepEqual(searchedPhoneByDevice.data.items.map((phone) => phone.id), ['phone-1'], '手机号应能通过所属设备名称搜索');
+const searchedAccountByPhone = await service.list('accounts', { search: '13800000000', page: 1, pageSize: 20 }, authenticatedAdmin);
+assert.deepEqual(searchedAccountByPhone.data.items.map((account) => account.id), ['account-business'], '互联网账号应能通过绑定手机号搜索');
 const filteredByLoginDevice = await service.list('accounts', { loginDeviceId: 'device-b', page: 1, pageSize: 10 }, authenticatedAdmin);
 assert.deepEqual(
   (filteredByLoginDevice.data.items as AssetInternetAccount[]).map((account) => account.id),
@@ -210,6 +214,22 @@ const deviceOnlyRelationships = await service.relationships({ page: 1, pageSize:
 assert.equal(deviceOnlyRelationships.data.items.length, 2);
 assert.deepEqual(deviceOnlyRelationships.data.items[0]?.phones, []);
 assert.deepEqual(deviceOnlyRelationships.data.items[0]?.accounts, []);
+
+{
+  const originalDevices = structuredClone(data[STORAGE_KEYS.ASSET_DEVICES]);
+  data[STORAGE_KEYS.ASSET_DEVICES] = (data[STORAGE_KEYS.ASSET_DEVICES] as Array<Record<string, unknown>>).map((device) => (
+    device.id === 'device-b' ? { ...device, ownerId: 'user-other', owner: '管理员' } : device
+  ));
+  service.invalidate();
+  const exactOwner = await service.list('devices', {
+    ownerId: `org:${encodeURIComponent('user-admin')}:${encodeURIComponent('管理员')}`,
+    page: 1,
+    pageSize: 10,
+  }, authenticatedAdmin);
+  assert.deepEqual(exactOwner.data.items.map((device) => device.id), ['device-a'], '有 ID 时同名人员必须按 ID 精确筛选');
+  data[STORAGE_KEYS.ASSET_DEVICES] = originalDevices;
+  service.invalidate();
+}
 
 {
   let releaseOldRead!: () => void;

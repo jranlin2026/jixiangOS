@@ -934,7 +934,8 @@ function matchesLocalOrganization(id: string | undefined, name: string | undefin
   if (!filterValue) return true;
   if (filterValue.startsWith('org:')) {
     const [encodedId = '', encodedName = ''] = filterValue.slice(4).split(':');
-    return Boolean((encodedId && id === decodeURIComponent(encodedId)) || (encodedName && name === decodeURIComponent(encodedName)));
+    if (id) return Boolean(encodedId && id === decodeURIComponent(encodedId));
+    return Boolean(encodedName && name === decodeURIComponent(encodedName));
   }
   return filterValue.startsWith('name:') ? name === filterValue.slice(5) : id === filterValue;
 }
@@ -988,11 +989,12 @@ function filterDevices(rows: AssetDevice[], filters?: AssetFilters): AssetDevice
 
 function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPhoneNumber[] {
   const keyword = filters?.search?.trim().toLowerCase();
+  const canReadDevices = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES);
   const boundPhoneIds = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS)
     ? new Set(visibleAccounts().map((account) => account.phoneId).filter((id): id is string => Boolean(id)))
     : new Set<string>();
   return rows.filter((row) => {
-    const device = getDevice(row.deviceId);
+    const device = canReadDevices ? getDevice(row.deviceId) : undefined;
     const matchesKeyword = !keyword || [
       row.phoneNumber,
       row.phoneNumberMasked,
@@ -1045,10 +1047,12 @@ function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPh
 function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): AssetInternetAccount[] {
   const keyword = filters?.search?.trim().toLowerCase();
   const accountById = new Map(visibleAccounts().map((account) => [account.id, account]));
+  const canReadPhones = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES);
+  const canReadDevices = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES);
   return rows.filter((row) => {
-    const phone = getPhone(row.phoneId);
+    const phone = canReadPhones ? getPhone(row.phoneId) : undefined;
     const loginDevices = normalizeAccountLoginDeviceIds(row.loginDeviceIds)
-      .map((id) => getDevice(id))
+      .map((id) => canReadDevices ? getDevice(id) : undefined)
       .filter((device): device is AssetDevice => Boolean(device));
     const identitySearchValues = normalizeIdentityAccountIds(row.identityAccountIds).flatMap((id) => {
       const identityAccount = accountById.get(id);
@@ -1302,8 +1306,10 @@ async function fetchDevices(filters?: AssetFilters): Promise<ApiResponse<Paginat
   if (shouldUseBackendApi()) return backendAssetList<AssetDevice>('devices', filters);
   ensureInit();
   await delay(120);
-  const visibleAccountRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS) ? visibleAccounts() : [];
-  const visiblePhoneRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES) ? visiblePhones() : [];
+  const canReadAccounts = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS);
+  const canReadPhones = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES);
+  const visibleAccountRows = canReadAccounts ? visibleAccounts() : [];
+  const visiblePhoneRows = canReadPhones ? visiblePhones() : [];
   const accountCountByDeviceId = visibleAccountRows.reduce((counts, account) => {
     normalizeAccountLoginDeviceIds(account.loginDeviceIds).forEach((deviceId) => {
       counts.set(deviceId, (counts.get(deviceId) || 0) + 1);
@@ -1315,13 +1321,18 @@ async function fetchDevices(filters?: AssetFilters): Promise<ApiResponse<Paginat
     return counts;
   }, new Map<string, number>());
   const effectiveFilters = { ...filters };
-  if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS)) delete effectiveFilters.loginDeviceBinding;
-  if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES)) delete effectiveFilters.phoneBinding;
-  const rows = filterDevices(visibleDevices().map((device) => ({
-    ...device,
-    ...(canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS) ? { internetAccountCount: accountCountByDeviceId.get(device.id) || 0 } : {}),
-    ...(canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES) ? { phoneNumberCount: phoneCountByDeviceId.get(device.id) || 0 } : {}),
-  })), effectiveFilters);
+  if (!canReadAccounts) delete effectiveFilters.loginDeviceBinding;
+  if (!canReadPhones) delete effectiveFilters.phoneBinding;
+  const rows = filterDevices(visibleDevices().map((device) => {
+    const cleanDevice = { ...device } as AssetDevice & { phoneNumberCount?: number };
+    delete cleanDevice.internetAccountCount;
+    delete cleanDevice.phoneNumberCount;
+    return {
+      ...cleanDevice,
+      ...(canReadAccounts ? { internetAccountCount: accountCountByDeviceId.get(device.id) || 0 } : {}),
+      ...(canReadPhones ? { phoneNumberCount: phoneCountByDeviceId.get(device.id) || 0 } : {}),
+    };
+  }), effectiveFilters);
   return createSuccessResponse(paginate(rows, filters));
 }
 
@@ -1657,6 +1668,14 @@ async function fetchAssetFilterOptions(kind: 'devices' | 'phones' | 'accounts'):
   if (shouldUseBackendApi()) return backendRequest<AssetFilterOptions>(`/assets/filter-options/${kind}`);
   ensureInit();
   await delay(60);
+  const permissionByKind = {
+    devices: PERMISSION_KEYS.ASSETS_DEVICES,
+    phones: PERMISSION_KEYS.ASSETS_PHONES,
+    accounts: PERMISSION_KEYS.ASSETS_ACCOUNTS,
+  } as const;
+  if (!canReadLocalAssetModule(permissionByKind[kind])) {
+    return createErrorResponse('无权查看该资产筛选项', 403);
+  }
   const rows = kind === 'devices' ? visibleDevices() : kind === 'phones' ? visiblePhones() : visibleAccounts();
   const fieldOptions = (field: string, normalize: (value: unknown) => string = (value) => String(value || '').trim()) => uniqueLocalOptions(
     rows.map((row) => {
