@@ -113,6 +113,10 @@ assert.equal(
   1,
   '设备列表应返回当前数据范围内的准确互联网账号数量',
 );
+const accountDetail = await service.detail('account', 'account-business', authenticatedAdmin);
+assert.equal(accountDetail.data?.account?.id, 'account-business', '生产模式应能读取服务端实时账号详情');
+assert.deepEqual(accountDetail.data?.relatedDevices?.map((device) => device.id), ['device-b']);
+assert.deepEqual(accountDetail.data?.relatedAccounts?.map((account) => account.id).sort(), ['account-apple', 'account-business']);
 
 {
   let releaseOldRead!: () => void;

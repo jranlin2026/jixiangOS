@@ -177,8 +177,17 @@ const useAssetStore = create<AssetState>((set, get) => ({
   },
 
   fetchDetail: async (type, id) => {
-    const res = await assetApi.fetchDetail(type, id);
-    if (res.code === 0) set({ detail: res.data });
+    set({ detail: null, loading: true, error: null });
+    try {
+      const res = await assetApi.fetchDetail(type, id);
+      if (res.code === 0 && res.data) {
+        set({ detail: res.data, loading: false });
+        return;
+      }
+      set({ loading: false, error: res.message || '资产资料不存在或无权查看' });
+    } catch (error: any) {
+      set({ loading: false, error: error?.message || '加载资产资料失败' });
+    }
   },
 
   createDevice: async (input) => {

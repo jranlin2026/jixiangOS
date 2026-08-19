@@ -2134,10 +2134,42 @@ app.post('/api/assets/accounts/:id/reveal/:field', requireAssetSensitiveViewAcce
   res.status(result.code === 0 ? 200 : result.code).json(result);
 });
 
+app.get('/api/assets/detail/:type/:id', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const type = routeParam(req.params.type);
+  const permissionByType = {
+    device: PERMISSION_KEYS.ASSETS_DEVICES,
+    phone: PERMISSION_KEYS.ASSETS_PHONES,
+    account: PERMISSION_KEYS.ASSETS_ACCOUNTS,
+  } as const;
+  if (type !== 'device' && type !== 'phone' && type !== 'account') {
+    res.status(404).json(failure('Unknown asset type', 404));
+    return;
+  }
+  if (!hasPermission(req.currentUser!, permissionByType[type], 'read')) {
+    res.status(403).json(failure('无权查看该资产资料', 403));
+    return;
+  }
+  const result = await assetListService.detail(type, routeParam(req.params.id), req.currentUser!);
+  res.json(result);
+});
+
 app.get('/api/assets/:kind', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
   const kind = routeParam(req.params.kind);
   if (!isAssetListKind(kind)) {
     res.status(404).json({ code: 404, data: null, message: 'Unknown asset list' });
+    return;
+  }
+  const permissionByKind = {
+    devices: PERMISSION_KEYS.ASSETS_DEVICES,
+    phones: PERMISSION_KEYS.ASSETS_PHONES,
+    accounts: PERMISSION_KEYS.ASSETS_ACCOUNTS,
+    risks: PERMISSION_KEYS.ASSETS_RISKS,
+    logs: PERMISSION_KEYS.ASSETS_LOGS,
+    offboarding: PERMISSION_KEYS.ASSETS_OFFBOARDING,
+    'matrix-publish': PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH,
+  } as const;
+  if (!hasPermission(req.currentUser!, permissionByKind[kind], 'read')) {
+    res.status(403).json(failure('无权查看该资产列表', 403));
     return;
   }
   const result = await assetListService.list(kind, {

@@ -152,6 +152,7 @@ type MatrixPublishFormState = {
 type DeviceAccountDrawerState = {
   open: boolean;
   deviceId?: string;
+  device?: AssetDevice;
   items: AssetInternetAccount[];
   page: number;
   pageSize: number;
@@ -477,6 +478,7 @@ const AssetManagement: React.FC = () => {
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [detailSaveNotice, setDetailSaveNotice] = useState('');
   const [deviceAccountDrawer, setDeviceAccountDrawer] = useState<DeviceAccountDrawerState>(emptyDeviceAccountDrawer);
+  const [loginDeviceFilterContext, setLoginDeviceFilterContext] = useState<AssetDevice>();
   const [returnToDeviceAccountDrawer, setReturnToDeviceAccountDrawer] = useState(false);
   const deviceAccountDrawerRequestId = useRef(0);
   const [viewSettingsOpen, setViewSettingsOpen] = useState<ConfigurableAssetTab | null>(null);
@@ -500,6 +502,7 @@ const AssetManagement: React.FC = () => {
     detail,
     pagination,
     loading,
+    error: assetError,
     fetchDashboard,
     fetchDevices,
     fetchPhones,
@@ -685,7 +688,7 @@ const AssetManagement: React.FC = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [search, platform, permissionStatus, status]);
+  }, [search, platform, permissionStatus, status, loginDeviceIdFilter]);
 
   const handleTabChange = (_: React.SyntheticEvent, value: AssetTab) => {
     setPlatform('');
@@ -697,6 +700,7 @@ const AssetManagement: React.FC = () => {
 
   const clearLoginDeviceFilter = () => {
     setPage(0);
+    setLoginDeviceFilterContext(undefined);
     setSearchParams({ tab: 'accounts' });
   };
 
@@ -1145,11 +1149,22 @@ const AssetManagement: React.FC = () => {
       loading: true,
       error: undefined,
     }));
-    const response = await assetApi.fetchInternetAccounts({
-      loginDeviceId: deviceId,
-      page: nextPage + 1,
-      pageSize: nextPageSize,
-    });
+    let response;
+    try {
+      response = await assetApi.fetchInternetAccounts({
+        loginDeviceId: deviceId,
+        page: nextPage + 1,
+        pageSize: nextPageSize,
+      });
+    } catch (error: any) {
+      if (requestId !== deviceAccountDrawerRequestId.current) return;
+      setDeviceAccountDrawer((current) => ({
+        ...current,
+        loading: false,
+        error: error?.message || '网络异常，加载互联网账号失败',
+      }));
+      return;
+    }
     if (requestId !== deviceAccountDrawerRequestId.current) return;
     if (response.code !== 0) {
       setDeviceAccountDrawer((current) => ({ ...current, loading: false, error: response.message || '加载互联网账号失败' }));
@@ -1168,7 +1183,7 @@ const AssetManagement: React.FC = () => {
 
   const openDeviceAccountDrawer = (device: AssetDevice) => {
     setReturnToDeviceAccountDrawer(false);
-    setDeviceAccountDrawer({ ...emptyDeviceAccountDrawer, open: true, deviceId: device.id, loading: true });
+    setDeviceAccountDrawer({ ...emptyDeviceAccountDrawer, open: true, deviceId: device.id, device, loading: true });
     void loadDeviceAccountDrawer(device.id);
   };
 
@@ -1187,6 +1202,7 @@ const AssetManagement: React.FC = () => {
     if (!deviceId) return;
     closeDeviceAccountDrawer();
     setPage(0);
+    setLoginDeviceFilterContext(deviceAccountDrawer.device);
     setSearchParams({ tab: 'accounts', loginDeviceId: deviceId });
   };
 
@@ -1236,7 +1252,7 @@ const AssetManagement: React.FC = () => {
         'IMEI 1': displayDeviceImei(device, 1),
         'IMEI 2': displayDeviceImei(device, 2),
         手机号: (phonesByDeviceId.get(device.id) || []).map((phone) => `${phone.slotType}:${displayPhoneNumber(phone)}`).join(' / '),
-        账号数: (accountsByDeviceId.get(device.id) || []).length,
+        互联网账号: device.internetAccountCount ?? (accountsByDeviceId.get(device.id) || []).length,
         所属部门: device.department,
         负责人: device.owner,
         当前使用人: device.currentUser,
@@ -1507,7 +1523,11 @@ const AssetManagement: React.FC = () => {
           <Chip
             color="primary"
             variant="outlined"
-            label={`登录设备：${deviceById.get(loginDeviceIdFilter)?.deviceCode || loginDeviceIdFilter}`}
+            label={`登录设备：${(
+              loginDeviceFilterContext?.id === loginDeviceIdFilter
+                ? loginDeviceFilterContext.deviceCode
+                : deviceById.get(loginDeviceIdFilter)?.deviceCode
+            ) || loginDeviceIdFilter}`}
             onDelete={clearLoginDeviceFilter}
             sx={{ fontWeight: 800 }}
           />
@@ -2844,7 +2864,9 @@ const AssetManagement: React.FC = () => {
         <DialogContent sx={{ bgcolor: '#FBFCFE', p: 1.5 }}>
           {!detail ? (
             <Box sx={{ py: 6, textAlign: 'center' }}>
-              <Typography sx={{ color: shell.muted, fontWeight: 800 }}>正在加载资产详情</Typography>
+              <Typography sx={{ color: assetError ? '#C62828' : shell.muted, fontWeight: 800 }}>
+                {loading ? '正在加载资产详情' : assetError || '资产资料不存在或无权查看'}
+              </Typography>
             </Box>
           ) : renderDetailBody()}
         </DialogContent>
@@ -3653,7 +3675,8 @@ const AssetManagement: React.FC = () => {
   };
 
   const renderDeviceAccountDrawer = () => {
-    const device = deviceAccountDrawer.deviceId ? deviceById.get(deviceAccountDrawer.deviceId) : undefined;
+    const device = deviceAccountDrawer.device
+      || (deviceAccountDrawer.deviceId ? deviceById.get(deviceAccountDrawer.deviceId) : undefined);
     const deviceTitle = device ? `${device.deviceCode} / ${device.deviceName}` : '设备';
     return (
       <Drawer

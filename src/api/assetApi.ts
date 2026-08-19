@@ -1790,6 +1790,9 @@ async function fetchOffboardingTasks(filters?: AssetFilters): Promise<ApiRespons
 }
 
 async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<AssetDetailBundle | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<AssetDetailBundle | null>(`/assets/detail/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
+  }
   ensureInit();
   await delay(120);
   const scope = getCurrentDataVisibilityScope('assets');

@@ -2,6 +2,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   AssetDevice,
   AssetDashboard,
+  AssetDetailBundle,
   AssetFilters,
   AssetInternetAccount,
   AssetMatrixPublishTask,
@@ -9,6 +10,7 @@ import type {
   AssetOperationLog,
   AssetPhoneNumber,
   AssetRisk,
+  AssetType,
 } from '../../src/types/asset';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
@@ -16,6 +18,7 @@ import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import { readAccountControlStatus } from '../../src/domain/assets/assetFields';
 import { normalizeAccountLoginDeviceIds } from '../../src/domain/assets/accountDeviceBindings';
+import { normalizeIdentityAccountIds } from '../../src/domain/assets/accountIdentityBindings';
 import { success } from '../api/response';
 import { filterAssetStorageData } from './assetStorageAccess';
 
@@ -173,6 +176,48 @@ export function createAssetListService(
           totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)),
         },
       });
+    },
+    async detail(type: AssetType, id: string, user: AuthenticatedUser) {
+      const visible = await loadVisible(user);
+      const devices = (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[];
+      const phones = (visible[STORAGE_KEYS.ASSET_PHONE_NUMBERS] || []) as AssetPhoneNumber[];
+      const accounts = (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[];
+      const risks = (visible[STORAGE_KEYS.ASSET_RISKS] || []) as AssetRisk[];
+      const logs = (visible[STORAGE_KEYS.ASSET_OPERATION_LOGS] || []) as AssetOperationLog[];
+      let bundle: AssetDetailBundle | null = null;
+
+      if (type === 'device') {
+        const device = devices.find((item) => item.id === id);
+        if (device) {
+          const relatedPhones = phones.filter((phone) => phone.deviceId === id);
+          const relatedAccounts = accounts.filter((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(id));
+          const ids = new Set([id, ...relatedPhones.map((phone) => phone.id), ...relatedAccounts.map((account) => account.id)]);
+          bundle = { type, device, relatedPhones, relatedAccounts, risks: risks.filter((risk) => ids.has(risk.targetId)), logs: logs.filter((log) => ids.has(log.targetId)) };
+        }
+      } else if (type === 'phone') {
+        const phone = phones.find((item) => item.id === id);
+        if (phone) {
+          const relatedDevice = devices.find((device) => device.id === phone.deviceId);
+          const relatedAccounts = accounts.filter((account) => account.phoneId === id);
+          const ids = new Set([id, relatedDevice?.id || '', ...relatedAccounts.map((account) => account.id)]);
+          bundle = { type, phone, relatedDevice, relatedPhones: [phone], relatedAccounts, risks: risks.filter((risk) => ids.has(risk.targetId)), logs: logs.filter((log) => ids.has(log.targetId)) };
+        }
+      } else {
+        const account = accounts.find((item) => item.id === id);
+        if (account) {
+          const relatedDevices = devices.filter((device) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(device.id));
+          const relatedPhones = phones.filter((phone) => phone.id === account.phoneId);
+          const identityIds = new Set(normalizeIdentityAccountIds(account.identityAccountIds));
+          const relatedAccounts = accounts.filter((item) => (
+            item.id === account.id
+            || identityIds.has(item.id)
+            || normalizeIdentityAccountIds(item.identityAccountIds).includes(account.id)
+          ));
+          const ids = new Set([...relatedDevices.map((device) => device.id), ...relatedPhones.map((phone) => phone.id), ...relatedAccounts.map((item) => item.id)]);
+          bundle = { type, account, relatedDevices, relatedPhones, relatedAccounts, risks: risks.filter((risk) => ids.has(risk.targetId)), logs: logs.filter((log) => ids.has(log.targetId)) };
+        }
+      }
+      return success(bundle);
     },
     async dashboard(user: AuthenticatedUser) {
       const visible = await loadVisible(user);
