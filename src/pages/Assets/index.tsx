@@ -3052,8 +3052,18 @@ const AssetManagement: React.FC = () => {
         {renderTextField('monthlyFee', '月费用', { type: 'number' })}
         {renderTextField('expiresAt', '到期日', { type: 'date' })}
         {renderSelectField('accountStatus', '账号状态', ['使用中', '闲置', '异常', '封禁', '已注销'], { required: true })}
-        {renderTextField('purpose', '用途', { multiline: true })}
-        {renderTextField('remark', '备注', { multiline: true })}
+        <Box
+          sx={{
+            gridColumn: '1 / -1',
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+            alignItems: 'stretch',
+            gap: 2,
+          }}
+        >
+          {renderTextField('purpose', '用途', { multiline: true })}
+          {renderTextField('remark', '备注', { multiline: true })}
+        </Box>
       </BusinessFormSection>
     </>
   );

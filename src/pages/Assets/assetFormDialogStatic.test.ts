@@ -8,6 +8,8 @@ const formModelSource = readFileSync(new URL('./assetFormModel.ts', import.meta.
 const formDialog = source.match(/<ProtectedFormDialog[\s\S]*?<\/ProtectedFormDialog>/)?.[0] || '';
 const phoneFields = source.match(/const renderPhoneFields[\s\S]*?const renderAccountFields/)?.[0] || '';
 const phonePackageSection = phoneFields.match(/<BusinessFormSection step=\{4\}[\s\S]*?<\/BusinessFormSection>/)?.[0] || '';
+const accountFields = source.match(/const renderAccountFields[\s\S]*?const renderImportDialog/)?.[0] || '';
+const accountOperationsSection = accountFields.match(/<BusinessFormSection step=\{4\}[\s\S]*?<\/BusinessFormSection>/)?.[0] || '';
 
 assert.match(formDialog, /maxWidth="md"/, '资产录入弹窗应限制为中等桌面宽度，避免输入框过宽');
 assert.match(formDialog, /markButtonClicksDirty=\{false\}/, '关闭、取消和分区按钮不应把空白表单误判为已填写');
@@ -45,6 +47,11 @@ assert.match(source, /renderAccountIdentityCard/, '账号详情应展示身份�
 assert.match(source, /<PlatformBrandMark/, '互联网账号应使用品牌图标而不是字母占位');
 assert.match(source, /renderPlatformSelectField[\s\S]*?renderValue[\s\S]*?<PlatformBrandMark/, '业务平台选中后应在字段内显示品牌 Logo');
 assert.match(source, /platformOptions\.map[\s\S]*?<PlatformBrandMark/, '业务平台下拉选项左侧应显示品牌 Logo');
+assert.match(
+  accountOperationsSection,
+  /gridColumn: '1 \/ -1'[\s\S]*?gridTemplateColumns: \{ xs: '1fr', md: '1fr 1fr' \}[\s\S]*?renderTextField\('purpose', '用途', \{ multiline: true \}\)[\s\S]*?renderTextField\('remark', '备注', \{ multiline: true \}\)/,
+  '用途和备注应组成全宽双列字段组，桌面端同排、移动端纵向排列',
+);
 assert.match(source, /appleIdentityAccountId: _appleIdentityAccountId[\s\S]*?googleIdentityAccountId: _googleIdentityAccountId[\s\S]*?\.\.\.accountValues/, '表单专用的 Apple\/Google 选择字段不应持久化到账号资产');
 assert.match(source, /detailSaveNotice[\s\S]*?资料已更新/, '编辑成功应在详情页内非阻断提示');
 assert.match(assetApiSource, /reveal\/service-password/, '后端模式应通过独立接口查看服务密码');
