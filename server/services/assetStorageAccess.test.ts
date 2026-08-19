@@ -167,6 +167,7 @@ const storageData = {
       owner: '童双全',
       currentUser: '童双全',
       phoneId: 'phone-self',
+      loginDeviceIds: ['device-self', 'device-other'],
       identityAccountIds: ['account-other'],
       loginAccount: 'self_raw',
       loginPassword: 'must-never-leak',
@@ -183,6 +184,14 @@ const storageData = {
       phoneId: 'phone-other',
       loginAccount: 'other_raw',
       loginAccountMasked: 'other_***',
+    },
+    {
+      id: 'account-device-visible',
+      owner: '其他员工',
+      currentUser: '其他员工',
+      loginDeviceIds: ['device-self'],
+      loginAccount: 'device_visible_raw',
+      loginAccountMasked: 'device_visible_***',
     },
   ],
   [STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS]: [{ accountId: 'account-self', ciphertext: 'encrypted-secret' }],
@@ -209,11 +218,13 @@ assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].realName,
 assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].iccid, '89860012345678901234');
 assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].imsi, '460001234567890');
 assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePassword, undefined);
-assert.deepEqual((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[]).map((item) => item.id), ['account-self']);
+assert.deepEqual((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[]).map((item) => item.id), ['account-self', 'account-device-visible']);
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginAccount, 'self_raw');
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].realName, '童**');
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].boundEmail, 'self@example.com');
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginPassword, undefined);
+assert.deepEqual((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginDeviceIds, ['device-self']);
+assert.deepEqual((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[1].loginDeviceIds, ['device-self']);
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].identityAccountIds, []);
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_RISKS] as any[]).map((item) => item.id), ['risk-self']);
 assert.equal(canWriteStorageKey(salesAuth, STORAGE_KEYS.ASSET_DEVICES), false);

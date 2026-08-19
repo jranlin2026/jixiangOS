@@ -370,6 +370,7 @@ const createdAccount = await riskService.createInternetAccount({
   loginPassword: 'test-password',
   realName: '资产管理员',
   phoneId: createdPhone.data!.id,
+  loginDeviceIds: [oldDevice.id, unowned.data!.id],
   boundEmail: 'asset-admin@example.com',
   ownerSubject: '公司',
   departmentId: 'dept-assets',
@@ -386,6 +387,7 @@ assert.equal(createdAccount.code, 0);
 assert.equal(createdAccount.data?.loginAccount, 'jx_official_001');
 assert.equal(createdAccount.data?.loginAccountMasked.includes('*'), true);
 assert.equal(createdAccount.data?.boundEmailMasked?.includes('*'), true);
+assert.deepEqual(createdAccount.data?.loginDeviceIds, [oldDevice.id, unowned.data!.id], '互联网账号应支持独立绑定多台登录设备');
 assert.ok(
   riskPrisma.read<AssetInternetAccount[]>(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS).some((account) => account.id === createdAccount.data?.id),
 );
@@ -395,6 +397,11 @@ assert.equal(JSON.stringify(storedCredentials).includes('test-password'), false)
 const revealedLoginPassword = await riskService.revealAccountCredential(createdAccount.data!.id, 'loginPassword', sensitiveAssetAdmin);
 assert.equal(revealedLoginPassword.code, 0);
 assert.equal(revealedLoginPassword.data?.value, 'test-password');
+const rejectedMissingLoginDevice = await riskService.updateInternetAccount(createdAccount.data!.id, {
+  loginDeviceIds: ['missing-device'],
+}, assetAdmin);
+assert.equal(rejectedMissingLoginDevice.code, 400);
+assert.match(rejectedMissingLoginDevice.message, /登录设备不存在/);
 const appleIdentity = await riskService.createInternetAccount({
   platform: 'Apple ID',
   accountName: '企业 Apple ID',
@@ -597,6 +604,12 @@ assert.ok(
 );
 const deletedDeviceWithRelations = await riskService.deleteDevice(oldDevice.id, assetAdmin);
 assert.equal(deletedDeviceWithRelations.code, 0);
+assert.deepEqual(
+  riskPrisma.read<AssetInternetAccount[]>(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS)
+    .find((account) => account.id === createdAccount.data!.id)?.loginDeviceIds,
+  [unowned.data!.id],
+  '删除设备后应从账号登录设备关系中移除该设备，但保留其他登录设备',
+);
 assert.equal(
   riskPrisma.read<AssetRisk[]>(STORAGE_KEYS.ASSET_RISKS)
     .some((risk) => risk.riskKey === `phone-no-owner-${relatedOwnerlessPhone.data!.id}`),

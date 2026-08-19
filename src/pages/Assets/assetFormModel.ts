@@ -49,7 +49,7 @@ export const ASSET_FORM_SECTIONS: Record<AssetFormType, Array<{ title: string; s
   ],
   account: [
     { title: '平台与账号', summary: '平台 / 类型 / 登录账号 / 实名主体' },
-    { title: '登录与安全', summary: '密码 / 手机号 / Apple ID / Google账号 / 二次验证' },
+    { title: '登录与安全', summary: '密码 / 手机号 / 登录设备 / 身份账号 / 二次验证' },
     { title: '归属与使用', summary: '主体 / 部门 / 负责人 / 使用人' },
     { title: '经营与状态', summary: '业务场景 / 服务商 / 费用 / 状态' },
   ],
@@ -79,6 +79,7 @@ export function createAssetFormDefaults(type: AssetFormType): Record<string, str
     platform: '',
     accountCategory: '主账号',
     phoneId: '',
+    loginDeviceIds: '[]',
     appleIdentityAccountId: '',
     googleIdentityAccountId: '',
     loginMethod: '密码登录',

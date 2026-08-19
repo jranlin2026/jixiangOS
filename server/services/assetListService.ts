@@ -14,6 +14,7 @@ import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { readAccountControlStatus } from '../../src/domain/assets/assetFields';
+import { normalizeAccountLoginDeviceIds } from '../../src/domain/assets/accountDeviceBindings';
 import { success } from '../api/response';
 import { filterAssetStorageData } from './assetStorageAccess';
 
@@ -49,13 +50,24 @@ function text(value: unknown): string {
   return String(value || '').toLowerCase();
 }
 
-function matchesSearch(row: AssetRow, keyword: string, accountById?: Map<string, AssetInternetAccount>): boolean {
+function matchesSearch(
+  row: AssetRow,
+  keyword: string,
+  accountById?: Map<string, AssetInternetAccount>,
+  deviceById?: Map<string, AssetDevice>,
+): boolean {
   if (!keyword) return true;
   const values = Object.values(row as unknown as Record<string, unknown>);
   if (accountById && 'identityAccountIds' in row && Array.isArray(row.identityAccountIds)) {
     row.identityAccountIds.forEach((id) => {
       const identityAccount = accountById.get(id);
       if (identityAccount) values.push(identityAccount.platform, identityAccount.accountName, identityAccount.loginAccount);
+    });
+  }
+  if (deviceById && 'loginDeviceIds' in row) {
+    normalizeAccountLoginDeviceIds(row.loginDeviceIds).forEach((id) => {
+      const device = deviceById.get(id);
+      if (device) values.push(device.deviceCode, device.deviceName, device.brand, device.model);
     });
   }
   return values.some((value) => {
@@ -69,8 +81,9 @@ function matchesFilters(
   row: AssetRow,
   filters: AssetFilters,
   accountById?: Map<string, AssetInternetAccount>,
+  deviceById?: Map<string, AssetDevice>,
 ): boolean {
-  if (!matchesSearch(row, text(filters.search).trim(), accountById)) return false;
+  if (!matchesSearch(row, text(filters.search).trim(), accountById, deviceById)) return false;
   const value = row as unknown as Record<string, unknown>;
   if (filters.platform && (kind === 'matrix-publish'
     ? !(value.targets as AssetMatrixPublishTask['targets']).some((target) => target.platform === filters.platform)
@@ -124,7 +137,9 @@ export function createAssetListService(
       const rows = (Array.isArray(visible[KEY_BY_KIND[kind]]) ? visible[KEY_BY_KIND[kind]] : []) as AssetRow[];
       const visibleAccounts = (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[];
       const accountById = kind === 'accounts' ? new Map(visibleAccounts.map((account) => [account.id, account])) : undefined;
-      const filtered = rows.filter((row) => matchesFilters(kind, row, filters, accountById));
+      const visibleDevices = (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[];
+      const deviceById = kind === 'accounts' ? new Map(visibleDevices.map((device) => [device.id, device])) : undefined;
+      const filtered = rows.filter((row) => matchesFilters(kind, row, filters, accountById, deviceById));
       const page = Math.max(1, Number(filters.page) || 1);
       const pageSize = Math.min(500, Math.max(1, Number(filters.pageSize) || 20));
       const start = (page - 1) * pageSize;

@@ -44,6 +44,10 @@ import {
   normalizeIdentityAccountIds,
   validateIdentityAccountIds,
 } from '../domain/assets/accountIdentityBindings';
+import {
+  normalizeAccountLoginDeviceIds,
+  validateAccountLoginDeviceIds,
+} from '../domain/assets/accountDeviceBindings';
 
 const delay = (ms?: number) => baseDelay(ms, 'assets');
 
@@ -502,7 +506,7 @@ const ASSET_IMPORT_LABELS: Record<AssetImportType, string> = {
 export const ASSET_IMPORT_TEMPLATES: Record<AssetImportType, string[]> = {
   devices: ['设备类型*', '设备名称*', '品牌*', '型号*', '序列号', '通信方式*', 'IMEI 1', 'IMEI 2', '取得方式', '购买金额', '月租金', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
   phones: ['手机号*', 'SIM形态*', 'ICCID', 'IMSI', '服务密码', '实名主体', '实名信息', '运营商', '归属地', '所属设备编号', 'SIM卡槽', '套餐', '月费用', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
-  accounts: ['平台*', '账号类型*', '账号名称*', '登录账号*', '实名主体', '实名信息', '绑定手机号', '绑定邮箱', '二次验证', '账号控制权*', '所属主体', '所属部门', '资产负责人', '当前使用人', '账号状态', '业务场景', '服务商', '月费用', '用途', '备注'],
+  accounts: ['平台*', '账号类型*', '账号名称*', '登录账号*', '实名主体', '实名信息', '绑定手机号', '登录设备编号（多个用/分隔）', '绑定邮箱', '二次验证', '账号控制权*', '所属主体', '所属部门', '资产负责人', '当前使用人', '账号状态', '业务场景', '服务商', '月费用', '用途', '备注'],
 };
 
 const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> = {
@@ -548,6 +552,7 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
     实名主体: '深圳极享科技有限公司',
     实名信息: '张三',
     绑定手机号: '13900001111',
+    '登录设备编号（多个用/分隔）': 'DEV-0001 / DEV-0002',
     绑定邮箱: 'ops@example.com',
     所属主体: '公司',
     所属部门: '运营管理部',
@@ -731,6 +736,15 @@ function accountInputFromCsv(raw: Record<string, string>): Partial<AssetInternet
   const phoneKeyword = csvCell(raw, '绑定手机号');
   const phone = findPhoneForImport(phoneKeyword);
   if (phoneKeyword && !phone) throw new Error('绑定手机号不存在');
+  const loginDeviceKeywords = csvCell(raw, '登录设备编号（多个用/分隔）', '登录设备编号', '登录设备')
+    .split(/[、,，/|;；\s]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const loginDeviceIds = loginDeviceKeywords.map((keyword) => {
+    const device = devices().find((item) => item.id === keyword || item.deviceCode === keyword);
+    if (!device) throw new Error(`登录设备不存在：${keyword}`);
+    return device.id;
+  });
   return {
     platform: csvCell(raw, '平台*', '平台'),
     accountCategory: (csvCell(raw, '账号类型*', '账号类型') || '主账号') as AssetInternetAccountInput['accountCategory'],
@@ -739,6 +753,7 @@ function accountInputFromCsv(raw: Record<string, string>): Partial<AssetInternet
     realNameSubject: csvCell(raw, '实名主体'),
     realName: csvCell(raw, '实名信息'),
     phoneId: phone?.id,
+    loginDeviceIds,
     boundEmail: csvCell(raw, '绑定邮箱'),
     ownerSubject: (csvCell(raw, '所属主体') || '公司') as AssetInternetAccountInput['ownerSubject'],
     department: csvCell(raw, '所属部门'),
@@ -804,13 +819,16 @@ function visibleAccounts(scope = getCurrentDataVisibilityScope('assets')): Asset
   const rows = accounts();
   if (scope.unrestricted) return rows;
   const visiblePhoneIds = new Set(visiblePhones(scope).map((phone) => phone.id));
+  const visibleDeviceIds = new Set(visibleDevices(scope).map((device) => device.id));
   const visibleRows = rows.filter((account) => (
     canViewAssetAccount(account, scope)
     || Boolean(account.phoneId && visiblePhoneIds.has(account.phoneId))
+    || Boolean(account.loginDeviceIds?.some((id) => visibleDeviceIds.has(id)))
   ));
   const visibleIds = new Set(visibleRows.map((account) => account.id));
   return visibleRows.map((account) => ({
     ...account,
+    loginDeviceIds: normalizeAccountLoginDeviceIds(account.loginDeviceIds).filter((id) => visibleDeviceIds.has(id)),
     identityAccountIds: normalizeIdentityAccountIds(account.identityAccountIds).filter((id) => visibleIds.has(id)),
   }));
 }
@@ -922,7 +940,9 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
   const accountById = new Map(visibleAccounts().map((account) => [account.id, account]));
   return rows.filter((row) => {
     const phone = getPhone(row.phoneId);
-    const device = getPhoneDevice(phone);
+    const loginDevices = normalizeAccountLoginDeviceIds(row.loginDeviceIds)
+      .map((id) => getDevice(id))
+      .filter((device): device is AssetDevice => Boolean(device));
     const identitySearchValues = normalizeIdentityAccountIds(row.identityAccountIds).flatMap((id) => {
       const identityAccount = accountById.get(id);
       return identityAccount ? [identityAccount.platform, identityAccount.accountName, identityAccount.loginAccount] : [];
@@ -946,8 +966,7 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
       row.accountStatus,
       phone?.phoneNumber,
       phone?.phoneNumberMasked,
-      device?.deviceCode,
-      device?.deviceName,
+      ...loginDevices.flatMap((device) => [device.deviceCode, device.deviceName]),
       ...identitySearchValues,
     ].some((value) => includesKeyword(value, keyword));
     const matchesPlatform = !filters?.platform || row.platform === filters.platform;
@@ -963,8 +982,7 @@ function relatedAccountsForPhone(phoneId: string): AssetInternetAccount[] {
 }
 
 function relatedAccountsForDevice(deviceId: string): AssetInternetAccount[] {
-  const phoneIds = phones().filter((phone) => phone.deviceId === deviceId).map((phone) => phone.id);
-  return accounts().filter((account) => account.phoneId && phoneIds.includes(account.phoneId));
+  return accounts().filter((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(deviceId));
 }
 
 function detailLogs(assetIds: string[]): AssetOperationLog[] {
@@ -981,7 +999,7 @@ function detailRisks(assetIds: string[]): AssetRisk[] {
 
 function matrixTargetFromAccount(account: AssetInternetAccount): AssetMatrixPublishTarget {
   const phone = getPhone(account.phoneId);
-  const device = getPhoneDevice(phone);
+  const device = getDevice(normalizeAccountLoginDeviceIds(account.loginDeviceIds)[0]);
   return {
     id: `matrix-target-${Date.now()}-${account.id}-${Math.random().toString(16).slice(2, 8)}`,
     accountId: account.id,
@@ -1187,16 +1205,22 @@ async function deleteDevice(id: string): Promise<ApiResponse<AssetDevice>> {
     if (!existing) throw new Error('设备不存在');
 
     const phoneIds = phones().filter((phone) => phone.deviceId === id).map((phone) => phone.id);
-    const relatedAccounts = accounts().filter((account) => account.phoneId && phoneIds.includes(account.phoneId));
+    const relatedAccounts = accounts().filter((account) => (
+      Boolean(account.phoneId && phoneIds.includes(account.phoneId))
+      || normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(id)
+    ));
 
     setStorageData(STORAGE_KEYS.ASSET_DEVICES, rows.filter((device) => device.id !== id));
     setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, phones().filter((phone) => phone.deviceId !== id));
     if (relatedAccounts.length) {
-      setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((account) => (
-        account.phoneId && phoneIds.includes(account.phoneId)
-          ? { ...account, phoneId: undefined, updatedAt: now() }
-          : account
-      )));
+      const updatedAt = now();
+      setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((account) => {
+        const unbindPhone = Boolean(account.phoneId && phoneIds.includes(account.phoneId));
+        const currentDeviceIds = normalizeAccountLoginDeviceIds(account.loginDeviceIds);
+        const loginDeviceIds = currentDeviceIds.filter((deviceId) => deviceId !== id);
+        if (!unbindPhone && loginDeviceIds.length === currentDeviceIds.length) return account;
+        return { ...account, phoneId: unbindPhone ? undefined : account.phoneId, loginDeviceIds, updatedAt };
+      }));
     }
     setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, offboardingTasks().filter((task) => (
       !(task.assetType === '设备资产' && task.assetId === id)
@@ -1382,6 +1406,11 @@ function assertAccountBinding(input: Partial<AssetInternetAccountInput>, exclude
   }
   const phoneId = normalizePhoneId(input.phoneId);
   if (phoneId && !getPhone(phoneId)) throw new Error('绑定手机号不存在');
+  const loginDeviceIds = normalizeAccountLoginDeviceIds(input.loginDeviceIds);
+  const loginDeviceError = validateAccountLoginDeviceIds(loginDeviceIds, devices());
+  if (loginDeviceError) throw new Error(loginDeviceError);
+  const visibleDeviceIds = new Set(visibleDevices().map((device) => device.id));
+  if (loginDeviceIds.some((id) => !visibleDeviceIds.has(id))) throw new Error('无权绑定该登录设备');
   const identityError = validateIdentityAccountIds({
     sourceAccountId: excludeId,
     sourcePlatform: platform,
@@ -1420,6 +1449,7 @@ async function createInternetAccount(input: Partial<AssetInternetAccountInput>, 
       realName: input.realName || '',
       realNameMasked: maskRealName(input.realName),
       phoneId: normalizePhoneId(input.phoneId),
+      loginDeviceIds: normalizeAccountLoginDeviceIds(input.loginDeviceIds),
       identityAccountIds: normalizeIdentityAccountIds(input.identityAccountIds),
       boundEmail: input.boundEmail || '',
       boundEmailMasked: maskEmail(input.boundEmail),
@@ -1458,6 +1488,9 @@ async function createInternetAccount(input: Partial<AssetInternetAccountInput>, 
     if (account.identityAccountIds?.length) {
       logAssetOperation('绑定资产', '互联网账号', account.id, account.accountName, `绑定${account.identityAccountIds.length}个身份账号`);
     }
+    if (account.loginDeviceIds?.length) {
+      logAssetOperation('绑定资产', '互联网账号', account.id, account.accountName, `配置${account.loginDeviceIds.length}台登录设备`);
+    }
     rebuildRisksAndOffboarding();
     return account;
   });
@@ -1495,6 +1528,9 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
       ...existing,
       ...input,
       phoneId: nextPhoneId,
+      loginDeviceIds: input.loginDeviceIds === undefined
+        ? existing.loginDeviceIds
+        : normalizeAccountLoginDeviceIds(input.loginDeviceIds),
       identityAccountIds: input.identityAccountIds === undefined
         ? existing.identityAccountIds
         : normalizeIdentityAccountIds(input.identityAccountIds),
@@ -1539,6 +1575,16 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
         updated.id,
         updated.accountName,
         identityCount ? `更新${identityCount}个身份账号绑定` : '解除身份账号绑定',
+      );
+    }
+    if (normalizeAccountLoginDeviceIds(existing.loginDeviceIds).join(',') !== normalizeAccountLoginDeviceIds(updated.loginDeviceIds).join(',')) {
+      const deviceCount = normalizeAccountLoginDeviceIds(updated.loginDeviceIds).length;
+      logAssetOperation(
+        deviceCount ? '绑定资产' : '解绑资产',
+        '互联网账号',
+        updated.id,
+        updated.accountName,
+        deviceCount ? `更新为${deviceCount}台登录设备` : '清空登录设备',
       );
     }
     rebuildRisksAndOffboarding();
@@ -1742,7 +1788,11 @@ async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<Ass
   const account = visibleAccountRows.find((item) => item.id === id);
   if (!account) return createSuccessResponse(null);
   const phone = getPhone(account.phoneId);
-  const relatedDevice = getPhoneDevice(phone);
+  const visibleDeviceIds = new Set(visibleDeviceRows.map((device) => device.id));
+  const relatedDevices = normalizeAccountLoginDeviceIds(account.loginDeviceIds)
+    .filter((deviceId) => visibleDeviceIds.has(deviceId))
+    .map((deviceId) => getDevice(deviceId))
+    .filter((device): device is AssetDevice => Boolean(device));
   const visibleAccountIds = new Set(visibleAccountRows.map((item) => item.id));
   const identityIds = new Set(normalizeIdentityAccountIds(account.identityAccountIds));
   const relatedAccounts = visibleAccountRows.filter((item) => (
@@ -1750,11 +1800,11 @@ async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<Ass
     || identityIds.has(item.id)
     || (visibleAccountIds.has(item.id) && normalizeIdentityAccountIds(item.identityAccountIds).includes(account.id))
   ));
-  const detailAssetIds = [relatedDevice?.id || '', phone?.id || '', ...relatedAccounts.map((item) => item.id)];
+  const detailAssetIds = [...relatedDevices.map((device) => device.id), phone?.id || '', ...relatedAccounts.map((item) => item.id)];
   return createSuccessResponse({
     type,
     account,
-    relatedDevice,
+    relatedDevices,
     relatedPhones: phone ? [phone] : [],
     relatedAccounts,
     risks: detailRisks(detailAssetIds),

@@ -120,6 +120,8 @@ export interface AssetInternetAccount {
   realName?: string;
   realNameMasked?: string;
   phoneId?: string;
+  /** 该账号实际登录或使用的设备；独立于绑定手机号关系，可多选。 */
+  loginDeviceIds?: string[];
   /** Apple ID / Google 账号等用于登录或恢复该账号的独立身份账号资产。 */
   identityAccountIds?: string[];
   boundEmail?: string;
@@ -273,6 +275,7 @@ export interface AssetDetailBundle {
   phone?: AssetPhoneNumber;
   account?: AssetInternetAccount;
   relatedDevice?: AssetDevice;
+  relatedDevices?: AssetDevice[];
   relatedPhones: AssetPhoneNumber[];
   relatedAccounts: AssetInternetAccount[];
   risks: AssetRisk[];

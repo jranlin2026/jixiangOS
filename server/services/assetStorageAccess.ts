@@ -124,8 +124,17 @@ function visiblePhone(phone: Pick<AssetPhoneNumber, 'owner' | 'deviceId'>, visib
   return scope.unrestricted || hasVisibleName(scope, phone.owner) || Boolean(phone.deviceId && visibleDeviceIds.has(phone.deviceId));
 }
 
-function visibleAccount(account: Pick<AssetInternetAccount, 'owner' | 'currentUser' | 'phoneId'>, visiblePhoneIds: Set<string>, scope: AssetVisibilityScope): boolean {
-  return scope.unrestricted || hasVisibleName(scope, account.owner) || hasVisibleName(scope, account.currentUser) || Boolean(account.phoneId && visiblePhoneIds.has(account.phoneId));
+function visibleAccount(
+  account: Pick<AssetInternetAccount, 'owner' | 'currentUser' | 'phoneId' | 'loginDeviceIds'>,
+  visiblePhoneIds: Set<string>,
+  visibleDeviceIds: Set<string>,
+  scope: AssetVisibilityScope,
+): boolean {
+  return scope.unrestricted
+    || hasVisibleName(scope, account.owner)
+    || hasVisibleName(scope, account.currentUser)
+    || Boolean(account.phoneId && visiblePhoneIds.has(account.phoneId))
+    || Boolean(account.loginDeviceIds?.some((id) => visibleDeviceIds.has(id)));
 }
 
 function sanitizeDevice(device: AssetDevice): AssetDevice {
@@ -180,10 +189,11 @@ export function filterAssetStorageData(
   const visiblePhoneIds = new Set(phones.map((phone) => phone.id));
   const visibleAccounts = asArray<AssetInternetAccount>(data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS])
     .map((account) => normalizeAssetAccount({ ...account }))
-    .filter((account) => visibleAccount(account, visiblePhoneIds, scope));
+    .filter((account) => visibleAccount(account, visiblePhoneIds, visibleDeviceIds, scope));
   const visibleAccountIds = new Set(visibleAccounts.map((account) => account.id));
   const accounts = visibleAccounts.map((account) => sanitizeAccount({
     ...account,
+    loginDeviceIds: (account.loginDeviceIds || []).filter((id) => visibleDeviceIds.has(id)),
     identityAccountIds: (account.identityAccountIds || []).filter((id) => visibleAccountIds.has(id)),
   }, canViewSensitive));
   const visibleAssetIds = new Set<string>([

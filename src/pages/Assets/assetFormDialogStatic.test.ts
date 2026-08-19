@@ -10,6 +10,7 @@ const phoneFields = source.match(/const renderPhoneFields[\s\S]*?const renderAcc
 const phonePackageSection = phoneFields.match(/<BusinessFormSection step=\{4\}[\s\S]*?<\/BusinessFormSection>/)?.[0] || '';
 const accountFields = source.match(/const renderAccountFields[\s\S]*?const renderImportDialog/)?.[0] || '';
 const accountOperationsSection = accountFields.match(/<BusinessFormSection step=\{4\}[\s\S]*?<\/BusinessFormSection>/)?.[0] || '';
+const accountColumns = source.match(/const ACCOUNT_COLUMNS[\s\S]*?const DEFAULT_ACCOUNT_VISIBLE_COLUMN_IDS/)?.[0] || '';
 
 assert.match(formDialog, /maxWidth="md"/, '资产录入弹窗应限制为中等桌面宽度，避免输入框过宽');
 assert.match(formDialog, /markButtonClicksDirty=\{false\}/, '关闭、取消和分区按钮不应把空白表单误判为已填写');
@@ -47,6 +48,9 @@ assert.match(source, /renderAccountIdentityCard/, '账号详情应展示身份�
 assert.match(source, /<PlatformBrandMark/, '互联网账号应使用品牌图标而不是字母占位');
 assert.match(source, /renderPlatformSelectField[\s\S]*?renderValue[\s\S]*?<PlatformBrandMark/, '业务平台选中后应在字段内显示品牌 Logo');
 assert.match(source, /platformOptions\.map[\s\S]*?<PlatformBrandMark/, '业务平台下拉选项左侧应显示品牌 Logo');
+assert.match(source, /label="登录设备（可多选）"[\s\S]*?multiple[\s\S]*?loginDeviceIds/, '互联网账号应能独立多选登录设备');
+assert.match(source, /case 'device':[\s\S]*?normalizeAccountLoginDeviceIds\(account\.loginDeviceIds\)/, '账号列表的登录设备不得再通过绑定手机号反推');
+assert.match(accountColumns, /id: 'device', label: '登录设备'/, '互联网账号设备列应明确称为登录设备');
 assert.match(
   accountOperationsSection,
   /gridColumn: '1 \/ -1'[\s\S]*?gridTemplateColumns: \{ xs: '1fr', md: '1fr 1fr' \}[\s\S]*?renderTextField\('purpose', '用途', \{ multiline: true \}\)[\s\S]*?renderTextField\('remark', '备注', \{ multiline: true \}\)/,

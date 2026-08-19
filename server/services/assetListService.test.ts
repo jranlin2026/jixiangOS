@@ -46,8 +46,8 @@ const authenticatedAdmin: AuthenticatedUser = {
 
 const data: Record<string, unknown> = {
   [STORAGE_KEYS.ASSET_DEVICES]: [
-    { id: 'device-a', owner: '管理员', currentUser: '管理员', imei1: '111', imei1Masked: '***111' },
-    { id: 'device-b', owner: '管理员', currentUser: '管理员', imei1: '222', imei1Masked: '***222' },
+    { id: 'device-a', deviceCode: 'DEV-0001', deviceName: '直播一号机', owner: '管理员', currentUser: '管理员', imei1: '111', imei1Masked: '***111' },
+    { id: 'device-b', deviceCode: 'DEV-0002', deviceName: '剪辑二号机', owner: '管理员', currentUser: '管理员', imei1: '222', imei1Masked: '***222' },
   ],
   [STORAGE_KEYS.ASSET_PHONE_NUMBERS]: [
     { id: 'phone-1', owner: '管理员', deviceId: 'device-a', phoneNumber: '13800000000', phoneNumberMasked: '138****0000' },
@@ -85,7 +85,7 @@ assert.equal((second.data.items[0] as AssetPhoneNumber | undefined)?.deviceId, '
 
 data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] = [
   { id: 'account-apple', platform: 'Apple ID', accountName: '企业身份', loginAccount: 'brand-identity@icloud.com', owner: '管理员', currentUser: '管理员' },
-  { id: 'account-business', platform: 'TikTok', accountName: '品牌业务号', loginAccount: 'brand-business', identityAccountIds: ['account-apple'], owner: '管理员', currentUser: '管理员' },
+  { id: 'account-business', platform: 'TikTok', accountName: '品牌业务号', loginAccount: 'brand-business', loginDeviceIds: ['device-b'], identityAccountIds: ['account-apple'], owner: '管理员', currentUser: '管理员' },
 ];
 service.invalidate();
 const searchedByIdentity = await service.list('accounts', { search: 'brand-identity@icloud.com', page: 1, pageSize: 20 }, authenticatedAdmin);
@@ -93,6 +93,12 @@ assert.deepEqual(
   (searchedByIdentity.data.items as AssetInternetAccount[]).map((account) => account.id).sort(),
   ['account-apple', 'account-business'],
   '通过身份账号登录名搜索时应找到被绑定的业务账号',
+);
+const searchedByLoginDevice = await service.list('accounts', { search: '剪辑二号机', page: 1, pageSize: 20 }, authenticatedAdmin);
+assert.deepEqual(
+  (searchedByLoginDevice.data.items as AssetInternetAccount[]).map((account) => account.id),
+  ['account-business'],
+  '互联网账号应能通过独立配置的登录设备名称搜索',
 );
 
 {

@@ -21,6 +21,10 @@ import {
   normalizeIdentityAccountIds,
   validateIdentityAccountIds,
 } from '../../src/domain/assets/accountIdentityBindings';
+import {
+  normalizeAccountLoginDeviceIds,
+  validateAccountLoginDeviceIds,
+} from '../../src/domain/assets/accountDeviceBindings';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   AssetDevice,
@@ -343,13 +347,6 @@ function syncDeviceRisks(state: AssetState, changedAt: string): void {
     || risk.riskKey.startsWith('idle-device-has-accounts-')
   );
   const existing = new Map(state.risks.filter(managed).map((risk) => [risk.riskKey, risk]));
-  const phoneIdsByDevice = new Map<string, Set<string>>();
-  state.phones.forEach((phone) => {
-    if (!phone.deviceId) return;
-    const ids = phoneIdsByDevice.get(phone.deviceId) || new Set<string>();
-    ids.add(phone.id);
-    phoneIdsByDevice.set(phone.deviceId, ids);
-  });
   const derived: AssetRisk[] = [];
   state.devices.forEach((device) => {
     if (!cleanText(device.owner)) {
@@ -371,8 +368,7 @@ function syncDeviceRisks(state: AssetState, changedAt: string): void {
         remark: previous?.remark,
       });
     }
-    const phoneIds = phoneIdsByDevice.get(device.id) || new Set<string>();
-    if (device.status === '闲置' && state.accounts.some((account) => Boolean(account.phoneId && phoneIds.has(account.phoneId)))) {
+    if (device.status === '闲置' && state.accounts.some((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(device.id))) {
       const riskKey = `idle-device-has-accounts-${device.id}`;
       const previous = existing.get(riskKey);
       derived.push({
@@ -852,7 +848,10 @@ export function createAssetCommandService(
           if (!visibleToScope(existing, scope, directory)) throw new AssetCommandError(403, '无权删除该设备资产');
           const relatedPhones = state.phones.filter((phone) => phone.deviceId === id);
           const relatedPhoneIds = new Set(relatedPhones.map((phone) => phone.id));
-          const relatedAccounts = state.accounts.filter((account) => Boolean(account.phoneId && relatedPhoneIds.has(account.phoneId)));
+          const relatedAccounts = state.accounts.filter((account) => (
+            Boolean(account.phoneId && relatedPhoneIds.has(account.phoneId))
+            || normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(id)
+          ));
           if (relatedPhones.length && !hasPermission(actor, PERMISSION_KEYS.ASSETS_PHONES, 'delete')) {
             throw new AssetCommandError(403, '删除该设备会同步删除手机号，需要手机号删除权限');
           }
@@ -867,11 +866,12 @@ export function createAssetCommandService(
           }
           state.devices = state.devices.filter((device) => device.id !== id);
           state.phones = state.phones.filter((phone) => phone.deviceId !== id);
-          state.accounts = state.accounts.map((account) => (
-            account.phoneId && relatedPhoneIds.has(account.phoneId)
-              ? { ...account, phoneId: undefined, updatedAt: deletedAt }
-              : account
-          ));
+          state.accounts = state.accounts.map((account) => {
+            const unbindPhone = Boolean(account.phoneId && relatedPhoneIds.has(account.phoneId));
+            const loginDeviceIds = normalizeAccountLoginDeviceIds(account.loginDeviceIds).filter((deviceId) => deviceId !== id);
+            if (!unbindPhone && loginDeviceIds.length === normalizeAccountLoginDeviceIds(account.loginDeviceIds).length) return account;
+            return { ...account, phoneId: unbindPhone ? undefined : account.phoneId, loginDeviceIds, updatedAt: deletedAt };
+          });
           state.offboardingTasks = state.offboardingTasks.filter((task) => (
             !(task.assetType === '设备资产' && task.assetId === id)
             && !(task.assetType === '手机号资产' && relatedPhoneIds.has(task.assetId))
@@ -1211,6 +1211,13 @@ export function createAssetCommandService(
             if (!phone) throw new AssetCommandError(400, '绑定手机号不存在');
             if (!visibleToScope(phone, scope, directory)) throw new AssetCommandError(403, '无权绑定该手机号');
           }
+          const loginDeviceIds = normalizeAccountLoginDeviceIds(input.loginDeviceIds);
+          const loginDeviceError = validateAccountLoginDeviceIds(loginDeviceIds, state.devices);
+          if (loginDeviceError) throw new AssetCommandError(400, loginDeviceError);
+          for (const loginDeviceId of loginDeviceIds) {
+            const loginDevice = state.devices.find((item) => item.id === loginDeviceId)!;
+            if (!visibleToScope(loginDevice, scope, directory)) throw new AssetCommandError(403, '无权绑定该登录设备');
+          }
           const identityAccountIds = normalizeIdentityAccountIds(input.identityAccountIds);
           const identityError = validateIdentityAccountIds({ sourcePlatform: platform, identityAccountIds, accounts: state.accounts });
           if (identityError) throw new AssetCommandError(400, identityError);
@@ -1230,6 +1237,7 @@ export function createAssetCommandService(
             realName: cleanText(input.realName) || undefined,
             realNameMasked: maskRealName(input.realName),
             phoneId,
+            loginDeviceIds,
             identityAccountIds,
             boundEmail: cleanText(input.boundEmail) || undefined,
             boundEmailMasked: maskEmail(input.boundEmail),
@@ -1297,6 +1305,9 @@ export function createAssetCommandService(
           if (account.identityAccountIds?.length) {
             addLog(state, makeId('asset-log'), createdAt, actor, '绑定资产', '互联网账号', account.id, account.accountName, `绑定${account.identityAccountIds.length}个身份账号`);
           }
+          if (account.loginDeviceIds?.length) {
+            addLog(state, makeId('asset-log'), createdAt, actor, '绑定资产', '互联网账号', account.id, account.accountName, `配置${account.loginDeviceIds.length}台登录设备`);
+          }
           await persistState(transaction, state);
           return account;
         }, {
@@ -1338,6 +1349,15 @@ export function createAssetCommandService(
           const org = resolveOrgFields({ ...existing, ...input }, directory);
           const phoneId = input.phoneId === undefined ? existing.phoneId : cleanText(input.phoneId) || undefined;
           if (phoneId && !state.phones.some((item) => item.id === phoneId)) throw new AssetCommandError(400, '绑定手机号不存在');
+          const loginDeviceIds = input.loginDeviceIds === undefined
+            ? normalizeAccountLoginDeviceIds(existing.loginDeviceIds)
+            : normalizeAccountLoginDeviceIds(input.loginDeviceIds);
+          const loginDeviceError = validateAccountLoginDeviceIds(loginDeviceIds, state.devices);
+          if (loginDeviceError) throw new AssetCommandError(400, loginDeviceError);
+          for (const loginDeviceId of loginDeviceIds) {
+            const loginDevice = state.devices.find((item) => item.id === loginDeviceId)!;
+            if (!visibleToScope(loginDevice, scope, directory)) throw new AssetCommandError(403, '无权绑定该登录设备');
+          }
           const identityAccountIds = input.identityAccountIds === undefined
             ? normalizeIdentityAccountIds(existing.identityAccountIds)
             : normalizeIdentityAccountIds(input.identityAccountIds);
@@ -1376,6 +1396,7 @@ export function createAssetCommandService(
             realNameMasked: maskRealName(input.realName ?? existing.realName),
             boundEmailMasked: maskEmail(input.boundEmail ?? existing.boundEmail),
             phoneId,
+            loginDeviceIds,
             identityAccountIds,
             loginMethod,
             requiresPaymentPassword,
@@ -1419,6 +1440,19 @@ export function createAssetCommandService(
               next.id,
               next.accountName,
               identityCount ? `更新${identityCount}个身份账号绑定` : '解除身份账号绑定',
+            );
+          }
+          if (normalizeAccountLoginDeviceIds(existing.loginDeviceIds).join(',') !== loginDeviceIds.join(',')) {
+            addLog(
+              state,
+              makeId('asset-log'),
+              changedAt,
+              actor,
+              loginDeviceIds.length ? '绑定资产' : '解绑资产',
+              '互联网账号',
+              next.id,
+              next.accountName,
+              loginDeviceIds.length ? `更新为${loginDeviceIds.length}台登录设备` : '清空登录设备',
             );
           }
           await persistState(transaction, state);

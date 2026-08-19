@@ -108,6 +108,7 @@ import {
   normalizeIdentityAccountIds,
   type AssetIdentityAccountPlatform,
 } from '../../domain/assets/accountIdentityBindings';
+import { normalizeAccountLoginDeviceIds } from '../../domain/assets/accountDeviceBindings';
 
 type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'matrix' | 'logs' | 'offboarding';
 
@@ -168,6 +169,15 @@ const readAssetText = (asset: unknown, keys: string[], fallback: string): string
   return value === undefined || value === null ? fallback : String(value);
 };
 
+const readFormIdList = (value: string | undefined): string[] => {
+  if (!value) return [];
+  try {
+    return normalizeAccountLoginDeviceIds(JSON.parse(value));
+  } catch {
+    return [];
+  }
+};
+
 const deviceDeleteLabel = (device: AssetDevice) => {
   const code = readAssetText(device, ['deviceCode', 'assetCode', 'code', 'deviceNo'], device.id);
   const name = readAssetText(device, ['deviceName', 'assetName', 'name', 'brandModel'], '设备资产');
@@ -223,7 +233,7 @@ const ACCOUNT_COLUMNS: AssetColumnConfig[] = [
   { id: 'realName', label: '实名信息', width: 110 },
   { id: 'phone', label: '绑定手机号', width: 150 },
   { id: 'identityBindings', label: '身份账号绑定', width: 220 },
-  { id: 'device', label: '所属设备', width: 180 },
+  { id: 'device', label: '登录设备', width: 240 },
   { id: 'owner', label: '负责人', width: 120 },
   { id: 'permissionStatus', label: '控制权状态', width: 140 },
 ];
@@ -232,7 +242,7 @@ const DEFAULT_ACCOUNT_VISIBLE_COLUMN_IDS = ACCOUNT_COLUMNS.map((column) => colum
 const ASSET_VIEW_STORAGE_KEYS: Record<ConfigurableAssetTab, string> = {
   devices: 'aaos_asset_devices_table_view_v4',
   phones: 'aaos_asset_phones_table_view_v6',
-  accounts: 'aaos_asset_accounts_table_view_v7',
+  accounts: 'aaos_asset_accounts_table_view_v8',
 };
 
 const ASSET_VIEW_TITLES: Record<ConfigurableAssetTab, string> = {
@@ -560,14 +570,14 @@ const AssetManagement: React.FC = () => {
   const accountsByDeviceId = useMemo(() => {
     const map = new Map<string, AssetInternetAccount[]>();
     lookupAccounts.forEach((account) => {
-      const phone = phoneById.get(account.phoneId || '');
-      if (!phone?.deviceId) return;
-      const list = map.get(phone.deviceId) || [];
-      list.push(account);
-      map.set(phone.deviceId, list);
+      normalizeAccountLoginDeviceIds(account.loginDeviceIds).forEach((deviceId) => {
+        const list = map.get(deviceId) || [];
+        list.push(account);
+        map.set(deviceId, list);
+      });
     });
     return map;
-  }, [lookupAccounts, phoneById]);
+  }, [lookupAccounts]);
   const assetRelationshipSummary = useMemo(() => {
     const boundPhoneCount = lookupPhones.filter((phone) => Boolean(phone.deviceId && deviceById.get(phone.deviceId))).length;
     const boundAccountCount = lookupAccounts.filter((account) => Boolean(account.phoneId && phoneById.get(account.phoneId))).length;
@@ -955,6 +965,7 @@ const AssetManagement: React.FC = () => {
       values.loginPassword = '';
       values.paymentPassword = '';
       values.requiresPaymentPassword = account.requiresPaymentPassword ? 'true' : 'false';
+      values.loginDeviceIds = JSON.stringify(normalizeAccountLoginDeviceIds(account.loginDeviceIds));
       values.appleIdentityAccountId = findIdentityAccountForProvider(account, accountPool, 'Apple ID')?.id || '';
       values.googleIdentityAccountId = findIdentityAccountForProvider(account, accountPool, 'Google账号')?.id || '';
     }
@@ -995,10 +1006,12 @@ const AssetManagement: React.FC = () => {
         appleIdentityAccountId: _appleIdentityAccountId,
         googleIdentityAccountId: _googleIdentityAccountId,
         identityAccountIds: _identityAccountIds,
+        loginDeviceIds: _loginDeviceIds,
         ...accountValues
       } = formState.values;
       const input = {
         ...accountValues,
+        loginDeviceIds: readFormIdList(formState.values.loginDeviceIds),
         identityAccountIds: [
           formState.values.platform === 'Apple ID' ? '' : formState.values.appleIdentityAccountId,
           formState.values.platform === 'Google账号' ? '' : formState.values.googleIdentityAccountId,
@@ -1158,7 +1171,9 @@ const AssetManagement: React.FC = () => {
       }),
       accounts: accounts.map((account) => {
         const phone = phoneById.get(account.phoneId || '');
-        const device = deviceById.get(phone?.deviceId || '');
+        const loginDevices = normalizeAccountLoginDeviceIds(account.loginDeviceIds)
+          .map((id) => deviceById.get(id))
+          .filter((device): device is AssetDevice => Boolean(device));
         const identityAccounts = normalizeIdentityAccountIds(account.identityAccountIds)
           .map((id) => accountById.get(id))
           .filter((item): item is AssetInternetAccount => Boolean(item));
@@ -1174,7 +1189,7 @@ const AssetManagement: React.FC = () => {
           绑定AppleID: identityAccounts.find((item) => item.platform === 'Apple ID')?.loginAccount || '',
           绑定Google账号: identityAccounts.find((item) => item.platform === 'Google账号')?.loginAccount || '',
           绑定邮箱: displayAccountEmail(account),
-          所属设备: device?.deviceCode || '-',
+          登录设备: loginDevices.map((device) => device.deviceCode).join(' / ') || '-',
           负责人: account.owner,
           控制权状态: readAccountControlStatus(account),
           账号状态: account.accountStatus,
@@ -1341,7 +1356,7 @@ const AssetManagement: React.FC = () => {
     const searchPlaceholderMap: Partial<Record<AssetTab, string>> = {
       devices: '搜索设备编号、设备名称、IMEI 1/2、负责人',
       phones: '搜索手机号、实名信息、归属地、所属设备',
-      accounts: '搜索平台、账号名称、实名信息、绑定手机号',
+      accounts: '搜索平台、账号名称、绑定手机号、登录设备',
       matrix: '搜索任务、账号、执行人',
       logs: '搜索操作、对象、操作人',
       offboarding: '搜索员工、资产名称',
@@ -1586,7 +1601,6 @@ const AssetManagement: React.FC = () => {
 
   const renderAccountCell = (account: AssetInternetAccount, columnId: string) => {
     const phone = phoneById.get(account.phoneId || '');
-    const device = deviceById.get(phone?.deviceId || '');
     switch (columnId) {
       case 'accountNo':
         return <Box sx={{ color: shell.tableLink, fontWeight: 900 }}>{account.accountNo}</Box>;
@@ -1618,10 +1632,18 @@ const AssetManagement: React.FC = () => {
           </Stack>
         ) : <Box sx={{ color: shell.muted }}>未绑定</Box>;
       }
-      case 'device':
-        return device
-          ? renderRelationLink(`${device.deviceCode} / ${device.deviceName}`, () => openDetail('device', device.id))
-          : <Box sx={{ color: shell.muted }}>-</Box>;
+      case 'device': {
+        const loginDevices = normalizeAccountLoginDeviceIds(account.loginDeviceIds)
+          .map((id) => deviceById.get(id))
+          .filter((device): device is AssetDevice => Boolean(device));
+        return loginDevices.length ? (
+          <Stack spacing={0.35} alignItems="flex-start">
+            {loginDevices.map((device) => (
+              <Box key={device.id}>{renderRelationLink(`${device.deviceCode} / ${device.deviceName}`, () => openDetail('device', device.id))}</Box>
+            ))}
+          </Stack>
+        ) : <Box sx={{ color: shell.muted }}>未配置</Box>;
+      }
       case 'owner':
         return account.owner || '-';
       case 'permissionStatus':
@@ -2009,6 +2031,11 @@ const AssetManagement: React.FC = () => {
 
   const primaryDevice = detail?.device || detail?.relatedDevice;
   const primaryPhone = detail?.phone || detail?.relatedPhones[0];
+  const accountLoginDevices = detail?.account
+    ? normalizeAccountLoginDeviceIds(detail.account.loginDeviceIds)
+      .map((id) => [...(detail.relatedDevices || []), ...lookupDevices].find((device) => device.id === id))
+      .filter((device): device is AssetDevice => Boolean(device))
+    : [];
 
   const detailCardSx = {
     border: `1px solid ${shell.softLine}`,
@@ -2394,10 +2421,16 @@ const AssetManagement: React.FC = () => {
               })(),
             },
             {
-              label: '所属设备',
-              value: primaryDevice
-                ? renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))
-                : '-',
+              label: '登录设备',
+              value: accountLoginDevices.length
+                ? (
+                  <Stack spacing={0.35} alignItems="flex-start">
+                    {accountLoginDevices.map((device) => (
+                      <Box key={device.id}>{renderAssetNameLink(`${device.deviceCode} / ${device.deviceName}`, () => openDetail('device', device.id))}</Box>
+                    ))}
+                  </Stack>
+                )
+                : '未配置',
             },
             { label: '绑定邮箱', value: renderOperationalValue(displayAccountEmail(account), '绑定邮箱') },
             { label: '登录方式', value: account.loginMethod || '密码登录' },
@@ -2985,7 +3018,7 @@ const AssetManagement: React.FC = () => {
         {renderTextField('realNameSubject', '实名主体')}
         {renderTextField('realName', '实名信息')}
       </BusinessFormSection>
-      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.account[1].title} summary={sectionSummary(['loginMethod', 'loginPassword', 'paymentPassword', 'phoneId', 'appleIdentityAccountId', 'googleIdentityAccountId', 'twoFactorMethod'], ASSET_FORM_SECTIONS.account[1].summary)} errorCount={formState.validationErrorSection === 2 ? 1 : 0}>
+      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.account[1].title} summary={sectionSummary(['loginMethod', 'loginPassword', 'paymentPassword', 'phoneId', 'loginDeviceIds', 'appleIdentityAccountId', 'googleIdentityAccountId', 'twoFactorMethod'], ASSET_FORM_SECTIONS.account[1].summary)} errorCount={formState.validationErrorSection === 2 ? 1 : 0}>
         {renderSelectField('loginMethod', '登录方式', ['密码登录', '手机验证码', '扫码登录', 'SSO'], { required: true })}
         {formState.values.loginMethod === '密码登录' ? renderTextField('loginPassword', '登录密码', {
           type: 'password',
@@ -3030,6 +3063,35 @@ const AssetManagement: React.FC = () => {
           })}
         </Select>
       </FormControl>
+        <FormControl size="small" fullWidth>
+          <InputLabel>登录设备（可多选）</InputLabel>
+          <Select
+            label="登录设备（可多选）"
+            multiple
+            value={readFormIdList(formState.values.loginDeviceIds)}
+            onChange={(event) => {
+              const selected = typeof event.target.value === 'string'
+                ? event.target.value.split(',')
+                : event.target.value;
+              updateFormValue('loginDeviceIds', JSON.stringify(normalizeAccountLoginDeviceIds(selected)));
+            }}
+            renderValue={(selected) => selected
+              .map((id) => deviceById.get(id))
+              .filter((device): device is AssetDevice => Boolean(device))
+              .map((device) => `${device.deviceCode} / ${device.deviceName}`)
+              .join('、') || '暂不配置'}
+          >
+            {lookupDevices.map((device) => {
+              const selected = readFormIdList(formState.values.loginDeviceIds).includes(device.id);
+              return (
+                <MenuItem key={device.id} value={device.id}>
+                  <Checkbox checked={selected} />
+                  <ListItemText primary={`${device.deviceCode} / ${device.deviceName}`} secondary={formatDeviceBrandModel(device)} />
+                </MenuItem>
+              );
+            })}
+          </Select>
+        </FormControl>
         {renderTextField('boundEmail', '绑定邮箱')}
         {!['Apple ID', 'Google账号'].includes(formState.values.platform)
           ? renderIdentityAccountSelect('Apple ID', 'appleIdentityAccountId', '绑定 Apple ID')
