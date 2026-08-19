@@ -2376,110 +2376,233 @@ const AssetManagement: React.FC = () => {
     </Stack>
   );
 
-  const renderAccountBasicCard = (account: AssetInternetAccount) => (
-    renderDetailCard('账号基本信息', (
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-        <Stack spacing={1} alignItems="center" sx={{ width: 96, flexShrink: 0 }}>
-          <PlatformBrandMark platform={account.platform} size={72} />
-          <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} />
+  const accountEmptyValue = (label = '未录入') => (
+    <Typography component="span" sx={{ color: shell.muted, fontWeight: 700 }}>{label}</Typography>
+  );
+
+  const renderAccountSummaryCard = (account: AssetInternetAccount) => (
+    <Paper elevation={0} sx={{ ...detailCardSx, p: 2 }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.75} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between">
+        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
+          <PlatformBrandMark platform={account.platform} size={56} />
+          <Box sx={{ minWidth: 0 }}>
+            <Typography sx={{ color: shell.ink, fontSize: 22, lineHeight: 1.25, fontWeight: 950, overflowWrap: 'anywhere' }}>
+              {account.accountName}
+            </Typography>
+            <Stack direction="row" spacing={0.5} alignItems="center" useFlexGap flexWrap="wrap" sx={{ mt: 0.35 }}>
+              <Typography variant="body2" sx={{ color: shell.muted, fontWeight: 800 }}>{account.platform}</Typography>
+              <Typography variant="body2" sx={{ color: shell.softLine }}>·</Typography>
+              {renderOperationalValue(displayAccountLogin(account), '登录账号')}
+            </Stack>
+            <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mt: 0.85 }}>
+              <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} />
+              <Chip size="small" label={readAccountControlStatus(account)} sx={chipSx(statusTone(readAccountControlStatus(account)))} />
+              <Chip size="small" label={account.accountCategory || '主账号'} variant="outlined" sx={{ height: 24, borderRadius: '6px', fontWeight: 800 }} />
+            </Stack>
+          </Box>
         </Stack>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.2 }}>
-            <Typography sx={{ color: shell.ink, fontSize: 22, fontWeight: 950 }}>{account.platform} - {account.accountName}</Typography>
-            <Chip size="small" label={readAccountControlStatus(account)} sx={chipSx(statusTone(readAccountControlStatus(account)))} />
+        <Box sx={{ minWidth: { sm: 190 }, textAlign: { xs: 'left', sm: 'right' } }}>
+          <Typography variant="caption" sx={{ color: shell.muted }}>账号编号</Typography>
+          <Stack direction="row" spacing={0.25} alignItems="center" justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}>
+            <Typography sx={{ color: shell.ink, fontWeight: 900 }}>{account.accountNo}</Typography>
+            {renderCopyButton(account.accountNo, '账号编号')}
           </Stack>
-          {renderInfoRows([
-            { label: '账号编号', value: <Stack direction="row" alignItems="center" spacing={0.5}>{account.accountNo}{renderCopyButton(account.accountNo, '账号编号')}</Stack> },
-            { label: '平台', value: account.platform },
-            { label: '账号类型', value: account.accountCategory || '主账号' },
-            { label: '所属主体', value: account.ownerSubject },
-            { label: '登录账号', value: renderOperationalValue(displayAccountLogin(account), '登录账号') },
-            { label: '实名主体', value: account.realNameSubject || '-' },
-            { label: '实名信息', value: renderOperationalValue(displayAccountRealName(account), '实名信息') },
-            {
-              label: '绑定手机号',
-              value: primaryPhone
-                ? renderAssetNameLink(displayPhoneNumber(primaryPhone), () => openDetail('phone', primaryPhone.id))
-                : '-',
-            },
-            {
-              label: '绑定 Apple ID',
-              value: (() => {
-                const identityAccount = findIdentityAccountForProvider(account, detail?.relatedAccounts || lookupAccounts, 'Apple ID');
-                return identityAccount
-                  ? renderAssetNameLink(`${identityAccount.accountName} / ${displayAccountLogin(identityAccount)}`, () => openDetail('account', identityAccount.id))
-                  : '未绑定';
-              })(),
-            },
-            {
-              label: '绑定 Google',
-              value: (() => {
-                const identityAccount = findIdentityAccountForProvider(account, detail?.relatedAccounts || lookupAccounts, 'Google账号');
-                return identityAccount
-                  ? renderAssetNameLink(`${identityAccount.accountName} / ${displayAccountLogin(identityAccount)}`, () => openDetail('account', identityAccount.id))
-                  : '未绑定';
-              })(),
-            },
-            {
-              label: '登录设备',
-              value: accountLoginDevices.length
-                ? (
-                  <Stack spacing={0.35} alignItems="flex-start">
-                    {accountLoginDevices.map((device) => (
-                      <Box key={device.id}>{renderAssetNameLink(`${device.deviceCode} / ${device.deviceName}`, () => openDetail('device', device.id))}</Box>
-                    ))}
-                  </Stack>
-                )
-                : '未配置',
-            },
-            { label: '绑定邮箱', value: renderOperationalValue(displayAccountEmail(account), '绑定邮箱') },
-            { label: '登录方式', value: account.loginMethod || '密码登录' },
-            {
-              label: '登录密码',
-              value: account.loginCredentialStatus === '已设置'
-                ? renderSensitiveInline('account', account.id, 'loginPassword', '••••••')
-                : <Chip size="small" label={account.loginCredentialStatus || '待补齐'} sx={chipSx(statusTone(account.loginCredentialStatus || '待补齐'))} />,
-            },
-            {
-              label: '支付密码',
-              value: account.paymentCredentialStatus === '已设置'
-                ? renderSensitiveInline('account', account.id, 'paymentPassword', '••••••')
-                : <Chip size="small" label={account.paymentCredentialStatus || '不适用'} sx={chipSx(statusTone(account.paymentCredentialStatus || '不适用'))} />,
-            },
-            { label: '凭证更新时间', value: account.credentialUpdatedAt ? formatDate(account.credentialUpdatedAt, 'yyyy-MM-dd HH:mm') : '-' },
-            { label: '控制权状态', value: <Chip size="small" label={readAccountControlStatus(account)} sx={chipSx(statusTone(readAccountControlStatus(account)))} /> },
-            { label: '账号状态', value: <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} /> },
-            { label: '所属部门', value: account.department || '-' },
-            { label: '负责人', value: account.owner || '-' },
-            { label: '当前使用人', value: account.currentUser || '-' },
-            { label: '用途', value: account.purpose || '-' },
-            { label: '业务场景', value: account.businessScene || '-' },
-          ], 2)}
+          <Typography variant="caption" sx={{ color: shell.muted }}>
+            {account.currentUser ? `当前使用人：${account.currentUser}` : '当前使用人：未分配'}
+          </Typography>
         </Box>
       </Stack>
-    ))
+    </Paper>
   );
+
+  const renderAccountIdentitySection = (account: AssetInternetAccount) => renderDetailCard('账号身份', renderInfoRows([
+    { label: '账号编号', value: <Stack direction="row" alignItems="center" spacing={0.25}>{account.accountNo}{renderCopyButton(account.accountNo, '账号编号')}</Stack> },
+    { label: '业务平台', value: <Stack direction="row" spacing={0.75} alignItems="center"><PlatformBrandMark platform={account.platform} size={28} /><Box>{account.platform}</Box></Stack> },
+    { label: '账号类型', value: account.accountCategory || '主账号' },
+    { label: '实名主体', value: account.realNameSubject || accountEmptyValue() },
+    {
+      label: '实名信息',
+      value: displayAccountRealName(account)
+        ? renderSensitiveInline('account', account.id, 'accountRealName', displayAccountRealName(account))
+        : accountEmptyValue(),
+    },
+  ], 2));
+
+  const renderAccountSecuritySection = (account: AssetInternetAccount) => renderDetailCard('登录与安全', (
+    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
+      {[
+        { label: '登录方式', value: account.loginMethod || '密码登录' },
+        { label: '绑定邮箱', value: renderOperationalValue(displayAccountEmail(account), '绑定邮箱') },
+        {
+          label: '登录密码',
+          value: account.loginCredentialStatus === '已设置'
+            ? renderSensitiveInline('account', account.id, 'loginPassword', '••••••')
+            : <Chip size="small" label={account.loginCredentialStatus || '待补齐'} sx={chipSx(statusTone(account.loginCredentialStatus || '待补齐'))} />,
+        },
+        {
+          label: '支付密码',
+          value: account.paymentCredentialStatus === '已设置'
+            ? renderSensitiveInline('account', account.id, 'paymentPassword', '••••••')
+            : <Chip size="small" label={account.paymentCredentialStatus || '不适用'} sx={chipSx(statusTone(account.paymentCredentialStatus || '不适用'))} />,
+        },
+        { label: '二次验证', value: account.twoFactorMethod || accountEmptyValue('未配置') },
+        { label: '凭证更新', value: account.credentialUpdatedAt ? formatDate(account.credentialUpdatedAt, 'yyyy-MM-dd HH:mm') : accountEmptyValue('暂无记录') },
+      ].map((item) => (
+        <Paper key={item.label} variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.4, minWidth: 0 }}>
+          <Typography variant="caption" sx={{ color: shell.muted }}>{item.label}</Typography>
+          <Box sx={{ color: shell.ink, fontWeight: 850, mt: 0.45, minWidth: 0 }}>{item.value}</Box>
+        </Paper>
+      ))}
+    </Box>
+  ));
+
+  const renderAccountBindingSection = (account: AssetInternetAccount) => {
+    const identityAccounts = detail?.relatedAccounts || lookupAccounts;
+    const appleAccount = findIdentityAccountForProvider(account, identityAccounts, 'Apple ID');
+    const googleAccount = findIdentityAccountForProvider(account, identityAccounts, 'Google账号');
+    const renderIdentityBinding = (label: AssetIdentityAccountPlatform, identityAccount?: AssetInternetAccount) => (
+      <Paper variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.4, minWidth: 0 }}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <PlatformBrandMark platform={label} size={34} />
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="caption" sx={{ color: shell.muted }}>绑定{label}</Typography>
+            <Box sx={{ minWidth: 0 }}>
+              {identityAccount
+                ? renderAssetNameLink(`${identityAccount.accountName} / ${displayAccountLogin(identityAccount)}`, () => openDetail('account', identityAccount.id))
+                : accountEmptyValue('未绑定')}
+            </Box>
+          </Box>
+        </Stack>
+      </Paper>
+    );
+    return renderDetailCard('绑定关系', (
+      <Stack spacing={1.25}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' }, gap: 1.25 }}>
+          <Paper variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.4, minWidth: 0 }}>
+            <Typography variant="caption" sx={{ color: shell.muted }}>绑定手机号</Typography>
+            <Box sx={{ mt: 0.45, minWidth: 0 }}>
+              {primaryPhone
+                ? renderAssetNameLink(displayPhoneNumber(primaryPhone), () => openDetail('phone', primaryPhone.id))
+                : accountEmptyValue('未绑定')}
+            </Box>
+            {primaryPhone ? <Typography variant="caption" sx={{ color: shell.muted }}>{primaryPhone.operator || '未录入运营商'}</Typography> : null}
+          </Paper>
+          {renderIdentityBinding('Apple ID', appleAccount)}
+          {renderIdentityBinding('Google账号', googleAccount)}
+        </Box>
+        <Box>
+          <Typography sx={{ color: shell.ink, fontWeight: 900, mb: 0.75 }}>登录设备 ({accountLoginDevices.length})</Typography>
+          {accountLoginDevices.length ? (
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
+              {accountLoginDevices.map((device) => (
+                <Paper key={device.id} variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.25, minWidth: 0 }}>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                    <Box sx={{ minWidth: 0 }}>
+                      {renderAssetNameLink(`${device.deviceCode} / ${device.deviceName}`, () => openDetail('device', device.id))}
+                      <Typography variant="caption" display="block" sx={{ color: shell.muted }}>{formatDeviceBrandModel(device)}</Typography>
+                    </Box>
+                    <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} />
+                  </Stack>
+                </Paper>
+              ))}
+            </Box>
+          ) : (
+            <Box sx={{ py: 1.5, px: 1.25, border: `1px dashed ${shell.softLine}`, borderRadius: 1.25, color: shell.muted, textAlign: 'center' }}>
+              尚未配置登录设备
+            </Box>
+          )}
+        </Box>
+      </Stack>
+    ));
+  };
+
+  const renderAccountOwnershipSection = (account: AssetInternetAccount) => renderDetailCard('归属与使用', renderInfoRows([
+    { label: '所属主体', value: account.ownerSubject || '公司' },
+    { label: '所属部门', value: account.department || accountEmptyValue() },
+    { label: '资产负责人', value: account.owner || accountEmptyValue('未分配') },
+    { label: '当前使用人', value: account.currentUser || accountEmptyValue('未分配') },
+  ], 2));
+
+  const renderAccountBusinessSection = (account: AssetInternetAccount) => renderDetailCard('经营与状态', (
+    <Stack spacing={1.25}>
+      {renderInfoRows([
+        { label: '业务场景', value: account.businessScene || accountEmptyValue() },
+        { label: '服务商', value: account.serviceProvider || accountEmptyValue() },
+        { label: '月费用', value: formatCurrency(account.monthlyFee) },
+        { label: '到期日', value: account.expiresAt ? formatDate(account.expiresAt, 'yyyy-MM-dd') : accountEmptyValue() },
+        { label: '账号状态', value: <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} /> },
+        { label: '更新时间', value: formatDate(account.updatedAt, 'yyyy-MM-dd HH:mm') },
+      ], 2)}
+      {(account.purpose || account.remark) ? (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
+          {account.purpose ? (
+            <Paper variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.4 }}>
+              <Typography variant="caption" sx={{ color: shell.muted }}>用途</Typography>
+              <Typography sx={{ color: shell.ink, fontWeight: 750, whiteSpace: 'pre-wrap', mt: 0.45 }}>{account.purpose}</Typography>
+            </Paper>
+          ) : null}
+          {account.remark ? (
+            <Paper variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.4 }}>
+              <Typography variant="caption" sx={{ color: shell.muted }}>备注</Typography>
+              <Typography sx={{ color: shell.ink, fontWeight: 750, whiteSpace: 'pre-wrap', mt: 0.45 }}>{account.remark}</Typography>
+            </Paper>
+          ) : null}
+        </Box>
+      ) : null}
+    </Stack>
+  ));
 
   const renderAccountIdentityCard = (account: AssetInternetAccount) => {
     const related = detail?.relatedAccounts || [];
     const outboundIds = new Set(normalizeIdentityAccountIds(account.identityAccountIds));
-    const rows = related
-      .filter((item) => item.id !== account.id && (
-        outboundIds.has(item.id) || normalizeIdentityAccountIds(item.identityAccountIds).includes(account.id)
-      ))
-      .map((item) => [
-        outboundIds.has(item.id) ? '当前账号使用' : '被业务账号使用',
-        <Stack direction="row" spacing={1} alignItems="center"><PlatformBrandMark platform={item.platform} size={30} /><Box>{item.platform}</Box></Stack>,
-        renderAssetNameLink(item.accountName, () => openDetail('account', item.id)),
-        displayAccountLogin(item),
-        <Chip size="small" label={readAccountControlStatus(item)} sx={chipSx(statusTone(readAccountControlStatus(item)))} />,
-      ]);
-    return renderDetailCard('身份账号关联', renderCompactTable(
-      ['关联方向', '平台', '账号名称', '登录账号', '控制权'],
-      rows,
-      '暂无 Apple ID 或 Google 账号关联',
+    const outboundAccounts = related.filter((item) => item.id !== account.id && outboundIds.has(item.id));
+    const inboundAccounts = related.filter((item) => item.id !== account.id && normalizeIdentityAccountIds(item.identityAccountIds).includes(account.id));
+    const renderIdentityRelations = (title: string, items: AssetInternetAccount[], emptyText: string) => (
+      <Box>
+        <Typography sx={{ color: shell.ink, fontWeight: 900, mb: 0.75 }}>{title}</Typography>
+        {items.length ? (
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
+            {items.map((item) => (
+              <Paper key={item.id} variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.25, minWidth: 0 }}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <PlatformBrandMark platform={item.platform} size={36} />
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between">
+                      {renderAssetNameLink(item.accountName, () => openDetail('account', item.id))}
+                      <Chip size="small" label={readAccountControlStatus(item)} sx={chipSx(statusTone(readAccountControlStatus(item)))} />
+                    </Stack>
+                    <Typography variant="caption" sx={{ color: shell.muted, overflowWrap: 'anywhere' }}>
+                      {item.platform} · {displayAccountLogin(item)}
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Paper>
+            ))}
+          </Box>
+        ) : (
+          <Box sx={{ py: 1.4, px: 1.25, border: `1px dashed ${shell.softLine}`, borderRadius: 1.25, color: shell.muted, textAlign: 'center' }}>{emptyText}</Box>
+        )}
+      </Box>
+    );
+    return renderDetailCard('身份账号关联', (
+      <Stack spacing={1.5}>
+        {renderIdentityRelations('此账号使用的身份账号', outboundAccounts, '暂未绑定 Apple ID 或 Google 账号')}
+        {renderIdentityRelations('使用此账号的业务账号', inboundAccounts, '暂无业务账号依赖此账号')}
+      </Stack>
     ));
   };
+
+  const renderAccountDetailSections = (account: AssetInternetAccount) => (
+    <Stack spacing={1.25}>
+      {renderAccountSummaryCard(account)}
+      {renderAccountIdentitySection(account)}
+      {renderAccountSecuritySection(account)}
+      {renderAccountBindingSection(account)}
+      {renderAccountOwnershipSection(account)}
+      {renderAccountBusinessSection(account)}
+      {renderAccountIdentityCard(account)}
+    </Stack>
+  );
 
   const renderAssetNameLink = (label: string, onClick: () => void) => (
     <Button
@@ -2536,14 +2659,7 @@ const AssetManagement: React.FC = () => {
     if (!detail) return null;
     if (detail.device) return renderDeviceDetailSections(detail.device);
     if (detail.phone) return renderPhoneDetailSections(detail.phone);
-    const basicCard = detail.account ? renderAccountBasicCard(detail.account) : null;
-    return (
-      <Stack spacing={1.25}>
-        {basicCard}
-        {detail.account ? renderAccountIdentityCard(detail.account) : null}
-        {renderRelatedAssetsSection()}
-      </Stack>
-    );
+    return detail.account ? renderAccountDetailSections(detail.account) : null;
   };
 
   const renderDetailDialog = () => {
@@ -2557,17 +2673,17 @@ const AssetManagement: React.FC = () => {
       <Dialog
         open={detailDialogOpen}
         onClose={closeDetailDialog}
-        maxWidth="md"
+        maxWidth={detail?.type === 'account' ? 'lg' : 'md'}
         fullWidth
-        PaperProps={{ sx: { borderRadius: 1, overflow: 'hidden', maxWidth: 960 } }}
+        PaperProps={{ sx: { borderRadius: 1, overflow: 'hidden', maxWidth: detail?.type === 'account' ? 1040 : 960, maxHeight: '88vh' } }}
       >
         <DialogTitle sx={{ p: 0 }}>
-          <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between" sx={{ px: 2.25, py: 1.5, borderBottom: `1px solid ${shell.softLine}` }}>
+          <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ px: { xs: 1.5, sm: 2.25 }, py: 1.5, borderBottom: `1px solid ${shell.softLine}` }}>
             <Stack direction="row" spacing={1} alignItems="center">
-              <Typography sx={{ color: shell.ink, fontSize: 20, fontWeight: 950 }}>{detail ? detailTitleMap[detail.type] : '查看资产资料'}</Typography>
+              <Typography sx={{ color: shell.ink, fontSize: { xs: 18, sm: 20 }, fontWeight: 950, whiteSpace: 'nowrap' }}>{detail ? detailTitleMap[detail.type] : '查看资产资料'}</Typography>
               {detailSaveNotice ? <Chip size="small" color="success" label={detailSaveNotice} /> : null}
             </Stack>
-            <Stack direction="row" spacing={1} alignItems="center">
+            <Stack direction="row" spacing={0.5} alignItems="center">
               {detail && canEditAssetType(detail.type) ? (
                 <Button
                   size="small"
@@ -2578,12 +2694,18 @@ const AssetManagement: React.FC = () => {
                     else if (detail.phone) openEditForm('phone', detail.phone);
                     else if (detail.account) openEditForm('account', detail.account);
                   }}
-                  sx={{ fontWeight: 900, px: 2 }}
+                  aria-label="编辑资料"
+                  sx={{
+                    fontWeight: 900,
+                    minWidth: { xs: 40, sm: 'auto' },
+                    px: { xs: 1, sm: 2 },
+                    '& .MuiButton-startIcon': { m: { xs: 0, sm: '0 8px 0 -4px' } },
+                  }}
                 >
-                  编辑资料
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>编辑资料</Box>
                 </Button>
               ) : null}
-              <IconButton onClick={closeDetailDialog} sx={{ color: shell.muted }}>
+              <IconButton aria-label="关闭资产详情" onClick={closeDetailDialog} sx={{ color: shell.muted }}>
                 <CloseIcon />
               </IconButton>
             </Stack>

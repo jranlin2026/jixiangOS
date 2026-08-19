@@ -41,6 +41,7 @@
 售后挽回的真实截图点击验收需要一条已上传凭证的本地测试数据；不影响订单审核已完成的交互验收。
 
 final result: passed
+
 ---
 
 # 极享商学院 V2 独立模块 Design QA
@@ -131,7 +132,6 @@ final result: passed
 - Console errors: none
 
 final result: passed
-
 ---
 
 # Design QA — 客户合并弹窗
@@ -262,5 +262,59 @@ No actionable P0/P1/P2 findings remain.
 - Console: no application errors; only two pre-existing React Router v7 future-flag warnings.
 - Primary interaction: changing communication mode from `无SIM` to `双卡` displayed both `IMEI 1` and `IMEI 2` fields.
 - Additional interactions: phone and internet-account tabs opened their respective four-section create forms with the expected headings.
+
+final result: passed
+
+---
+
+# Internet Account Detail Design QA
+
+- Source visual truth: `/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-ca4c864a-2638-4dc1-849f-38c3de98be0b.png`
+- Desktop implementation: `/tmp/jixiangos-account-detail-qa-20260819/account-detail-redesign.png`
+- Desktop lower sections: `/tmp/jixiangos-account-detail-qa-20260819/account-detail-redesign-lower.png`
+- Identity relationship section: `/tmp/jixiangos-account-detail-qa-20260819/account-detail-redesign-relations.png`
+- Mobile implementation: `/tmp/jixiangos-account-detail-qa-20260819/account-detail-redesign-mobile-fixed.png`
+- Side-by-side comparison: `/tmp/jixiangos-account-detail-qa-20260819/design-qa-account-detail-comparison.png`
+- Desktop viewport: 1028 x 863 CSS px, device scale factor 1
+- Mobile viewport: 390 x 844 CSS px, device scale factor 1
+- Source pixels: 1060 x 837
+- Desktop implementation pixels: 1028 x 863
+- Comparison normalization: source scaled to 1028 px wide and centered on a 1028 x 864 white canvas; implementation padded from 1028 x 863 to 1028 x 864; canvases were placed side by side.
+- State: Internet account detail dialog with a realistic Instagram account, populated ownership/business fields, and empty phone/device/identity bindings.
+
+## Findings
+
+No remaining P0, P1, or P2 visual findings.
+
+- Fonts and typography: existing JixiangOS typography and weights are preserved. The account name, section titles, field labels, values, and status chips now have a clear hierarchy without changing the product font stack.
+- Spacing and layout rhythm: the former single dense field block is replaced by a 56 px summary mark and semantic cards with consistent 12-20 px internal rhythm. The 1040 px desktop dialog and one-column mobile layout do not clip persistent actions.
+- Colors and visual tokens: existing shell ink, muted text, lines, link blue, and semantic status tones are reused. No new visual language was introduced.
+- Image quality and asset fidelity: the existing local platform brand component renders the correct Instagram, Apple, and Google marks sharply at their intended sizes. No runtime image links or placeholder assets were added.
+- Copy and content: labels match the selected information architecture: account identity, login and security, bindings, ownership and use, business and status, and directional identity-account relationships. Empty values use explicit states instead of hyphens.
+- Interaction checks: edit and close actions remained available; linked operational identifiers retain copy controls; sensitive real-name/password controls retain permission-gated reveal behavior; the dialog scrolls while its header/footer stay visible.
+- Console check: one notification-bell `Failed to fetch` error occurred because the visual QA preview intentionally ran without the backend API. It is outside the asset detail implementation and did not affect the tested dialog.
+
+Focused-region comparison was required because the full dialog scrolls. Separate captures verified the binding, ownership, business, purpose/remark, and identity relationship sections.
+
+## Comparison History
+
+1. First desktop pass: no actionable desktop layout mismatch. Semantic grouping, status hierarchy, and explicit empty states were all visible.
+2. First mobile pass: P2 header action wrapped vertically at 390 px because the full edit label competed with the title and close button.
+3. Fix: mobile edit action now uses its icon-only presentation, the title uses an 18 px non-wrapping style, and desktop keeps the full button label.
+4. Post-fix mobile capture: header title, edit action, and close action fit one row; no clipping or vertical label remains.
+
+## Implementation Checklist
+
+- [x] Account summary with brand, login identifier, status, control, type, account number, and current user
+- [x] Semantic detail sections
+- [x] Multi-device and identity-provider relationship cards
+- [x] Directional upstream/downstream identity account groups
+- [x] Purpose and remark long-text layout
+- [x] Desktop and mobile dialog behavior
+- [x] Permission-sensitive reveal controls preserved
+
+## Follow-up Polish
+
+No P3 item is required for this release.
 
 final result: passed
