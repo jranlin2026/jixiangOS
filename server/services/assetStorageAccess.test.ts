@@ -204,13 +204,13 @@ assert.deepEqual((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[]).map((item) => 
 assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei1, 'IMEI-RAW-1');
 assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei2, 'IMEI-RAW-2');
 assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].phoneNumber, '13800001111');
-assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].realName, '童双全');
+assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].realName, '童**');
 assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].iccid, '89860012345678901234');
 assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].imsi, '460001234567890');
 assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePassword, undefined);
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[]).map((item) => item.id), ['account-self']);
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginAccount, 'self_raw');
-assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].realName, '童双全');
+assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].realName, '童**');
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].boundEmail, 'self@example.com');
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginPassword, undefined);
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_RISKS] as any[]).map((item) => item.id), ['risk-self']);
@@ -222,6 +222,8 @@ assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei1, 'IMEI-RAW-
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei2, 'IMEI-RAW-2');
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[1].imei1, 'OTHER-RAW');
 assert.equal((opsData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePassword, undefined);
+assert.equal((opsData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].realName, '童双全');
+assert.equal((opsData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].realName, '童双全');
 assert.equal((opsData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginPassword, undefined);
 assert.equal(STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS in opsData, false);
 assert.equal(canWriteStorageKey(opsAuth, STORAGE_KEYS.ASSET_DEVICES), true);

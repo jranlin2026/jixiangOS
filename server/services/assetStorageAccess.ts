@@ -134,18 +134,27 @@ function sanitizeDevice(device: AssetDevice): AssetDevice {
   return { ...canonicalDevice, ...values };
 }
 
-function sanitizePhone(phone: AssetPhoneNumber): AssetPhoneNumber {
-  return { ...phone, servicePassword: undefined };
+function sanitizePhone(phone: AssetPhoneNumber, canViewSensitive: boolean): AssetPhoneNumber {
+  const safePhone = { ...phone, servicePassword: undefined };
+  if (canViewSensitive) return safePhone;
+  return {
+    ...safePhone,
+    realName: phone.realNameMasked || undefined,
+  };
 }
 
-function sanitizeAccount(account: AssetInternetAccount): AssetInternetAccount {
+function sanitizeAccount(account: AssetInternetAccount, canViewSensitive: boolean): AssetInternetAccount {
   const {
     loginPassword: _loginPassword,
     paymentPassword: _paymentPassword,
     credentialBackfill: _credentialBackfill,
     ...safeAccount
   } = account as AssetInternetAccount & { loginPassword?: unknown; paymentPassword?: unknown; credentialBackfill?: unknown };
-  return safeAccount;
+  if (canViewSensitive) return safeAccount;
+  return {
+    ...safeAccount,
+    realName: account.realNameMasked || undefined,
+  };
 }
 
 export function filterAssetStorageData(
@@ -158,6 +167,7 @@ export function filterAssetStorageData(
   }
 
   const scope = assetScopeForUser(user, context);
+  const canViewSensitive = hasPermission(user, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW, 'read');
   const devices = asArray<AssetDevice>(data[STORAGE_KEYS.ASSET_DEVICES])
     .map((device) => normalizeAssetDevice({ ...device }))
     .filter((device) => visibleDevice(device, scope))
@@ -166,12 +176,12 @@ export function filterAssetStorageData(
   const phones = asArray<AssetPhoneNumber>(data[STORAGE_KEYS.ASSET_PHONE_NUMBERS])
     .map((phone) => normalizeAssetPhone({ ...phone }))
     .filter((phone) => visiblePhone(phone, visibleDeviceIds, scope))
-    .map(sanitizePhone);
+    .map((phone) => sanitizePhone(phone, canViewSensitive));
   const visiblePhoneIds = new Set(phones.map((phone) => phone.id));
   const accounts = asArray<AssetInternetAccount>(data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS])
     .map((account) => normalizeAssetAccount({ ...account }))
     .filter((account) => visibleAccount(account, visiblePhoneIds, scope))
-    .map(sanitizeAccount);
+    .map((account) => sanitizeAccount(account, canViewSensitive));
   const visibleAssetIds = new Set<string>([
     ...devices.map((device) => device.id),
     ...phones.map((phone) => phone.id),
