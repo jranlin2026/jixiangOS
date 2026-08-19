@@ -47,10 +47,10 @@ export function useProtectedFormClose({
   }, [dirty, onClose, submitting]);
 
   const interactionProps = useMemo(() => ({
-    onChangeCapture: markDirty,
-    onInputCapture: markDirty,
-    onPasteCapture: markDirty,
-    onDropCapture: markDirty,
+    onChange: markDirty,
+    onInput: markDirty,
+    onPaste: markDirty,
+    onDrop: markDirty,
     onClickCapture: (event: React.MouseEvent<HTMLElement>) => {
       const button = (event.target as Element | null)?.closest('button');
       if (shouldMarkProtectedFormButtonClick({
