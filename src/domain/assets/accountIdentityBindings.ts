@@ -44,8 +44,12 @@ export function validateIdentityAccountIds(input: {
   const sourcePlatform = input.sourcePlatform || sourceAccount?.platform;
   const platformCounts = new Map<string, number>();
 
+  if (input.sourceAccountId && ids.includes(input.sourceAccountId)) return '身份账号不能绑定自己';
+  if (ids.length && IDENTITY_ACCOUNT_PLATFORMS.includes(sourcePlatform as AssetIdentityAccountPlatform)) {
+    return 'Apple ID 和 Google账号是身份账号，不能再绑定其他身份账号';
+  }
+
   for (const id of ids) {
-    if (input.sourceAccountId && id === input.sourceAccountId) return '身份账号不能绑定自己';
     const target = byId.get(id);
     if (!target) return '绑定的身份账号不存在';
     if (!IDENTITY_ACCOUNT_PLATFORMS.includes(target.platform as AssetIdentityAccountPlatform)) {

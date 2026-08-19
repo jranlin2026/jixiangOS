@@ -35,7 +35,9 @@ assert.match(validateIdentityAccountIds({ sourceAccountId: 'tiktok-1', identityA
 assert.match(validateIdentityAccountIds({ sourceAccountId: 'tiktok-1', identityAccountIds: ['missing'], accounts: rows }) || '', /不存在/);
 assert.match(validateIdentityAccountIds({ sourceAccountId: 'tiktok-1', identityAccountIds: ['tiktok-1'], accounts: [apple, google, account('tiktok-1', 'Apple ID')] }) || '', /自己/);
 assert.match(validateIdentityAccountIds({ sourceAccountId: 'tiktok-1', identityAccountIds: ['apple-1', 'apple-2'], accounts: [...rows, account('apple-2', 'Apple ID')] }) || '', /只能绑定一个 Apple ID/);
-assert.match(validateIdentityAccountIds({ sourceAccountId: 'apple-source', identityAccountIds: ['apple-1'], accounts: [...rows, account('apple-source', 'Apple ID')] }) || '', /同类型/);
+assert.match(validateIdentityAccountIds({ sourceAccountId: 'apple-source', identityAccountIds: ['apple-1'], accounts: [...rows, account('apple-source', 'Apple ID')] }) || '', /身份账号/);
+assert.match(validateIdentityAccountIds({ sourceAccountId: 'apple-source', identityAccountIds: ['google-1'], accounts: [...rows, account('apple-source', 'Apple ID')] }) || '', /身份账号/);
+assert.match(validateIdentityAccountIds({ sourceAccountId: 'google-1', identityAccountIds: ['apple-1'], accounts: rows }) || '', /身份账号/);
 assert.match(validateIdentityAccountIds({ sourceAccountId: 'tiktok-1', identityAccountIds: ['bad-provider'], accounts: [...rows, account('bad-provider', 'LINE')] }) || '', /Apple ID 或 Google账号/);
 assert.match(validateIdentityAccountIds({ sourceAccountId: 'tiktok-1', identityAccountIds: ['apple-disabled'], accounts: [...rows, account('apple-disabled', 'Apple ID', [], { accountStatus: '已注销' })] }) || '', /不可用/);
 assert.match(validateIdentityAccountIds({ sourceAccountId: 'tiktok-1', identityAccountIds: ['apple-transfer'], accounts: [...rows, account('apple-transfer', 'Apple ID', [], { controlStatus: '待交接' })] }) || '', /未掌控/);

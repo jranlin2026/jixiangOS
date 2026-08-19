@@ -158,20 +158,7 @@ const CONFIGURABLE_ASSET_TABS = new Set<AssetTab>(['devices', 'phones', 'account
 
 const ASSET_ACTION_COLUMN_WIDTH = 132;
 const ASSET_LOOKUP_PAGE_SIZE = 500;
-
-async function fetchAllAccountLookupRows(): Promise<AssetInternetAccount[]> {
-  const rows: AssetInternetAccount[] = [];
-  let currentPage = 1;
-  let totalPages = 1;
-  do {
-    const result = await assetApi.fetchInternetAccounts({ page: currentPage, pageSize: ASSET_LOOKUP_PAGE_SIZE });
-    if (result.code !== 0) return [];
-    rows.push(...result.data.items);
-    totalPages = result.data.pagination.totalPages;
-    currentPage += 1;
-  } while (currentPage <= totalPages);
-  return rows;
-}
+const IDENTITY_ACCOUNT_LOOKUP_PAGE_SIZE = 50;
 
 const readAssetText = (asset: unknown, keys: string[], fallback: string): string => {
   const row = asset as Record<string, unknown>;
@@ -445,6 +432,7 @@ const AssetManagement: React.FC = () => {
   const [lookupDevices, setLookupDevices] = useState<AssetDevice[]>([]);
   const [lookupPhones, setLookupPhones] = useState<AssetPhoneNumber[]>([]);
   const [lookupAccounts, setLookupAccounts] = useState<AssetInternetAccount[]>([]);
+  const [identityAccountCandidates, setIdentityAccountCandidates] = useState<AssetInternetAccount[]>([]);
   const [lookupUsers, setLookupUsers] = useState<User[]>([]);
   const [lookupDepartments, setLookupDepartments] = useState<Department[]>([]);
   const [formState, setFormState] = useState<AssetFormState>(emptyForm);
@@ -538,7 +526,10 @@ const AssetManagement: React.FC = () => {
 
   const deviceById = useMemo(() => new Map(lookupDevices.map((device) => [device.id, device])), [lookupDevices]);
   const phoneById = useMemo(() => new Map(lookupPhones.map((phone) => [phone.id, phone])), [lookupPhones]);
-  const accountById = useMemo(() => new Map(lookupAccounts.map((account) => [account.id, account])), [lookupAccounts]);
+  const accountById = useMemo(() => new Map(
+    [...lookupAccounts, ...identityAccountCandidates, ...(detail?.relatedAccounts || [])]
+      .map((account) => [account.id, account]),
+  ), [detail?.relatedAccounts, identityAccountCandidates, lookupAccounts]);
   const userById = useMemo(() => new Map(lookupUsers.map((user) => [user.id, user])), [lookupUsers]);
   const departmentById = useMemo(() => new Map(lookupDepartments.map((department) => [department.id, department])), [lookupDepartments]);
   const phonesByDeviceId = useMemo(() => {
@@ -605,7 +596,13 @@ const AssetManagement: React.FC = () => {
     assetApi.fetchPhoneNumbers({ pageSize: ASSET_LOOKUP_PAGE_SIZE }).then((res) => {
       if (res.code === 0) setLookupPhones(res.data.items);
     });
-    void fetchAllAccountLookupRows().then(setLookupAccounts);
+    assetApi.fetchInternetAccounts({ pageSize: ASSET_LOOKUP_PAGE_SIZE }).then((res) => {
+      if (res.code === 0) setLookupAccounts(res.data.items);
+    });
+    void Promise.all([
+      assetApi.fetchInternetAccounts({ platform: 'Apple ID', pageSize: IDENTITY_ACCOUNT_LOOKUP_PAGE_SIZE }),
+      assetApi.fetchInternetAccounts({ platform: 'Google账号', pageSize: IDENTITY_ACCOUNT_LOOKUP_PAGE_SIZE }),
+    ]).then((results) => setIdentityAccountCandidates(results.flatMap((res) => res.code === 0 ? res.data.items : [])));
     settingsApi.fetchAssignableDirectory().then((res) => {
       if (res.code === 0) {
         setLookupUsers(res.data.users);
@@ -657,14 +654,17 @@ const AssetManagement: React.FC = () => {
   };
 
   const refreshLookupData = async () => {
-    const [deviceRes, phoneRes, accountRows] = await Promise.all([
+    const [deviceRes, phoneRes, accountRes, appleRes, googleRes] = await Promise.all([
       assetApi.fetchDevices({ pageSize: ASSET_LOOKUP_PAGE_SIZE }),
       assetApi.fetchPhoneNumbers({ pageSize: ASSET_LOOKUP_PAGE_SIZE }),
-      fetchAllAccountLookupRows(),
+      assetApi.fetchInternetAccounts({ pageSize: ASSET_LOOKUP_PAGE_SIZE }),
+      assetApi.fetchInternetAccounts({ platform: 'Apple ID', pageSize: IDENTITY_ACCOUNT_LOOKUP_PAGE_SIZE }),
+      assetApi.fetchInternetAccounts({ platform: 'Google账号', pageSize: IDENTITY_ACCOUNT_LOOKUP_PAGE_SIZE }),
     ]);
     if (deviceRes.code === 0) setLookupDevices(deviceRes.data.items);
     if (phoneRes.code === 0) setLookupPhones(phoneRes.data.items);
-    setLookupAccounts(accountRows);
+    if (accountRes.code === 0) setLookupAccounts(accountRes.data.items);
+    setIdentityAccountCandidates([appleRes, googleRes].flatMap((res) => res.code === 0 ? res.data.items : []));
     const directoryRes = await settingsApi.fetchAssignableDirectory();
     if (directoryRes.code === 0) {
       setLookupUsers(directoryRes.data.users);
@@ -921,7 +921,7 @@ const AssetManagement: React.FC = () => {
     };
   };
 
-  const openEditForm = (type: AssetFormType, item: AssetDevice | AssetPhoneNumber | AssetInternetAccount) => {
+  const openEditForm = async (type: AssetFormType, item: AssetDevice | AssetPhoneNumber | AssetInternetAccount) => {
     if (!canEditAssetType(type)) {
       showFeedback('当前账号没有编辑资产权限');
       return;
@@ -933,11 +933,25 @@ const AssetManagement: React.FC = () => {
     if (type === 'phone') values.servicePassword = '';
     if (type === 'account') {
       const account = item as AssetInternetAccount;
+      const linkedIds = normalizeIdentityAccountIds(account.identityAccountIds);
+      const missingIds = linkedIds.filter((id) => !accountById.has(id));
+      const fetchedRows = (await Promise.all(missingIds.map(async (id) => {
+        const response = await assetApi.fetchInternetAccounts({ search: id, page: 1, pageSize: 10 });
+        return response.code === 0 ? response.data.items.filter((candidate) => candidate.id === id) : [];
+      }))).flat();
+      if (fetchedRows.length) {
+        setIdentityAccountCandidates((current) => Array.from(
+          new Map([...current, ...fetchedRows].map((candidate) => [candidate.id, candidate])).values(),
+        ));
+      }
+      const accountPool = Array.from(new Map(
+        [...lookupAccounts, ...identityAccountCandidates, ...fetchedRows].map((candidate) => [candidate.id, candidate]),
+      ).values());
       values.loginPassword = '';
       values.paymentPassword = '';
       values.requiresPaymentPassword = account.requiresPaymentPassword ? 'true' : 'false';
-      values.appleIdentityAccountId = findIdentityAccountForProvider(account, lookupAccounts, 'Apple ID')?.id || '';
-      values.googleIdentityAccountId = findIdentityAccountForProvider(account, lookupAccounts, 'Google账号')?.id || '';
+      values.appleIdentityAccountId = findIdentityAccountForProvider(account, accountPool, 'Apple ID')?.id || '';
+      values.googleIdentityAccountId = findIdentityAccountForProvider(account, accountPool, 'Google账号')?.id || '';
     }
     setFormState({ open: true, type, mode: 'edit', id: item.id, values: normalizeAssetFormValues(values), validationAttempted: false });
   };
@@ -2814,44 +2828,49 @@ const AssetManagement: React.FC = () => {
     fieldName: 'appleIdentityAccountId' | 'googleIdentityAccountId',
     label: string,
   ) => {
-    const candidates = lookupAccounts.filter((account) => (
+    const candidates = Array.from(accountById.values()).filter((account) => (
       account.platform === platform
       && account.id !== formState.id
       && !['异常', '封禁', '已注销'].includes(account.accountStatus)
       && readAccountControlStatus(account) === '已掌控'
     ));
+    const selected = accountById.get(formState.values[fieldName] || '') || null;
     return (
-      <FormControl size="small" fullWidth>
-        <InputLabel>{label}</InputLabel>
-        <Select
-          label={label}
-          value={formState.values[fieldName] || ''}
-          onChange={(event) => updateFormValue(fieldName, event.target.value)}
-          renderValue={(selected) => {
-            const account = accountById.get(String(selected));
-            return account ? (
-              <Stack direction="row" spacing={1} alignItems="center">
-                <PlatformBrandMark platform={account.platform} size={24} />
-                <Box>{account.accountName} / {displayAccountLogin(account)}</Box>
-              </Stack>
-            ) : '暂不绑定';
-          }}
-        >
-          <MenuItem value="">暂不绑定</MenuItem>
-          {candidates.map((account) => (
-            <MenuItem key={account.id} value={account.id}>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
-                <PlatformBrandMark platform={account.platform} size={28} />
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography sx={{ fontWeight: 850 }}>{account.accountName}</Typography>
-                  <Typography variant="caption" sx={{ color: shell.muted }}>{displayAccountLogin(account)} / {account.currentUser || '未分配'}</Typography>
-                </Box>
-              </Stack>
-            </MenuItem>
-          ))}
-          {!candidates.length ? <MenuItem value="__empty" disabled>暂无可绑定的{platform}，请先建档</MenuItem> : null}
-        </Select>
-      </FormControl>
+      <Autocomplete
+        options={candidates}
+        value={selected}
+        filterOptions={(options) => options}
+        getOptionLabel={(account) => `${account.accountName} / ${displayAccountLogin(account)}`}
+        isOptionEqualToValue={(option, value) => option.id === value.id}
+        onChange={(_, account) => updateFormValue(fieldName, account?.id || '')}
+        onInputChange={(_, query, reason) => {
+          if (reason !== 'input') return;
+          void assetApi.fetchInternetAccounts({
+            platform,
+            search: query.trim(),
+            page: 1,
+            pageSize: IDENTITY_ACCOUNT_LOOKUP_PAGE_SIZE,
+          }).then((res) => {
+            if (res.code !== 0) return;
+            setIdentityAccountCandidates((current) => Array.from(
+              new Map([...current, ...res.data.items].map((account) => [account.id, account])).values(),
+            ));
+          });
+        }}
+        noOptionsText={`暂无可绑定的${platform}，请先建档`}
+        renderOption={(props, account) => (
+          <Box component="li" {...props} key={account.id}>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+              <PlatformBrandMark platform={account.platform} size={28} />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography sx={{ fontWeight: 850 }}>{account.accountName}</Typography>
+                <Typography variant="caption" sx={{ color: shell.muted }}>{displayAccountLogin(account)} / {account.currentUser || '未分配'}</Typography>
+              </Box>
+            </Stack>
+          </Box>
+        )}
+        renderInput={(params) => <TextField {...params} label={label} placeholder={`搜索${platform}账号`} />}
+      />
     );
   };
 
@@ -2899,10 +2918,10 @@ const AssetManagement: React.FC = () => {
           })}
         </Select>
       </FormControl>
-        {formState.values.platform !== 'Apple ID'
+        {!['Apple ID', 'Google账号'].includes(formState.values.platform)
           ? renderIdentityAccountSelect('Apple ID', 'appleIdentityAccountId', '绑定 Apple ID')
           : <Box />}
-        {formState.values.platform !== 'Google账号'
+        {!['Apple ID', 'Google账号'].includes(formState.values.platform)
           ? renderIdentityAccountSelect('Google账号', 'googleIdentityAccountId', '绑定 Google 账号')
           : <Box />}
         {renderTextField('boundEmail', '绑定邮箱')}

@@ -242,6 +242,7 @@ const accounts: AssetInternetAccount[] = [
     accountName: 'Self Account',
     loginAccount: 'self_account',
     loginAccountMasked: 'self_***',
+    identityAccountIds: ['account-other'],
     phoneId: 'phone-self',
     ownerSubject: '公司' as AssetInternetAccount['ownerSubject'],
     department: 'Sales',
@@ -356,6 +357,9 @@ seed('user-self');
   assert.deepEqual(ids(visibleDevices.data.items), ['device-self']);
   assert.deepEqual(ids(visiblePhones.data.items), ['phone-self']);
   assert.deepEqual(ids(visibleAccounts.data.items), ['account-self']);
+  assert.deepEqual(visibleAccounts.data.items[0].identityAccountIds, []);
+  const hiddenIdentitySearch = await assetApi.fetchInternetAccounts({ search: 'other_account', pageSize: 10 });
+  assert.equal(hiddenIdentitySearch.data.items.length, 0);
   assert.deepEqual(ids(visibleRisks.data.items), ['risk-self']);
   assert.deepEqual(ids(visibleLogs.data.items), ['log-self']);
   assert.deepEqual(ids(visibleTasks.data.items), ['task-self']);

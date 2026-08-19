@@ -804,10 +804,15 @@ function visibleAccounts(scope = getCurrentDataVisibilityScope('assets')): Asset
   const rows = accounts();
   if (scope.unrestricted) return rows;
   const visiblePhoneIds = new Set(visiblePhones(scope).map((phone) => phone.id));
-  return rows.filter((account) => (
+  const visibleRows = rows.filter((account) => (
     canViewAssetAccount(account, scope)
     || Boolean(account.phoneId && visiblePhoneIds.has(account.phoneId))
   ));
+  const visibleIds = new Set(visibleRows.map((account) => account.id));
+  return visibleRows.map((account) => ({
+    ...account,
+    identityAccountIds: normalizeIdentityAccountIds(account.identityAccountIds).filter((id) => visibleIds.has(id)),
+  }));
 }
 
 function visibleAssetIds(scope = getCurrentDataVisibilityScope('assets')): Record<AssetType | 'all', Set<string>> {
@@ -914,7 +919,7 @@ function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPh
 
 function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): AssetInternetAccount[] {
   const keyword = filters?.search?.trim().toLowerCase();
-  const accountById = new Map(accounts().map((account) => [account.id, account]));
+  const accountById = new Map(visibleAccounts().map((account) => [account.id, account]));
   return rows.filter((row) => {
     const phone = getPhone(row.phoneId);
     const device = getPhoneDevice(phone);
