@@ -194,6 +194,8 @@ const phones: AssetPhoneNumber[] = [
     id: 'phone-self',
     phoneNumber: '13900000001',
     phoneNumberMasked: '139****0001',
+    realName: 'Self Phone Legal Name',
+    realNameMasked: 'S***e',
     operator: '移动' as AssetPhoneNumber['operator'],
     deviceId: 'device-self',
     slotType: '卡槽1' as AssetPhoneNumber['slotType'],
@@ -358,6 +360,8 @@ seed('user-self');
 
   assert.deepEqual(ids(visibleDevices.data.items), ['device-self']);
   assert.deepEqual(ids(visiblePhones.data.items), ['phone-self']);
+  assert.equal(visiblePhones.data.items[0].realName, undefined);
+  assert.equal(visiblePhones.data.items[0].realNameMasked, 'S***e');
   assert.deepEqual(ids(visibleAccounts.data.items), ['account-self']);
   assert.equal(visibleAccounts.data.items[0].realName, undefined);
   assert.equal(visibleAccounts.data.items[0].realNameMasked, 'S***e');
@@ -370,6 +374,13 @@ seed('user-self');
   assert.equal(hiddenDetail.data, null);
   assert.equal(dashboard.data.deviceCount, 1);
   assert.equal(dashboard.data.monthlyCost, 138);
+
+  await assetApi.updatePhoneNumber('phone-self', { realName: 'Unauthorized Phone Replacement', status: '已停用' });
+  await assetApi.updateInternetAccount('account-self', { realName: 'Unauthorized Account Replacement', accountStatus: '异常' });
+  const storedPhones = JSON.parse(storage.getItem(STORAGE_KEYS.ASSET_PHONE_NUMBERS) || '[]') as AssetPhoneNumber[];
+  const storedAccounts = JSON.parse(storage.getItem(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS) || '[]') as AssetInternetAccount[];
+  assert.equal(storedPhones.find((phone) => phone.id === 'phone-self')?.realName, 'Self Phone Legal Name');
+  assert.equal(storedAccounts.find((account) => account.id === 'account-self')?.realName, 'Self Legal Name');
 }
 
 seed('user-peer');
@@ -392,6 +403,8 @@ seed('user-admin');
   const visibleRisks = await assetApi.fetchRisks({ pageSize: 10 });
 
   assert.equal(visibleDevices.data.items.length, 3);
+  const visiblePhones = await assetApi.fetchPhoneNumbers({ pageSize: 10 });
+  assert.equal(visiblePhones.data.items.find((phone) => phone.id === 'phone-self')?.realName, 'Self Phone Legal Name');
   assert.equal(visibleAccounts.data.items.length, 3);
   assert.equal(visibleAccounts.data.items.find((account) => account.id === 'account-self')?.realName, 'Self Legal Name');
   assert.equal(visibleRisks.data.items.length, 3);

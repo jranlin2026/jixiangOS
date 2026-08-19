@@ -807,12 +807,20 @@ function visibleRawPhones(scope = getCurrentDataVisibilityScope('assets')): Asse
   return rows.filter((phone) => canViewAssetPhone(phone, scope) || Boolean(phone.deviceId && visibleDeviceIds.has(phone.deviceId)));
 }
 
-function sanitizePhoneForRead(phone: AssetPhoneNumber): AssetPhoneNumber {
-  return { ...phone, servicePassword: undefined };
+function sanitizePhoneForRead(
+  phone: AssetPhoneNumber,
+  canRevealRealName = canRevealLocalAssetCredential(),
+): AssetPhoneNumber {
+  return {
+    ...phone,
+    realName: canRevealRealName ? phone.realName : undefined,
+    servicePassword: undefined,
+  };
 }
 
 function visiblePhones(scope = getCurrentDataVisibilityScope('assets')): AssetPhoneNumber[] {
-  return visibleRawPhones(scope).map(sanitizePhoneForRead);
+  const canRevealRealName = canRevealLocalAssetCredential();
+  return visibleRawPhones(scope).map((phone) => sanitizePhoneForRead(phone, canRevealRealName));
 }
 
 function visibleAccounts(scope = getCurrentDataVisibilityScope('assets')): AssetInternetAccount[] {
@@ -1332,12 +1340,16 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
     const nextServicePassword = clearServicePassword
       ? undefined
       : String(input.servicePassword || '').trim() ? input.servicePassword : existing.servicePassword;
+    const nextRealName = canRevealLocalAssetCredential()
+      ? input.realName ?? existing.realName
+      : existing.realName;
     const updated = normalizeAssetPhone({
       ...existing,
       ...phoneChanges,
       phoneNumber,
       phoneNumberMasked: maskPhone(phoneNumber),
-      realNameMasked: maskRealName(input.realName ?? existing.realName),
+      realName: nextRealName,
+      realNameMasked: maskRealName(nextRealName),
       iccidMasked: maskIdentifier(input.iccid ?? existing.iccid),
       imsiMasked: maskIdentifier(input.imsi ?? existing.imsi),
       servicePassword: nextServicePassword,
@@ -1527,6 +1539,9 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
     const hasLoginCredential = await hasLocalAssetCredential(id, 'loginPassword');
     const hasPaymentCredential = await hasLocalAssetCredential(id, 'paymentPassword');
     const controlStatus = input.controlStatus || (input.permissionStatus ? readAccountControlStatus({ permissionStatus: input.permissionStatus }) : readAccountControlStatus(existing));
+    const nextRealName = canRevealLocalAssetCredential()
+      ? input.realName ?? existing.realName
+      : existing.realName;
     const updated = normalizeAssetAccount({
       ...existing,
       ...input,
@@ -1539,7 +1554,8 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
         : normalizeIdentityAccountIds(input.identityAccountIds),
       loginAccount,
       loginAccountMasked: maskLogin(loginAccount),
-      realNameMasked: maskRealName(input.realName ?? existing.realName),
+      realName: nextRealName,
+      realNameMasked: maskRealName(nextRealName),
       boundEmailMasked: maskEmail(input.boundEmail ?? existing.boundEmail),
       controlStatus,
       loginMethod,
