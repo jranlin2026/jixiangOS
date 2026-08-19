@@ -72,6 +72,8 @@ export interface AssetDevice {
   remark?: string;
   createdAt: string;
   updatedAt: string;
+  /** 当前数据范围内，明确将该设备配置为登录设备的互联网账号数量。 */
+  internetAccountCount?: number;
 }
 
 export interface AssetPhoneNumber {
@@ -252,6 +254,7 @@ export interface AssetMatrixPublishStats {
 export interface AssetFilters {
   search?: string;
   platform?: string;
+  loginDeviceId?: string;
   permissionStatus?: string;
   riskLevel?: string;
   status?: string;

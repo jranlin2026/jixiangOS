@@ -2143,6 +2143,7 @@ app.get('/api/assets/:kind', requireAssetReadAccess, async (req: AuthenticatedRe
   const result = await assetListService.list(kind, {
     search: queryParam(req.query.search),
     platform: queryParam(req.query.platform),
+    loginDeviceId: queryParam(req.query.loginDeviceId),
     permissionStatus: queryParam(req.query.permissionStatus),
     riskLevel: queryParam(req.query.riskLevel),
     status: queryParam(req.query.status),

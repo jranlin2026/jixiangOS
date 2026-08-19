@@ -106,6 +106,7 @@ function backendAssetList<T>(kind: string, filters?: AssetFilters): Promise<ApiR
   const params = new URLSearchParams();
   if (filters?.search) params.set('search', filters.search);
   if (filters?.platform) params.set('platform', filters.platform);
+  if (filters?.loginDeviceId) params.set('loginDeviceId', filters.loginDeviceId);
   if (filters?.permissionStatus) params.set('permissionStatus', filters.permissionStatus);
   if (filters?.riskLevel) params.set('riskLevel', filters.riskLevel);
   if (filters?.status) params.set('status', filters.status);
@@ -140,6 +141,15 @@ function canRevealLocalAssetCredential(): boolean {
   if (!user) return false;
   const { roles } = ensureOrganizationConfigData();
   return hasPermission(toAuthenticatedUser(user, roles), PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW, 'read');
+}
+
+function canReadLocalAssetAccounts(): boolean {
+  const session = getStorageData<AuthSession>(AUTH_SESSION_STORAGE_KEY);
+  const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
+  const user = users.find((item) => item.id === session?.userId);
+  if (!user) return false;
+  const { roles } = ensureOrganizationConfigData();
+  return hasPermission(toAuthenticatedUser(user, roles), PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read');
 }
 
 function risks(): AssetRisk[] {
@@ -981,10 +991,12 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
       ...identitySearchValues,
     ].some((value) => includesKeyword(value, keyword));
     const matchesPlatform = !filters?.platform || row.platform === filters.platform;
+    const matchesLoginDevice = !filters?.loginDeviceId
+      || normalizeAccountLoginDeviceIds(row.loginDeviceIds).includes(filters.loginDeviceId);
     const matchesPermission = !filters?.permissionStatus || readAccountControlStatus(row) === filters.permissionStatus;
     const matchesRisk = !filters?.riskLevel || row.riskLevel === filters.riskLevel;
     const matchesStatus = !filters?.status || row.accountStatus === filters.status;
-    return matchesKeyword && matchesPlatform && matchesPermission && matchesRisk && matchesStatus;
+    return matchesKeyword && matchesPlatform && matchesLoginDevice && matchesPermission && matchesRisk && matchesStatus;
   });
 }
 
@@ -1098,7 +1110,18 @@ async function fetchDevices(filters?: AssetFilters): Promise<ApiResponse<Paginat
   if (shouldUseBackendApi()) return backendAssetList<AssetDevice>('devices', filters);
   ensureInit();
   await delay(120);
-  return createSuccessResponse(paginate(filterDevices(visibleDevices(), filters), filters));
+  const visibleAccountRows = canReadLocalAssetAccounts() ? visibleAccounts() : [];
+  const accountCountByDeviceId = visibleAccountRows.reduce((counts, account) => {
+    normalizeAccountLoginDeviceIds(account.loginDeviceIds).forEach((deviceId) => {
+      counts.set(deviceId, (counts.get(deviceId) || 0) + 1);
+    });
+    return counts;
+  }, new Map<string, number>());
+  const rows = filterDevices(visibleDevices(), filters).map((device) => ({
+    ...device,
+    internetAccountCount: accountCountByDeviceId.get(device.id) || 0,
+  }));
+  return createSuccessResponse(paginate(rows, filters));
 }
 
 async function createDevice(input: Partial<AssetDeviceInput>): Promise<ApiResponse<AssetDevice>> {

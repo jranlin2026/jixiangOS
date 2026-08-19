@@ -13,6 +13,7 @@ import type {
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import { readAccountControlStatus } from '../../src/domain/assets/assetFields';
 import { normalizeAccountLoginDeviceIds } from '../../src/domain/assets/accountDeviceBindings';
 import { success } from '../api/response';
@@ -88,6 +89,10 @@ function matchesFilters(
   if (filters.platform && (kind === 'matrix-publish'
     ? !(value.targets as AssetMatrixPublishTask['targets']).some((target) => target.platform === filters.platform)
     : value.platform !== filters.platform)) return false;
+  if (filters.loginDeviceId && (
+    kind !== 'accounts'
+    || !normalizeAccountLoginDeviceIds(value.loginDeviceIds as string[] | undefined).includes(filters.loginDeviceId)
+  )) return false;
   if (filters.permissionStatus && (kind !== 'accounts' || readAccountControlStatus(value) !== filters.permissionStatus)) return false;
   if (filters.riskLevel && value.riskLevel !== filters.riskLevel && value.level !== filters.riskLevel) return false;
   if (filters.status) {
@@ -135,11 +140,27 @@ export function createAssetListService(
     async list(kind: AssetListKind, filters: AssetFilters, user: AuthenticatedUser) {
       const visible = await loadVisible(user);
       const rows = (Array.isArray(visible[KEY_BY_KIND[kind]]) ? visible[KEY_BY_KIND[kind]] : []) as AssetRow[];
-      const visibleAccounts = (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[];
+      const visibleAccounts = hasPermission(user, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[]
+        : [];
       const accountById = kind === 'accounts' ? new Map(visibleAccounts.map((account) => [account.id, account])) : undefined;
       const visibleDevices = (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[];
       const deviceById = kind === 'accounts' ? new Map(visibleDevices.map((device) => [device.id, device])) : undefined;
-      const filtered = rows.filter((row) => matchesFilters(kind, row, filters, accountById, deviceById));
+      const accountCountByDeviceId = kind === 'devices'
+        ? visibleAccounts.reduce((counts, account) => {
+          normalizeAccountLoginDeviceIds(account.loginDeviceIds).forEach((deviceId) => {
+            counts.set(deviceId, (counts.get(deviceId) || 0) + 1);
+          });
+          return counts;
+        }, new Map<string, number>())
+        : undefined;
+      const rowsWithRelationshipCounts = kind === 'devices'
+        ? (rows as AssetDevice[]).map((device) => ({
+          ...device,
+          internetAccountCount: accountCountByDeviceId?.get(device.id) || 0,
+        }))
+        : rows;
+      const filtered = rowsWithRelationshipCounts.filter((row) => matchesFilters(kind, row, filters, accountById, deviceById));
       const page = Math.max(1, Number(filters.page) || 1);
       const pageSize = Math.min(500, Math.max(1, Number(filters.pageSize) || 20));
       const start = (page - 1) * pageSize;

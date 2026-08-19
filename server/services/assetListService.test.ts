@@ -100,6 +100,19 @@ assert.deepEqual(
   ['account-business'],
   '互联网账号应能通过独立配置的登录设备名称搜索',
 );
+const filteredByLoginDevice = await service.list('accounts', { loginDeviceId: 'device-b', page: 1, pageSize: 10 }, authenticatedAdmin);
+assert.deepEqual(
+  (filteredByLoginDevice.data.items as AssetInternetAccount[]).map((account) => account.id),
+  ['account-business'],
+  '设备互联网账号明细应只返回当前设备的登录账号',
+);
+assert.equal(filteredByLoginDevice.data.pagination.total, 1, '设备互联网账号明细必须返回可分页的准确总数');
+const devicesWithAccountCount = await service.list('devices', { page: 1, pageSize: 10 }, authenticatedAdmin);
+assert.equal(
+  (devicesWithAccountCount.data.items.find((device) => device.id === 'device-b') as { internetAccountCount?: number } | undefined)?.internetAccountCount,
+  1,
+  '设备列表应返回当前数据范围内的准确互联网账号数量',
+);
 
 {
   let releaseOldRead!: () => void;

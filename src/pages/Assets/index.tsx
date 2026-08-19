@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useSearchParams } from 'react-router-dom';
 import {
@@ -11,6 +11,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Drawer,
   FormControl,
   FormControlLabel,
   IconButton,
@@ -148,6 +149,26 @@ type MatrixPublishFormState = {
   values: AssetMatrixPublishTaskInput;
 };
 
+type DeviceAccountDrawerState = {
+  open: boolean;
+  deviceId?: string;
+  items: AssetInternetAccount[];
+  page: number;
+  pageSize: number;
+  total: number;
+  loading: boolean;
+  error?: string;
+};
+
+const emptyDeviceAccountDrawer: DeviceAccountDrawerState = {
+  open: false,
+  items: [],
+  page: 0,
+  pageSize: 10,
+  total: 0,
+  loading: false,
+};
+
 const ASSET_TABS: Array<{ value: AssetTab; label: string; permissionKey: string }> = [
   { value: 'overview', label: '资产总览', permissionKey: PERMISSION_KEYS.ASSETS_OVERVIEW },
   { value: 'devices', label: '设备资产', permissionKey: PERMISSION_KEYS.ASSETS_DEVICES },
@@ -201,7 +222,7 @@ const DEVICE_COLUMNS: AssetColumnConfig[] = [
   { id: 'brandModel', label: '类型 / 品牌型号', width: 180 },
   { id: 'imei', label: '卡槽 / IMEI', width: 250 },
   { id: 'simType', label: '对应手机号', width: 210 },
-  { id: 'accountCount', label: '账号数', width: 100 },
+  { id: 'accountCount', label: '互联网账号', width: 120 },
   { id: 'department', label: '所属部门', width: 130 },
   { id: 'owner', label: '负责人', width: 120 },
   { id: 'currentUser', label: '当前使用人', width: 130 },
@@ -455,6 +476,9 @@ const AssetManagement: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<AssetDeleteTarget>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [detailSaveNotice, setDetailSaveNotice] = useState('');
+  const [deviceAccountDrawer, setDeviceAccountDrawer] = useState<DeviceAccountDrawerState>(emptyDeviceAccountDrawer);
+  const [returnToDeviceAccountDrawer, setReturnToDeviceAccountDrawer] = useState(false);
+  const deviceAccountDrawerRequestId = useRef(0);
   const [viewSettingsOpen, setViewSettingsOpen] = useState<ConfigurableAssetTab | null>(null);
   const [revealedValues, setRevealedValues] = useState<Record<string, string>>({});
 
@@ -528,15 +552,17 @@ const AssetManagement: React.FC = () => {
     [currentUser],
   );
   const activeTabVisible = visibleTabs.some((tab) => tab.value === activeTab);
+  const loginDeviceIdFilter = activeTab === 'accounts' ? searchParams.get('loginDeviceId') || '' : '';
 
   const filters = useMemo<AssetFilters>(() => ({
     search,
     platform,
     permissionStatus,
     status,
+    loginDeviceId: loginDeviceIdFilter || undefined,
     page: page + 1,
     pageSize: rowsPerPage,
-  }), [page, permissionStatus, platform, rowsPerPage, search, status]);
+  }), [loginDeviceIdFilter, page, permissionStatus, platform, rowsPerPage, search, status]);
 
   const deviceById = useMemo(() => new Map(lookupDevices.map((device) => [device.id, device])), [lookupDevices]);
   const phoneById = useMemo(() => new Map(lookupPhones.map((phone) => [phone.id, phone])), [lookupPhones]);
@@ -628,6 +654,8 @@ const AssetManagement: React.FC = () => {
 
   useEffect(() => {
     setDetailDialogOpen(false);
+    setDeviceAccountDrawer(emptyDeviceAccountDrawer);
+    setReturnToDeviceAccountDrawer(false);
     setViewSettingsOpen(null);
     clearDetail();
     setPage(0);
@@ -665,6 +693,11 @@ const AssetManagement: React.FC = () => {
     setStatus('');
     setPage(0);
     setSearchParams({ tab: value });
+  };
+
+  const clearLoginDeviceFilter = () => {
+    setPage(0);
+    setSearchParams({ tab: 'accounts' });
   };
 
   const refreshLookupData = async () => {
@@ -1080,13 +1113,15 @@ const AssetManagement: React.FC = () => {
     await refreshActiveTab();
   };
 
-  const openDetail = (type: AssetType, id: string) => {
+  const openDetail = (type: AssetType, id: string, options?: { returnToDeviceAccounts?: boolean }) => {
+    setReturnToDeviceAccountDrawer(Boolean(options?.returnToDeviceAccounts));
     setDetailDialogOpen(true);
     fetchDetail(type, id);
   };
 
   const openAccountPhoneDetail = (phoneId?: string) => {
     if (!phoneId) return;
+    setReturnToDeviceAccountDrawer(false);
     setDetailDialogOpen(true);
     fetchDetail('phone', phoneId);
   };
@@ -1094,6 +1129,65 @@ const AssetManagement: React.FC = () => {
   const closeDetailDialog = () => {
     setDetailDialogOpen(false);
     clearDetail();
+    if (returnToDeviceAccountDrawer) {
+      setDeviceAccountDrawer((current) => ({ ...current, open: true }));
+    }
+    setReturnToDeviceAccountDrawer(false);
+  };
+
+  const loadDeviceAccountDrawer = async (deviceId: string, nextPage = 0, nextPageSize = 10) => {
+    const requestId = ++deviceAccountDrawerRequestId.current;
+    setDeviceAccountDrawer((current) => ({
+      ...current,
+      deviceId,
+      page: nextPage,
+      pageSize: nextPageSize,
+      loading: true,
+      error: undefined,
+    }));
+    const response = await assetApi.fetchInternetAccounts({
+      loginDeviceId: deviceId,
+      page: nextPage + 1,
+      pageSize: nextPageSize,
+    });
+    if (requestId !== deviceAccountDrawerRequestId.current) return;
+    if (response.code !== 0) {
+      setDeviceAccountDrawer((current) => ({ ...current, loading: false, error: response.message || '加载互联网账号失败' }));
+      return;
+    }
+    setDeviceAccountDrawer((current) => ({
+      ...current,
+      items: response.data.items,
+      total: response.data.pagination.total,
+      page: Math.max(0, response.data.pagination.page - 1),
+      pageSize: response.data.pagination.pageSize,
+      loading: false,
+      error: undefined,
+    }));
+  };
+
+  const openDeviceAccountDrawer = (device: AssetDevice) => {
+    setReturnToDeviceAccountDrawer(false);
+    setDeviceAccountDrawer({ ...emptyDeviceAccountDrawer, open: true, deviceId: device.id, loading: true });
+    void loadDeviceAccountDrawer(device.id);
+  };
+
+  const closeDeviceAccountDrawer = () => {
+    deviceAccountDrawerRequestId.current += 1;
+    setDeviceAccountDrawer((current) => ({ ...current, open: false, loading: false }));
+  };
+
+  const openAccountDetailFromDeviceDrawer = (accountId: string) => {
+    setDeviceAccountDrawer((current) => ({ ...current, open: false }));
+    openDetail('account', accountId, { returnToDeviceAccounts: true });
+  };
+
+  const goToDeviceAccounts = () => {
+    const deviceId = deviceAccountDrawer.deviceId;
+    if (!deviceId) return;
+    closeDeviceAccountDrawer();
+    setPage(0);
+    setSearchParams({ tab: 'accounts', loginDeviceId: deviceId });
   };
 
   const revealedKey = (type: AssetType, id: string, field: AssetSensitiveField) => `${type}:${id}:${field}`;
@@ -1409,6 +1503,15 @@ const AssetManagement: React.FC = () => {
             </Select>
           </FormControl>
         )}
+        {activeTab === 'accounts' && loginDeviceIdFilter ? (
+          <Chip
+            color="primary"
+            variant="outlined"
+            label={`登录设备：${deviceById.get(loginDeviceIdFilter)?.deviceCode || loginDeviceIdFilter}`}
+            onDelete={clearLoginDeviceFilter}
+            sx={{ fontWeight: 800 }}
+          />
+        ) : null}
       </ModuleToolbar>
     );
   };
@@ -1498,8 +1601,21 @@ const AssetManagement: React.FC = () => {
       case 'simType':
         return renderDevicePhones(device);
       case 'accountCount': {
-        const count = (accountsByDeviceId.get(device.id) || []).length;
-        return count ? `${count}个账号` : '-';
+        const count = device.internetAccountCount ?? (accountsByDeviceId.get(device.id) || []).length;
+        return count ? (
+          <Button
+            variant="text"
+            size="small"
+            aria-label={`查看${device.deviceCode}的互联网账号明细`}
+            onClick={(event) => {
+              event.stopPropagation();
+              openDeviceAccountDrawer(device);
+            }}
+            sx={{ minWidth: 0, px: 0, fontWeight: 900, whiteSpace: 'nowrap' }}
+          >
+            {count} 个
+          </Button>
+        ) : <Typography variant="body2" sx={{ color: shell.muted }}>未配置</Typography>;
       }
       case 'department':
         return device.department;
@@ -3536,6 +3652,137 @@ const AssetManagement: React.FC = () => {
     );
   };
 
+  const renderDeviceAccountDrawer = () => {
+    const device = deviceAccountDrawer.deviceId ? deviceById.get(deviceAccountDrawer.deviceId) : undefined;
+    const deviceTitle = device ? `${device.deviceCode} / ${device.deviceName}` : '设备';
+    return (
+      <Drawer
+        anchor="right"
+        open={deviceAccountDrawer.open}
+        onClose={closeDeviceAccountDrawer}
+        PaperProps={{
+          sx: {
+            width: { xs: '100%', sm: 680, md: 760 },
+            maxWidth: '100vw',
+            bgcolor: '#F7F9FC',
+          },
+        }}
+      >
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+          <Box sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff', borderBottom: `1px solid ${shell.softLine}` }}>
+            <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={2}>
+              <Box sx={{ minWidth: 0 }}>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 900, color: shell.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {deviceTitle}
+                  </Typography>
+                  <Chip size="small" label={`${deviceAccountDrawer.total} 个`} sx={{ fontWeight: 900, bgcolor: '#EAF2FF', color: shell.blue }} />
+                </Stack>
+                <Typography variant="body2" sx={{ color: shell.muted, mt: 0.5 }}>
+                  当前实际登录在该设备上的互联网账号
+                </Typography>
+              </Box>
+              <IconButton aria-label="关闭互联网账号明细" onClick={closeDeviceAccountDrawer} sx={{ flexShrink: 0 }}>
+                <CloseIcon />
+              </IconButton>
+            </Stack>
+          </Box>
+
+          <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: { xs: 1.5, sm: 3 }, py: 2 }}>
+            {deviceAccountDrawer.loading ? (
+              <Paper variant="outlined" sx={{ p: 4, textAlign: 'center', color: shell.muted }}>正在加载互联网账号...</Paper>
+            ) : deviceAccountDrawer.error ? (
+              <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
+                <Typography sx={{ color: '#C62828', mb: 1.5 }}>{deviceAccountDrawer.error}</Typography>
+                <Button
+                  variant="outlined"
+                  onClick={() => deviceAccountDrawer.deviceId && void loadDeviceAccountDrawer(
+                    deviceAccountDrawer.deviceId,
+                    deviceAccountDrawer.page,
+                    deviceAccountDrawer.pageSize,
+                  )}
+                >
+                  重新加载
+                </Button>
+              </Paper>
+            ) : deviceAccountDrawer.items.length ? (
+              <Stack spacing={1.25}>
+                {deviceAccountDrawer.items.map((account) => (
+                  <Paper
+                    key={account.id}
+                    variant="outlined"
+                    sx={{ p: { xs: 1.5, sm: 2 }, borderColor: shell.softLine, borderRadius: 2, boxShadow: '0 3px 12px rgba(15, 23, 42, 0.04)' }}
+                  >
+                    <Stack direction="row" spacing={1.5} alignItems="center">
+                      <PlatformBrandMark platform={account.platform} size={44} />
+                      <Box sx={{ minWidth: 0, flex: 1 }}>
+                        <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={0.75}>
+                          <Typography sx={{ fontWeight: 900, color: shell.ink, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {account.accountName}
+                          </Typography>
+                          <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} />
+                        </Stack>
+                        <Typography variant="body2" sx={{ color: shell.muted, mt: 0.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {displayAccountLogin(account)}
+                        </Typography>
+                      </Box>
+                      <Button
+                        size="small"
+                        endIcon={<ChevronRightIcon />}
+                        onClick={() => openAccountDetailFromDeviceDrawer(account.id)}
+                        sx={{ flexShrink: 0, fontWeight: 900 }}
+                      >
+                        查看详情
+                      </Button>
+                    </Stack>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' }, gap: 1.25, mt: 1.5, pt: 1.5, borderTop: `1px solid ${shell.softLine}` }}>
+                      <Box>
+                        <Typography variant="caption" sx={{ color: shell.muted }}>账号类型</Typography>
+                        <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 800 }}>{account.accountCategory || '未配置'}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" sx={{ color: shell.muted }}>当前使用人</Typography>
+                        <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 800 }}>{account.currentUser || '未分配'}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" sx={{ color: shell.muted }}>控制权</Typography>
+                        <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 800 }}>{readAccountControlStatus(account) || account.permissionStatus}</Typography>
+                      </Box>
+                    </Box>
+                  </Paper>
+                ))}
+              </Stack>
+            ) : (
+              <Paper variant="outlined" sx={{ p: 5, textAlign: 'center' }}>
+                <Typography sx={{ color: shell.ink, fontWeight: 900 }}>暂无互联网账号</Typography>
+                <Typography variant="body2" sx={{ color: shell.muted, mt: 0.5 }}>可在互联网账号资料中选择该设备作为登录设备。</Typography>
+              </Paper>
+            )}
+          </Box>
+
+          <Box sx={{ bgcolor: '#fff', borderTop: `1px solid ${shell.softLine}` }}>
+            {deviceAccountDrawer.total > 0 ? (
+              <TablePagination
+                count={deviceAccountDrawer.total}
+                page={deviceAccountDrawer.page}
+                rowsPerPage={deviceAccountDrawer.pageSize}
+                rowsPerPageOptions={[10, 20, 50]}
+                onPageChange={(_, nextPage) => deviceAccountDrawer.deviceId && void loadDeviceAccountDrawer(deviceAccountDrawer.deviceId, nextPage, deviceAccountDrawer.pageSize)}
+                onRowsPerPageChange={(event) => deviceAccountDrawer.deviceId && void loadDeviceAccountDrawer(deviceAccountDrawer.deviceId, 0, Number(event.target.value))}
+                sx={{ ...assetPaginationSx, border: 0, borderRadius: 0, '& .MuiTablePagination-toolbar': { minHeight: 52, px: { xs: 1, sm: 2 } } }}
+              />
+            ) : null}
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: { xs: 2, sm: 3 }, py: 1.5, borderTop: deviceAccountDrawer.total > 0 ? `1px solid ${shell.softLine}` : 0 }}>
+              <Button onClick={goToDeviceAccounts} endIcon={<ChevronRightIcon />} sx={{ fontWeight: 900 }}>
+                前往互联网账号管理
+              </Button>
+            </Box>
+          </Box>
+        </Box>
+      </Drawer>
+    );
+  };
+
   const renderViewSettingsDialog = () => {
     if (!viewSettingsOpen || !activeAssetView) return null;
     return (
@@ -3597,6 +3844,7 @@ const AssetManagement: React.FC = () => {
       </ModuleTabs>
       {renderToolbar()}
       {renderActiveTable()}
+      {renderDeviceAccountDrawer()}
       {renderDetailDialog()}
       {renderImportDialog()}
       {renderMatrixPublishDialog()}

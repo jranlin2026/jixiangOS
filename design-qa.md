@@ -44,6 +44,39 @@ final result: passed
 
 ---
 
+# Device Internet Account Drill-down Design QA
+
+- Source visual truth: `/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-7b1abc52-f1f3-4be7-863d-802f2fa13f8f.png`
+- Desktop table capture: `/tmp/jixiangos-device-account-qa-lDVR6B/device-account-column-desktop.jpeg`
+- Desktop drawer capture: `/tmp/jixiangos-device-account-qa-lDVR6B/device-account-drawer-desktop.jpeg`
+- Desktop viewport: 1318 x 768 pixels
+- State: one device with one Instagram account connected through `loginDeviceIds`.
+
+## Findings
+
+No remaining P0, P1, or P2 visual findings.
+
+- The ambiguous `账号数` header is now `互联网账号`; an empty relationship is shown as `未配置`, while a populated relationship is a blue count action.
+- The right drawer keeps the device table visible as context and uses the existing product tokens, local platform logo component, status chips, compact relationship metadata, and unified pagination.
+- The drawer contains no passwords or sensitive reveal actions. It presents only operational account identity, current user, type, control state, and navigation.
+- `查看详情` transitions to the existing account detail dialog without stacking overlays. Closing detail restores the device-account drawer and its pagination state.
+- The drawer uses 760 px on desktop, 680 px on tablet, and full width below the small breakpoint. Account metadata collapses from three columns to one column on narrow screens.
+- `前往互联网账号管理` opens the account table with an explicit login-device filter chip, so users can continue managing the same relationship set without a hidden filter.
+
+## Interaction checks
+
+- [x] Device account count opens the relationship drawer
+- [x] Drawer data is fetched with an exact `loginDeviceId` filter
+- [x] Drawer count, page, page size, and jump-to-page use the unified pagination component
+- [x] Account detail opens without a nested drawer/dialog stack
+- [x] Closing account detail restores the drawer
+- [x] Empty device relationships remain non-clickable
+- [x] Production build and targeted relationship tests pass
+
+final result: passed
+
+---
+
 # 极享商学院 V2 独立模块 Design QA
 
 ## 视觉依据与验证环境
