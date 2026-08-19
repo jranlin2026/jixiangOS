@@ -328,6 +328,20 @@ export function createAssetListService(
           };
         })
         : rows;
+      const rowsWithVisibleRelationships = rowsWithRelationshipCounts.map((row) => {
+        if (kind === 'phones' && !canReadDevices) {
+          const phone = { ...(row as AssetPhoneNumber) };
+          delete phone.deviceId;
+          return phone;
+        }
+        if (kind === 'accounts') {
+          const account = { ...(row as AssetInternetAccount) };
+          if (!canReadPhones) delete account.phoneId;
+          if (!canReadDevices) delete account.loginDeviceIds;
+          return account;
+        }
+        return row;
+      });
       const effectiveFilters = { ...filters };
       if (!canReadPhones) {
         if (kind === 'devices' || kind === 'accounts') delete effectiveFilters.phoneBinding;
@@ -346,7 +360,7 @@ export function createAssetListService(
         if (kind === 'phones') delete effectiveFilters.accountBinding;
         if (kind === 'devices') delete effectiveFilters.loginDeviceBinding;
       }
-      const filtered = rowsWithRelationshipCounts.filter((row) => matchesFilters(kind, row, effectiveFilters, accountById, deviceById, boundPhoneIds, phoneById));
+      const filtered = rowsWithVisibleRelationships.filter((row) => matchesFilters(kind, row, effectiveFilters, accountById, deviceById, boundPhoneIds, phoneById));
       const page = Math.max(1, Number(filters.page) || 1);
       const pageSize = Math.min(500, Math.max(1, Number(filters.pageSize) || 20));
       const start = (page - 1) * pageSize;
@@ -516,13 +530,16 @@ export function createAssetListService(
     },
     async dashboard(user: AuthenticatedUser) {
       const visible = await loadVisible(user);
-      const devices = hasPermission(user, PERMISSION_KEYS.ASSETS_DEVICES, 'read')
+      const canReadDevices = hasPermission(user, PERMISSION_KEYS.ASSETS_DEVICES, 'read');
+      const canReadPhones = hasPermission(user, PERMISSION_KEYS.ASSETS_PHONES, 'read');
+      const canReadAccounts = hasPermission(user, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read');
+      const devices = canReadDevices
         ? (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[]
         : [];
-      const phones = hasPermission(user, PERMISSION_KEYS.ASSETS_PHONES, 'read')
+      const phones = canReadPhones
         ? (visible[STORAGE_KEYS.ASSET_PHONE_NUMBERS] || []) as AssetPhoneNumber[]
         : [];
-      const accounts = hasPermission(user, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read')
+      const accounts = canReadAccounts
         ? (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[]
         : [];
       const risks = hasPermission(user, PERMISSION_KEYS.ASSETS_RISKS, 'read')
@@ -534,9 +551,14 @@ export function createAssetListService(
       const deviceMonthlyCost = devices.reduce((sum, row) => sum + Number(row.monthlyCost || 0), 0);
       const phoneMonthlyCost = phones.reduce((sum, row) => sum + Number(row.monthlyFee || 0), 0);
       const accountMonthlyCost = accounts.reduce((sum, row) => sum + Number(row.monthlyFee || 0), 0);
-      const boundPhoneCount = phones.filter((phone) => Boolean(phone.deviceId)).length;
-      const boundAccountCount = accounts.filter((account) => Boolean(account.phoneId)).length;
-      const accountsWithLoginDevice = accounts.filter((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).length > 0).length;
+      const canReadPhoneDeviceRelationship = canReadPhones && canReadDevices;
+      const canReadAccountPhoneRelationship = canReadAccounts && canReadPhones;
+      const canReadAccountDeviceRelationship = canReadAccounts && canReadDevices;
+      const boundPhoneCount = canReadPhoneDeviceRelationship ? phones.filter((phone) => Boolean(phone.deviceId)).length : 0;
+      const boundAccountCount = canReadAccountPhoneRelationship ? accounts.filter((account) => Boolean(account.phoneId)).length : 0;
+      const accountsWithLoginDevice = canReadAccountDeviceRelationship
+        ? accounts.filter((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).length > 0).length
+        : 0;
       const credentialPending = accounts.filter((account) => (
         account.loginCredentialStatus === '待补齐' || account.paymentCredentialStatus === '待补齐'
       )).length;
@@ -550,7 +572,7 @@ export function createAssetListService(
         openRiskCount,
         offboardingCount,
         monthlyCost: deviceMonthlyCost + phoneMonthlyCost + accountMonthlyCost,
-        unboundAccountCount: accounts.length - boundAccountCount,
+        unboundAccountCount: canReadAccountPhoneRelationship ? accounts.length - boundAccountCount : 0,
         deviceSummary: {
           total: devices.length,
           inUse: devices.filter((device) => device.status === '使用中').length,
@@ -562,7 +584,7 @@ export function createAssetListService(
         phoneSummary: {
           total: phones.length,
           boundDevice: boundPhoneCount,
-          unboundDevice: phones.length - boundPhoneCount,
+          unboundDevice: canReadPhoneDeviceRelationship ? phones.length - boundPhoneCount : 0,
           inUse: phones.filter((phone) => phone.status === '使用中').length,
           inactive: phones.filter((phone) => phone.status !== '使用中').length,
           monthlyCost: phoneMonthlyCost,
@@ -570,9 +592,9 @@ export function createAssetListService(
         accountSummary: {
           total: accounts.length,
           withLoginDevice: accountsWithLoginDevice,
-          withoutLoginDevice: accounts.length - accountsWithLoginDevice,
+          withoutLoginDevice: canReadAccountDeviceRelationship ? accounts.length - accountsWithLoginDevice : 0,
           boundPhone: boundAccountCount,
-          unboundPhone: accounts.length - boundAccountCount,
+          unboundPhone: canReadAccountPhoneRelationship ? accounts.length - boundAccountCount : 0,
           credentialPending,
           monthlyCost: accountMonthlyCost,
         },
@@ -580,9 +602,9 @@ export function createAssetListService(
           openRisks: openRiskCount,
           offboarding: offboardingCount,
           unassignedDevices,
-          unboundPhones: phones.length - boundPhoneCount,
-          accountsWithoutLoginDevice: accounts.length - accountsWithLoginDevice,
-          accountsWithoutPhone: accounts.length - boundAccountCount,
+          unboundPhones: canReadPhoneDeviceRelationship ? phones.length - boundPhoneCount : 0,
+          accountsWithoutLoginDevice: canReadAccountDeviceRelationship ? accounts.length - accountsWithLoginDevice : 0,
+          accountsWithoutPhone: canReadAccountPhoneRelationship ? accounts.length - boundAccountCount : 0,
           credentialPending,
         },
       });

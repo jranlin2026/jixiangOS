@@ -215,6 +215,38 @@ assert.equal(deviceOnlyRelationships.data.items.length, 2);
 assert.deepEqual(deviceOnlyRelationships.data.items[0]?.phones, []);
 assert.deepEqual(deviceOnlyRelationships.data.items[0]?.accounts, []);
 
+const phoneOnlyReader: AuthenticatedUser = {
+  ...authenticatedAdmin,
+  permissions: [{ module: PERMISSION_KEYS.ASSETS_PHONES, actions: ['read'] }],
+};
+const phoneOnlyList = await service.list('phones', { page: 1, pageSize: 10 }, phoneOnlyReader);
+assert.equal('deviceId' in (phoneOnlyList.data.items[0] as object), false, '仅手机号权限不得返回设备关联 ID');
+const phoneOnlySearch = await service.list('phones', { search: 'device-b', page: 1, pageSize: 10 }, phoneOnlyReader);
+assert.equal(phoneOnlySearch.data.pagination.total, 0, '仅手机号权限不得搜索隐藏设备 ID');
+const phoneOnlyDashboard = await service.dashboard(phoneOnlyReader);
+assert.equal(phoneOnlyDashboard.data.phoneSummary.boundDevice, 0);
+assert.equal(phoneOnlyDashboard.data.phoneSummary.unboundDevice, 0, '无设备权限时不得推断手机号设备绑定关系');
+
+const accountOnlyReader: AuthenticatedUser = {
+  ...authenticatedAdmin,
+  permissions: [{ module: PERMISSION_KEYS.ASSETS_ACCOUNTS, actions: ['read'] }],
+};
+const accountOnlyList = await service.list('accounts', { page: 1, pageSize: 10 }, accountOnlyReader);
+const accountOnlyBusiness = accountOnlyList.data.items.find((account) => account.id === 'account-business') as AssetInternetAccount;
+assert.equal('phoneId' in accountOnlyBusiness, false, '仅账号权限不得返回手机号关联 ID');
+assert.equal('loginDeviceIds' in accountOnlyBusiness, false, '仅账号权限不得返回登录设备关联 ID');
+const accountOnlyPhoneSearch = await service.list('accounts', { search: 'phone-1', page: 1, pageSize: 10 }, accountOnlyReader);
+const accountOnlyDeviceSearch = await service.list('accounts', { search: 'device-b', page: 1, pageSize: 10 }, accountOnlyReader);
+assert.equal(accountOnlyPhoneSearch.data.pagination.total, 0, '仅账号权限不得搜索隐藏手机号 ID');
+assert.equal(accountOnlyDeviceSearch.data.pagination.total, 0, '仅账号权限不得搜索隐藏设备 ID');
+const accountOnlyDashboard = await service.dashboard(accountOnlyReader);
+assert.deepEqual({
+  withLoginDevice: accountOnlyDashboard.data.accountSummary.withLoginDevice,
+  withoutLoginDevice: accountOnlyDashboard.data.accountSummary.withoutLoginDevice,
+  boundPhone: accountOnlyDashboard.data.accountSummary.boundPhone,
+  unboundPhone: accountOnlyDashboard.data.accountSummary.unboundPhone,
+}, { withLoginDevice: 0, withoutLoginDevice: 0, boundPhone: 0, unboundPhone: 0 }, '无关联叶子权限时不得返回账号绑定统计');
+
 {
   const originalDevices = structuredClone(data[STORAGE_KEYS.ASSET_DEVICES]);
   data[STORAGE_KEYS.ASSET_DEVICES] = (data[STORAGE_KEYS.ASSET_DEVICES] as Array<Record<string, unknown>>).map((device) => (

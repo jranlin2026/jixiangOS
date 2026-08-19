@@ -1209,15 +1209,23 @@ async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
   ensureInit();
   await delay(120);
   const scope = getCurrentDataVisibilityScope('assets');
-  const deviceRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES) ? visibleDevices(scope) : [];
-  const phoneRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES) ? visiblePhones(scope) : [];
-  const accountRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS) ? visibleAccounts(scope) : [];
+  const canReadDevices = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES);
+  const canReadPhones = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES);
+  const canReadAccounts = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS);
+  const deviceRows = canReadDevices ? visibleDevices(scope) : [];
+  const phoneRows = canReadPhones ? visiblePhones(scope) : [];
+  const accountRows = canReadAccounts ? visibleAccounts(scope) : [];
   const deviceMonthlyCost = deviceRows.reduce((sum, item) => sum + Number(item.monthlyCost || 0), 0);
   const phoneMonthlyCost = phoneRows.reduce((sum, item) => sum + Number(item.monthlyFee || 0), 0);
   const accountMonthlyCost = accountRows.reduce((sum, item) => sum + Number(item.monthlyFee || 0), 0);
-  const boundPhoneCount = phoneRows.filter((phone) => Boolean(phone.deviceId)).length;
-  const boundAccountCount = accountRows.filter((account) => Boolean(account.phoneId)).length;
-  const accountsWithLoginDevice = accountRows.filter((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).length > 0).length;
+  const canReadPhoneDeviceRelationship = canReadPhones && canReadDevices;
+  const canReadAccountPhoneRelationship = canReadAccounts && canReadPhones;
+  const canReadAccountDeviceRelationship = canReadAccounts && canReadDevices;
+  const boundPhoneCount = canReadPhoneDeviceRelationship ? phoneRows.filter((phone) => Boolean(phone.deviceId)).length : 0;
+  const boundAccountCount = canReadAccountPhoneRelationship ? accountRows.filter((account) => Boolean(account.phoneId)).length : 0;
+  const accountsWithLoginDevice = canReadAccountDeviceRelationship
+    ? accountRows.filter((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).length > 0).length
+    : 0;
   const credentialPending = accountRows.filter((account) => account.loginCredentialStatus === '待补齐' || account.paymentCredentialStatus === '待补齐').length;
   const openRiskCount = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_RISKS)
     ? visibleRisks(scope).filter((risk) => risk.status === 'open').length
@@ -1233,7 +1241,7 @@ async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
     openRiskCount,
     offboardingCount,
     monthlyCost: deviceMonthlyCost + phoneMonthlyCost + accountMonthlyCost,
-    unboundAccountCount: accountRows.length - boundAccountCount,
+    unboundAccountCount: canReadAccountPhoneRelationship ? accountRows.length - boundAccountCount : 0,
     deviceSummary: {
       total: deviceRows.length,
       inUse: deviceRows.filter((device) => device.status === '使用中').length,
@@ -1245,7 +1253,7 @@ async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
     phoneSummary: {
       total: phoneRows.length,
       boundDevice: boundPhoneCount,
-      unboundDevice: phoneRows.length - boundPhoneCount,
+      unboundDevice: canReadPhoneDeviceRelationship ? phoneRows.length - boundPhoneCount : 0,
       inUse: phoneRows.filter((phone) => phone.status === '使用中').length,
       inactive: phoneRows.filter((phone) => phone.status !== '使用中').length,
       monthlyCost: phoneMonthlyCost,
@@ -1253,9 +1261,9 @@ async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
     accountSummary: {
       total: accountRows.length,
       withLoginDevice: accountsWithLoginDevice,
-      withoutLoginDevice: accountRows.length - accountsWithLoginDevice,
+      withoutLoginDevice: canReadAccountDeviceRelationship ? accountRows.length - accountsWithLoginDevice : 0,
       boundPhone: boundAccountCount,
-      unboundPhone: accountRows.length - boundAccountCount,
+      unboundPhone: canReadAccountPhoneRelationship ? accountRows.length - boundAccountCount : 0,
       credentialPending,
       monthlyCost: accountMonthlyCost,
     },
@@ -1263,9 +1271,9 @@ async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
       openRisks: openRiskCount,
       offboarding: offboardingCount,
       unassignedDevices,
-      unboundPhones: phoneRows.length - boundPhoneCount,
-      accountsWithoutLoginDevice: accountRows.length - accountsWithLoginDevice,
-      accountsWithoutPhone: accountRows.length - boundAccountCount,
+      unboundPhones: canReadPhoneDeviceRelationship ? phoneRows.length - boundPhoneCount : 0,
+      accountsWithoutLoginDevice: canReadAccountDeviceRelationship ? accountRows.length - accountsWithLoginDevice : 0,
+      accountsWithoutPhone: canReadAccountPhoneRelationship ? accountRows.length - boundAccountCount : 0,
       credentialPending,
     },
   };
@@ -1489,12 +1497,19 @@ async function fetchPhoneNumbers(filters?: AssetFilters): Promise<ApiResponse<Pa
   ensureInit();
   await delay(120);
   const effectiveFilters = { ...filters };
-  if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES)) {
+  const canReadDevices = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES);
+  if (!canReadDevices) {
     delete effectiveFilters.deviceBinding;
     if (effectiveFilters.bindingStatus === 'bound-device' || effectiveFilters.bindingStatus === 'unbound-device') delete effectiveFilters.bindingStatus;
   }
   if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS)) delete effectiveFilters.accountBinding;
-  return createSuccessResponse(paginate(filterPhones(visiblePhones(), effectiveFilters), effectiveFilters));
+  const filtered = filterPhones(visiblePhones(), effectiveFilters).map((phone) => {
+    if (canReadDevices) return phone;
+    const visiblePhone = { ...phone };
+    delete visiblePhone.deviceId;
+    return visiblePhone;
+  });
+  return createSuccessResponse(paginate(filtered, effectiveFilters));
 }
 
 function assertPhoneBinding(input: Partial<AssetPhoneNumberInput>, excludeId?: string): void {
@@ -1652,16 +1667,24 @@ async function fetchInternetAccounts(filters?: AssetFilters): Promise<ApiRespons
   ensureInit();
   await delay(120);
   const effectiveFilters = { ...filters };
-  if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES)) {
+  const canReadPhones = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES);
+  const canReadDevices = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES);
+  if (!canReadPhones) {
     delete effectiveFilters.phoneBinding;
     if (effectiveFilters.bindingStatus === 'bound-phone' || effectiveFilters.bindingStatus === 'unbound-phone') delete effectiveFilters.bindingStatus;
   }
-  if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES)) {
+  if (!canReadDevices) {
     delete effectiveFilters.loginDeviceBinding;
     delete effectiveFilters.loginDeviceId;
     if (effectiveFilters.bindingStatus === 'with-login-device' || effectiveFilters.bindingStatus === 'without-login-device') delete effectiveFilters.bindingStatus;
   }
-  return createSuccessResponse(paginate(filterAccounts(visibleAccounts(), effectiveFilters), effectiveFilters));
+  const filtered = filterAccounts(visibleAccounts(), effectiveFilters).map((account) => {
+    const visibleAccount = { ...account };
+    if (!canReadPhones) delete visibleAccount.phoneId;
+    if (!canReadDevices) delete visibleAccount.loginDeviceIds;
+    return visibleAccount;
+  });
+  return createSuccessResponse(paginate(filtered, effectiveFilters));
 }
 
 async function fetchAssetFilterOptions(kind: 'devices' | 'phones' | 'accounts'): Promise<ApiResponse<AssetFilterOptions>> {
