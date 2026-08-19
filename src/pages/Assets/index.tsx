@@ -2679,11 +2679,18 @@ const AssetManagement: React.FC = () => {
       >
         <DialogTitle sx={{ p: 0 }}>
           <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ px: { xs: 1.5, sm: 2.25 }, py: 1.5, borderBottom: `1px solid ${shell.softLine}` }}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Typography sx={{ color: shell.ink, fontSize: { xs: 18, sm: 20 }, fontWeight: 950, whiteSpace: 'nowrap' }}>{detail ? detailTitleMap[detail.type] : '查看资产资料'}</Typography>
-              {detailSaveNotice ? <Chip size="small" color="success" label={detailSaveNotice} /> : null}
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+              <Typography sx={{ color: shell.ink, fontSize: { xs: 18, sm: 20 }, fontWeight: 950, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{detail ? detailTitleMap[detail.type] : '查看资产资料'}</Typography>
+              {detailSaveNotice ? (
+                <>
+                  <Tooltip title={detailSaveNotice}>
+                    <Chip size="small" color="success" label="✓" sx={{ display: { xs: 'inline-flex', sm: 'none' }, width: 28, flexShrink: 0, '& .MuiChip-label': { px: 0 } }} />
+                  </Tooltip>
+                  <Chip size="small" color="success" label={detailSaveNotice} sx={{ display: { xs: 'none', sm: 'inline-flex' }, flexShrink: 0 }} />
+                </>
+              ) : null}
             </Stack>
-            <Stack direction="row" spacing={0.5} alignItems="center">
+            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
               {detail && canEditAssetType(detail.type) ? (
                 <Button
                   size="small"

@@ -95,7 +95,7 @@ const roles: Role[] = [
     id: 'role-asset-self',
     name: 'Asset Self Role',
     code: 'asset_self',
-    permissions: [{ module: PERMISSION_KEYS.ASSETS, actions: ['read'] }],
+    permissions: [{ module: PERMISSION_KEYS.ASSETS_ACCOUNTS, actions: ['read'] }],
     dataScopes: { assets: 'self' },
     memberCount: 0,
     isActive: true,
@@ -106,7 +106,7 @@ const roles: Role[] = [
     id: 'role-asset-manager',
     name: 'Asset Manager Role',
     code: 'asset_manager',
-    permissions: [{ module: PERMISSION_KEYS.ASSETS, actions: ['read'] }],
+    permissions: [{ module: PERMISSION_KEYS.ASSETS_ACCOUNTS, actions: ['read'] }],
     dataScopes: { assets: 'department' },
     memberCount: 0,
     isActive: true,
@@ -242,6 +242,8 @@ const accounts: AssetInternetAccount[] = [
     accountName: 'Self Account',
     loginAccount: 'self_account',
     loginAccountMasked: 'self_***',
+    realName: 'Self Legal Name',
+    realNameMasked: 'S***e',
     identityAccountIds: ['account-other'],
     phoneId: 'phone-self',
     ownerSubject: '公司' as AssetInternetAccount['ownerSubject'],
@@ -357,6 +359,8 @@ seed('user-self');
   assert.deepEqual(ids(visibleDevices.data.items), ['device-self']);
   assert.deepEqual(ids(visiblePhones.data.items), ['phone-self']);
   assert.deepEqual(ids(visibleAccounts.data.items), ['account-self']);
+  assert.equal(visibleAccounts.data.items[0].realName, undefined);
+  assert.equal(visibleAccounts.data.items[0].realNameMasked, 'S***e');
   assert.deepEqual(visibleAccounts.data.items[0].identityAccountIds, []);
   const hiddenIdentitySearch = await assetApi.fetchInternetAccounts({ search: 'other_account', pageSize: 10 });
   assert.equal(hiddenIdentitySearch.data.items.length, 0);
@@ -389,5 +393,6 @@ seed('user-admin');
 
   assert.equal(visibleDevices.data.items.length, 3);
   assert.equal(visibleAccounts.data.items.length, 3);
+  assert.equal(visibleAccounts.data.items.find((account) => account.id === 'account-self')?.realName, 'Self Legal Name');
   assert.equal(visibleRisks.data.items.length, 3);
 }

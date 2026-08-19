@@ -817,17 +817,20 @@ function visiblePhones(scope = getCurrentDataVisibilityScope('assets')): AssetPh
 
 function visibleAccounts(scope = getCurrentDataVisibilityScope('assets')): AssetInternetAccount[] {
   const rows = accounts();
-  if (scope.unrestricted) return rows;
   const visiblePhoneIds = new Set(visiblePhones(scope).map((phone) => phone.id));
   const visibleDeviceIds = new Set(visibleDevices(scope).map((device) => device.id));
-  const visibleRows = rows.filter((account) => (
-    canViewAssetAccount(account, scope)
-    || Boolean(account.phoneId && visiblePhoneIds.has(account.phoneId))
-    || Boolean(account.loginDeviceIds?.some((id) => visibleDeviceIds.has(id)))
-  ));
+  const visibleRows = scope.unrestricted
+    ? rows
+    : rows.filter((account) => (
+      canViewAssetAccount(account, scope)
+      || Boolean(account.phoneId && visiblePhoneIds.has(account.phoneId))
+      || Boolean(account.loginDeviceIds?.some((id) => visibleDeviceIds.has(id)))
+    ));
   const visibleIds = new Set(visibleRows.map((account) => account.id));
+  const canRevealRealName = canRevealLocalAssetCredential();
   return visibleRows.map((account) => ({
     ...account,
+    realName: canRevealRealName ? account.realName : undefined,
     loginDeviceIds: normalizeAccountLoginDeviceIds(account.loginDeviceIds).filter((id) => visibleDeviceIds.has(id)),
     identityAccountIds: normalizeIdentityAccountIds(account.identityAccountIds).filter((id) => visibleIds.has(id)),
   }));

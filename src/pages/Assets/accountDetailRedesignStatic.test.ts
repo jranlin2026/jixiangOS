@@ -21,6 +21,8 @@ assert.match(source, /登录设备\s*\(\{accountLoginDevices\.length\}\)/, '绑�
 assert.match(source, /此账号使用的身份账号/, '身份账号关联必须区分当前账号的上游身份账号');
 assert.match(source, /使用此账号的业务账号/, '身份账号关联必须区分下游业务账号');
 assert.match(source, /detail\?\.type === 'account' \? 1040 : 960/, '互联网账号详情应使用1040px桌面宽度');
+assert.match(source, /label="✓"[\s\S]*display: \{ xs: 'inline-flex', sm: 'none' \}/, '窄屏保存反馈应使用紧凑标记，避免挤压标题操作区');
+assert.match(source, /textOverflow: 'ellipsis'/, '详情标题在极窄视口应安全收缩而不是遮挡操作');
 assert.doesNotMatch(source, /renderDetailCard\('账号基本信息'/, '不应继续将所有字段堆叠在单一账号基本信息卡片中');
 
 console.log('account detail redesign static tests passed');
