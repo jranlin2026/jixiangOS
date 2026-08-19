@@ -41,9 +41,29 @@ const applyColumnWidth = (table: HTMLTableElement, columnIndex: number, width: n
   });
 };
 
+const parsePositivePixelWidth = (value: string) => {
+  if (!value.trim().endsWith('px')) return 0;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+};
+
+export const resolveTargetColumnWidth = (
+  inlineWidth: string,
+  minWidth: string,
+  renderedWidth: number,
+) => (
+  parsePositivePixelWidth(inlineWidth)
+  || parsePositivePixelWidth(minWidth)
+  || Math.max(0, Math.round(renderedWidth))
+);
+
 const updateTableMinWidth = (table: HTMLTableElement) => {
   const headers = Array.from(table.querySelectorAll('thead th')) as HTMLTableCellElement[];
-  const width = headers.reduce((sum, header) => sum + Math.round(header.getBoundingClientRect().width), 0);
+  const width = headers.reduce((sum, header) => sum + resolveTargetColumnWidth(
+    header.style.width,
+    getComputedStyle(header).minWidth,
+    header.getBoundingClientRect().width,
+  ), 0);
   if (width > 0) table.style.minWidth = `${width}px`;
 };
 
@@ -70,7 +90,11 @@ export const enhanceTable = (table: HTMLTableElement, pathname: string, tableInd
 
     const columnId = getAutoColumnId(header.textContent || '', columnIndex);
     if (columnId === '操作' || columnId === `column-${columnIndex}`) return;
-    const currentWidth = Math.round(header.getBoundingClientRect().width);
+    const currentWidth = resolveTargetColumnWidth(
+      header.style.width,
+      getComputedStyle(header).minWidth,
+      header.getBoundingClientRect().width,
+    );
     const width = clampColumnWidth(widths[columnId] ?? (currentWidth || 140));
     widths[columnId] = width;
 

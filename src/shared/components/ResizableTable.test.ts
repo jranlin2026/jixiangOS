@@ -44,6 +44,6 @@ assert.equal(clampColumnWidth(900), 520);
 assert.deepEqual(resizeColumnWidths(defaults, 'name', 80), { name: 260, phone: 140 });
 assert.deepEqual(resizeColumnWidths(defaults, 'name', -200), { name: 96, phone: 140 });
 
-assert.equal(createAutoTableStorageKey('/refund-center', 2), 'aaos_auto_table_column_widths_v1:/refund-center:2');
+assert.equal(createAutoTableStorageKey('/refund-center', 2), 'aaos_auto_table_column_widths_v2:/refund-center:2');
 assert.equal(getAutoColumnId('客户 客户列宽调整', 1), '客户');
 assert.equal(getAutoColumnId('', 3), 'column-3');

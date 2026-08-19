@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveTargetColumnWidth } from './GlobalTableColumnResizer';
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(path.join(testDir, 'GlobalTableColumnResizer.tsx'), 'utf8');
@@ -21,5 +22,17 @@ assert.match(
   /cell\.style\.overflow = 'hidden';[\s\S]*cell\.style\.textOverflow = 'ellipsis';[\s\S]*cell\.style\.whiteSpace = 'nowrap';/,
   '列宽重新应用时应同时阻止内容绘制到相邻单元格',
 );
+
+assert.equal(
+  resolveTargetColumnWidth('180px', '180px', 264),
+  180,
+  '表格被容器拉伸时，应使用列的显式宽度而不是被拉伸后的可视宽度',
+);
+assert.equal(
+  resolveTargetColumnWidth('', '132px', 300),
+  132,
+  '操作列等固定最小宽度列不应吸收缩窄列释放的空间',
+);
+assert.equal(resolveTargetColumnWidth('', 'auto', 140), 140, '无显式宽度时才回退到实际可视宽度');
 
 console.log('GlobalTableColumnResizer tests passed');

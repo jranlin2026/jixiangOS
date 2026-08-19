@@ -5,7 +5,9 @@ export type ColumnWidthMap = Record<string, number>;
 
 const MIN_COLUMN_WIDTH = 96;
 const MAX_COLUMN_WIDTH = 520;
-const AUTO_TABLE_WIDTH_STORAGE_PREFIX = 'aaos_auto_table_column_widths_v1';
+// v2 resets widths persisted by the former rendered-width calculation, which
+// could make several neighboring columns drift when a single column changed.
+const AUTO_TABLE_WIDTH_STORAGE_PREFIX = 'aaos_auto_table_column_widths_v2';
 
 export const clampColumnWidth = (width: number, min = MIN_COLUMN_WIDTH, max = MAX_COLUMN_WIDTH) => (
   Math.min(Math.max(Math.round(width), min), max)
