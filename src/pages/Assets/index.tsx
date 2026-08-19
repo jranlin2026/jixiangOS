@@ -1532,9 +1532,15 @@ const AssetManagement: React.FC = () => {
             <Box sx={{ display: 'grid', gap: 1, p: 1.5 }}>
               {overviewRelationships.map((row) => (
                 <Paper key={row.device.id} elevation={0} sx={{ border: `1px solid ${shell.softLine}`, borderRadius: 1, p: 1.5 }}>
-                  <Stack spacing={1.1}>
-                    {renderRelationLink(`${row.device.deviceCode} / ${row.device.deviceName}`, () => openDetail('device', row.device.id))}
-                    <Typography variant="caption" sx={{ color: shell.muted }}>{formatDeviceBrandModel(row.device)} · {row.device.currentUser || '未分配使用人'}</Typography>
+                  <Stack spacing={1.25}>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1 }}>
+                      <Box><Typography variant="caption" sx={{ color: shell.muted }}>设备编号</Typography>{renderRelationLink(row.device.deviceCode, () => openDetail('device', row.device.id))}</Box>
+                      <Box><Typography variant="caption" sx={{ color: shell.muted }}>设备名称</Typography><Typography variant="body2" sx={{ fontWeight: 800 }}>{row.device.deviceName || '未命名'}</Typography></Box>
+                      <Box><Typography variant="caption" sx={{ color: shell.muted }}>品牌 / 型号</Typography><Typography variant="body2">{formatDeviceBrandModel(row.device)}</Typography></Box>
+                      <Box><Typography variant="caption" sx={{ color: shell.muted }}>所属部门</Typography><Typography variant="body2">{row.device.department || '未填部门'}</Typography></Box>
+                      <Box><Typography variant="caption" sx={{ color: shell.muted }}>负责人</Typography><Typography variant="body2">{row.device.owner || '未分配'}</Typography></Box>
+                      <Box><Typography variant="caption" sx={{ color: shell.muted }}>当前使用人</Typography><Typography variant="body2">{row.device.currentUser || '未分配'}</Typography></Box>
+                    </Box>
                     {renderPhoneBadges(row)}
                     {renderAccountBadges(row)}
                   </Stack>
@@ -1543,16 +1549,20 @@ const AssetManagement: React.FC = () => {
             </Box>
           ) : (
             <TableContainer>
-              <Table sx={{ ...moduleTableSx, minWidth: 1080 }}>
-                <TableHead><TableRow><TableCell>设备</TableCell><TableCell>卡槽 / IMEI</TableCell><TableCell>对应手机号</TableCell><TableCell>登录互联网账号</TableCell><TableCell>归属与使用</TableCell><TableCell>状态</TableCell></TableRow></TableHead>
+              <Table sx={{ ...moduleTableSx, minWidth: 1680 }}>
+                <TableHead><TableRow><TableCell>设备编号</TableCell><TableCell>设备名称</TableCell><TableCell>品牌 / 型号</TableCell><TableCell>卡槽 / IMEI</TableCell><TableCell>对应手机号</TableCell><TableCell>登录互联网账号</TableCell><TableCell>所属部门</TableCell><TableCell>负责人</TableCell><TableCell>当前使用人</TableCell><TableCell>状态</TableCell></TableRow></TableHead>
                 <TableBody>
                   {overviewRelationships.map((row) => (
                     <TableRow key={row.device.id} hover>
-                      <TableCell>{renderRelationLink(`${row.device.deviceCode} / ${row.device.deviceName}`, () => openDetail('device', row.device.id))}<Typography variant="caption" sx={{ color: shell.muted }}>{formatDeviceBrandModel(row.device)}</Typography></TableCell>
+                      <TableCell>{renderRelationLink(row.device.deviceCode, () => openDetail('device', row.device.id))}</TableCell>
+                      <TableCell><Typography variant="body2" sx={{ fontWeight: 800 }}>{row.device.deviceName || '未命名'}</Typography></TableCell>
+                      <TableCell><Typography variant="body2">{formatDeviceBrandModel(row.device)}</Typography></TableCell>
                       <TableCell>{renderDeviceImeis(row.device)}</TableCell>
                       <TableCell>{renderPhoneBadges(row)}</TableCell>
                       <TableCell>{renderAccountBadges(row)}</TableCell>
-                      <TableCell><Typography variant="body2">{row.device.department || '未填部门'}</Typography><Typography variant="caption" sx={{ color: shell.muted }}>{row.device.currentUser || '未分配使用人'}</Typography></TableCell>
+                      <TableCell><Typography variant="body2">{row.device.department || '未填部门'}</Typography></TableCell>
+                      <TableCell><Typography variant="body2">{row.device.owner || '未分配'}</Typography></TableCell>
+                      <TableCell><Typography variant="body2">{row.device.currentUser || '未分配'}</Typography></TableCell>
                       <TableCell><Chip size="small" label={row.device.status} sx={chipSx(statusTone(row.device.status))} /></TableCell>
                     </TableRow>
                   ))}
