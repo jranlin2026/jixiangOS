@@ -2625,6 +2625,33 @@ const AssetManagement: React.FC = () => {
     </FormControl>
   );
 
+  const renderPlatformSelectField = () => (
+    <FormControl size="small" fullWidth required>
+      <InputLabel>业务平台</InputLabel>
+      <Select
+        label="业务平台"
+        value={formState.values.platform || ''}
+        onChange={(event) => updateFormValue('platform', event.target.value)}
+        renderValue={(selected) => selected ? (
+          <Stack direction="row" spacing={1} alignItems="center">
+            <PlatformBrandMark platform={String(selected)} size={26} />
+            <Box component="span">{String(selected)}</Box>
+          </Stack>
+        ) : '未选择'}
+      >
+        <MenuItem value="">未选择</MenuItem>
+        {platformOptions.map((option) => (
+          <MenuItem key={option} value={option}>
+            <Stack direction="row" spacing={1.25} alignItems="center">
+              <PlatformBrandMark platform={option} size={30} />
+              <Box component="span">{option}</Box>
+            </Stack>
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  );
+
   const renderUserSelectField = (prefix: 'owner' | 'currentUser', label: string) => {
     const idField = `${prefix}Id`;
     const nameValue = formState.values[prefix] || '';
@@ -2951,7 +2978,7 @@ const AssetManagement: React.FC = () => {
   const renderAccountFields = () => (
     <>
       <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.account[0].title} summary={sectionSummary(['platform', 'accountCategory', 'accountName', 'loginAccount', 'realNameSubject'], ASSET_FORM_SECTIONS.account[0].summary)} errorCount={sectionErrorCount(['platform', 'accountCategory', 'accountName', 'loginAccount']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
-        {renderSelectField('platform', '业务平台', platformOptions, { required: true })}
+        {renderPlatformSelectField()}
         {renderSelectField('accountCategory', '账号类型', ['主账号', '员工号', '直播号', '投放号', '客服号', '其他'], { required: true })}
         {renderTextField('accountName', '账号名称', { required: true })}
         {renderTextField('loginAccount', '登录账号', { required: true })}
