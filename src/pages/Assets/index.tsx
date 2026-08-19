@@ -78,6 +78,7 @@ import type {
   AssetInternetAccount,
   AssetInternetAccountInput,
   AssetMatrixPublishTaskInput,
+  AssetOverviewRelationshipRow,
   AssetPhoneNumber,
   AssetPhoneNumberInput,
   AssetSensitiveField,
@@ -459,6 +460,14 @@ const AssetManagement: React.FC = () => {
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [overviewSearch, setOverviewSearch] = useState('');
+  const [overviewPage, setOverviewPage] = useState(0);
+  const [overviewRowsPerPage, setOverviewRowsPerPage] = useState(10);
+  const [overviewRelationships, setOverviewRelationships] = useState<AssetOverviewRelationshipRow[]>([]);
+  const [overviewRelationshipTotal, setOverviewRelationshipTotal] = useState(0);
+  const [overviewRelationshipsLoading, setOverviewRelationshipsLoading] = useState(false);
+  const [overviewRelationshipsError, setOverviewRelationshipsError] = useState('');
+  const [overviewRefreshToken, setOverviewRefreshToken] = useState(0);
   const { alert: showSystemAlert, dialog: feedbackDialog } = useAppFeedback();
   const showFeedback = (message: React.ReactNode, title = '提示') => {
     void showSystemAlert(message, title);
@@ -556,6 +565,9 @@ const AssetManagement: React.FC = () => {
   );
   const activeTabVisible = visibleTabs.some((tab) => tab.value === activeTab);
   const loginDeviceIdFilter = activeTab === 'accounts' ? searchParams.get('loginDeviceId') || '' : '';
+  const bindingStatusFilter = activeTab === 'devices' || activeTab === 'phones' || activeTab === 'accounts'
+    ? (searchParams.get('bindingStatus') || '') as AssetFilters['bindingStatus'] | ''
+    : '';
 
   const filters = useMemo<AssetFilters>(() => ({
     search,
@@ -563,9 +575,10 @@ const AssetManagement: React.FC = () => {
     permissionStatus,
     status,
     loginDeviceId: loginDeviceIdFilter || undefined,
+    bindingStatus: bindingStatusFilter || undefined,
     page: page + 1,
     pageSize: rowsPerPage,
-  }), [loginDeviceIdFilter, page, permissionStatus, platform, rowsPerPage, search, status]);
+  }), [bindingStatusFilter, loginDeviceIdFilter, page, permissionStatus, platform, rowsPerPage, search, status]);
 
   const deviceById = useMemo(() => new Map(lookupDevices.map((device) => [device.id, device])), [lookupDevices]);
   const phoneById = useMemo(() => new Map(lookupPhones.map((phone) => [phone.id, phone])), [lookupPhones]);
@@ -608,18 +621,6 @@ const AssetManagement: React.FC = () => {
     });
     return map;
   }, [lookupAccounts]);
-  const assetRelationshipSummary = useMemo(() => {
-    const boundPhoneCount = lookupPhones.filter((phone) => Boolean(phone.deviceId && deviceById.get(phone.deviceId))).length;
-    const boundAccountCount = lookupAccounts.filter((account) => Boolean(account.phoneId && phoneById.get(account.phoneId))).length;
-    const devicesWithPhones = lookupDevices.filter((device) => (phonesByDeviceId.get(device.id) || []).length).length;
-    return {
-      devicesWithPhones,
-      boundPhoneCount,
-      unboundPhoneCount: Math.max(0, lookupPhones.length - boundPhoneCount),
-      boundAccountCount,
-      unboundAccountCount: Math.max(0, lookupAccounts.length - boundAccountCount),
-    };
-  }, [deviceById, lookupAccounts, lookupDevices, lookupPhones, phoneById, phonesByDeviceId]);
   const deviceView = useTableViewConfig(ASSET_VIEW_STORAGE_KEYS.devices, DEVICE_COLUMNS, DEFAULT_DEVICE_VISIBLE_COLUMN_IDS);
   const phoneView = useTableViewConfig(ASSET_VIEW_STORAGE_KEYS.phones, PHONE_COLUMNS, DEFAULT_PHONE_VISIBLE_COLUMN_IDS);
   const accountView = useTableViewConfig(ASSET_VIEW_STORAGE_KEYS.accounts, ACCOUNT_COLUMNS, DEFAULT_ACCOUNT_VISIBLE_COLUMN_IDS);
@@ -688,7 +689,37 @@ const AssetManagement: React.FC = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [search, platform, permissionStatus, status, loginDeviceIdFilter]);
+  }, [search, platform, permissionStatus, status, loginDeviceIdFilter, bindingStatusFilter]);
+
+  useEffect(() => {
+    if (!activeTabVisible || activeTab !== 'overview') return;
+    let active = true;
+    setOverviewRelationshipsLoading(true);
+    setOverviewRelationshipsError('');
+    void assetApi.fetchOverviewRelationships({
+      search: overviewSearch,
+      page: overviewPage + 1,
+      pageSize: overviewRowsPerPage,
+    }).then((response) => {
+      if (!active) return;
+      if (response.code !== 0) throw new Error(response.message || '加载资产关系失败');
+      const lastAvailablePage = Math.max(0, response.data.pagination.totalPages - 1);
+      if (overviewPage > lastAvailablePage) {
+        setOverviewPage(lastAvailablePage);
+        return;
+      }
+      setOverviewRelationships(response.data.items);
+      setOverviewRelationshipTotal(response.data.pagination.total);
+    }).catch((requestError: unknown) => {
+      if (!active) return;
+      setOverviewRelationships([]);
+      setOverviewRelationshipTotal(0);
+      setOverviewRelationshipsError(requestError instanceof Error ? requestError.message : '加载资产关系失败');
+    }).finally(() => {
+      if (active) setOverviewRelationshipsLoading(false);
+    });
+    return () => { active = false; };
+  }, [activeTab, activeTabVisible, overviewPage, overviewRefreshToken, overviewRowsPerPage, overviewSearch]);
 
   const handleTabChange = (_: React.SyntheticEvent, value: AssetTab) => {
     setPlatform('');
@@ -702,6 +733,20 @@ const AssetManagement: React.FC = () => {
     setPage(0);
     setLoginDeviceFilterContext(undefined);
     setSearchParams({ tab: 'accounts' });
+  };
+
+  const openOverviewTarget = (tab: Extract<AssetTab, 'devices' | 'phones' | 'accounts'>, next: {
+    status?: string;
+    bindingStatus?: AssetFilters['bindingStatus'];
+  } = {}) => {
+    setSearch('');
+    setPlatform('');
+    setPermissionStatus('');
+    setStatus(next.status || '');
+    setPage(0);
+    const params: Record<string, string> = { tab };
+    if (next.bindingStatus) params.bindingStatus = next.bindingStatus;
+    setSearchParams(params);
   };
 
   const refreshLookupData = async () => {
@@ -726,6 +771,7 @@ const AssetManagement: React.FC = () => {
 
   const refreshActiveTab = async () => {
     await fetchDashboard();
+    if (activeTab === 'overview') setOverviewRefreshToken((value) => value + 1);
     if (activeTab === 'devices') await fetchDevices(filters);
     if (activeTab === 'phones') await fetchPhones(filters);
     if (activeTab === 'accounts') await fetchAccounts(filters);
@@ -1342,122 +1388,189 @@ const AssetManagement: React.FC = () => {
   };
 
   const renderOverview = () => {
-    const cards = [
-      { label: '设备资产', value: dashboard?.deviceCount || 0, tone: shell.blue },
-      { label: '手机号资产', value: dashboard?.phoneCount || 0, tone: shell.green },
-      { label: '互联网账号', value: dashboard?.accountCount || 0, tone: shell.ink },
-      { label: '离职待回收', value: dashboard?.offboardingCount || 0, tone: shell.amber },
-      { label: '月度费用', value: formatCurrency(dashboard?.monthlyCost || 0), tone: shell.blue },
-    ];
-    const relationCards = [
-      { label: '已挂手机号的设备', value: assetRelationshipSummary.devicesWithPhones, tab: 'devices' as AssetTab },
-      { label: '已绑定设备的手机号', value: assetRelationshipSummary.boundPhoneCount, tab: 'phones' as AssetTab },
-      { label: '已绑定手机号的账号', value: assetRelationshipSummary.boundAccountCount, tab: 'accounts' as AssetTab },
-      { label: '未绑定手机号的账号', value: assetRelationshipSummary.unboundAccountCount, tab: 'accounts' as AssetTab, tone: assetRelationshipSummary.unboundAccountCount ? shell.amber : shell.green },
-    ];
-    const deviceRelationRows = lookupDevices.slice(0, 6).map((device) => {
-      const linkedPhones = phonesByDeviceId.get(device.id) || [];
-      const linkedAccounts = accountsByDeviceId.get(device.id) || [];
-      return { device, linkedPhones, linkedAccounts };
-    });
+    const canReadDevices = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_DEVICES, 'read');
+    const canReadPhones = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_PHONES, 'read');
+    const canReadAccounts = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read');
+    const categoryCards = [
+      canReadDevices ? {
+        key: 'devices', label: '设备资产', total: dashboard?.deviceSummary.total || 0, tone: shell.blue,
+        cost: dashboard?.deviceSummary.monthlyCost || 0,
+        actions: [
+          { label: '使用中', value: dashboard?.deviceSummary.inUse || 0, onClick: () => openOverviewTarget('devices', { status: '使用中' }) },
+          { label: '库存中', value: dashboard?.deviceSummary.inventory || 0, onClick: () => openOverviewTarget('devices', { status: '库存中' }) },
+          { label: '未分配使用人', value: dashboard?.deviceSummary.unassignedUser || 0, onClick: () => openOverviewTarget('devices', { bindingStatus: 'unassigned-user' }) },
+        ],
+        onClick: () => openOverviewTarget('devices'),
+      } : null,
+      canReadPhones ? {
+        key: 'phones', label: '手机号资产', total: dashboard?.phoneSummary.total || 0, tone: shell.green,
+        cost: dashboard?.phoneSummary.monthlyCost || 0,
+        actions: [
+          { label: '已绑定设备', value: dashboard?.phoneSummary.boundDevice || 0, onClick: () => openOverviewTarget('phones', { bindingStatus: 'bound-device' }) },
+          { label: '未绑定设备', value: dashboard?.phoneSummary.unboundDevice || 0, onClick: () => openOverviewTarget('phones', { bindingStatus: 'unbound-device' }) },
+          { label: '使用中', value: dashboard?.phoneSummary.inUse || 0, onClick: () => openOverviewTarget('phones', { status: '使用中' }) },
+        ],
+        onClick: () => openOverviewTarget('phones'),
+      } : null,
+      canReadAccounts ? {
+        key: 'accounts', label: '互联网账号', total: dashboard?.accountSummary.total || 0, tone: '#7C3AED',
+        cost: dashboard?.accountSummary.monthlyCost || 0,
+        actions: [
+          { label: '有登录设备', value: dashboard?.accountSummary.withLoginDevice || 0, onClick: () => openOverviewTarget('accounts', { bindingStatus: 'with-login-device' }) },
+          { label: '无登录设备', value: dashboard?.accountSummary.withoutLoginDevice || 0, onClick: () => openOverviewTarget('accounts', { bindingStatus: 'without-login-device' }) },
+          { label: '密码待补齐', value: dashboard?.accountSummary.credentialPending || 0, onClick: () => openOverviewTarget('accounts', { bindingStatus: 'credential-pending' }) },
+        ],
+        onClick: () => openOverviewTarget('accounts'),
+      } : null,
+    ].filter(Boolean) as Array<{
+      key: string;
+      label: string;
+      total: number;
+      tone: string;
+      cost: number;
+      actions: Array<{ label: string; value: number; onClick: () => void }>;
+      onClick: () => void;
+    }>;
+    const attentionItems = [
+      canReadDevices ? { label: '设备未分配使用人', value: dashboard?.relationshipHealth.unassignedDevices || 0, onClick: () => openOverviewTarget('devices', { bindingStatus: 'unassigned-user' }) } : null,
+      canReadPhones ? { label: '手机号未绑定设备', value: dashboard?.relationshipHealth.unboundPhones || 0, onClick: () => openOverviewTarget('phones', { bindingStatus: 'unbound-device' }) } : null,
+      canReadAccounts ? { label: '账号无登录设备', value: dashboard?.relationshipHealth.accountsWithoutLoginDevice || 0, onClick: () => openOverviewTarget('accounts', { bindingStatus: 'without-login-device' }) } : null,
+      canReadAccounts ? { label: '账号未绑定手机号', value: dashboard?.relationshipHealth.accountsWithoutPhone || 0, onClick: () => openOverviewTarget('accounts', { bindingStatus: 'unbound-phone' }) } : null,
+      canReadAccounts ? { label: '账号密码待补齐', value: dashboard?.relationshipHealth.credentialPending || 0, onClick: () => openOverviewTarget('accounts', { bindingStatus: 'credential-pending' }) } : null,
+    ].filter(Boolean) as Array<{ label: string; value: number; onClick: () => void }>;
+    const renderPhoneBadges = (row: AssetOverviewRelationshipRow) => row.phones.length ? (
+      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+        {row.phones.map((phone) => (
+          <Chip key={phone.id} size="small" label={`${phone.slotType || '卡槽'} ${displayPhoneNumber(phone)}`} onClick={() => openDetail('phone', phone.id)} sx={{ ...chipSx(toneSx('low')), cursor: 'pointer' }} />
+        ))}
+      </Stack>
+    ) : <Typography variant="body2" sx={{ color: shell.amber, fontWeight: 800 }}>未绑定手机号</Typography>;
+    const renderAccountBadges = (row: AssetOverviewRelationshipRow) => row.accounts.length ? (
+      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+        {row.accounts.slice(0, 3).map((account) => (
+          <Chip
+            key={account.id}
+            size="small"
+            avatar={<PlatformBrandMark platform={account.platform} size={20} />}
+            label={`${account.platform} · ${account.accountName}`}
+            onClick={() => openDetail('account', account.id)}
+            sx={{ cursor: 'pointer', fontWeight: 800 }}
+          />
+        ))}
+        {row.accounts.length > 3 ? <Chip size="small" label={`+${row.accounts.length - 3}`} onClick={() => openDeviceAccountDrawer(row.device)} sx={{ cursor: 'pointer', fontWeight: 800 }} /> : null}
+      </Stack>
+    ) : <Typography variant="body2" sx={{ color: shell.muted }}>暂无登录账号</Typography>;
     return (
-      <Box sx={{ display: 'grid', gap: 2 }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)', xl: 'repeat(6, 1fr)' }, gap: 1.5 }}>
-          {cards.map((card) => (
-            <Paper key={card.label} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.75 }}>
-              <Typography variant="caption" sx={{ color: shell.muted, fontWeight: 800 }}>
-                {card.label}
-              </Typography>
-              <Typography sx={{ color: card.tone, fontWeight: 900, fontSize: 24, lineHeight: 1.35, mt: 0.5 }}>
-                {card.value}
-              </Typography>
-            </Paper>
-          ))}
-        </Box>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '360px minmax(0, 1fr)' }, gap: 2 }}>
-          <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 2 }}>
-            <Typography sx={{ fontWeight: 950, mb: 0.5 }}>关系总览</Typography>
-            <Typography variant="body2" sx={{ color: shell.muted, mb: 1.5 }}>
-              设备通过手机号连接互联网账号。
-            </Typography>
-            <Box sx={{ display: 'grid', gap: 1 }}>
-              {relationCards.map((card) => (
-                <Box
-                  key={card.label}
-                  component="button"
-                  type="button"
-                  onClick={() => setSearchParams({ tab: card.tab })}
-                  sx={{
-                    border: `1px solid ${shell.softLine}`,
-                    borderRadius: 1,
-                    bgcolor: '#fff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    px: 1.25,
-                    py: 1,
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    '&:hover': { borderColor: shell.blue, bgcolor: '#F8FBFF' },
-                  }}
-                >
-                  <Typography sx={{ color: shell.muted, fontWeight: 800 }}>{card.label}</Typography>
-                  <Typography sx={{ color: card.tone || shell.ink, fontSize: 20, fontWeight: 950 }}>{card.value}</Typography>
-                </Box>
-              ))}
+      <Box sx={{ display: 'grid', gap: 2.25 }}>
+        <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1.5, p: { xs: 2, md: 2.5 }, background: 'linear-gradient(135deg, #F8FBFF 0%, #FFFFFF 55%, #F8F5FF 100%)' }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} alignItems={{ xs: 'flex-start', md: 'center' }} justifyContent="space-between" spacing={1.5} sx={{ mb: 2 }}>
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 950 }}>资产驾驶舱</Typography>
+              <Typography variant="body2" sx={{ color: shell.muted, mt: 0.25 }}>清楚查看设备、手机号与互联网账号，以及它们各自独立的绑定关系。</Typography>
             </Box>
-          </Paper>
-          <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 2 }}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1.5} sx={{ mb: 1.5 }}>
-              <Box>
-                <Typography sx={{ fontWeight: 950 }}>设备关系链</Typography>
-                <Typography variant="body2" sx={{ color: shell.muted }}>从设备往下看手机号，再看到绑定的互联网账号。</Typography>
+            <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
+              <Typography variant="caption" sx={{ color: shell.muted, fontWeight: 800 }}>当前月度费用</Typography>
+              <Typography sx={{ color: shell.blue, fontWeight: 950, fontSize: 24 }}>{formatCurrency(dashboard?.monthlyCost || 0)}</Typography>
+            </Box>
+          </Stack>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: `repeat(${Math.max(1, categoryCards.length)}, minmax(0, 1fr))` }, gap: 1.5 }}>
+            {categoryCards.map((card) => (
+              <Paper key={card.key} elevation={0} sx={{ border: `1px solid ${shell.softLine}`, borderTop: `4px solid ${card.tone}`, borderRadius: 1.25, p: 1.75, minWidth: 0 }}>
+                <Stack direction="row" alignItems="center" justifyContent="space-between">
+                  <Button onClick={card.onClick} sx={{ color: shell.ink, fontWeight: 950, px: 0, minWidth: 0 }}>{card.label}</Button>
+                  <Typography sx={{ color: card.tone, fontWeight: 950, fontSize: 28 }}>{card.total}</Typography>
+                </Stack>
+                <Typography variant="caption" sx={{ color: shell.muted }}>月费用 {formatCurrency(card.cost)}</Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 0.75, mt: 1.5 }}>
+                  {card.actions.map((action) => (
+                    <Box key={action.label} component="button" type="button" onClick={action.onClick} sx={{ border: 0, borderRadius: 1, bgcolor: '#F6F8FC', p: 0.9, cursor: 'pointer', textAlign: 'left', minWidth: 0, '&:hover': { bgcolor: '#EEF4FF' } }}>
+                      <Typography sx={{ color: shell.ink, fontWeight: 950, fontSize: 18 }}>{action.value}</Typography>
+                      <Typography variant="caption" sx={{ color: shell.muted, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{action.label}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Paper>
+            ))}
+          </Box>
+        </Paper>
+
+        <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1.5, p: 2 }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ xs: 'flex-start', md: 'center' }} justifyContent="space-between" sx={{ mb: 1.5 }}>
+            <Box>
+              <Typography sx={{ fontWeight: 950 }}>待关联与待处理</Typography>
+              <Typography variant="body2" sx={{ color: shell.muted }}>点击关联问题直接进入对应台账，并自动带上筛选条件。</Typography>
+            </Box>
+            {hasPermission(currentUser, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'read') ? (
+              <Chip size="small" label={`离职待回收 ${dashboard?.relationshipHealth.offboarding || 0}`} onClick={() => setSearchParams({ tab: 'offboarding' })} sx={{ ...chipSx((dashboard?.relationshipHealth.offboarding || 0) ? toneSx('medium') : toneSx('low')), cursor: 'pointer' }} />
+            ) : null}
+          </Stack>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(5, 1fr)' }, gap: 1 }}>
+            {attentionItems.map((item) => (
+              <Box key={item.label} component="button" type="button" onClick={item.onClick} sx={{ border: `1px solid ${item.value ? '#FED7AA' : shell.softLine}`, bgcolor: item.value ? '#FFFBEB' : '#F8FAFC', borderRadius: 1, p: 1.25, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', textAlign: 'left' }}>
+                <Typography variant="body2" sx={{ color: shell.muted, fontWeight: 800 }}>{item.label}</Typography>
+                <Typography sx={{ color: item.value ? shell.amber : shell.green, fontWeight: 950, fontSize: 20 }}>{item.value}</Typography>
               </Box>
-              <Button size="small" endIcon={<ChevronRightIcon />} onClick={() => setSearchParams({ tab: 'devices' })}>
-                查看设备
-              </Button>
-            </Stack>
-            <Box sx={{ display: 'grid', gap: 0.75 }}>
-              {deviceRelationRows.map(({ device, linkedPhones, linkedAccounts }) => (
-                <Box
-                  key={device.id}
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', md: '1.2fr 1.4fr 0.8fr' },
-                    gap: 1,
-                    alignItems: 'center',
-                    borderTop: `1px solid ${shell.softLine}`,
-                    pt: 0.9,
-                  }}
-                >
-                  <Stack spacing={0.15} sx={{ minWidth: 0 }}>
-                    {renderRelationLink(`${device.deviceCode} / ${device.deviceName}`, () => openDetail('device', device.id))}
-                    <Typography variant="caption" sx={{ color: shell.muted }}>{device.owner || '未填负责人'} / {device.department || '未填部门'}</Typography>
-                  </Stack>
-                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                    {linkedPhones.length ? linkedPhones.map((phone) => (
-                      <Chip
-                        key={phone.id}
-                        size="small"
-                        label={`${phone.slotType} ${displayPhoneNumber(phone)}`}
-                        onClick={() => openDetail('phone', phone.id)}
-                        sx={{ ...chipSx(toneSx('low')), cursor: 'pointer' }}
-                      />
-                    )) : (
-                      <Typography variant="body2" sx={{ color: shell.muted }}>未绑定手机号</Typography>
-                    )}
-                  </Stack>
-                  <Typography sx={{ color: linkedAccounts.length ? shell.ink : shell.muted, fontWeight: 850 }}>
-                    {linkedAccounts.length ? `${linkedAccounts.length}个互联网账号` : '暂无账号'}
-                  </Typography>
-                </Box>
-              ))}
-              {!deviceRelationRows.length ? (
-                <Typography sx={{ color: shell.muted, textAlign: 'center', py: 3 }}>暂无设备关系数据</Typography>
-              ) : null}
+            ))}
+          </Box>
+        </Paper>
+
+        <Paper elevation={0} sx={{ ...moduleTablePaperSx, borderRadius: 1.5, overflow: 'hidden' }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between" spacing={1.5} sx={{ p: 2, borderBottom: `1px solid ${shell.softLine}` }}>
+            <Box>
+              <Typography sx={{ fontWeight: 950 }}>资产关系明细</Typography>
+              <Typography variant="body2" sx={{ color: shell.muted }}>卡槽手机号、账号验证手机号、账号登录设备是三组独立关系。</Typography>
             </Box>
-          </Paper>
-        </Box>
+            <TextField size="small" value={overviewSearch} onChange={(event) => { setOverviewSearch(event.target.value); setOverviewPage(0); }} placeholder="搜索设备、手机号或互联网账号" sx={{ width: { xs: '100%', md: 320 } }} />
+          </Stack>
+          {overviewRelationshipsError ? (
+            <Stack alignItems="center" spacing={1} sx={{ py: 5 }}><Typography color="error">{overviewRelationshipsError}</Typography><Button onClick={() => setOverviewRefreshToken((value) => value + 1)}>重试</Button></Stack>
+          ) : isMobile ? (
+            <Box sx={{ display: 'grid', gap: 1, p: 1.5 }}>
+              {overviewRelationships.map((row) => (
+                <Paper key={row.device.id} elevation={0} sx={{ border: `1px solid ${shell.softLine}`, borderRadius: 1, p: 1.5 }}>
+                  <Stack spacing={1.1}>
+                    {renderRelationLink(`${row.device.deviceCode} / ${row.device.deviceName}`, () => openDetail('device', row.device.id))}
+                    <Typography variant="caption" sx={{ color: shell.muted }}>{formatDeviceBrandModel(row.device)} · {row.device.currentUser || '未分配使用人'}</Typography>
+                    {renderPhoneBadges(row)}
+                    {renderAccountBadges(row)}
+                  </Stack>
+                </Paper>
+              ))}
+            </Box>
+          ) : (
+            <TableContainer>
+              <Table sx={{ ...moduleTableSx, minWidth: 1080 }}>
+                <TableHead><TableRow><TableCell>设备</TableCell><TableCell>卡槽 / IMEI</TableCell><TableCell>对应手机号</TableCell><TableCell>登录互联网账号</TableCell><TableCell>归属与使用</TableCell><TableCell>状态</TableCell></TableRow></TableHead>
+                <TableBody>
+                  {overviewRelationships.map((row) => (
+                    <TableRow key={row.device.id} hover>
+                      <TableCell>{renderRelationLink(`${row.device.deviceCode} / ${row.device.deviceName}`, () => openDetail('device', row.device.id))}<Typography variant="caption" sx={{ color: shell.muted }}>{formatDeviceBrandModel(row.device)}</Typography></TableCell>
+                      <TableCell>{renderDeviceImeis(row.device)}</TableCell>
+                      <TableCell>{renderPhoneBadges(row)}</TableCell>
+                      <TableCell>{renderAccountBadges(row)}</TableCell>
+                      <TableCell><Typography variant="body2">{row.device.department || '未填部门'}</Typography><Typography variant="caption" sx={{ color: shell.muted }}>{row.device.currentUser || '未分配使用人'}</Typography></TableCell>
+                      <TableCell><Chip size="small" label={row.device.status} sx={chipSx(statusTone(row.device.status))} /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+          {!overviewRelationshipsLoading && !overviewRelationships.length && !overviewRelationshipsError ? <Typography sx={{ color: shell.muted, textAlign: 'center', py: 5 }}>暂无符合条件的资产关系</Typography> : null}
+          {overviewRelationshipsLoading ? <Typography sx={{ color: shell.muted, textAlign: 'center', py: 3 }}>正在加载资产关系...</Typography> : null}
+          <TablePagination
+            component="div"
+            count={overviewRelationshipTotal}
+            page={overviewPage}
+            rowsPerPage={overviewRowsPerPage}
+            rowsPerPageOptions={[10, 20, 50]}
+            onPageChange={(_, nextPage) => setOverviewPage(nextPage)}
+            onRowsPerPageChange={(event) => { setOverviewRowsPerPage(Number(event.target.value)); setOverviewPage(0); }}
+            labelRowsPerPage="每页条数"
+            labelDisplayedRows={formatPaginationRows}
+            sx={assetPaginationSx}
+          />
+        </Paper>
       </Box>
     );
   };
@@ -1478,6 +1591,16 @@ const AssetManagement: React.FC = () => {
       accounts: ['使用中', '闲置', '异常', '封禁', '已注销'],
       matrix: ['pending', 'completed'],
       offboarding: ['待回收', '已回收'],
+    };
+    const bindingStatusLabels: Partial<Record<NonNullable<AssetFilters['bindingStatus']>, string>> = {
+      'unassigned-user': '未分配使用人',
+      'bound-device': '已绑定设备',
+      'unbound-device': '未绑定设备',
+      'bound-phone': '已绑定手机号',
+      'unbound-phone': '未绑定手机号',
+      'with-login-device': '有登录设备',
+      'without-login-device': '无登录设备',
+      'credential-pending': '密码待补齐',
     };
     return (
       <ModuleToolbar>
@@ -1529,6 +1652,15 @@ const AssetManagement: React.FC = () => {
                 : deviceById.get(loginDeviceIdFilter)?.deviceCode
             ) || loginDeviceIdFilter}`}
             onDelete={clearLoginDeviceFilter}
+            sx={{ fontWeight: 800 }}
+          />
+        ) : null}
+        {bindingStatusFilter ? (
+          <Chip
+            color="primary"
+            variant="outlined"
+            label={`总览筛选：${bindingStatusLabels[bindingStatusFilter] || bindingStatusFilter}`}
+            onDelete={() => setSearchParams({ tab: activeTab })}
             sx={{ fontWeight: 800 }}
           />
         ) : null}

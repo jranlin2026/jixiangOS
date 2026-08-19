@@ -255,11 +255,18 @@ export interface AssetFilters {
   search?: string;
   platform?: string;
   loginDeviceId?: string;
+  bindingStatus?: 'unassigned-user' | 'bound-device' | 'unbound-device' | 'bound-phone' | 'unbound-phone' | 'with-login-device' | 'without-login-device' | 'credential-pending';
   permissionStatus?: string;
   riskLevel?: string;
   status?: string;
   page?: number;
   pageSize?: number;
+}
+
+export interface AssetOverviewRelationshipRow {
+  device: AssetDevice;
+  phones: AssetPhoneNumber[];
+  accounts: AssetInternetAccount[];
 }
 
 export interface AssetDashboard {
@@ -270,6 +277,40 @@ export interface AssetDashboard {
   offboardingCount: number;
   monthlyCost: number;
   unboundAccountCount: number;
+  deviceSummary: {
+    total: number;
+    inUse: number;
+    inventory: number;
+    attention: number;
+    unassignedUser: number;
+    monthlyCost: number;
+  };
+  phoneSummary: {
+    total: number;
+    boundDevice: number;
+    unboundDevice: number;
+    inUse: number;
+    inactive: number;
+    monthlyCost: number;
+  };
+  accountSummary: {
+    total: number;
+    withLoginDevice: number;
+    withoutLoginDevice: number;
+    boundPhone: number;
+    unboundPhone: number;
+    credentialPending: number;
+    monthlyCost: number;
+  };
+  relationshipHealth: {
+    openRisks: number;
+    offboarding: number;
+    unassignedDevices: number;
+    unboundPhones: number;
+    accountsWithoutLoginDevice: number;
+    accountsWithoutPhone: number;
+    credentialPending: number;
+  };
 }
 
 export interface AssetDetailBundle {

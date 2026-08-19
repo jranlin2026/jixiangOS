@@ -5,6 +5,7 @@ import type {
   AssetDetailBundle,
   AssetFilters,
   AssetInternetAccount,
+  AssetOverviewRelationshipRow,
   AssetMatrixPublishTask,
   AssetOffboardingTask,
   AssetOperationLog,
@@ -96,6 +97,28 @@ function matchesFilters(
     kind !== 'accounts'
     || !normalizeAccountLoginDeviceIds(value.loginDeviceIds as string[] | undefined).includes(filters.loginDeviceId)
   )) return false;
+  if (filters.bindingStatus) {
+    const loginDeviceIds = normalizeAccountLoginDeviceIds(value.loginDeviceIds as string[] | undefined);
+    const credentialPending = value.loginCredentialStatus === '待补齐' || value.paymentCredentialStatus === '待补齐';
+    const matchesBinding = filters.bindingStatus === 'unassigned-user'
+      ? kind === 'devices' && !value.currentUserId && !value.currentUser
+      : filters.bindingStatus === 'bound-device'
+        ? kind === 'phones' && Boolean(value.deviceId)
+        : filters.bindingStatus === 'unbound-device'
+          ? kind === 'phones' && !value.deviceId
+          : filters.bindingStatus === 'bound-phone'
+            ? kind === 'accounts' && Boolean(value.phoneId)
+            : filters.bindingStatus === 'unbound-phone'
+              ? kind === 'accounts' && !value.phoneId
+              : filters.bindingStatus === 'with-login-device'
+                ? kind === 'accounts' && loginDeviceIds.length > 0
+                : filters.bindingStatus === 'without-login-device'
+                  ? kind === 'accounts' && loginDeviceIds.length === 0
+                  : filters.bindingStatus === 'credential-pending'
+                    ? kind === 'accounts' && credentialPending
+                    : true;
+    if (!matchesBinding) return false;
+  }
   if (filters.permissionStatus && (kind !== 'accounts' || readAccountControlStatus(value) !== filters.permissionStatus)) return false;
   if (filters.riskLevel && value.riskLevel !== filters.riskLevel && value.level !== filters.riskLevel) return false;
   if (filters.status) {
@@ -229,22 +252,121 @@ export function createAssetListService(
       }
       return success(bundle);
     },
+    async relationships(filters: AssetFilters, user: AuthenticatedUser) {
+      const visible = await loadVisible(user);
+      const devices = hasPermission(user, PERMISSION_KEYS.ASSETS_DEVICES, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[]
+        : [];
+      const phones = hasPermission(user, PERMISSION_KEYS.ASSETS_PHONES, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_PHONE_NUMBERS] || []) as AssetPhoneNumber[]
+        : [];
+      const accounts = hasPermission(user, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[]
+        : [];
+      const keyword = text(filters.search).trim();
+      const rows = devices.map<AssetOverviewRelationshipRow>((device) => ({
+        device,
+        phones: phones.filter((phone) => phone.deviceId === device.id),
+        accounts: accounts.filter((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(device.id)),
+      })).filter((row) => {
+        if (filters.status && row.device.status !== filters.status) return false;
+        if (!keyword) return true;
+        return [
+          row.device.deviceCode,
+          row.device.deviceName,
+          row.device.brand,
+          row.device.model,
+          row.device.department,
+          row.device.owner,
+          row.device.currentUser,
+          ...row.phones.flatMap((phone) => [phone.phoneNumber, phone.phoneNumberMasked, phone.realName, phone.operator]),
+          ...row.accounts.flatMap((account) => [account.platform, account.accountName, account.loginAccount, account.loginAccountMasked]),
+        ].some((value) => text(value).includes(keyword));
+      });
+      const page = Math.max(1, Number(filters.page) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
+      const start = (page - 1) * pageSize;
+      return success({
+        items: rows.slice(start, start + pageSize),
+        pagination: {
+          page,
+          pageSize,
+          total: rows.length,
+          totalPages: Math.max(1, Math.ceil(rows.length / pageSize)),
+        },
+      });
+    },
     async dashboard(user: AuthenticatedUser) {
       const visible = await loadVisible(user);
-      const devices = (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[];
-      const phones = (visible[STORAGE_KEYS.ASSET_PHONE_NUMBERS] || []) as AssetPhoneNumber[];
-      const accounts = (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[];
-      const risks = (visible[STORAGE_KEYS.ASSET_RISKS] || []) as AssetRisk[];
-      const offboarding = (visible[STORAGE_KEYS.ASSET_OFFBOARDING_TASKS] || []) as AssetOffboardingTask[];
+      const devices = hasPermission(user, PERMISSION_KEYS.ASSETS_DEVICES, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[]
+        : [];
+      const phones = hasPermission(user, PERMISSION_KEYS.ASSETS_PHONES, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_PHONE_NUMBERS] || []) as AssetPhoneNumber[]
+        : [];
+      const accounts = hasPermission(user, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[]
+        : [];
+      const risks = hasPermission(user, PERMISSION_KEYS.ASSETS_RISKS, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_RISKS] || []) as AssetRisk[]
+        : [];
+      const offboarding = hasPermission(user, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_OFFBOARDING_TASKS] || []) as AssetOffboardingTask[]
+        : [];
+      const deviceMonthlyCost = devices.reduce((sum, row) => sum + Number(row.monthlyCost || 0), 0);
+      const phoneMonthlyCost = phones.reduce((sum, row) => sum + Number(row.monthlyFee || 0), 0);
+      const accountMonthlyCost = accounts.reduce((sum, row) => sum + Number(row.monthlyFee || 0), 0);
+      const boundPhoneCount = phones.filter((phone) => Boolean(phone.deviceId)).length;
+      const boundAccountCount = accounts.filter((account) => Boolean(account.phoneId)).length;
+      const accountsWithLoginDevice = accounts.filter((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).length > 0).length;
+      const credentialPending = accounts.filter((account) => (
+        account.loginCredentialStatus === '待补齐' || account.paymentCredentialStatus === '待补齐'
+      )).length;
+      const openRiskCount = risks.filter((risk) => risk.status === 'open').length;
+      const offboardingCount = offboarding.filter((task) => task.status === '待回收').length;
+      const unassignedDevices = devices.filter((device) => !device.currentUserId && !device.currentUser).length;
       return success<AssetDashboard>({
         deviceCount: devices.length,
         phoneCount: phones.length,
         accountCount: accounts.length,
-        openRiskCount: risks.filter((risk) => risk.status === 'open').length,
-        offboardingCount: offboarding.filter((task) => task.status === '待回收').length,
-        monthlyCost: devices.reduce((sum, row) => sum + Number(row.monthlyCost || 0), 0)
-          + phones.reduce((sum, row) => sum + Number(row.monthlyFee || 0), 0),
-        unboundAccountCount: accounts.filter((account) => !account.phoneId).length,
+        openRiskCount,
+        offboardingCount,
+        monthlyCost: deviceMonthlyCost + phoneMonthlyCost + accountMonthlyCost,
+        unboundAccountCount: accounts.length - boundAccountCount,
+        deviceSummary: {
+          total: devices.length,
+          inUse: devices.filter((device) => device.status === '使用中').length,
+          inventory: devices.filter((device) => device.status === '库存中').length,
+          attention: devices.filter((device) => !['使用中', '库存中'].includes(device.status)).length,
+          unassignedUser: unassignedDevices,
+          monthlyCost: deviceMonthlyCost,
+        },
+        phoneSummary: {
+          total: phones.length,
+          boundDevice: boundPhoneCount,
+          unboundDevice: phones.length - boundPhoneCount,
+          inUse: phones.filter((phone) => phone.status === '使用中').length,
+          inactive: phones.filter((phone) => phone.status !== '使用中').length,
+          monthlyCost: phoneMonthlyCost,
+        },
+        accountSummary: {
+          total: accounts.length,
+          withLoginDevice: accountsWithLoginDevice,
+          withoutLoginDevice: accounts.length - accountsWithLoginDevice,
+          boundPhone: boundAccountCount,
+          unboundPhone: accounts.length - boundAccountCount,
+          credentialPending,
+          monthlyCost: accountMonthlyCost,
+        },
+        relationshipHealth: {
+          openRisks: openRiskCount,
+          offboarding: offboardingCount,
+          unassignedDevices,
+          unboundPhones: phones.length - boundPhoneCount,
+          accountsWithoutLoginDevice: accounts.length - accountsWithLoginDevice,
+          accountsWithoutPhone: accounts.length - boundAccountCount,
+          credentialPending,
+        },
       });
     },
   };

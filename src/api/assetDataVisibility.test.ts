@@ -247,6 +247,7 @@ const accounts: AssetInternetAccount[] = [
     realName: 'Self Legal Name',
     realNameMasked: 'S***e',
     identityAccountIds: ['account-other'],
+    loginDeviceIds: ['device-self'],
     phoneId: 'phone-self',
     ownerSubject: '公司' as AssetInternetAccount['ownerSubject'],
     department: 'Sales',
@@ -357,6 +358,7 @@ seed('user-self');
   const visibleTasks = await assetApi.fetchOffboardingTasks({ pageSize: 10 });
   const hiddenDetail = await assetApi.fetchDetail('device', 'device-peer');
   const dashboard = await assetApi.fetchDashboard();
+  const relationships = await assetApi.fetchOverviewRelationships({ pageSize: 10 });
 
   assert.deepEqual(ids(visibleDevices.data.items), ['device-self']);
   assert.deepEqual(ids(visiblePhones.data.items), ['phone-self']);
@@ -373,7 +375,9 @@ seed('user-self');
   assert.deepEqual(ids(visibleTasks.data.items), ['task-self']);
   assert.equal(hiddenDetail.data, null);
   assert.equal(dashboard.data.deviceCount, 1);
-  assert.equal(dashboard.data.monthlyCost, 138);
+  assert.equal(dashboard.data.monthlyCost, 148, '总费用应包含设备、手机号与互联网账号');
+  assert.deepEqual(ids(relationships.data.items.map((row) => row.device)), ['device-self']);
+  assert.deepEqual(ids(relationships.data.items[0]?.accounts || []), ['account-self']);
 
   await assetApi.updatePhoneNumber('phone-self', { realName: 'Unauthorized Phone Replacement', status: '已停用' });
   await assetApi.updateInternetAccount('account-self', { realName: 'Unauthorized Account Replacement', accountStatus: '异常' });

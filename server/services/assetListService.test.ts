@@ -47,11 +47,11 @@ const authenticatedAdmin: AuthenticatedUser = {
 
 const data: Record<string, unknown> = {
   [STORAGE_KEYS.ASSET_DEVICES]: [
-    { id: 'device-a', deviceCode: 'DEV-0001', deviceName: '直播一号机', owner: '管理员', currentUser: '管理员', imei1: '111', imei1Masked: '***111' },
-    { id: 'device-b', deviceCode: 'DEV-0002', deviceName: '剪辑二号机', owner: '管理员', currentUser: '管理员', imei1: '222', imei1Masked: '***222' },
+    { id: 'device-a', deviceCode: 'DEV-0001', deviceName: '直播一号机', owner: '管理员', currentUser: '管理员', imei1: '111', imei1Masked: '***111', status: '使用中', monthlyCost: 50 },
+    { id: 'device-b', deviceCode: 'DEV-0002', deviceName: '剪辑二号机', owner: '管理员', currentUser: '', imei1: '222', imei1Masked: '***222', status: '库存中', monthlyCost: 30 },
   ],
   [STORAGE_KEYS.ASSET_PHONE_NUMBERS]: [
-    { id: 'phone-1', owner: '管理员', deviceId: 'device-a', phoneNumber: '13800000000', phoneNumberMasked: '138****0000' },
+    { id: 'phone-1', owner: '管理员', deviceId: 'device-a', phoneNumber: '13800000000', phoneNumberMasked: '138****0000', status: '使用中', monthlyFee: 38 },
   ],
   [STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS]: [],
   [STORAGE_KEYS.ASSET_RISKS]: [],
@@ -77,7 +77,7 @@ await service.list('phones', { page: 1, pageSize: 20 }, authenticatedAdmin);
 assert.equal(storageReadCount, 7, '未写入时应复用同一资产快照');
 
 data[STORAGE_KEYS.ASSET_PHONE_NUMBERS] = [
-  { id: 'phone-1', owner: '管理员', deviceId: 'device-b', phoneNumber: '13800000000', phoneNumberMasked: '138****0000' },
+  { id: 'phone-1', owner: '管理员', deviceId: 'device-b', phoneNumber: '13800000000', phoneNumberMasked: '138****0000', status: '使用中', monthlyFee: 38 },
 ];
 service.invalidate();
 
@@ -85,10 +85,28 @@ const second = await service.list('phones', { page: 1, pageSize: 20 }, authentic
 assert.equal((second.data.items[0] as AssetPhoneNumber | undefined)?.deviceId, 'device-b');
 
 data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] = [
-  { id: 'account-apple', platform: 'Apple ID', accountName: '企业身份', loginAccount: 'brand-identity@icloud.com', owner: '管理员', currentUser: '管理员' },
-  { id: 'account-business', platform: 'TikTok', accountName: '品牌业务号', loginAccount: 'brand-business', loginDeviceIds: ['device-b'], identityAccountIds: ['account-apple'], owner: '管理员', currentUser: '管理员' },
+  { id: 'account-apple', platform: 'Apple ID', accountName: '企业身份', loginAccount: 'brand-identity@icloud.com', owner: '管理员', currentUser: '管理员', accountStatus: '使用中', loginCredentialStatus: '待补齐', monthlyFee: 12 },
+  { id: 'account-business', platform: 'TikTok', accountName: '品牌业务号', loginAccount: 'brand-business', phoneId: 'phone-1', loginDeviceIds: ['device-b'], identityAccountIds: ['account-apple'], owner: '管理员', currentUser: '管理员', accountStatus: '使用中', loginCredentialStatus: '已设置', monthlyFee: 20 },
 ];
 service.invalidate();
+const dashboard = await service.dashboard(authenticatedAdmin);
+assert.deepEqual(dashboard.data.deviceSummary, {
+  total: 2,
+  inUse: 1,
+  inventory: 1,
+  attention: 0,
+  unassignedUser: 1,
+  monthlyCost: 80,
+});
+assert.equal(dashboard.data.phoneSummary.boundDevice, 1);
+assert.equal(dashboard.data.accountSummary.withLoginDevice, 1);
+assert.equal(dashboard.data.accountSummary.unboundPhone, 1);
+assert.equal(dashboard.data.accountSummary.credentialPending, 1);
+assert.equal(dashboard.data.monthlyCost, 150, '总月费用应包含设备、手机号和互联网账号');
+const relationshipPage = await service.relationships({ search: '品牌业务号', page: 1, pageSize: 10 }, authenticatedAdmin);
+assert.equal(relationshipPage.data.pagination.total, 1, '关系明细应支持通过关联账号搜索设备');
+assert.equal(relationshipPage.data.items[0]?.device.id, 'device-b');
+assert.deepEqual(relationshipPage.data.items[0]?.accounts.map((account) => account.id), ['account-business']);
 const searchedByIdentity = await service.list('accounts', { search: 'brand-identity@icloud.com', page: 1, pageSize: 20 }, authenticatedAdmin);
 assert.deepEqual(
   (searchedByIdentity.data.items as AssetInternetAccount[]).map((account) => account.id).sort(),
@@ -130,6 +148,15 @@ assert.deepEqual(deviceOnlyDetail.data?.relatedPhones, [], '仅设备权限不�
 assert.deepEqual(deviceOnlyDetail.data?.relatedAccounts, [], '仅设备权限不应泄露关联互联网账号');
 assert.deepEqual(deviceOnlyDetail.data?.risks, [], '无风险权限时不应返回风险');
 assert.deepEqual(deviceOnlyDetail.data?.logs, [], '无日志权限时不应返回日志');
+const deviceOnlyDashboard = await service.dashboard(deviceOnlyReader);
+assert.equal(deviceOnlyDashboard.data.deviceCount, 2);
+assert.equal(deviceOnlyDashboard.data.phoneCount, 0, '总览必须按叶子读取权限隐藏手机号统计');
+assert.equal(deviceOnlyDashboard.data.accountCount, 0, '总览必须按叶子读取权限隐藏账号统计');
+assert.equal(deviceOnlyDashboard.data.monthlyCost, 80, '总费用只能汇总有权限的资产类型');
+const deviceOnlyRelationships = await service.relationships({ page: 1, pageSize: 10 }, deviceOnlyReader);
+assert.equal(deviceOnlyRelationships.data.items.length, 2);
+assert.deepEqual(deviceOnlyRelationships.data.items[0]?.phones, []);
+assert.deepEqual(deviceOnlyRelationships.data.items[0]?.accounts, []);
 
 {
   let releaseOldRead!: () => void;

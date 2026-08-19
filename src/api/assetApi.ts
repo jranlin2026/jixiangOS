@@ -15,6 +15,7 @@
   AssetMatrixPublishTaskInput,
   AssetOffboardingTask,
   AssetOperationLog,
+  AssetOverviewRelationshipRow,
   AssetPhoneNumber,
   AssetPhoneNumberInput,
   AssetRisk,
@@ -107,6 +108,7 @@ function backendAssetList<T>(kind: string, filters?: AssetFilters): Promise<ApiR
   if (filters?.search) params.set('search', filters.search);
   if (filters?.platform) params.set('platform', filters.platform);
   if (filters?.loginDeviceId) params.set('loginDeviceId', filters.loginDeviceId);
+  if (filters?.bindingStatus) params.set('bindingStatus', filters.bindingStatus);
   if (filters?.permissionStatus) params.set('permissionStatus', filters.permissionStatus);
   if (filters?.riskLevel) params.set('riskLevel', filters.riskLevel);
   if (filters?.status) params.set('status', filters.status);
@@ -925,7 +927,9 @@ function filterDevices(rows: AssetDevice[], filters?: AssetFilters): AssetDevice
     ].some((value) => includesKeyword(value, keyword));
     const matchesRisk = !filters?.riskLevel || row.riskLevel === filters.riskLevel;
     const matchesStatus = !filters?.status || row.status === filters.status;
-    return matchesKeyword && matchesRisk && matchesStatus;
+    const matchesBinding = !filters?.bindingStatus
+      || (filters.bindingStatus === 'unassigned-user' && !row.currentUserId && !row.currentUser);
+    return matchesKeyword && matchesRisk && matchesStatus && matchesBinding;
   });
 }
 
@@ -952,7 +956,10 @@ function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPh
       device?.deviceName,
     ].some((value) => includesKeyword(value, keyword));
     const matchesStatus = !filters?.status || row.status === filters.status;
-    return matchesKeyword && matchesStatus;
+    const matchesBinding = !filters?.bindingStatus
+      || (filters.bindingStatus === 'bound-device' && Boolean(row.deviceId))
+      || (filters.bindingStatus === 'unbound-device' && !row.deviceId);
+    return matchesKeyword && matchesStatus && matchesBinding;
   });
 }
 
@@ -996,7 +1003,15 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
     const matchesPermission = !filters?.permissionStatus || readAccountControlStatus(row) === filters.permissionStatus;
     const matchesRisk = !filters?.riskLevel || row.riskLevel === filters.riskLevel;
     const matchesStatus = !filters?.status || row.accountStatus === filters.status;
-    return matchesKeyword && matchesPlatform && matchesLoginDevice && matchesPermission && matchesRisk && matchesStatus;
+    const loginDeviceIds = normalizeAccountLoginDeviceIds(row.loginDeviceIds);
+    const credentialPending = row.loginCredentialStatus === '待补齐' || row.paymentCredentialStatus === '待补齐';
+    const matchesBinding = !filters?.bindingStatus
+      || (filters.bindingStatus === 'bound-phone' && Boolean(row.phoneId))
+      || (filters.bindingStatus === 'unbound-phone' && !row.phoneId)
+      || (filters.bindingStatus === 'with-login-device' && loginDeviceIds.length > 0)
+      || (filters.bindingStatus === 'without-login-device' && loginDeviceIds.length === 0)
+      || (filters.bindingStatus === 'credential-pending' && credentialPending);
+    return matchesKeyword && matchesPlatform && matchesLoginDevice && matchesPermission && matchesRisk && matchesStatus && matchesBinding;
   });
 }
 
@@ -1088,22 +1103,97 @@ async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
   ensureInit();
   await delay(120);
   const scope = getCurrentDataVisibilityScope('assets');
-  const deviceRows = visibleDevices(scope);
-  const phoneRows = visiblePhones(scope);
-  const accountRows = visibleAccounts(scope);
+  const deviceRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES) ? visibleDevices(scope) : [];
+  const phoneRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES) ? visiblePhones(scope) : [];
+  const accountRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS) ? visibleAccounts(scope) : [];
+  const deviceMonthlyCost = deviceRows.reduce((sum, item) => sum + Number(item.monthlyCost || 0), 0);
+  const phoneMonthlyCost = phoneRows.reduce((sum, item) => sum + Number(item.monthlyFee || 0), 0);
+  const accountMonthlyCost = accountRows.reduce((sum, item) => sum + Number(item.monthlyFee || 0), 0);
+  const boundPhoneCount = phoneRows.filter((phone) => Boolean(phone.deviceId)).length;
+  const boundAccountCount = accountRows.filter((account) => Boolean(account.phoneId)).length;
+  const accountsWithLoginDevice = accountRows.filter((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).length > 0).length;
+  const credentialPending = accountRows.filter((account) => account.loginCredentialStatus === '待补齐' || account.paymentCredentialStatus === '待补齐').length;
+  const openRiskCount = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_RISKS)
+    ? visibleRisks(scope).filter((risk) => risk.status === 'open').length
+    : 0;
+  const offboardingCount = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_OFFBOARDING)
+    ? visibleOffboardingTasks(scope).filter((task) => task.status === '待回收').length
+    : 0;
+  const unassignedDevices = deviceRows.filter((device) => !device.currentUserId && !device.currentUser).length;
   const dashboard: AssetDashboard = {
     deviceCount: deviceRows.length,
     phoneCount: phoneRows.length,
     accountCount: accountRows.length,
-    openRiskCount: visibleRisks(scope).filter((risk) => risk.status === 'open').length,
-    offboardingCount: visibleOffboardingTasks(scope).filter((task) => task.status === '待回收').length,
-    monthlyCost: [
-      ...deviceRows.map((item) => item.monthlyCost),
-      ...phoneRows.map((item) => item.monthlyFee),
-    ].reduce((sum, value) => sum + Number(value || 0), 0),
-    unboundAccountCount: accountRows.filter((account) => !account.phoneId).length,
+    openRiskCount,
+    offboardingCount,
+    monthlyCost: deviceMonthlyCost + phoneMonthlyCost + accountMonthlyCost,
+    unboundAccountCount: accountRows.length - boundAccountCount,
+    deviceSummary: {
+      total: deviceRows.length,
+      inUse: deviceRows.filter((device) => device.status === '使用中').length,
+      inventory: deviceRows.filter((device) => device.status === '库存中').length,
+      attention: deviceRows.filter((device) => !['使用中', '库存中'].includes(device.status)).length,
+      unassignedUser: unassignedDevices,
+      monthlyCost: deviceMonthlyCost,
+    },
+    phoneSummary: {
+      total: phoneRows.length,
+      boundDevice: boundPhoneCount,
+      unboundDevice: phoneRows.length - boundPhoneCount,
+      inUse: phoneRows.filter((phone) => phone.status === '使用中').length,
+      inactive: phoneRows.filter((phone) => phone.status !== '使用中').length,
+      monthlyCost: phoneMonthlyCost,
+    },
+    accountSummary: {
+      total: accountRows.length,
+      withLoginDevice: accountsWithLoginDevice,
+      withoutLoginDevice: accountRows.length - accountsWithLoginDevice,
+      boundPhone: boundAccountCount,
+      unboundPhone: accountRows.length - boundAccountCount,
+      credentialPending,
+      monthlyCost: accountMonthlyCost,
+    },
+    relationshipHealth: {
+      openRisks: openRiskCount,
+      offboarding: offboardingCount,
+      unassignedDevices,
+      unboundPhones: phoneRows.length - boundPhoneCount,
+      accountsWithoutLoginDevice: accountRows.length - accountsWithLoginDevice,
+      accountsWithoutPhone: accountRows.length - boundAccountCount,
+      credentialPending,
+    },
   };
   return createSuccessResponse(dashboard);
+}
+
+async function fetchOverviewRelationships(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetOverviewRelationshipRow>>> {
+  if (shouldUseBackendApi()) return backendAssetList<AssetOverviewRelationshipRow>('relationships', filters);
+  ensureInit();
+  await delay(120);
+  const deviceRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES) ? visibleDevices() : [];
+  const phoneRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES) ? visiblePhones() : [];
+  const accountRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS) ? visibleAccounts() : [];
+  const keyword = String(filters?.search || '').trim().toLowerCase();
+  const rows = deviceRows.map((device) => ({
+    device,
+    phones: phoneRows.filter((phone) => phone.deviceId === device.id),
+    accounts: accountRows.filter((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(device.id)),
+  })).filter((row) => {
+    if (filters?.status && row.device.status !== filters.status) return false;
+    if (!keyword) return true;
+    return [
+      row.device.deviceCode,
+      row.device.deviceName,
+      row.device.brand,
+      row.device.model,
+      row.device.department,
+      row.device.owner,
+      row.device.currentUser,
+      ...row.phones.flatMap((phone) => [phone.phoneNumber, phone.phoneNumberMasked, phone.realName, phone.operator]),
+      ...row.accounts.flatMap((account) => [account.platform, account.accountName, account.loginAccount, account.loginAccountMasked]),
+    ].some((value) => includesKeyword(value, keyword));
+  });
+  return createSuccessResponse(paginate(rows, filters));
 }
 
 async function fetchDevices(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetDevice>>> {
@@ -2189,6 +2279,7 @@ async function importAssetsFromCsv(type: AssetImportType, csvText: string): Prom
 
 export const assetApi = {
   fetchDashboard,
+  fetchOverviewRelationships,
   fetchDevices,
   createDevice,
   updateDevice,

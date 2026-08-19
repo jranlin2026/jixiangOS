@@ -76,6 +76,7 @@ import { createStorageService } from './services/storageService';
 import { createBusinessAttachmentService, createPrismaBusinessAttachmentRepository } from './services/businessAttachmentService';
 import { createAssetListService, isAssetListKind } from './services/assetListService';
 import { createAssetCommandService } from './services/assetCommandService';
+import type { AssetFilters } from '../src/types/asset';
 import { createOrderApplicationService } from './services/orderApplicationService';
 import {
   buildOrderCommissionRecords,
@@ -2153,6 +2154,16 @@ app.get('/api/assets/detail/:type/:id', requireAssetReadAccess, async (req: Auth
   res.json(result);
 });
 
+app.get('/api/assets/relationships', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await assetListService.relationships({
+    search: queryParam(req.query.search),
+    status: queryParam(req.query.status),
+    page: Number(queryParam(req.query.page) || 1),
+    pageSize: Number(queryParam(req.query.pageSize) || 10),
+  }, req.currentUser!);
+  res.json(result);
+});
+
 app.get('/api/assets/:kind', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
   const kind = routeParam(req.params.kind);
   if (!isAssetListKind(kind)) {
@@ -2176,6 +2187,7 @@ app.get('/api/assets/:kind', requireAssetReadAccess, async (req: AuthenticatedRe
     search: queryParam(req.query.search),
     platform: queryParam(req.query.platform),
     loginDeviceId: queryParam(req.query.loginDeviceId),
+    bindingStatus: queryParam(req.query.bindingStatus) as AssetFilters['bindingStatus'],
     permissionStatus: queryParam(req.query.permissionStatus),
     riskLevel: queryParam(req.query.riskLevel),
     status: queryParam(req.query.status),
