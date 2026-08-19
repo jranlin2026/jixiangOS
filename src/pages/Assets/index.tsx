@@ -969,8 +969,14 @@ const AssetManagement: React.FC = () => {
       if (saved) await fetchDetail('phone', saved.id);
     }
     if (formState.type === 'account') {
+      const {
+        appleIdentityAccountId: _appleIdentityAccountId,
+        googleIdentityAccountId: _googleIdentityAccountId,
+        identityAccountIds: _identityAccountIds,
+        ...accountValues
+      } = formState.values;
       const input = {
-        ...formState.values,
+        ...accountValues,
         identityAccountIds: [
           formState.values.platform === 'Apple ID' ? '' : formState.values.appleIdentityAccountId,
           formState.values.platform === 'Google账号' ? '' : formState.values.googleIdentityAccountId,

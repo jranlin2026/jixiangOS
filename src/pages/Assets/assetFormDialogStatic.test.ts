@@ -35,6 +35,7 @@ assert.match(source, /renderIdentityAccountSelect\('Apple ID', 'appleIdentityAcc
 assert.match(source, /renderIdentityAccountSelect\('Google账号', 'googleIdentityAccountId'/, '账号表单应支持选择已建档 Google 账号');
 assert.match(source, /renderAccountIdentityCard/, '账号详情应展示身份账号的正向和反向关联');
 assert.match(source, /<PlatformBrandMark/, '互联网账号应使用品牌图标而不是字母占位');
+assert.match(source, /appleIdentityAccountId: _appleIdentityAccountId[\s\S]*?googleIdentityAccountId: _googleIdentityAccountId[\s\S]*?\.\.\.accountValues/, '表单专用的 Apple\/Google 选择字段不应持久化到账号资产');
 assert.match(source, /detailSaveNotice[\s\S]*?资料已更新/, '编辑成功应在详情页内非阻断提示');
 assert.match(assetApiSource, /reveal\/service-password/, '后端模式应通过独立接口查看服务密码');
 assert.match(serverSource, /requireAssetSensitiveViewAccess[\s\S]*?revealPhoneServicePassword/, '服务密码查看接口应校验敏感字段权限');
