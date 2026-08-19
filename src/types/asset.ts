@@ -34,6 +34,30 @@ export type AssetSensitiveField = 'imei' | 'imei1' | 'imei2' | 'phoneNumber' | '
 
 export type AssetImportType = 'devices' | 'phones' | 'accounts';
 
+export interface AssetFilterOption {
+  value: string;
+  label: string;
+}
+
+export interface AssetFilterOptions {
+  deviceCategories: AssetFilterOption[];
+  brands: AssetFilterOption[];
+  communicationTypes: AssetFilterOption[];
+  acquisitionTypes: AssetFilterOption[];
+  statuses: AssetFilterOption[];
+  operators: AssetFilterOption[];
+  attributionLocations: AssetFilterOption[];
+  simForms: AssetFilterOption[];
+  packageNames: AssetFilterOption[];
+  platforms: AssetFilterOption[];
+  controlStatuses: AssetFilterOption[];
+  accountCategories: AssetFilterOption[];
+  departments: AssetFilterOption[];
+  owners: AssetFilterOption[];
+  currentUsers: AssetFilterOption[];
+  loginDevices: AssetFilterOption[];
+}
+
 export interface AssetDevice {
   id: string;
   deviceCode: string;

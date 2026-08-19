@@ -44,11 +44,26 @@ const authenticatedAdmin: AuthenticatedUser = {
   isActive: adminUser.isActive,
   permissions,
 };
+const deviceOnlyRole: Role = {
+  ...adminRole,
+  id: 'role-device-only',
+  name: '设备查看员',
+  code: 'device_reader',
+  permissions: [{ module: PERMISSION_KEYS.ASSETS_DEVICES, actions: ['read'] }],
+};
+const deviceOnlyUser: User = { ...adminUser, id: 'user-device-only', role: deviceOnlyRole.name, roleId: deviceOnlyRole.id };
+const authenticatedDeviceOnly: AuthenticatedUser = {
+  ...authenticatedAdmin,
+  id: deviceOnlyUser.id,
+  role: deviceOnlyRole.name,
+  roleId: deviceOnlyRole.id,
+  permissions: deviceOnlyRole.permissions,
+};
 
 const data: Record<string, unknown> = {
   [STORAGE_KEYS.ASSET_DEVICES]: [
     { id: 'device-a', deviceCode: 'DEV-0001', deviceName: '直播一号机', deviceCategory: '手机', brand: '苹果', model: '15 Pro', communicationType: '双卡', acquisitionType: '购买', departmentId: 'dept-live', ownerId: 'user-admin', currentUserId: 'user-admin', owner: '管理员', currentUser: '管理员', imei1: '111', imei1Masked: '***111', status: '使用中', riskLevel: '低', monthlyCost: 50 },
-    { id: 'device-b', deviceCode: 'DEV-0002', deviceName: '剪辑二号机', deviceCategory: '电脑', brand: '苹果', model: '', communicationType: '无SIM', acquisitionType: '租赁', departmentId: 'dept-edit', ownerId: 'user-admin', owner: '管理员', currentUser: '', imei1: '222', imei1Masked: '***222', status: '库存中', riskLevel: '中', monthlyCost: 30 },
+    { id: 'device-b', deviceCode: 'DEV-0002', deviceName: '剪辑二号机', deviceCategory: '电脑', brand: '苹果', model: '', communicationType: '无SIM', acquisitionType: '租赁', departmentId: 'dept-edit', department: '剪辑部', ownerId: 'user-admin', owner: '管理员', currentUser: '', imei1: '222', imei1Masked: '***222', status: '库存中', riskLevel: '中', monthlyCost: 30 },
   ],
   [STORAGE_KEYS.ASSET_PHONE_NUMBERS]: [
     { id: 'phone-1', owner: '管理员', ownerId: 'user-admin', deviceId: 'device-a', phoneNumber: '13800000000', phoneNumberMasked: '138****0000', operator: '移动', attributionLocation: '福建厦门', simForm: '实体SIM', servicePasswordMasked: '******', status: '使用中', monthlyFee: 38 },
@@ -68,7 +83,7 @@ const service = createAssetListService(
       return { code: 0, data: data[key] ?? [] };
     },
   },
-  async () => ({ roles: [adminRole], users: [adminUser] }),
+  async () => ({ roles: [adminRole, deviceOnlyRole], users: [adminUser, deviceOnlyUser] }),
 );
 
 const first = await service.list('phones', { page: 1, pageSize: 20 }, authenticatedAdmin);
@@ -77,7 +92,7 @@ await service.list('phones', { page: 1, pageSize: 20 }, authenticatedAdmin);
 assert.equal(storageReadCount, 7, '未写入时应复用同一资产快照');
 
 data[STORAGE_KEYS.ASSET_PHONE_NUMBERS] = [
-  { id: 'phone-1', owner: '管理员', ownerId: 'user-admin', deviceId: 'device-b', phoneNumber: '13800000000', phoneNumberMasked: '138****0000', operator: '移动', attributionLocation: '福建厦门', simForm: '实体SIM', servicePasswordMasked: '******', packageName: '企业畅联', contractExpiresAt: '2099-12-31', status: '使用中', monthlyFee: 38 },
+  { id: 'phone-1', owner: '管理员', ownerId: 'user-admin', deviceId: 'device-b', phoneNumber: '13800000000', phoneNumberMasked: '138****0000', operator: '中国移动', attributionLocation: '福建厦门', simForm: '实体SIM', servicePasswordMasked: '******', packageName: '企业畅联', contractExpiresAt: '2099-12-31', status: '使用中', monthlyFee: 38 },
 ];
 service.invalidate();
 
@@ -135,6 +150,12 @@ const filteredPhoneCombination = await service.list('phones', {
   packageName: '企业畅联', contractStatus: 'active', monthlyFeeMin: 30, monthlyFeeMax: 40, page: 1, pageSize: 10,
 }, authenticatedAdmin);
 assert.deepEqual(filteredPhoneCombination.data.items.map((item) => item.id), ['phone-1'], '手机号筛选应同时识别设备、账号与服务密码配置状态');
+const phoneOptions = await service.filterOptions('phones', authenticatedAdmin);
+assert.deepEqual(phoneOptions.data.operators, [{ value: '移动', label: '移动' }], '旧运营商名称应归一为标准筛选项');
+const restrictedDevices = await service.list('devices', { phoneBinding: 'bound', loginDeviceBinding: 'with', page: 1, pageSize: 10 }, authenticatedDeviceOnly);
+assert.equal(restrictedDevices.data.pagination.total, 2, '无关联模块权限时应忽略关系筛选，不得推断隐藏关系');
+assert.equal('phoneNumberCount' in (restrictedDevices.data.items[0] as object), false, '无手机号权限时不得返回关系计数');
+assert.equal('internetAccountCount' in (restrictedDevices.data.items[0] as object), false, '无账号权限时不得返回关系计数');
 const filteredAccountCombination = await service.list('accounts', {
   accountCategory: '直播号', phoneBinding: 'bound', loginDeviceBinding: 'with', identityBinding: 'apple',
   credentialStatus: 'complete', twoFactorStatus: 'configured', page: 1, pageSize: 10,
@@ -216,8 +237,8 @@ assert.deepEqual(deviceOnlyRelationships.data.items[0]?.accounts, []);
         return { code: 0, data: snapshot };
       },
     },
-    async () => ({ roles: [adminRole], users: [adminUser] }),
-  );
+  async () => ({ roles: [adminRole, deviceOnlyRole], users: [adminUser, deviceOnlyUser] }),
+);
 
   const oldRead = concurrentService.list('phones', { page: 1, pageSize: 20 }, authenticatedAdmin);
   await oldReadStarted;

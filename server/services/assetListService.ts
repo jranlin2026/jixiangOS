@@ -4,6 +4,8 @@ import type {
   AssetDashboard,
   AssetDetailBundle,
   AssetFilters,
+  AssetFilterOption,
+  AssetFilterOptions,
   AssetInternetAccount,
   AssetOverviewRelationshipRow,
   AssetMatrixPublishTask,
@@ -55,6 +57,33 @@ function text(value: unknown): string {
   return String(value || '').toLowerCase();
 }
 
+function normalizeOperator(value: unknown): string {
+  const raw = String(value || '').trim();
+  if (raw.includes('移动')) return '移动';
+  if (raw.includes('联通')) return '联通';
+  if (raw.includes('电信')) return '电信';
+  if (raw.includes('广电')) return '广电';
+  return raw || '未知';
+}
+
+function matchesOrganizationFilter(value: Record<string, unknown>, idKey: string, nameKey: string, filterValue?: string): boolean {
+  if (!filterValue) return true;
+  if (filterValue.startsWith('org:')) {
+    const [encodedId = '', encodedName = ''] = filterValue.slice(4).split(':');
+    const id = decodeURIComponent(encodedId);
+    const name = decodeURIComponent(encodedName);
+    return Boolean((id && String(value[idKey] || '') === id) || (name && String(value[nameKey] || '') === name));
+  }
+  return filterValue.startsWith('name:')
+    ? String(value[nameKey] || '') === filterValue.slice(5)
+    : String(value[idKey] || '') === filterValue;
+}
+
+function uniqueOptions(values: Array<AssetFilterOption | undefined>): AssetFilterOption[] {
+  return [...new Map(values.filter((item): item is AssetFilterOption => Boolean(item?.value)).map((item) => [item.value, item])).values()]
+    .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
+}
+
 function matchesSearch(
   row: AssetRow,
   keyword: string,
@@ -87,6 +116,7 @@ function matchesFilters(
   filters: AssetFilters,
   accountById?: Map<string, AssetInternetAccount>,
   deviceById?: Map<string, AssetDevice>,
+  boundPhoneIds?: Set<string>,
 ): boolean {
   if (!matchesSearch(row, text(filters.search).trim(), accountById, deviceById)) return false;
   const value = row as unknown as Record<string, unknown>;
@@ -135,13 +165,13 @@ function matchesFilters(
     const complete = kind === 'devices' && Boolean(value.deviceCategory && value.brand && value.model && readDeviceCommunicationType(value as unknown as AssetDevice));
     if ((filters.profileStatus === 'complete') !== complete) return false;
   }
-  if (filters.operator && (kind !== 'phones' || value.operator !== filters.operator)) return false;
+  if (filters.operator && (kind !== 'phones' || normalizeOperator(value.operator) !== normalizeOperator(filters.operator))) return false;
   if (filters.attributionLocation && (kind !== 'phones' || value.attributionLocation !== filters.attributionLocation)) return false;
   if (filters.simForm && (kind !== 'phones' || value.simForm !== filters.simForm)) return false;
   if (filters.accountCategory && (kind !== 'accounts' || value.accountCategory !== filters.accountCategory)) return false;
-  if (filters.departmentId && value.departmentId !== filters.departmentId) return false;
-  if (filters.ownerId && value.ownerId !== filters.ownerId) return false;
-  if (filters.currentUserId && value.currentUserId !== filters.currentUserId) return false;
+  if (!matchesOrganizationFilter(value, 'departmentId', 'department', filters.departmentId)) return false;
+  if (!matchesOrganizationFilter(value, 'ownerId', 'owner', filters.ownerId)) return false;
+  if (!matchesOrganizationFilter(value, 'currentUserId', 'currentUser', filters.currentUserId)) return false;
   if (filters.userAssignment) {
     const assigned = Boolean(value.currentUserId || value.currentUser);
     if ((filters.userAssignment === 'assigned') !== assigned) return false;
@@ -167,7 +197,7 @@ function matchesFilters(
     if ((filters.loginDeviceBinding === 'with') !== bound) return false;
   }
   if (filters.accountBinding) {
-    const bound = kind === 'phones' && Boolean(accountById && [...accountById.values()].some((account) => account.phoneId === value.id));
+    const bound = kind === 'phones' && Boolean(boundPhoneIds?.has(String(value.id)));
     if ((filters.accountBinding === 'with') !== bound) return false;
   }
   if (filters.identityBinding) {
@@ -246,13 +276,19 @@ export function createAssetListService(
     async list(kind: AssetListKind, filters: AssetFilters, user: AuthenticatedUser) {
       const visible = await loadVisible(user);
       const rows = (Array.isArray(visible[KEY_BY_KIND[kind]]) ? visible[KEY_BY_KIND[kind]] : []) as AssetRow[];
-      const visibleAccounts = hasPermission(user, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read')
+      const canReadDevices = hasPermission(user, PERMISSION_KEYS.ASSETS_DEVICES, 'read');
+      const canReadPhones = hasPermission(user, PERMISSION_KEYS.ASSETS_PHONES, 'read');
+      const canReadAccounts = hasPermission(user, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read');
+      const visibleAccounts = canReadAccounts
         ? (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[]
         : [];
       const accountById = kind === 'accounts' || kind === 'phones' ? new Map(visibleAccounts.map((account) => [account.id, account])) : undefined;
-      const visibleDevices = (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[];
+      const boundPhoneIds = kind === 'phones' && canReadAccounts
+        ? new Set(visibleAccounts.map((account) => account.phoneId).filter((id): id is string => Boolean(id)))
+        : undefined;
+      const visibleDevices = canReadDevices ? (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[] : [];
       const deviceById = kind === 'accounts' ? new Map(visibleDevices.map((device) => [device.id, device])) : undefined;
-      const accountCountByDeviceId = kind === 'devices'
+      const accountCountByDeviceId = kind === 'devices' && canReadAccounts
         ? visibleAccounts.reduce((counts, account) => {
           normalizeAccountLoginDeviceIds(account.loginDeviceIds).forEach((deviceId) => {
             counts.set(deviceId, (counts.get(deviceId) || 0) + 1);
@@ -260,21 +296,44 @@ export function createAssetListService(
           return counts;
         }, new Map<string, number>())
         : undefined;
-      const visiblePhones = (visible[STORAGE_KEYS.ASSET_PHONE_NUMBERS] || []) as AssetPhoneNumber[];
-      const phoneCountByDeviceId = kind === 'devices'
+      const visiblePhones = canReadPhones ? (visible[STORAGE_KEYS.ASSET_PHONE_NUMBERS] || []) as AssetPhoneNumber[] : [];
+      const phoneCountByDeviceId = kind === 'devices' && canReadPhones
         ? visiblePhones.reduce((counts, phone) => {
           if (phone.deviceId) counts.set(phone.deviceId, (counts.get(phone.deviceId) || 0) + 1);
           return counts;
         }, new Map<string, number>())
         : undefined;
       const rowsWithRelationshipCounts = kind === 'devices'
-        ? (rows as AssetDevice[]).map((device) => ({
-          ...device,
-          internetAccountCount: accountCountByDeviceId?.get(device.id) || 0,
-          phoneNumberCount: phoneCountByDeviceId?.get(device.id) || 0,
-        }))
+        ? (rows as AssetDevice[]).map((device) => {
+          const cleanDevice = { ...device } as AssetDevice & { phoneNumberCount?: number };
+          delete cleanDevice.internetAccountCount;
+          delete cleanDevice.phoneNumberCount;
+          return {
+            ...cleanDevice,
+            ...(canReadAccounts ? { internetAccountCount: accountCountByDeviceId?.get(device.id) || 0 } : {}),
+            ...(canReadPhones ? { phoneNumberCount: phoneCountByDeviceId?.get(device.id) || 0 } : {}),
+          };
+        })
         : rows;
-      const filtered = rowsWithRelationshipCounts.filter((row) => matchesFilters(kind, row, filters, accountById, deviceById));
+      const effectiveFilters = { ...filters };
+      if (!canReadPhones) {
+        if (kind === 'devices' || kind === 'accounts') delete effectiveFilters.phoneBinding;
+        if (effectiveFilters.bindingStatus === 'bound-phone' || effectiveFilters.bindingStatus === 'unbound-phone') delete effectiveFilters.bindingStatus;
+      }
+      if (!canReadDevices) {
+        if (kind === 'phones') delete effectiveFilters.deviceBinding;
+        if (kind === 'accounts') {
+          delete effectiveFilters.loginDeviceBinding;
+          delete effectiveFilters.loginDeviceId;
+        }
+        if (effectiveFilters.bindingStatus === 'bound-device' || effectiveFilters.bindingStatus === 'unbound-device'
+          || effectiveFilters.bindingStatus === 'with-login-device' || effectiveFilters.bindingStatus === 'without-login-device') delete effectiveFilters.bindingStatus;
+      }
+      if (!canReadAccounts) {
+        if (kind === 'phones') delete effectiveFilters.accountBinding;
+        if (kind === 'devices') delete effectiveFilters.loginDeviceBinding;
+      }
+      const filtered = rowsWithRelationshipCounts.filter((row) => matchesFilters(kind, row, effectiveFilters, accountById, deviceById, boundPhoneIds));
       const page = Math.max(1, Number(filters.page) || 1);
       const pageSize = Math.min(500, Math.max(1, Number(filters.pageSize) || 20));
       const start = (page - 1) * pageSize;
@@ -287,6 +346,60 @@ export function createAssetListService(
           totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)),
         },
       });
+    },
+    async filterOptions(kind: 'devices' | 'phones' | 'accounts', user: AuthenticatedUser) {
+      const visible = await loadVisible(user);
+      const rows = (visible[KEY_BY_KIND[kind]] || []) as Array<Record<string, unknown>>;
+      const canReadDevices = hasPermission(user, PERMISSION_KEYS.ASSETS_DEVICES, 'read');
+      const toFieldOptions = (field: string, normalize: (value: unknown) => string = (value) => String(value || '').trim()) => uniqueOptions(
+        rows.map((row) => {
+          const value = normalize(row[field]);
+          return value ? { value, label: value } : undefined;
+        }),
+      );
+      const organizationOptions = (idField: string, nameField: string) => uniqueOptions(rows.map((row) => {
+        const id = String(row[idField] || '').trim();
+        const name = String(row[nameField] || '').trim();
+        return id || name ? { value: `org:${encodeURIComponent(id)}:${encodeURIComponent(name)}`, label: name || id } : undefined;
+      }));
+      const empty: AssetFilterOptions = {
+        deviceCategories: [], brands: [], communicationTypes: [], acquisitionTypes: [], statuses: [],
+        operators: [], attributionLocations: [], simForms: [], packageNames: [], platforms: [],
+        controlStatuses: [], accountCategories: [], departments: [], owners: [], currentUsers: [], loginDevices: [],
+      };
+      const options: AssetFilterOptions = {
+        ...empty,
+        statuses: toFieldOptions(kind === 'accounts' ? 'accountStatus' : 'status'),
+        departments: organizationOptions('departmentId', 'department'),
+        owners: organizationOptions('ownerId', 'owner'),
+        currentUsers: organizationOptions('currentUserId', 'currentUser'),
+      };
+      if (kind === 'devices') {
+        options.deviceCategories = toFieldOptions('deviceCategory');
+        options.brands = toFieldOptions('brand');
+        options.communicationTypes = uniqueOptions(rows.map((row) => {
+          const value = readDeviceCommunicationType(row as unknown as AssetDevice);
+          return value ? { value, label: value } : undefined;
+        }));
+        options.acquisitionTypes = toFieldOptions('acquisitionType');
+      } else if (kind === 'phones') {
+        options.operators = toFieldOptions('operator', normalizeOperator);
+        options.attributionLocations = toFieldOptions('attributionLocation');
+        options.simForms = toFieldOptions('simForm');
+        options.packageNames = toFieldOptions('packageName');
+      } else {
+        options.platforms = toFieldOptions('platform');
+        options.controlStatuses = uniqueOptions(rows.map((row) => {
+          const value = readAccountControlStatus(row);
+          return value ? { value, label: value } : undefined;
+        }));
+        options.accountCategories = toFieldOptions('accountCategory');
+        if (canReadDevices) {
+          options.loginDevices = uniqueOptions(((visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[])
+            .map((device) => ({ value: device.id, label: `${device.deviceCode} / ${device.deviceName}` })));
+        }
+      }
+      return success(options);
     },
     async detail(type: AssetType, id: string, user: AuthenticatedUser) {
       const visible = await loadVisible(user);

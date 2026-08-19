@@ -4,6 +4,8 @@
   AssetDevice,
   AssetDeviceInput,
   AssetFilters,
+  AssetFilterOption,
+  AssetFilterOptions,
   AssetImportFailedRow,
   AssetImportResult,
   AssetImportType,
@@ -919,6 +921,29 @@ function getPhoneDevice(phone?: AssetPhoneNumber): AssetDevice | undefined {
   return phone ? getDevice(phone.deviceId) : undefined;
 }
 
+function normalizeLocalOperator(value: unknown): string {
+  const raw = String(value || '').trim();
+  if (raw.includes('移动')) return '移动';
+  if (raw.includes('联通')) return '联通';
+  if (raw.includes('电信')) return '电信';
+  if (raw.includes('广电')) return '广电';
+  return raw || '未知';
+}
+
+function matchesLocalOrganization(id: string | undefined, name: string | undefined, filterValue?: string): boolean {
+  if (!filterValue) return true;
+  if (filterValue.startsWith('org:')) {
+    const [encodedId = '', encodedName = ''] = filterValue.slice(4).split(':');
+    return Boolean((encodedId && id === decodeURIComponent(encodedId)) || (encodedName && name === decodeURIComponent(encodedName)));
+  }
+  return filterValue.startsWith('name:') ? name === filterValue.slice(5) : id === filterValue;
+}
+
+function uniqueLocalOptions(values: Array<AssetFilterOption | undefined>): AssetFilterOption[] {
+  return [...new Map(values.filter((item): item is AssetFilterOption => Boolean(item?.value)).map((item) => [item.value, item])).values()]
+    .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
+}
+
 function filterDevices(rows: AssetDevice[], filters?: AssetFilters): AssetDevice[] {
   const keyword = filters?.search?.trim().toLowerCase();
   return rows.filter((row) => {
@@ -952,9 +977,9 @@ function filterDevices(rows: AssetDevice[], filters?: AssetFilters): AssetDevice
       && (!filters?.brand || row.brand === filters.brand)
       && (!filters?.communicationType || communicationType === filters.communicationType)
       && (!filters?.acquisitionType || row.acquisitionType === filters.acquisitionType)
-      && (!filters?.departmentId || row.departmentId === filters.departmentId)
-      && (!filters?.ownerId || row.ownerId === filters.ownerId)
-      && (!filters?.currentUserId || row.currentUserId === filters.currentUserId)
+      && matchesLocalOrganization(row.departmentId, row.department, filters?.departmentId)
+      && matchesLocalOrganization(row.ownerId, row.owner, filters?.ownerId)
+      && matchesLocalOrganization(row.currentUserId, row.currentUser, filters?.currentUserId)
       && (!filters?.userAssignment || (filters.userAssignment === 'assigned') === assigned)
       && (!filters?.loginDeviceBinding || (filters.loginDeviceBinding === 'with') === Number(row.internetAccountCount || 0) > 0)
       && (!filters?.phoneBinding || (filters.phoneBinding === 'bound') === Number((row as AssetDevice & { phoneNumberCount?: number }).phoneNumberCount || 0) > 0);
@@ -963,6 +988,9 @@ function filterDevices(rows: AssetDevice[], filters?: AssetFilters): AssetDevice
 
 function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPhoneNumber[] {
   const keyword = filters?.search?.trim().toLowerCase();
+  const boundPhoneIds = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS)
+    ? new Set(visibleAccounts().map((account) => account.phoneId).filter((id): id is string => Boolean(id)))
+    : new Set<string>();
   return rows.filter((row) => {
     const device = getDevice(row.deviceId);
     const matchesKeyword = !keyword || [
@@ -988,8 +1016,7 @@ function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPh
       || (filters.bindingStatus === 'bound-device' && Boolean(row.deviceId))
       || (filters.bindingStatus === 'unbound-device' && !row.deviceId);
     const deviceBound = Boolean(row.deviceId);
-    const accountBound = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS)
-      && visibleAccounts().some((account) => account.phoneId === row.id);
+    const accountBound = boundPhoneIds.has(row.id);
     const assigned = Boolean(row.currentUserId || row.currentUser);
     const servicePasswordConfigured = Boolean(row.servicePassword || row.servicePasswordMasked);
     const expired = Boolean(row.contractExpiresAt && new Date(row.contractExpiresAt).getTime() < Date.now());
@@ -998,12 +1025,12 @@ function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPh
       || (filters.contractStatus === 'expired' && expired)
       || (filters.contractStatus === 'active' && Boolean(row.contractExpiresAt) && !expired);
     return matchesKeyword && matchesStatus && matchesBinding
-      && (!filters?.operator || row.operator === filters.operator)
+      && (!filters?.operator || normalizeLocalOperator(row.operator) === normalizeLocalOperator(filters.operator))
       && (!filters?.attributionLocation || row.attributionLocation === filters.attributionLocation)
       && (!filters?.simForm || row.simForm === filters.simForm)
-      && (!filters?.departmentId || row.departmentId === filters.departmentId)
-      && (!filters?.ownerId || row.ownerId === filters.ownerId)
-      && (!filters?.currentUserId || row.currentUserId === filters.currentUserId)
+      && matchesLocalOrganization(row.departmentId, row.department, filters?.departmentId)
+      && matchesLocalOrganization(row.ownerId, row.owner, filters?.ownerId)
+      && matchesLocalOrganization(row.currentUserId, row.currentUser, filters?.currentUserId)
       && (!filters?.userAssignment || (filters.userAssignment === 'assigned') === assigned)
       && (!filters?.deviceBinding || (filters.deviceBinding === 'bound') === deviceBound)
       && (!filters?.accountBinding || (filters.accountBinding === 'with') === accountBound)
@@ -1078,9 +1105,9 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
     const twoFactorConfigured = Boolean(row.twoFactorMethod?.trim());
     return matchesKeyword && matchesPlatform && matchesLoginDevice && matchesPermission && matchesRisk && matchesStatus && matchesBinding
       && (!filters?.accountCategory || row.accountCategory === filters.accountCategory)
-      && (!filters?.departmentId || row.departmentId === filters.departmentId)
-      && (!filters?.ownerId || row.ownerId === filters.ownerId)
-      && (!filters?.currentUserId || row.currentUserId === filters.currentUserId)
+      && matchesLocalOrganization(row.departmentId, row.department, filters?.departmentId)
+      && matchesLocalOrganization(row.ownerId, row.owner, filters?.ownerId)
+      && matchesLocalOrganization(row.currentUserId, row.currentUser, filters?.currentUserId)
       && (!filters?.userAssignment || (filters.userAssignment === 'assigned') === assigned)
       && (!filters?.phoneBinding || (filters.phoneBinding === 'bound') === phoneBound)
       && (!filters?.loginDeviceBinding || (filters.loginDeviceBinding === 'with') === (loginDeviceIds.length > 0))
@@ -1287,11 +1314,14 @@ async function fetchDevices(filters?: AssetFilters): Promise<ApiResponse<Paginat
     if (phone.deviceId) counts.set(phone.deviceId, (counts.get(phone.deviceId) || 0) + 1);
     return counts;
   }, new Map<string, number>());
+  const effectiveFilters = { ...filters };
+  if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS)) delete effectiveFilters.loginDeviceBinding;
+  if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES)) delete effectiveFilters.phoneBinding;
   const rows = filterDevices(visibleDevices().map((device) => ({
     ...device,
-    internetAccountCount: accountCountByDeviceId.get(device.id) || 0,
-    phoneNumberCount: phoneCountByDeviceId.get(device.id) || 0,
-  })), filters);
+    ...(canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS) ? { internetAccountCount: accountCountByDeviceId.get(device.id) || 0 } : {}),
+    ...(canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES) ? { phoneNumberCount: phoneCountByDeviceId.get(device.id) || 0 } : {}),
+  })), effectiveFilters);
   return createSuccessResponse(paginate(rows, filters));
 }
 
@@ -1447,7 +1477,13 @@ async function fetchPhoneNumbers(filters?: AssetFilters): Promise<ApiResponse<Pa
   if (shouldUseBackendApi()) return backendAssetList<AssetPhoneNumber>('phones', filters);
   ensureInit();
   await delay(120);
-  return createSuccessResponse(paginate(filterPhones(visiblePhones(), filters), filters));
+  const effectiveFilters = { ...filters };
+  if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES)) {
+    delete effectiveFilters.deviceBinding;
+    if (effectiveFilters.bindingStatus === 'bound-device' || effectiveFilters.bindingStatus === 'unbound-device') delete effectiveFilters.bindingStatus;
+  }
+  if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS)) delete effectiveFilters.accountBinding;
+  return createSuccessResponse(paginate(filterPhones(visiblePhones(), effectiveFilters), effectiveFilters));
 }
 
 function assertPhoneBinding(input: Partial<AssetPhoneNumberInput>, excludeId?: string): void {
@@ -1604,7 +1640,68 @@ async function fetchInternetAccounts(filters?: AssetFilters): Promise<ApiRespons
   if (shouldUseBackendApi()) return backendAssetList<AssetInternetAccount>('accounts', filters);
   ensureInit();
   await delay(120);
-  return createSuccessResponse(paginate(filterAccounts(visibleAccounts(), filters), filters));
+  const effectiveFilters = { ...filters };
+  if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES)) {
+    delete effectiveFilters.phoneBinding;
+    if (effectiveFilters.bindingStatus === 'bound-phone' || effectiveFilters.bindingStatus === 'unbound-phone') delete effectiveFilters.bindingStatus;
+  }
+  if (!canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES)) {
+    delete effectiveFilters.loginDeviceBinding;
+    delete effectiveFilters.loginDeviceId;
+    if (effectiveFilters.bindingStatus === 'with-login-device' || effectiveFilters.bindingStatus === 'without-login-device') delete effectiveFilters.bindingStatus;
+  }
+  return createSuccessResponse(paginate(filterAccounts(visibleAccounts(), effectiveFilters), effectiveFilters));
+}
+
+async function fetchAssetFilterOptions(kind: 'devices' | 'phones' | 'accounts'): Promise<ApiResponse<AssetFilterOptions>> {
+  if (shouldUseBackendApi()) return backendRequest<AssetFilterOptions>(`/assets/filter-options/${kind}`);
+  ensureInit();
+  await delay(60);
+  const rows = kind === 'devices' ? visibleDevices() : kind === 'phones' ? visiblePhones() : visibleAccounts();
+  const fieldOptions = (field: string, normalize: (value: unknown) => string = (value) => String(value || '').trim()) => uniqueLocalOptions(
+    rows.map((row) => {
+      const value = normalize((row as unknown as Record<string, unknown>)[field]);
+      return value ? { value, label: value } : undefined;
+    }),
+  );
+  const organizationOptions = (idField: string, nameField: string) => uniqueLocalOptions(rows.map((row) => {
+    const value = row as unknown as Record<string, unknown>;
+    const id = String(value[idField] || '').trim();
+    const name = String(value[nameField] || '').trim();
+    return id || name ? { value: `org:${encodeURIComponent(id)}:${encodeURIComponent(name)}`, label: name || id } : undefined;
+  }));
+  const options: AssetFilterOptions = {
+    deviceCategories: [], brands: [], communicationTypes: [], acquisitionTypes: [], statuses: [],
+    operators: [], attributionLocations: [], simForms: [], packageNames: [], platforms: [],
+    controlStatuses: [], accountCategories: [], departments: organizationOptions('departmentId', 'department'),
+    owners: organizationOptions('ownerId', 'owner'), currentUsers: organizationOptions('currentUserId', 'currentUser'), loginDevices: [],
+  };
+  options.statuses = fieldOptions(kind === 'accounts' ? 'accountStatus' : 'status');
+  if (kind === 'devices') {
+    options.deviceCategories = fieldOptions('deviceCategory');
+    options.brands = fieldOptions('brand');
+    options.communicationTypes = uniqueLocalOptions((rows as AssetDevice[]).map((device) => {
+      const value = readDeviceCommunicationType(device);
+      return value ? { value, label: value } : undefined;
+    }));
+    options.acquisitionTypes = fieldOptions('acquisitionType');
+  } else if (kind === 'phones') {
+    options.operators = fieldOptions('operator', normalizeLocalOperator);
+    options.attributionLocations = fieldOptions('attributionLocation');
+    options.simForms = fieldOptions('simForm');
+    options.packageNames = fieldOptions('packageName');
+  } else {
+    options.platforms = fieldOptions('platform');
+    options.controlStatuses = uniqueLocalOptions((rows as AssetInternetAccount[]).map((account) => {
+      const value = readAccountControlStatus(account);
+      return value ? { value, label: value } : undefined;
+    }));
+    options.accountCategories = fieldOptions('accountCategory');
+    if (canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES)) {
+      options.loginDevices = uniqueLocalOptions(visibleDevices().map((device) => ({ value: device.id, label: `${device.deviceCode} / ${device.deviceName}` })));
+    }
+  }
+  return createSuccessResponse(options);
 }
 
 function assertAccountBinding(input: Partial<AssetInternetAccountInput>, excludeId?: string): void {
@@ -2374,6 +2471,7 @@ export const assetApi = {
   updatePhoneNumber,
   deletePhoneNumber,
   fetchInternetAccounts,
+  fetchAssetFilterOptions,
   createInternetAccount,
   updateInternetAccount,
   deleteInternetAccount,

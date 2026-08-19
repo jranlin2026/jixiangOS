@@ -2164,6 +2164,24 @@ app.get('/api/assets/relationships', requireAssetReadAccess, async (req: Authent
   res.json(result);
 });
 
+app.get('/api/assets/filter-options/:kind', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const kind = routeParam(req.params.kind);
+  if (kind !== 'devices' && kind !== 'phones' && kind !== 'accounts') {
+    res.status(404).json({ code: 404, data: null, message: 'Unknown asset filter options' });
+    return;
+  }
+  const permissionByKind = {
+    devices: PERMISSION_KEYS.ASSETS_DEVICES,
+    phones: PERMISSION_KEYS.ASSETS_PHONES,
+    accounts: PERMISSION_KEYS.ASSETS_ACCOUNTS,
+  } as const;
+  if (!hasPermission(req.currentUser!, permissionByKind[kind], 'read')) {
+    res.status(403).json(failure('无权查看该资产筛选项', 403));
+    return;
+  }
+  res.json(await assetListService.filterOptions(kind, req.currentUser!));
+});
+
 app.get('/api/assets/:kind', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
   const kind = routeParam(req.params.kind);
   if (!isAssetListKind(kind)) {
