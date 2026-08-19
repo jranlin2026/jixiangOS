@@ -39,6 +39,7 @@ assert.match(source, /renderIdentityAccountSelect\('Google账号', 'googleIdenti
 assert.doesNotMatch(phoneFields, /\? renderTextField\([\s\S]*?: <Box \/>/, '隐藏的账号安全字段不应继续占用表单栅格');
 assert.match(source, /togglePasswordVisibility/, '密码输入应支持切换明文与密文');
 assert.match(source, /InputAdornment position="end"[\s\S]*?VisibilityOffIcon/, '密码输入框应在末尾显示可见性按钮');
+assert.match(source, /visiblePasswordFields\[field\] \? <VisibilityIcon[\s\S]*?: <VisibilityOffIcon/, '明文状态应显示睁眼，密文状态应显示闭眼');
 assert.match(source, /servicePassword[\s\S]*?passwordEndAdornment\('servicePassword'\)/, '手机号服务密码也应支持明文校对');
 assert.match(source, /renderAccountIdentityCard/, '账号详情应展示身份账号的正向和反向关联');
 assert.match(source, /<PlatformBrandMark/, '互联网账号应使用品牌图标而不是字母占位');

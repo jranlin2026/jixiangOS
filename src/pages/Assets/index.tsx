@@ -2584,7 +2584,7 @@ const AssetManagement: React.FC = () => {
           onClick={() => togglePasswordVisibility(field)}
           onMouseDown={(event) => event.preventDefault()}
         >
-          {visiblePasswordFields[field] ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+          {visiblePasswordFields[field] ? <VisibilityIcon fontSize="small" /> : <VisibilityOffIcon fontSize="small" />}
         </IconButton>
       </Tooltip>
     </InputAdornment>
