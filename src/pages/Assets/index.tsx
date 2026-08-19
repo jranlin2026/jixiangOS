@@ -14,6 +14,7 @@ import {
   FormControl,
   FormControlLabel,
   IconButton,
+  InputAdornment,
   InputLabel,
   ListItemText,
   MenuItem,
@@ -40,6 +41,7 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
@@ -436,6 +438,7 @@ const AssetManagement: React.FC = () => {
   const [lookupUsers, setLookupUsers] = useState<User[]>([]);
   const [lookupDepartments, setLookupDepartments] = useState<Department[]>([]);
   const [formState, setFormState] = useState<AssetFormState>(emptyForm);
+  const [visiblePasswordFields, setVisiblePasswordFields] = useState<Record<string, boolean>>({});
   const [importState, setImportState] = useState<AssetImportState>(emptyImportState);
   const [matrixForm, setMatrixForm] = useState<MatrixPublishFormState>(emptyMatrixPublishForm);
   const [deleteTarget, setDeleteTarget] = useState<AssetDeleteTarget>(null);
@@ -900,6 +903,7 @@ const AssetManagement: React.FC = () => {
       showFeedback('当前账号没有编辑资产权限');
       return;
     }
+    setVisiblePasswordFields({});
     setFormState({ open: true, type, mode: 'create', values: createAssetFormDefaults(type), validationAttempted: false });
   };
 
@@ -926,6 +930,7 @@ const AssetManagement: React.FC = () => {
       showFeedback('当前账号没有编辑资产权限');
       return;
     }
+    setVisiblePasswordFields({});
     const values = Object.entries(item).reduce<Record<string, string>>((acc, [key, value]) => {
       acc[key] = String(value ?? '');
       return acc;
@@ -956,7 +961,10 @@ const AssetManagement: React.FC = () => {
     setFormState({ open: true, type, mode: 'edit', id: item.id, values: normalizeAssetFormValues(values), validationAttempted: false });
   };
 
-  const closeForm = () => setFormState(emptyForm);
+  const closeForm = () => {
+    setVisiblePasswordFields({});
+    setFormState(emptyForm);
+  };
 
   const submitForm = async () => {
     if (!canEditAssetType(formState.type)) {
@@ -2562,21 +2570,46 @@ const AssetManagement: React.FC = () => {
     );
   };
 
-  const renderTextField = (name: string, label: string, props: { required?: boolean; type?: string; multiline?: boolean; helperText?: string } = {}) => (
+  const togglePasswordVisibility = (field: string) => {
+    setVisiblePasswordFields((current) => ({ ...current, [field]: !current[field] }));
+  };
+
+  const passwordEndAdornment = (field: string) => (
+    <InputAdornment position="end">
+      <Tooltip title={visiblePasswordFields[field] ? '隐藏密码' : '显示密码'}>
+        <IconButton
+          edge="end"
+          size="small"
+          aria-label={visiblePasswordFields[field] ? '隐藏密码' : '显示密码'}
+          onClick={() => togglePasswordVisibility(field)}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          {visiblePasswordFields[field] ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+        </IconButton>
+      </Tooltip>
+    </InputAdornment>
+  );
+
+  const renderTextField = (name: string, label: string, props: { required?: boolean; type?: string; multiline?: boolean; helperText?: string } = {}) => {
+    const isPassword = props.type === 'password';
+    return (
     <TextField
       size="small"
       label={label}
       value={formState.values[name] || ''}
       onChange={(event) => updateFormValue(name, event.target.value)}
       required={props.required}
-      type={props.type}
+      type={isPassword && visiblePasswordFields[name] ? 'text' : props.type}
       multiline={props.multiline}
       minRows={props.multiline ? 2 : undefined}
       helperText={props.helperText}
+      autoComplete={isPassword ? 'new-password' : undefined}
+      InputProps={isPassword ? { endAdornment: passwordEndAdornment(name) } : undefined}
       InputLabelProps={props.type === 'date' ? { shrink: true } : undefined}
       fullWidth
     />
-  );
+    );
+  };
 
   const renderSelectField = (name: string, label: string, options: string[], props: { required?: boolean } = {}) => (
     <FormControl size="small" fullWidth required={props.required}>
@@ -2834,9 +2867,10 @@ const AssetManagement: React.FC = () => {
             label={formState.mode === 'edit' ? '新服务密码（留空不修改）' : '服务密码'}
             value={formState.values.servicePassword || ''}
             onChange={(event) => updateFormValue('servicePassword', event.target.value)}
-            type="password"
+            type={visiblePasswordFields.servicePassword ? 'text' : 'password'}
             autoComplete="new-password"
             disabled={formState.values.clearServicePassword === 'true'}
+            InputProps={{ endAdornment: passwordEndAdornment('servicePassword') }}
             fullWidth
           />
           {formState.mode === 'edit' && formState.values.servicePasswordMasked ? (
@@ -2930,16 +2964,27 @@ const AssetManagement: React.FC = () => {
           type: 'password',
           required: formState.mode === 'create',
           helperText: formState.mode === 'edit' ? '留空表示不修改原登录密码' : '加密保存，仅授权人员可查看',
-        }) : <Box />}
-        <FormControlLabel
-          control={<Checkbox checked={formState.values.requiresPaymentPassword === 'true'} onChange={(event) => updateFormValue('requiresPaymentPassword', event.target.checked ? 'true' : 'false')} />}
-          label="该账号涉及支付，需要保存支付密码"
-        />
-        {formState.values.requiresPaymentPassword === 'true' ? renderTextField('paymentPassword', '支付密码', {
-          type: 'password',
-          required: formState.mode === 'create',
-          helperText: formState.mode === 'edit' ? '留空表示不修改原支付密码' : '与登录密码独立加密保存',
-        }) : <Box />}
+        }) : null}
+        <Box
+          sx={{
+            gridColumn: '1 / -1',
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+            alignItems: 'start',
+            gap: 2,
+          }}
+        >
+          <FormControlLabel
+            sx={{ minHeight: 40, m: 0 }}
+            control={<Checkbox checked={formState.values.requiresPaymentPassword === 'true'} onChange={(event) => updateFormValue('requiresPaymentPassword', event.target.checked ? 'true' : 'false')} />}
+            label="该账号涉及支付，需要保存支付密码"
+          />
+          {formState.values.requiresPaymentPassword === 'true' ? renderTextField('paymentPassword', '支付密码', {
+            type: 'password',
+            required: formState.mode === 'create',
+            helperText: formState.mode === 'edit' ? '留空表示不修改原支付密码' : '与登录密码独立加密保存',
+          }) : null}
+        </Box>
       <FormControl size="small" fullWidth>
         <InputLabel>绑定手机号</InputLabel>
         <Select
@@ -2958,13 +3003,13 @@ const AssetManagement: React.FC = () => {
           })}
         </Select>
       </FormControl>
+        {renderTextField('boundEmail', '绑定邮箱')}
         {!['Apple ID', 'Google账号'].includes(formState.values.platform)
           ? renderIdentityAccountSelect('Apple ID', 'appleIdentityAccountId', '绑定 Apple ID')
-          : <Box />}
+          : null}
         {!['Apple ID', 'Google账号'].includes(formState.values.platform)
           ? renderIdentityAccountSelect('Google账号', 'googleIdentityAccountId', '绑定 Google 账号')
-          : <Box />}
-        {renderTextField('boundEmail', '绑定邮箱')}
+          : null}
         {renderTextField('twoFactorMethod', '二次验证方式')}
       </BusinessFormSection>
       <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.account[2].title} summary={sectionSummary(['ownerSubject', 'department', 'owner', 'currentUser'], ASSET_FORM_SECTIONS.account[2].summary)} errorCount={sectionErrorCount(['ownerSubject'])}>

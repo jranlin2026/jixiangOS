@@ -36,6 +36,10 @@ assert.doesNotMatch(source, /label: '手机号', value: renderSensitiveInline/, 
 assert.doesNotMatch(source, /label: '登录账号', value: renderSensitiveInline/, '登录账号不应继续依赖敏感字段查看按钮');
 assert.match(source, /renderIdentityAccountSelect\('Apple ID', 'appleIdentityAccountId'/, '账号表单应支持选择已建档 Apple ID');
 assert.match(source, /renderIdentityAccountSelect\('Google账号', 'googleIdentityAccountId'/, '账号表单应支持选择已建档 Google 账号');
+assert.doesNotMatch(phoneFields, /\? renderTextField\([\s\S]*?: <Box \/>/, '隐藏的账号安全字段不应继续占用表单栅格');
+assert.match(source, /togglePasswordVisibility/, '密码输入应支持切换明文与密文');
+assert.match(source, /InputAdornment position="end"[\s\S]*?VisibilityOffIcon/, '密码输入框应在末尾显示可见性按钮');
+assert.match(source, /servicePassword[\s\S]*?passwordEndAdornment\('servicePassword'\)/, '手机号服务密码也应支持明文校对');
 assert.match(source, /renderAccountIdentityCard/, '账号详情应展示身份账号的正向和反向关联');
 assert.match(source, /<PlatformBrandMark/, '互联网账号应使用品牌图标而不是字母占位');
 assert.match(source, /appleIdentityAccountId: _appleIdentityAccountId[\s\S]*?googleIdentityAccountId: _googleIdentityAccountId[\s\S]*?\.\.\.accountValues/, '表单专用的 Apple\/Google 选择字段不应持久化到账号资产');
