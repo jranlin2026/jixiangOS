@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { AssetInternetAccount, AssetPhoneNumber } from '../../src/types/asset';
 import type { Role } from '../../src/types/role';
@@ -117,6 +118,18 @@ const accountDetail = await service.detail('account', 'account-business', authen
 assert.equal(accountDetail.data?.account?.id, 'account-business', '生产模式应能读取服务端实时账号详情');
 assert.deepEqual(accountDetail.data?.relatedDevices?.map((device) => device.id), ['device-b']);
 assert.deepEqual(accountDetail.data?.relatedAccounts?.map((account) => account.id).sort(), ['account-apple', 'account-business']);
+const deviceOnlyReader: AuthenticatedUser = {
+  ...authenticatedAdmin,
+  permissions: [
+    { module: PERMISSION_KEYS.ASSETS_DEVICES, actions: ['read'] },
+  ],
+};
+const deviceOnlyDetail = await service.detail('device', 'device-b', deviceOnlyReader);
+assert.equal(deviceOnlyDetail.data?.device?.id, 'device-b');
+assert.deepEqual(deviceOnlyDetail.data?.relatedPhones, [], '仅设备权限不应泄露关联手机号');
+assert.deepEqual(deviceOnlyDetail.data?.relatedAccounts, [], '仅设备权限不应泄露关联互联网账号');
+assert.deepEqual(deviceOnlyDetail.data?.risks, [], '无风险权限时不应返回风险');
+assert.deepEqual(deviceOnlyDetail.data?.logs, [], '无日志权限时不应返回日志');
 
 {
   let releaseOldRead!: () => void;

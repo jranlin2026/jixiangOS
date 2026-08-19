@@ -179,11 +179,21 @@ export function createAssetListService(
     },
     async detail(type: AssetType, id: string, user: AuthenticatedUser) {
       const visible = await loadVisible(user);
-      const devices = (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[];
-      const phones = (visible[STORAGE_KEYS.ASSET_PHONE_NUMBERS] || []) as AssetPhoneNumber[];
-      const accounts = (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[];
-      const risks = (visible[STORAGE_KEYS.ASSET_RISKS] || []) as AssetRisk[];
-      const logs = (visible[STORAGE_KEYS.ASSET_OPERATION_LOGS] || []) as AssetOperationLog[];
+      const devices = hasPermission(user, PERMISSION_KEYS.ASSETS_DEVICES, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[]
+        : [];
+      const phones = hasPermission(user, PERMISSION_KEYS.ASSETS_PHONES, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_PHONE_NUMBERS] || []) as AssetPhoneNumber[]
+        : [];
+      const accounts = hasPermission(user, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[]
+        : [];
+      const risks = hasPermission(user, PERMISSION_KEYS.ASSETS_RISKS, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_RISKS] || []) as AssetRisk[]
+        : [];
+      const logs = hasPermission(user, PERMISSION_KEYS.ASSETS_LOGS, 'read')
+        ? (visible[STORAGE_KEYS.ASSET_OPERATION_LOGS] || []) as AssetOperationLog[]
+        : [];
       let bundle: AssetDetailBundle | null = null;
 
       if (type === 'device') {

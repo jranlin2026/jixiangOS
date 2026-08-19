@@ -143,13 +143,13 @@ function canRevealLocalAssetCredential(): boolean {
   return hasPermission(toAuthenticatedUser(user, roles), PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW, 'read');
 }
 
-function canReadLocalAssetAccounts(): boolean {
+function canReadLocalAssetModule(permissionKey: string): boolean {
   const session = getStorageData<AuthSession>(AUTH_SESSION_STORAGE_KEY);
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
   const user = users.find((item) => item.id === session?.userId);
   if (!user) return false;
   const { roles } = ensureOrganizationConfigData();
-  return hasPermission(toAuthenticatedUser(user, roles), PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read');
+  return hasPermission(toAuthenticatedUser(user, roles), permissionKey, 'read');
 }
 
 function risks(): AssetRisk[] {
@@ -1110,7 +1110,7 @@ async function fetchDevices(filters?: AssetFilters): Promise<ApiResponse<Paginat
   if (shouldUseBackendApi()) return backendAssetList<AssetDevice>('devices', filters);
   ensureInit();
   await delay(120);
-  const visibleAccountRows = canReadLocalAssetAccounts() ? visibleAccounts() : [];
+  const visibleAccountRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS) ? visibleAccounts() : [];
   const accountCountByDeviceId = visibleAccountRows.reduce((counts, account) => {
     normalizeAccountLoginDeviceIds(account.loginDeviceIds).forEach((deviceId) => {
       counts.set(deviceId, (counts.get(deviceId) || 0) + 1);
@@ -1796,9 +1796,13 @@ async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<Ass
   ensureInit();
   await delay(120);
   const scope = getCurrentDataVisibilityScope('assets');
-  const visibleDeviceRows = visibleDevices(scope);
-  const visiblePhoneRows = visiblePhones(scope);
-  const visibleAccountRows = visibleAccounts(scope);
+  const visibleDeviceRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_DEVICES) ? visibleDevices(scope) : [];
+  const visiblePhoneRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES) ? visiblePhones(scope) : [];
+  const visibleAccountRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS) ? visibleAccounts(scope) : [];
+  const canReadRisks = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_RISKS);
+  const canReadLogs = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_LOGS);
+  const readDetailRisks = (ids: string[]) => canReadRisks ? detailRisks(ids) : [];
+  const readDetailLogs = (ids: string[]) => canReadLogs ? detailLogs(ids) : [];
   if (type === 'device') {
     const device = visibleDeviceRows.find((item) => item.id === id);
     if (!device) return createSuccessResponse(null);
@@ -1810,14 +1814,14 @@ async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<Ass
       device,
       relatedPhones,
       relatedAccounts,
-      risks: detailRisks(detailAssetIds),
-      logs: detailLogs(detailAssetIds),
+      risks: readDetailRisks(detailAssetIds),
+      logs: readDetailLogs(detailAssetIds),
     });
   }
   if (type === 'phone') {
     const phone = visiblePhoneRows.find((item) => item.id === id);
     if (!phone) return createSuccessResponse(null);
-    const relatedDevice = getDevice(phone.deviceId);
+    const relatedDevice = visibleDeviceRows.find((device) => device.id === phone.deviceId);
     const relatedAccounts = relatedAccountsForPhone(id).filter((account) => visibleAccountRows.some((item) => item.id === account.id));
     const detailAssetIds = [relatedDevice?.id || '', phone.id, ...relatedAccounts.map((account) => account.id)];
     return createSuccessResponse({
@@ -1826,13 +1830,13 @@ async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<Ass
       relatedDevice,
       relatedPhones: [phone],
       relatedAccounts,
-      risks: detailRisks(detailAssetIds),
-      logs: detailLogs(detailAssetIds),
+      risks: readDetailRisks(detailAssetIds),
+      logs: readDetailLogs(detailAssetIds),
     });
   }
   const account = visibleAccountRows.find((item) => item.id === id);
   if (!account) return createSuccessResponse(null);
-  const phone = getPhone(account.phoneId);
+  const phone = visiblePhoneRows.find((item) => item.id === account.phoneId);
   const visibleDeviceIds = new Set(visibleDeviceRows.map((device) => device.id));
   const relatedDevices = normalizeAccountLoginDeviceIds(account.loginDeviceIds)
     .filter((deviceId) => visibleDeviceIds.has(deviceId))
@@ -1852,8 +1856,8 @@ async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<Ass
     relatedDevices,
     relatedPhones: phone ? [phone] : [],
     relatedAccounts,
-    risks: detailRisks(detailAssetIds),
-    logs: detailLogs(detailAssetIds),
+    risks: readDetailRisks(detailAssetIds),
+    logs: readDetailLogs(detailAssetIds),
   });
 }
 
