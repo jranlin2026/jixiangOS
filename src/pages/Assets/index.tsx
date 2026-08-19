@@ -2726,6 +2726,45 @@ const AssetManagement: React.FC = () => {
     </>
   );
 
+  const phoneSlotMenuProps = {
+    PaperProps: {
+      sx: {
+        mt: 0.5,
+        border: `1px solid ${shell.line}`,
+        borderRadius: 2,
+        boxShadow: 'none',
+      },
+    },
+    MenuListProps: { sx: { py: 0.5 } },
+  };
+
+  const renderPhoneSlotImeiOption = (slot: '卡槽1' | '卡槽2') => {
+    const imeiIndex = slot === '卡槽2' ? 2 : 1;
+    const device = deviceById.get(formState.values.deviceId);
+    const imei = device ? displayDeviceImei(device, imeiIndex) : '';
+    return (
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: '64px 72px minmax(0, 1fr)',
+          alignItems: 'center',
+          width: '100%',
+          minWidth: 0,
+          columnGap: 1,
+        }}
+      >
+        <Typography component="span" sx={{ fontWeight: 750 }}>{slot}</Typography>
+        <Typography component="span" sx={{ color: shell.muted }}>{`IMEI ${imeiIndex}`}</Typography>
+        <Typography
+          component="span"
+          sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+        >
+          {imei || '未录入'}
+        </Typography>
+      </Box>
+    );
+  };
+
   const renderPhoneFields = () => (
     <>
       <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.phone[0].title} summary={sectionSummary(['phoneNumber', 'simForm', 'iccid', 'imsi'], ASSET_FORM_SECTIONS.phone[0].summary)} errorCount={sectionErrorCount(['phoneNumber', 'simForm']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
@@ -2766,10 +2805,11 @@ const AssetManagement: React.FC = () => {
           label="SIM卡槽"
           value={phoneSlotOptionsForDevice(formState.values.deviceId).includes(formState.values.slotType) ? formState.values.slotType : ''}
           onChange={(event) => updateFormValue('slotType', event.target.value)}
-          renderValue={(selected) => formatPhoneSlotImeiLabel(selected as '卡槽1' | '卡槽2', deviceById.get(formState.values.deviceId))}
+          MenuProps={phoneSlotMenuProps}
+          renderValue={(selected) => renderPhoneSlotImeiOption(selected as '卡槽1' | '卡槽2')}
         >
           {phoneSlotOptionsForDevice(formState.values.deviceId).map((option) => (
-            <MenuItem key={option} value={option}>{formatPhoneSlotImeiLabel(option as '卡槽1' | '卡槽2', deviceById.get(formState.values.deviceId))}</MenuItem>
+            <MenuItem key={option} value={option}>{renderPhoneSlotImeiOption(option as '卡槽1' | '卡槽2')}</MenuItem>
           ))}
         </Select>
         <Typography variant="caption" sx={{ color: shell.muted, mt: 0.5 }}>

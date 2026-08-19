@@ -22,6 +22,9 @@ assert.ok(
   '服务密码应放在套餐与状态分区的归属地后面',
 );
 assert.match(source, /formatPhoneSlotImeiLabel/, '设备卡槽选项应显示对应的 IMEI 标识');
+assert.match(source, /gridTemplateColumns: '64px 72px minmax\(0, 1fr\)'/, '卡槽、IMEI序号和号码应使用固定列对齐');
+assert.match(source, /fontVariantNumeric: 'tabular-nums'/, 'IMEI 号码应使用等宽数字对齐');
+assert.match(phoneFields, /MenuProps=\{phoneSlotMenuProps\}/, '卡槽下拉层应使用收紧的统一弹层样式');
 assert.match(source, /id: 'imei', label: '卡槽 \/ IMEI'/, '设备列表应将 IMEI 字段明确配置到卡槽');
 assert.match(source, /id: 'simType', label: '对应手机号'/, '设备列表手机号字段应表达与卡槽的对应关系');
 assert.match(source, /<Autocomplete[\s\S]*?freeSolo[\s\S]*?normalizeDeviceBrand/, '设备品牌应使用可搜索且允许自定义的标准化输入');
