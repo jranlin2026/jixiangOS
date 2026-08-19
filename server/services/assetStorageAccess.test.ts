@@ -144,7 +144,21 @@ const storageData = {
     { id: 'device-other', owner: '其他员工', currentUser: '其他员工', imei: 'OTHER-RAW', imeiMasked: 'OTHER-***' },
   ],
   [STORAGE_KEYS.ASSET_PHONE_NUMBERS]: [
-    { id: 'phone-self', owner: '童双全', deviceId: 'device-self', phoneNumber: '13800001111', phoneNumberMasked: '138****1111', servicePassword: '123456', servicePasswordMasked: '******' },
+    {
+      id: 'phone-self',
+      owner: '童双全',
+      deviceId: 'device-self',
+      phoneNumber: '13800001111',
+      phoneNumberMasked: '138****1111',
+      realName: '童双全',
+      realNameMasked: '童**',
+      iccid: '89860012345678901234',
+      iccidMasked: '898600**********1234',
+      imsi: '460001234567890',
+      imsiMasked: '46000******7890',
+      servicePassword: '123456',
+      servicePasswordMasked: '******',
+    },
     { id: 'phone-other', owner: '其他员工', deviceId: 'device-other', phoneNumber: '13900002222', phoneNumberMasked: '139****2222' },
   ],
   [STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS]: [
@@ -156,6 +170,8 @@ const storageData = {
       loginAccount: 'self_raw',
       loginPassword: 'must-never-leak',
       loginAccountMasked: 'self_***',
+      realName: '童双全',
+      realNameMasked: '童**',
       boundEmail: 'self@example.com',
       boundEmailMasked: 'se***@example.com',
     },
@@ -185,12 +201,18 @@ const storageData = {
 
 const salesData = filterAssetStorageData(storageData, salesAuth, { roles: [salesRole, opsRole], users });
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[]).map((item) => item.id), ['device-self']);
-assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei1, 'IMEI-***-1');
-assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei2, 'IMEI-***-2');
-assert.equal(JSON.stringify((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0]).includes('IMEI-RAW'), false);
+assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei1, 'IMEI-RAW-1');
+assert.equal((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei2, 'IMEI-RAW-2');
+assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].phoneNumber, '13800001111');
+assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].realName, '童双全');
+assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].iccid, '89860012345678901234');
+assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].imsi, '460001234567890');
 assert.equal((salesData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePassword, undefined);
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[]).map((item) => item.id), ['account-self']);
-assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginAccount, 'self_***');
+assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginAccount, 'self_raw');
+assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].realName, '童双全');
+assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].boundEmail, 'self@example.com');
+assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginPassword, undefined);
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_RISKS] as any[]).map((item) => item.id), ['risk-self']);
 assert.equal(canWriteStorageKey(salesAuth, STORAGE_KEYS.ASSET_DEVICES), false);
 

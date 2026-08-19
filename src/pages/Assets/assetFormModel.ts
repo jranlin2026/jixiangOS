@@ -1,20 +1,21 @@
 import { readDeviceCommunicationType } from '../../domain/assets/assetFields';
+import { displayDeviceImei, displayPhoneNumber } from '../../domain/assets/assetDisplay';
 import type { AssetDevice, AssetPhoneNumber } from '../../types/asset';
 
 export type AssetFormType = 'device' | 'phone' | 'account';
 
 export function formatPhoneSlotImeiLabel(
   slot: '卡槽1' | '卡槽2',
-  device?: Pick<AssetDevice, 'imei1Masked' | 'imei2Masked'>,
+  device?: Pick<AssetDevice, 'imei1' | 'imei1Masked' | 'imei2' | 'imei2Masked'>,
 ): string {
   const imeiLabel = slot === '卡槽2' ? 'IMEI 2' : 'IMEI 1';
-  const imei = slot === '卡槽2' ? device?.imei2Masked : device?.imei1Masked;
+  const imei = device ? displayDeviceImei(device, slot === '卡槽2' ? 2 : 1) : '';
   return imei ? `${slot}（${imeiLabel}：${imei}）` : `${slot}（对应 ${imeiLabel}）`;
 }
 
 export function buildDeviceSlotRows(
-  device: Pick<AssetDevice, 'communicationType' | 'simType' | 'imei1Masked' | 'imei2Masked'>,
-  phones: Array<Pick<AssetPhoneNumber, 'id' | 'slotType' | 'phoneNumberMasked'>>,
+  device: Pick<AssetDevice, 'communicationType' | 'simType' | 'imei1' | 'imei1Masked' | 'imei2' | 'imei2Masked'>,
+  phones: Array<Pick<AssetPhoneNumber, 'id' | 'slotType' | 'phoneNumber' | 'phoneNumberMasked'>>,
 ) {
   const communicationType = readDeviceCommunicationType(device);
   const slots: Array<'卡槽1' | '卡槽2'> = communicationType === '无SIM'
@@ -26,9 +27,9 @@ export function buildDeviceSlotRows(
     return {
       slotType,
       imeiLabel: isSecondSlot ? 'IMEI 2' : 'IMEI 1',
-      imeiMasked: isSecondSlot ? device.imei2Masked : device.imei1Masked,
+      imeiDisplay: displayDeviceImei(device, isSecondSlot ? 2 : 1),
       phoneId: phone?.id,
-      phoneNumberMasked: phone?.phoneNumberMasked,
+      phoneNumberDisplay: phone ? displayPhoneNumber(phone) : '',
     };
   });
 }

@@ -128,43 +128,24 @@ function visibleAccount(account: Pick<AssetInternetAccount, 'owner' | 'currentUs
   return scope.unrestricted || hasVisibleName(scope, account.owner) || hasVisibleName(scope, account.currentUser) || Boolean(account.phoneId && visiblePhoneIds.has(account.phoneId));
 }
 
-function sanitizeDevice(device: AssetDevice, canViewSensitive: boolean): AssetDevice {
+function sanitizeDevice(device: AssetDevice): AssetDevice {
   const { imei: _legacyImei, imeiMasked: _legacyImeiMasked, ...canonicalDevice } = device;
   const values = readDeviceImeis(device);
-  if (canViewSensitive) return { ...canonicalDevice, ...values };
-  return {
-    ...canonicalDevice,
-    imei1: values.imei1Masked,
-    imei1Masked: values.imei1Masked,
-    imei2: values.imei2 ? values.imei2Masked : undefined,
-    imei2Masked: values.imei2Masked,
-  };
+  return { ...canonicalDevice, ...values };
 }
 
-function sanitizePhone(phone: AssetPhoneNumber, canViewSensitive: boolean): AssetPhoneNumber {
-  const withoutServicePassword = { ...phone, servicePassword: undefined };
-  if (canViewSensitive) return withoutServicePassword;
-  return {
-    ...withoutServicePassword,
-    phoneNumber: phone.phoneNumberMasked || '',
-    iccid: phone.iccidMasked || undefined,
-    imsi: phone.imsiMasked || undefined,
-  };
+function sanitizePhone(phone: AssetPhoneNumber): AssetPhoneNumber {
+  return { ...phone, servicePassword: undefined };
 }
 
-function sanitizeAccount(account: AssetInternetAccount, canViewSensitive: boolean): AssetInternetAccount {
+function sanitizeAccount(account: AssetInternetAccount): AssetInternetAccount {
   const {
     loginPassword: _loginPassword,
     paymentPassword: _paymentPassword,
     credentialBackfill: _credentialBackfill,
     ...safeAccount
   } = account as AssetInternetAccount & { loginPassword?: unknown; paymentPassword?: unknown; credentialBackfill?: unknown };
-  if (canViewSensitive) return safeAccount;
-  return {
-    ...safeAccount,
-    loginAccount: account.loginAccountMasked || '',
-    boundEmail: account.boundEmailMasked || undefined,
-  };
+  return safeAccount;
 }
 
 export function filterAssetStorageData(
@@ -177,21 +158,20 @@ export function filterAssetStorageData(
   }
 
   const scope = assetScopeForUser(user, context);
-  const canViewSensitive = hasPermission(user, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW, 'read');
   const devices = asArray<AssetDevice>(data[STORAGE_KEYS.ASSET_DEVICES])
     .map((device) => normalizeAssetDevice({ ...device }))
     .filter((device) => visibleDevice(device, scope))
-    .map((device) => sanitizeDevice(device, canViewSensitive));
+    .map(sanitizeDevice);
   const visibleDeviceIds = new Set(devices.map((device) => device.id));
   const phones = asArray<AssetPhoneNumber>(data[STORAGE_KEYS.ASSET_PHONE_NUMBERS])
     .map((phone) => normalizeAssetPhone({ ...phone }))
     .filter((phone) => visiblePhone(phone, visibleDeviceIds, scope))
-    .map((phone) => sanitizePhone(phone, canViewSensitive));
+    .map(sanitizePhone);
   const visiblePhoneIds = new Set(phones.map((phone) => phone.id));
   const accounts = asArray<AssetInternetAccount>(data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS])
     .map((account) => normalizeAssetAccount({ ...account }))
     .filter((account) => visibleAccount(account, visiblePhoneIds, scope))
-    .map((account) => sanitizeAccount(account, canViewSensitive));
+    .map(sanitizeAccount);
   const visibleAssetIds = new Set<string>([
     ...devices.map((device) => device.id),
     ...phones.map((phone) => phone.id),

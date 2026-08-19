@@ -90,6 +90,16 @@ import {
   readAccountControlStatus,
   readDeviceCommunicationType,
 } from '../../domain/assets/assetFields';
+import {
+  displayAccountEmail,
+  displayAccountLogin,
+  displayAccountRealName,
+  displayDeviceImei,
+  displayPhoneIccid,
+  displayPhoneImsi,
+  displayPhoneNumber,
+  displayPhoneRealName,
+} from '../../domain/assets/assetDisplay';
 import { ASSET_FORM_SECTIONS, buildDeviceSlotRows, createAssetFormDefaults, formatPhoneSlotImeiLabel, type AssetFormType } from './assetFormModel';
 
 type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'matrix' | 'logs' | 'offboarding';
@@ -157,12 +167,12 @@ const deviceDeleteLabel = (device: AssetDevice) => {
 };
 
 const phoneDeleteLabel = (phone: AssetPhoneNumber) => (
-  readAssetText(phone, ['phoneNumberMasked', 'phoneNumber', 'assetName', 'name'], phone.id)
+  readAssetText(phone, ['phoneNumber', 'phoneNumberMasked', 'assetName', 'name'], phone.id)
 );
 
 const accountDeleteLabel = (account: AssetInternetAccount) => {
   const platform = readAssetText(account, ['platform'], '互联网账号');
-  const name = readAssetText(account, ['accountName', 'assetName', 'name', 'loginAccountMasked'], account.id);
+  const name = readAssetText(account, ['accountName', 'assetName', 'name', 'loginAccount', 'loginAccountMasked'], account.id);
   return `${platform} / ${name}`;
 };
 
@@ -1087,9 +1097,9 @@ const AssetManagement: React.FC = () => {
         型号: device.model,
         序列号: device.serialNumber || '',
         通信方式: readDeviceCommunicationType(device),
-        'IMEI 1': device.imei1Masked,
-        'IMEI 2': device.imei2Masked || '',
-        手机号: (phonesByDeviceId.get(device.id) || []).map((phone) => `${phone.slotType}:${phone.phoneNumberMasked}`).join(' / '),
+        'IMEI 1': displayDeviceImei(device, 1),
+        'IMEI 2': displayDeviceImei(device, 2),
+        手机号: (phonesByDeviceId.get(device.id) || []).map((phone) => `${phone.slotType}:${displayPhoneNumber(phone)}`).join(' / '),
         账号数: (accountsByDeviceId.get(device.id) || []).length,
         所属部门: device.department,
         负责人: device.owner,
@@ -1099,12 +1109,12 @@ const AssetManagement: React.FC = () => {
       phones: phones.map((phone) => {
         const device = deviceById.get(phone.deviceId || '');
         return {
-          手机号: phone.phoneNumberMasked,
+          手机号: displayPhoneNumber(phone),
           SIM形态: phone.simForm,
-          ICCID: phone.iccidMasked || '',
-          IMSI: phone.imsiMasked || '',
+          ICCID: displayPhoneIccid(phone),
+          IMSI: displayPhoneImsi(phone),
           实名主体: phone.realNameSubject || '',
-          实名信息: phone.realNameMasked || '',
+          实名信息: displayPhoneRealName(phone),
           运营商: phone.operator,
           归属地: phone.attributionLocation || '',
           所属设备: device?.deviceCode || '-',
@@ -1126,10 +1136,11 @@ const AssetManagement: React.FC = () => {
           平台: account.platform,
           账号类型: account.accountCategory,
           账号名称: account.accountName,
-          登录账号: account.loginAccountMasked,
+          登录账号: displayAccountLogin(account),
           实名主体: account.realNameSubject || '',
-          实名信息: account.realNameMasked || '',
-          绑定手机号: phone?.phoneNumberMasked || '未绑定',
+          实名信息: displayAccountRealName(account),
+          绑定手机号: phone ? displayPhoneNumber(phone) : '未绑定',
+          绑定邮箱: displayAccountEmail(account),
           所属设备: device?.deviceCode || '-',
           负责人: account.owner,
           控制权状态: readAccountControlStatus(account),
@@ -1269,7 +1280,7 @@ const AssetManagement: React.FC = () => {
                       <Chip
                         key={phone.id}
                         size="small"
-                        label={`${phone.slotType} ${phone.phoneNumberMasked}`}
+                        label={`${phone.slotType} ${displayPhoneNumber(phone)}`}
                         onClick={() => openDetail('phone', phone.id)}
                         sx={{ ...chipSx(toneSx('low')), cursor: 'pointer' }}
                       />
@@ -1418,7 +1429,7 @@ const AssetManagement: React.FC = () => {
             <Typography variant="caption" sx={{ color: shell.muted, width: 96, flexShrink: 0 }}>
               {row.slotType} / {row.imeiLabel}
             </Typography>
-            <Box>{row.imeiMasked || '-'}</Box>
+            <Box>{row.imeiDisplay || '-'}</Box>
           </Stack>
         ))}
       </Stack>
@@ -1476,7 +1487,7 @@ const AssetManagement: React.FC = () => {
             <Stack key={row.slotType} direction="row" spacing={0.75} alignItems="center" sx={{ minHeight: 24, whiteSpace: 'nowrap' }}>
               <Typography variant="caption" sx={{ color: shell.muted, width: 42, flexShrink: 0 }}>{row.slotType}</Typography>
               <Tooltip title="查看手机号资料">
-                {renderRelationLink(phone.phoneNumberMasked, () => openDetail('phone', phone.id))}
+                {renderRelationLink(displayPhoneNumber(phone), () => openDetail('phone', phone.id))}
               </Tooltip>
             </Stack>
           );
@@ -1495,9 +1506,9 @@ const AssetManagement: React.FC = () => {
     const device = deviceById.get(phone.deviceId || '');
     switch (columnId) {
       case 'phoneNumber':
-        return <Box sx={{ color: shell.tableLink, fontWeight: 900 }}>{phone.phoneNumberMasked}</Box>;
+        return <Box sx={{ color: shell.tableLink, fontWeight: 900 }}>{displayPhoneNumber(phone)}</Box>;
       case 'realName':
-        return phone.realNameMasked || '-';
+        return displayPhoneRealName(phone) || '未录入';
       case 'operator':
         return phone.operator;
       case 'attributionLocation':
@@ -1551,12 +1562,12 @@ const AssetManagement: React.FC = () => {
       case 'accountName':
         return account.accountName;
       case 'loginAccount':
-        return account.loginAccountMasked;
+        return displayAccountLogin(account);
       case 'realName':
-        return account.realNameMasked || '-';
+        return displayAccountRealName(account) || '未录入';
       case 'phone':
         return phone
-          ? renderRelationLink(phone.phoneNumberMasked, () => openAccountPhoneDetail(account.phoneId))
+          ? renderRelationLink(displayPhoneNumber(phone), () => openAccountPhoneDetail(account.phoneId))
           : <Box sx={{ color: shell.amber, fontWeight: 800 }}>未绑定</Box>;
       case 'device':
         return device
@@ -2002,6 +2013,17 @@ const AssetManagement: React.FC = () => {
     </Tooltip>
   );
 
+  const renderOperationalValue = (value: string | undefined, label: string) => {
+    const text = String(value || '').trim();
+    if (!text) return <Typography component="span" sx={{ color: shell.muted, fontWeight: 700 }}>未录入</Typography>;
+    return (
+      <Stack direction="row" spacing={0.25} alignItems="center" sx={{ minWidth: 0 }}>
+        <Box component="span" sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{text}</Box>
+        {renderCopyButton(text, label)}
+      </Stack>
+    );
+  };
+
   const renderSensitiveInline = (
     type: AssetType,
     id: string,
@@ -2114,7 +2136,6 @@ const AssetManagement: React.FC = () => {
           const accounts = slot.phoneId
             ? detail?.relatedAccounts.filter((account) => account.phoneId === slot.phoneId) || []
             : [];
-          const sensitiveField: AssetSensitiveField = slot.slotType === '卡槽2' ? 'imei2' : 'imei1';
           return (
             <Paper key={slot.slotType} variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.5 }}>
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'flex-start' }}>
@@ -2125,8 +2146,8 @@ const AssetManagement: React.FC = () => {
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography variant="caption" sx={{ color: shell.muted }}>IMEI 标识</Typography>
                   <Box sx={{ color: shell.ink, fontWeight: 800, mt: 0.25 }}>
-                    {slot.imeiMasked
-                      ? renderSensitiveInline('device', device.id, sensitiveField, slot.imeiMasked)
+                    {slot.imeiDisplay
+                      ? renderOperationalValue(slot.imeiDisplay, slot.imeiLabel)
                       : '未录入'}
                   </Box>
                 </Box>
@@ -2134,7 +2155,7 @@ const AssetManagement: React.FC = () => {
                   <Typography variant="caption" sx={{ color: shell.muted }}>对应手机号</Typography>
                   <Box sx={{ mt: 0.25 }}>
                     {phone
-                      ? renderAssetNameLink(phone.phoneNumberMasked, () => openDetail('phone', phone.id))
+                      ? renderAssetNameLink(displayPhoneNumber(phone), () => openDetail('phone', phone.id))
                       : <Typography sx={{ color: shell.muted, fontWeight: 800 }}>未绑定</Typography>}
                   </Box>
                   {phone ? (
@@ -2199,34 +2220,100 @@ const AssetManagement: React.FC = () => {
     </Stack>
   );
 
-  const renderPhoneBasicCard = (phone: AssetPhoneNumber) => (
-    renderDetailCard('手机号基本信息', (
-      renderInfoRows([
-        { label: '手机号', value: renderSensitiveInline('phone', phone.id, 'phoneNumber', phone.phoneNumberMasked) },
-        { label: '实名主体', value: phone.realNameSubject || '-' },
-        { label: '实名信息', value: renderSensitiveInline('phone', phone.id, 'phoneRealName', phone.realNameMasked || '-') },
-        { label: '运营商', value: phone.operator },
-        { label: '归属地', value: phone.attributionLocation || '-' },
-        { label: 'SIM 形态', value: phone.simForm || '实体SIM' },
-        { label: 'ICCID', value: phone.iccidMasked ? renderSensitiveInline('phone', phone.id, 'iccid', phone.iccidMasked) : '-' },
-        { label: 'IMSI', value: phone.imsiMasked ? renderSensitiveInline('phone', phone.id, 'imsi', phone.imsiMasked) : '-' },
-        { label: '服务密码', value: phone.servicePasswordMasked ? renderSensitiveInline('phone', phone.id, 'servicePassword', phone.servicePasswordMasked) : '-' },
-        {
-          label: '所属设备',
-          value: primaryDevice
-            ? renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))
-            : '-',
-        },
-        { label: 'SIM 卡槽 / IMEI', value: phone.slotType ? formatPhoneSlotImeiLabel(phone.slotType, primaryDevice) : '-' },
-        { label: '套餐', value: phone.packageName || '-' },
-        { label: '月费用', value: formatCurrency(phone.monthlyFee) },
-        { label: '所属部门', value: phone.department || primaryDevice?.department || '-' },
-        { label: '负责人', value: phone.owner || '-' },
-        { label: '当前使用人', value: phone.currentUser || primaryDevice?.currentUser || '-' },
-        { label: '卡状态', value: <Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} /> },
-        { label: '更新时间', value: formatDate(phone.updatedAt, 'yyyy-MM-dd') },
-      ], 2)
-    ))
+  const renderPhoneSummaryCard = (phone: AssetPhoneNumber) => (
+    <Paper elevation={0} sx={{ ...detailCardSx, p: 2 }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
+        <Box sx={{ minWidth: 0 }}>
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <Typography sx={{ color: shell.ink, fontSize: 24, fontWeight: 950 }}>{displayPhoneNumber(phone)}</Typography>
+            {renderCopyButton(displayPhoneNumber(phone), '手机号')}
+          </Stack>
+          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mt: 0.8 }}>
+            <Chip size="small" label={phone.operator || '未知运营商'} variant="outlined" />
+            <Chip size="small" label={phone.simForm || '实体SIM'} variant="outlined" />
+            <Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} />
+          </Stack>
+        </Box>
+        <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
+          <Typography variant="caption" sx={{ color: shell.muted }}>当前使用人</Typography>
+          <Typography sx={{ color: shell.ink, fontWeight: 900 }}>{phone.currentUser || primaryDevice?.currentUser || '未分配'}</Typography>
+          <Typography variant="caption" sx={{ color: shell.muted }}>
+            {primaryDevice ? `${primaryDevice.deviceCode} / ${phone.slotType || '未选卡槽'}` : '未绑定设备'}
+          </Typography>
+        </Box>
+      </Stack>
+    </Paper>
+  );
+
+  const renderPhoneIdentityCard = (phone: AssetPhoneNumber) => renderDetailCard('SIM身份信息', renderInfoRows([
+    { label: '手机号', value: renderOperationalValue(displayPhoneNumber(phone), '手机号') },
+    { label: '运营商', value: phone.operator || '未录入' },
+    { label: '归属地', value: phone.attributionLocation || '未录入' },
+    { label: 'SIM形态', value: phone.simForm || '实体SIM' },
+    { label: 'ICCID', value: renderOperationalValue(displayPhoneIccid(phone), 'ICCID') },
+    { label: 'IMSI', value: renderOperationalValue(displayPhoneImsi(phone), 'IMSI') },
+    {
+      label: '服务密码',
+      value: phone.servicePasswordMasked
+        ? renderSensitiveInline('phone', phone.id, 'servicePassword', phone.servicePasswordMasked)
+        : <Typography component="span" sx={{ color: shell.muted, fontWeight: 700 }}>未录入</Typography>,
+    },
+  ], 2));
+
+  const renderPhoneDeviceBindingCard = (phone: AssetPhoneNumber) => {
+    const slot = phone.slotType;
+    const imeiLabel = slot === '卡槽2' ? 'IMEI 2' : 'IMEI 1';
+    const imei = primaryDevice && slot ? displayDeviceImei(primaryDevice, slot === '卡槽2' ? 2 : 1) : '';
+    return renderDetailCard('设备绑定关系', primaryDevice && slot ? (
+      <Paper variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.5 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '0.7fr 1.2fr 1.3fr' }, gap: 1.5, alignItems: 'center' }}>
+          <Box>
+            <Typography variant="caption" sx={{ color: shell.muted }}>当前卡槽</Typography>
+            <Typography sx={{ color: shell.tableLink, fontWeight: 950 }}>{slot}</Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" sx={{ color: shell.muted }}>对应{imeiLabel}</Typography>
+            <Box sx={{ color: shell.ink, fontWeight: 850 }}>{renderOperationalValue(imei, imeiLabel)}</Box>
+          </Box>
+          <Box>
+            <Typography variant="caption" sx={{ color: shell.muted }}>所属设备</Typography>
+            <Box>{renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))}</Box>
+            <Typography variant="caption" sx={{ color: shell.muted }}>{formatDeviceBrandModel(primaryDevice)}</Typography>
+          </Box>
+        </Box>
+      </Paper>
+    ) : (
+      <Box sx={{ py: 1.5, textAlign: 'center', color: shell.muted }}>当前手机号尚未绑定设备与卡槽。</Box>
+    ));
+  };
+
+  const renderPhoneOwnershipCard = (phone: AssetPhoneNumber) => renderDetailCard('归属与使用', renderInfoRows([
+    { label: '所属主体', value: phone.ownerSubject || '公司' },
+    { label: '实名主体', value: phone.realNameSubject || '未录入' },
+    { label: '实名信息', value: renderOperationalValue(displayPhoneRealName(phone), '实名信息') },
+    { label: '所属部门', value: phone.department || primaryDevice?.department || '未录入' },
+    { label: '资产负责人', value: phone.owner || '未分配' },
+    { label: '当前使用人', value: phone.currentUser || primaryDevice?.currentUser || '未分配' },
+  ], 2));
+
+  const renderPhonePlanCard = (phone: AssetPhoneNumber) => renderDetailCard('套餐与状态', renderInfoRows([
+    { label: '套餐', value: phone.packageName || '未录入' },
+    { label: '月费用', value: formatCurrency(phone.monthlyFee) },
+    { label: '合约到期', value: phone.contractExpiresAt ? formatDate(phone.contractExpiresAt, 'yyyy-MM-dd') : '未录入' },
+    { label: '卡状态', value: <Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} /> },
+    { label: '更新时间', value: formatDate(phone.updatedAt, 'yyyy-MM-dd') },
+    ...(phone.remark ? [{ label: '备注', value: phone.remark }] : []),
+  ], 2));
+
+  const renderPhoneDetailSections = (phone: AssetPhoneNumber) => (
+    <Stack spacing={1.25}>
+      {renderPhoneSummaryCard(phone)}
+      {renderPhoneIdentityCard(phone)}
+      {renderPhoneDeviceBindingCard(phone)}
+      {renderPhoneOwnershipCard(phone)}
+      {renderPhonePlanCard(phone)}
+      {renderRelatedAssetsSection()}
+    </Stack>
   );
 
   const renderAccountBasicCard = (account: AssetInternetAccount) => (
@@ -2259,13 +2346,13 @@ const AssetManagement: React.FC = () => {
             { label: '平台', value: account.platform },
             { label: '账号类型', value: account.accountCategory || '主账号' },
             { label: '所属主体', value: account.ownerSubject },
-            { label: '登录账号', value: renderSensitiveInline('account', account.id, 'loginAccount', account.loginAccountMasked) },
+            { label: '登录账号', value: renderOperationalValue(displayAccountLogin(account), '登录账号') },
             { label: '实名主体', value: account.realNameSubject || '-' },
-            { label: '实名信息', value: renderSensitiveInline('account', account.id, 'accountRealName', account.realNameMasked || '-') },
+            { label: '实名信息', value: renderOperationalValue(displayAccountRealName(account), '实名信息') },
             {
               label: '绑定手机号',
               value: primaryPhone
-                ? renderAssetNameLink(primaryPhone.phoneNumberMasked, () => openDetail('phone', primaryPhone.id))
+                ? renderAssetNameLink(displayPhoneNumber(primaryPhone), () => openDetail('phone', primaryPhone.id))
                 : '-',
             },
             {
@@ -2274,7 +2361,7 @@ const AssetManagement: React.FC = () => {
                 ? renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))
                 : '-',
             },
-            { label: '绑定邮箱', value: renderSensitiveInline('account', account.id, 'boundEmail', account.boundEmailMasked || account.boundEmail || '-') },
+            { label: '绑定邮箱', value: renderOperationalValue(displayAccountEmail(account), '绑定邮箱') },
             { label: '登录方式', value: account.loginMethod || '密码登录' },
             {
               label: '登录密码',
@@ -2316,8 +2403,8 @@ const AssetManagement: React.FC = () => {
     if (!detail) return null;
     const phoneRows = detail.relatedPhones.map((phone) => [
       phone.slotType,
-      renderAssetNameLink(phone.phoneNumberMasked, () => openDetail('phone', phone.id)),
-      phone.realNameMasked || '-',
+      renderAssetNameLink(displayPhoneNumber(phone), () => openDetail('phone', phone.id)),
+      displayPhoneRealName(phone) || '未录入',
       phone.operator,
       phone.packageName || '-',
       <Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} />,
@@ -2325,9 +2412,12 @@ const AssetManagement: React.FC = () => {
     const accountRows = detail.relatedAccounts.map((account) => [
       <Stack direction="row" spacing={1} alignItems="center">{renderPlatformLogo(account)}<Box>{account.platform}</Box></Stack>,
       renderAssetNameLink(account.accountName, () => openDetail('account', account.id)),
-      account.loginAccountMasked,
-      account.realNameMasked || '-',
-      detail.relatedPhones.find((phone) => phone.id === account.phoneId)?.phoneNumberMasked || '-',
+      displayAccountLogin(account),
+      displayAccountRealName(account) || '未录入',
+      (() => {
+        const phone = detail.relatedPhones.find((item) => item.id === account.phoneId);
+        return phone ? displayPhoneNumber(phone) : '未绑定';
+      })(),
       <Chip size="small" label={account.permissionStatus} sx={chipSx(statusTone(account.permissionStatus))} />,
     ]);
     if (detail.type === 'device') {
@@ -2353,7 +2443,8 @@ const AssetManagement: React.FC = () => {
   const renderDetailBody = () => {
     if (!detail) return null;
     if (detail.device) return renderDeviceDetailSections(detail.device);
-    const basicCard = detail.phone ? renderPhoneBasicCard(detail.phone) : detail.account ? renderAccountBasicCard(detail.account) : null;
+    if (detail.phone) return renderPhoneDetailSections(detail.phone);
+    const basicCard = detail.account ? renderAccountBasicCard(detail.account) : null;
     return (
       <Stack spacing={1.25}>
         {basicCard}
@@ -2718,7 +2809,7 @@ const AssetManagement: React.FC = () => {
             const device = deviceById.get(phone.deviceId || '');
             return (
               <MenuItem key={phone.id} value={phone.id}>
-                {phone.phoneNumberMasked} / {device?.deviceCode || '未关联设备'} / {phone.slotType}
+                {displayPhoneNumber(phone)} / {device?.deviceCode || '未关联设备'} / {phone.slotType}
               </MenuItem>
             );
           })}
