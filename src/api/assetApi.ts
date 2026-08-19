@@ -114,6 +114,18 @@ function backendAssetList<T>(kind: string, filters?: AssetFilters): Promise<ApiR
   if (filters?.permissionStatus) params.set('permissionStatus', filters.permissionStatus);
   if (filters?.riskLevel) params.set('riskLevel', filters.riskLevel);
   if (filters?.status) params.set('status', filters.status);
+  const advancedFilterKeys: Array<keyof AssetFilters> = [
+    'deviceCategory', 'brand', 'communicationType', 'acquisitionType', 'profileStatus',
+    'operator', 'attributionLocation', 'simForm', 'accountCategory', 'departmentId',
+    'ownerId', 'currentUserId', 'userAssignment', 'phoneBinding', 'deviceBinding',
+    'loginDeviceBinding', 'accountBinding', 'identityBinding', 'credentialStatus',
+    'twoFactorStatus', 'servicePasswordStatus',
+    'packageName', 'contractStatus', 'monthlyFeeMin', 'monthlyFeeMax',
+  ];
+  advancedFilterKeys.forEach((key) => {
+    const value = filters?.[key];
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  });
   params.set('page', String(filters?.page || 1));
   params.set('pageSize', String(filters?.pageSize || DEFAULT_PAGE_SIZE));
   return backendRequest(`/assets/${kind}?${params.toString()}`);
@@ -931,7 +943,21 @@ function filterDevices(rows: AssetDevice[], filters?: AssetFilters): AssetDevice
     const matchesStatus = !filters?.status || row.status === filters.status;
     const matchesBinding = !filters?.bindingStatus
       || (filters.bindingStatus === 'unassigned-user' && !row.currentUserId && !row.currentUser);
-    return matchesKeyword && matchesRisk && matchesStatus && matchesBinding;
+    const communicationType = readDeviceCommunicationType(row);
+    const profileComplete = Boolean(row.deviceCategory && row.brand && row.model && communicationType);
+    const matchesProfile = !filters?.profileStatus || (filters.profileStatus === 'complete') === profileComplete;
+    const assigned = Boolean(row.currentUserId || row.currentUser);
+    return matchesKeyword && matchesRisk && matchesStatus && matchesBinding && matchesProfile
+      && (!filters?.deviceCategory || row.deviceCategory === filters.deviceCategory)
+      && (!filters?.brand || row.brand === filters.brand)
+      && (!filters?.communicationType || communicationType === filters.communicationType)
+      && (!filters?.acquisitionType || row.acquisitionType === filters.acquisitionType)
+      && (!filters?.departmentId || row.departmentId === filters.departmentId)
+      && (!filters?.ownerId || row.ownerId === filters.ownerId)
+      && (!filters?.currentUserId || row.currentUserId === filters.currentUserId)
+      && (!filters?.userAssignment || (filters.userAssignment === 'assigned') === assigned)
+      && (!filters?.loginDeviceBinding || (filters.loginDeviceBinding === 'with') === Number(row.internetAccountCount || 0) > 0)
+      && (!filters?.phoneBinding || (filters.phoneBinding === 'bound') === Number((row as AssetDevice & { phoneNumberCount?: number }).phoneNumberCount || 0) > 0);
   });
 }
 
@@ -961,7 +987,31 @@ function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPh
     const matchesBinding = !filters?.bindingStatus
       || (filters.bindingStatus === 'bound-device' && Boolean(row.deviceId))
       || (filters.bindingStatus === 'unbound-device' && !row.deviceId);
-    return matchesKeyword && matchesStatus && matchesBinding;
+    const deviceBound = Boolean(row.deviceId);
+    const accountBound = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS)
+      && visibleAccounts().some((account) => account.phoneId === row.id);
+    const assigned = Boolean(row.currentUserId || row.currentUser);
+    const servicePasswordConfigured = Boolean(row.servicePassword || row.servicePasswordMasked);
+    const expired = Boolean(row.contractExpiresAt && new Date(row.contractExpiresAt).getTime() < Date.now());
+    const matchesContract = !filters?.contractStatus
+      || (filters.contractStatus === 'unset' && !row.contractExpiresAt)
+      || (filters.contractStatus === 'expired' && expired)
+      || (filters.contractStatus === 'active' && Boolean(row.contractExpiresAt) && !expired);
+    return matchesKeyword && matchesStatus && matchesBinding
+      && (!filters?.operator || row.operator === filters.operator)
+      && (!filters?.attributionLocation || row.attributionLocation === filters.attributionLocation)
+      && (!filters?.simForm || row.simForm === filters.simForm)
+      && (!filters?.departmentId || row.departmentId === filters.departmentId)
+      && (!filters?.ownerId || row.ownerId === filters.ownerId)
+      && (!filters?.currentUserId || row.currentUserId === filters.currentUserId)
+      && (!filters?.userAssignment || (filters.userAssignment === 'assigned') === assigned)
+      && (!filters?.deviceBinding || (filters.deviceBinding === 'bound') === deviceBound)
+      && (!filters?.accountBinding || (filters.accountBinding === 'with') === accountBound)
+      && (!filters?.servicePasswordStatus || (filters.servicePasswordStatus === 'configured') === servicePasswordConfigured)
+      && (!filters?.packageName || row.packageName === filters.packageName)
+      && matchesContract
+      && (filters?.monthlyFeeMin === undefined || row.monthlyFee >= filters.monthlyFeeMin)
+      && (filters?.monthlyFeeMax === undefined || row.monthlyFee <= filters.monthlyFeeMax);
   });
 }
 
@@ -1013,7 +1063,30 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
       || (filters.bindingStatus === 'with-login-device' && loginDeviceIds.length > 0)
       || (filters.bindingStatus === 'without-login-device' && loginDeviceIds.length === 0)
       || (filters.bindingStatus === 'credential-pending' && credentialPending);
-    return matchesKeyword && matchesPlatform && matchesLoginDevice && matchesPermission && matchesRisk && matchesStatus && matchesBinding;
+    const phoneBound = Boolean(row.phoneId);
+    const assigned = Boolean(row.currentUserId || row.currentUser);
+    const identityIds = normalizeIdentityAccountIds(row.identityAccountIds);
+    const identityPlatforms = identityIds.map((id) => accountById.get(id)?.platform || '');
+    const matchesIdentity = !filters?.identityBinding
+      || (filters.identityBinding === 'any' && identityIds.length > 0)
+      || (filters.identityBinding === 'none' && identityIds.length === 0)
+      || (filters.identityBinding === 'apple' && identityPlatforms.includes('Apple ID'))
+      || (filters.identityBinding === 'google' && identityPlatforms.includes('Google账号'));
+    const pending = row.loginCredentialStatus === '待补齐' || row.paymentCredentialStatus === '待补齐';
+    const credentialComplete = row.loginCredentialStatus === '已设置'
+      && (!row.requiresPaymentPassword || row.paymentCredentialStatus === '已设置');
+    const twoFactorConfigured = Boolean(row.twoFactorMethod?.trim());
+    return matchesKeyword && matchesPlatform && matchesLoginDevice && matchesPermission && matchesRisk && matchesStatus && matchesBinding
+      && (!filters?.accountCategory || row.accountCategory === filters.accountCategory)
+      && (!filters?.departmentId || row.departmentId === filters.departmentId)
+      && (!filters?.ownerId || row.ownerId === filters.ownerId)
+      && (!filters?.currentUserId || row.currentUserId === filters.currentUserId)
+      && (!filters?.userAssignment || (filters.userAssignment === 'assigned') === assigned)
+      && (!filters?.phoneBinding || (filters.phoneBinding === 'bound') === phoneBound)
+      && (!filters?.loginDeviceBinding || (filters.loginDeviceBinding === 'with') === (loginDeviceIds.length > 0))
+      && matchesIdentity
+      && (!filters?.credentialStatus || (filters.credentialStatus === 'pending' ? pending : credentialComplete))
+      && (!filters?.twoFactorStatus || (filters.twoFactorStatus === 'configured') === twoFactorConfigured);
   });
 }
 
@@ -1203,16 +1276,22 @@ async function fetchDevices(filters?: AssetFilters): Promise<ApiResponse<Paginat
   ensureInit();
   await delay(120);
   const visibleAccountRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_ACCOUNTS) ? visibleAccounts() : [];
+  const visiblePhoneRows = canReadLocalAssetModule(PERMISSION_KEYS.ASSETS_PHONES) ? visiblePhones() : [];
   const accountCountByDeviceId = visibleAccountRows.reduce((counts, account) => {
     normalizeAccountLoginDeviceIds(account.loginDeviceIds).forEach((deviceId) => {
       counts.set(deviceId, (counts.get(deviceId) || 0) + 1);
     });
     return counts;
   }, new Map<string, number>());
-  const rows = filterDevices(visibleDevices(), filters).map((device) => ({
+  const phoneCountByDeviceId = visiblePhoneRows.reduce((counts, phone) => {
+    if (phone.deviceId) counts.set(phone.deviceId, (counts.get(phone.deviceId) || 0) + 1);
+    return counts;
+  }, new Map<string, number>());
+  const rows = filterDevices(visibleDevices().map((device) => ({
     ...device,
     internetAccountCount: accountCountByDeviceId.get(device.id) || 0,
-  }));
+    phoneNumberCount: phoneCountByDeviceId.get(device.id) || 0,
+  })), filters);
   return createSuccessResponse(paginate(rows, filters));
 }
 

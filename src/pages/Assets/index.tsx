@@ -48,6 +48,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import TuneIcon from '@mui/icons-material/Tune';
 import { assetApi } from '../../api';
 import { settingsApi } from '../../api';
 import useAssetStore from '../../store/useAssetStore';
@@ -452,15 +453,39 @@ function downloadCsv(filename: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
+const ADVANCED_ASSET_FILTER_KEYS = [
+  'brand', 'communicationType', 'acquisitionType', 'operator', 'attributionLocation',
+  'simForm', 'accountCategory', 'departmentId', 'ownerId', 'currentUserId',
+  'userAssignment', 'phoneBinding', 'deviceBinding', 'loginDeviceBinding',
+  'accountBinding', 'identityBinding', 'credentialStatus', 'twoFactorStatus',
+  'servicePasswordStatus', 'riskLevel', 'packageName', 'contractStatus', 'monthlyFeeMin', 'monthlyFeeMax',
+] as const satisfies ReadonlyArray<keyof AssetFilters>;
+
+type AdvancedAssetFilterKey = typeof ADVANCED_ASSET_FILTER_KEYS[number];
+type AdvancedAssetFilters = Pick<AssetFilters, AdvancedAssetFilterKey>;
+
+function readAdvancedAssetFilters(searchParams: URLSearchParams): AdvancedAssetFilters {
+  return ADVANCED_ASSET_FILTER_KEYS.reduce((result, key) => {
+    const value = searchParams.get(key);
+    if (value) (result as Record<string, string>)[key] = value;
+    return result;
+  }, {} as AdvancedAssetFilters);
+}
+
 const AssetManagement: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = getTabFromSearch(searchParams.get('tab'));
-  const [search, setSearch] = useState('');
-  const [platform, setPlatform] = useState('');
-  const [permissionStatus, setPermissionStatus] = useState('');
-  const [status, setStatus] = useState('');
+  const [search, setSearch] = useState(() => searchParams.get('search') || '');
+  const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get('search') || '');
+  const [platform, setPlatform] = useState(() => searchParams.get('platform') || '');
+  const [permissionStatus, setPermissionStatus] = useState(() => searchParams.get('permissionStatus') || '');
+  const [status, setStatus] = useState(() => searchParams.get('status') || '');
+  const [deviceCategory, setDeviceCategory] = useState(() => searchParams.get('deviceCategory') || '');
+  const [profileStatus, setProfileStatus] = useState<AssetFilters['profileStatus'] | ''>(() => (searchParams.get('profileStatus') || '') as AssetFilters['profileStatus'] | '');
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedAssetFilters>(() => readAdvancedAssetFilters(searchParams));
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [overviewSearch, setOverviewSearch] = useState('');
@@ -574,15 +599,18 @@ const AssetManagement: React.FC = () => {
     : '';
 
   const filters = useMemo<AssetFilters>(() => ({
-    search,
+    search: debouncedSearch,
     platform,
     permissionStatus,
     status,
+    deviceCategory: deviceCategory || undefined,
+    profileStatus: profileStatus || undefined,
+    ...advancedFilters,
     loginDeviceId: loginDeviceIdFilter || undefined,
     bindingStatus: bindingStatusFilter || undefined,
     page: page + 1,
     pageSize: rowsPerPage,
-  }), [bindingStatusFilter, loginDeviceIdFilter, page, permissionStatus, platform, rowsPerPage, search, status]);
+  }), [advancedFilters, bindingStatusFilter, debouncedSearch, deviceCategory, loginDeviceIdFilter, page, permissionStatus, platform, profileStatus, rowsPerPage, status]);
 
   const deviceById = useMemo(() => new Map(lookupDevices.map((device) => [device.id, device])), [lookupDevices]);
   const phoneById = useMemo(() => new Map(lookupPhones.map((phone) => [phone.id, phone])), [lookupPhones]);
@@ -693,7 +721,39 @@ const AssetManagement: React.FC = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [search, platform, permissionStatus, status, loginDeviceIdFilter, bindingStatusFilter]);
+  }, [search, platform, permissionStatus, status, deviceCategory, profileStatus, advancedFilters, loginDeviceIdFilter, bindingStatusFilter]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      const write = (key: string, value?: string) => value ? next.set(key, value) : next.delete(key);
+      write('search', search.trim());
+      write('platform', platform);
+      write('permissionStatus', permissionStatus);
+      write('status', status);
+      write('deviceCategory', deviceCategory);
+      write('profileStatus', profileStatus || '');
+      ADVANCED_ASSET_FILTER_KEYS.forEach((key) => write(key, String(advancedFilters[key] || '')));
+      return next.toString() === current.toString() ? current : next;
+    }, { replace: true });
+  }, [advancedFilters, deviceCategory, permissionStatus, platform, profileStatus, search, setSearchParams, status]);
+
+  useEffect(() => {
+    const nextSearch = searchParams.get('search') || '';
+    const nextAdvanced = readAdvancedAssetFilters(searchParams);
+    setSearch(nextSearch);
+    setPlatform(searchParams.get('platform') || '');
+    setPermissionStatus(searchParams.get('permissionStatus') || '');
+    setStatus(searchParams.get('status') || '');
+    setDeviceCategory(searchParams.get('deviceCategory') || '');
+    setProfileStatus((searchParams.get('profileStatus') || '') as AssetFilters['profileStatus'] | '');
+    setAdvancedFilters((current) => JSON.stringify(current) === JSON.stringify(nextAdvanced) ? current : nextAdvanced);
+  }, [searchParams]);
 
   useEffect(() => {
     if (!activeTabVisible || activeTab !== 'overview') return;
@@ -726,17 +786,43 @@ const AssetManagement: React.FC = () => {
   }, [activeTab, activeTabVisible, overviewPage, overviewRefreshToken, overviewRowsPerPage, overviewSearch]);
 
   const handleTabChange = (_: React.SyntheticEvent, value: AssetTab) => {
+    setSearch('');
     setPlatform('');
     setPermissionStatus('');
     setStatus('');
+    setDeviceCategory('');
+    setProfileStatus('');
+    setAdvancedFilters({});
+    setMoreFiltersOpen(false);
     setPage(0);
     setSearchParams({ tab: value });
+  };
+
+  const setAdvancedFilter = (key: AdvancedAssetFilterKey, value: string) => {
+    setAdvancedFilters((current) => ({ ...current, [key]: value || undefined }));
+  };
+
+  const clearAllAssetFilters = () => {
+    setSearch('');
+    setPlatform('');
+    setPermissionStatus('');
+    setStatus('');
+    setDeviceCategory('');
+    setProfileStatus('');
+    setAdvancedFilters({});
+    setLoginDeviceFilterContext(undefined);
+    setPage(0);
+    setSearchParams({ tab: activeTab });
   };
 
   const clearLoginDeviceFilter = () => {
     setPage(0);
     setLoginDeviceFilterContext(undefined);
-    setSearchParams({ tab: 'accounts' });
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete('loginDeviceId');
+      return next;
+    });
   };
 
   const openOverviewTarget = (tab: Extract<AssetTab, 'devices' | 'phones' | 'accounts'>, next: {
@@ -747,6 +833,9 @@ const AssetManagement: React.FC = () => {
     setPlatform('');
     setPermissionStatus('');
     setStatus(next.status || '');
+    setDeviceCategory('');
+    setProfileStatus('');
+    setAdvancedFilters({});
     setPage(0);
     const params: Record<string, string> = { tab };
     if (next.bindingStatus) params.bindingStatus = next.bindingStatus;
@@ -1634,46 +1723,140 @@ const AssetManagement: React.FC = () => {
       'without-login-device': '无登录设备',
       'credential-pending': '密码待补齐',
     };
+    const isAssetLedger = activeTab === 'devices' || activeTab === 'phones' || activeTab === 'accounts';
+    const unique = (values: Array<string | undefined>) => [...new Set(values.filter((value): value is string => Boolean(value)))];
+    const option = (value: string, label = value) => ({ value, label });
+    const renderSelect = (
+      label: string,
+      value: string,
+      options: Array<{ value: string; label: string }>,
+      onChange: (value: string) => void,
+      minWidth = 140,
+    ) => (
+      <FormControl size="small" sx={{ minWidth, flex: isMobile ? '1 1 100%' : '0 0 auto' }}>
+        <InputLabel>{label}</InputLabel>
+        <Select value={value} label={label} onChange={(event) => onChange(String(event.target.value))}>
+          <MenuItem value="">全部</MenuItem>
+          {options.map((item) => <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>)}
+        </Select>
+      </FormControl>
+    );
+    const departmentOptions = lookupDepartments
+      .filter((item) => lookupDevices.some((row) => row.departmentId === item.id)
+        || lookupPhones.some((row) => row.departmentId === item.id)
+        || lookupAccounts.some((row) => row.departmentId === item.id))
+      .map((item) => option(item.id, item.name));
+    const userOptions = lookupUsers
+      .filter((item) => lookupDevices.some((row) => row.ownerId === item.id || row.currentUserId === item.id)
+        || lookupPhones.some((row) => row.ownerId === item.id || row.currentUserId === item.id)
+        || lookupAccounts.some((row) => row.ownerId === item.id || row.currentUserId === item.id))
+      .map((item) => option(item.id, item.name));
+    const moreFieldsByTab: Partial<Record<AssetTab, AdvancedAssetFilterKey[]>> = {
+      devices: ['brand', 'communicationType', 'acquisitionType', 'phoneBinding', 'userAssignment', 'loginDeviceBinding', 'departmentId', 'ownerId', 'currentUserId', 'riskLevel'],
+      phones: ['attributionLocation', 'simForm', 'accountBinding', 'packageName', 'contractStatus', 'monthlyFeeMin', 'monthlyFeeMax', 'departmentId', 'ownerId', 'currentUserId', 'servicePasswordStatus'],
+      accounts: ['accountCategory', 'phoneBinding', 'loginDeviceBinding', 'identityBinding', 'credentialStatus', 'twoFactorStatus', 'departmentId', 'ownerId', 'currentUserId'],
+    };
+    const moreFilterKeys = moreFieldsByTab[activeTab] || [];
+    const moreFilterCount = moreFilterKeys.filter((key) => Boolean(advancedFilters[key])).length
+      + (activeTab === 'accounts' && loginDeviceIdFilter ? 1 : 0);
+    const filterLabels: Partial<Record<keyof AssetFilters, string>> = {
+      brand: '品牌', communicationType: '通信方式', acquisitionType: '取得方式', userAssignment: '使用人',
+      loginDeviceBinding: activeTab === 'devices' ? '登录账号' : '登录设备', departmentId: '部门', ownerId: '负责人',
+      currentUserId: '当前使用人', riskLevel: '风险等级', attributionLocation: '归属地', simForm: 'SIM形态',
+      accountBinding: '关联账号', servicePasswordStatus: '服务密码', accountCategory: '账号类型', phoneBinding: '绑定手机号',
+      identityBinding: '身份账号', credentialStatus: '密码凭证', twoFactorStatus: '二次验证',
+      packageName: '套餐', contractStatus: '合约到期', monthlyFeeMin: '最低月费', monthlyFeeMax: '最高月费',
+    };
+    const valueLabel = (key: keyof AssetFilters, value: string) => {
+      if (key === 'departmentId') return lookupDepartments.find((item) => item.id === value)?.name || value;
+      if (key === 'ownerId' || key === 'currentUserId') return lookupUsers.find((item) => item.id === value)?.name || value;
+      const labels: Record<string, string> = {
+        assigned: '已分配', unassigned: '未分配', with: '有', without: '无', bound: '已绑定', unbound: '未绑定',
+        configured: '已配置', unconfigured: '未配置', complete: '完整', incomplete: '待完善', pending: '待补齐',
+        apple: 'Apple ID', google: 'Google账号', any: '任一身份账号', none: '未绑定',
+      };
+      return labels[value] || value;
+    };
+    const advancedContent = (
+      <Box sx={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, minmax(150px, 1fr))', gap: 1.5 }}>
+        {activeTab === 'devices' ? <>
+          {renderSelect('品牌', String(advancedFilters.brand || ''), unique(lookupDevices.map((row) => row.brand)).map((item) => option(item)), (value) => setAdvancedFilter('brand', value))}
+          {renderSelect('通信方式', String(advancedFilters.communicationType || ''), ['无SIM', '单卡', '双卡', 'eSIM'].map((item) => option(item)), (value) => setAdvancedFilter('communicationType', value))}
+          {renderSelect('取得方式', String(advancedFilters.acquisitionType || ''), ['购买', '租赁', '借用'].map((item) => option(item)), (value) => setAdvancedFilter('acquisitionType', value))}
+          {renderSelect('手机号绑定', String(advancedFilters.phoneBinding || ''), [option('bound', '有手机号'), option('unbound', '无手机号')], (value) => setAdvancedFilter('phoneBinding', value))}
+          {renderSelect('使用人', String(advancedFilters.userAssignment || ''), [option('assigned', '已分配'), option('unassigned', '未分配')], (value) => setAdvancedFilter('userAssignment', value))}
+          {renderSelect('登录账号', String(advancedFilters.loginDeviceBinding || ''), [option('with', '有登录账号'), option('without', '无登录账号')], (value) => setAdvancedFilter('loginDeviceBinding', value))}
+          {renderSelect('风险等级', String(advancedFilters.riskLevel || ''), ['低', '中', '高'].map((item) => option(item)), (value) => setAdvancedFilter('riskLevel', value))}
+        </> : null}
+        {activeTab === 'phones' ? <>
+          {renderSelect('归属地', String(advancedFilters.attributionLocation || ''), unique(lookupPhones.map((row) => row.attributionLocation)).map((item) => option(item)), (value) => setAdvancedFilter('attributionLocation', value))}
+          {renderSelect('SIM形态', String(advancedFilters.simForm || ''), ['实体SIM', 'eSIM'].map((item) => option(item)), (value) => setAdvancedFilter('simForm', value))}
+          {renderSelect('关联账号', String(advancedFilters.accountBinding || ''), [option('with', '有账号'), option('without', '无账号')], (value) => setAdvancedFilter('accountBinding', value))}
+          {renderSelect('服务密码', String(advancedFilters.servicePasswordStatus || ''), [option('configured', '已配置'), option('unconfigured', '未配置')], (value) => setAdvancedFilter('servicePasswordStatus', value))}
+          {renderSelect('套餐', String(advancedFilters.packageName || ''), unique(lookupPhones.map((row) => row.packageName)).map((item) => option(item)), (value) => setAdvancedFilter('packageName', value))}
+          {renderSelect('合约到期', String(advancedFilters.contractStatus || ''), [option('active', '合约有效'), option('expired', '已到期'), option('unset', '未录入')], (value) => setAdvancedFilter('contractStatus', value))}
+          <TextField size="small" type="number" label="最低月费" value={advancedFilters.monthlyFeeMin ?? ''} onChange={(event) => setAdvancedFilter('monthlyFeeMin', event.target.value)} inputProps={{ min: 0 }} />
+          <TextField size="small" type="number" label="最高月费" value={advancedFilters.monthlyFeeMax ?? ''} onChange={(event) => setAdvancedFilter('monthlyFeeMax', event.target.value)} inputProps={{ min: 0 }} />
+        </> : null}
+        {activeTab === 'accounts' ? <>
+          {renderSelect('账号类型', String(advancedFilters.accountCategory || ''), ['主账号', '员工号', '直播号', '投放号', '客服号', '其他'].map((item) => option(item)), (value) => setAdvancedFilter('accountCategory', value))}
+          {renderSelect('绑定手机号', String(advancedFilters.phoneBinding || ''), [option('bound', '已绑定'), option('unbound', '未绑定')], (value) => setAdvancedFilter('phoneBinding', value))}
+          {renderSelect('登录设备', String(advancedFilters.loginDeviceBinding || ''), [option('with', '有登录设备'), option('without', '无登录设备')], (value) => setAdvancedFilter('loginDeviceBinding', value))}
+          {renderSelect('指定登录设备', loginDeviceIdFilter, lookupDevices.map((device) => option(device.id, `${device.deviceCode} / ${device.deviceName}`)), (value) => {
+            setSearchParams((current) => {
+              const next = new URLSearchParams(current);
+              if (value) next.set('loginDeviceId', value); else next.delete('loginDeviceId');
+              return next;
+            });
+          }, 180)}
+          {renderSelect('身份账号', String(advancedFilters.identityBinding || ''), [option('apple', 'Apple ID'), option('google', 'Google账号'), option('any', '任一身份账号'), option('none', '未绑定')], (value) => setAdvancedFilter('identityBinding', value))}
+          {renderSelect('密码凭证', String(advancedFilters.credentialStatus || ''), [option('complete', '已完善'), option('pending', '待补齐')], (value) => setAdvancedFilter('credentialStatus', value))}
+          {renderSelect('二次验证', String(advancedFilters.twoFactorStatus || ''), [option('configured', '已配置'), option('unconfigured', '未配置')], (value) => setAdvancedFilter('twoFactorStatus', value))}
+        </> : null}
+        {isAssetLedger ? <>
+          {renderSelect('所属部门', String(advancedFilters.departmentId || ''), departmentOptions, (value) => setAdvancedFilter('departmentId', value))}
+          {renderSelect('资产负责人', String(advancedFilters.ownerId || ''), userOptions, (value) => setAdvancedFilter('ownerId', value))}
+          {renderSelect('当前使用人', String(advancedFilters.currentUserId || ''), userOptions, (value) => setAdvancedFilter('currentUserId', value))}
+        </> : null}
+      </Box>
+    );
+    const activeChips: Array<{ key: string; label: string; clear: () => void }> = [];
+    if (search.trim()) activeChips.push({ key: 'search', label: `关键词：${search.trim()}`, clear: () => setSearch('') });
+    if (deviceCategory) activeChips.push({ key: 'deviceCategory', label: `设备类型：${deviceCategory}`, clear: () => setDeviceCategory('') });
+    if (profileStatus) activeChips.push({ key: 'profileStatus', label: `完善情况：${profileStatus === 'complete' ? '资料完整' : '待完善'}`, clear: () => setProfileStatus('') });
+    if (platform) activeChips.push({ key: 'platform', label: `平台：${platform}`, clear: () => setPlatform('') });
+    if (permissionStatus) activeChips.push({ key: 'permissionStatus', label: `控制权：${permissionStatus}`, clear: () => setPermissionStatus('') });
+    if (status) activeChips.push({ key: 'status', label: `状态：${status}`, clear: () => setStatus('') });
+    ADVANCED_ASSET_FILTER_KEYS.forEach((key) => {
+      const value = advancedFilters[key];
+      if (value) activeChips.push({ key, label: `${filterLabels[key] || key}：${valueLabel(key, String(value))}`, clear: () => setAdvancedFilter(key, '') });
+    });
     return (
-      <ModuleToolbar>
-        <TextField
-          size="small"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder={searchPlaceholderMap[activeTab] || '搜索资产'}
-          sx={{ minWidth: 280 }}
-        />
-        {(activeTab === 'accounts' || activeTab === 'matrix') && (
-          <>
-            <FormControl size="small" sx={{ minWidth: 140 }}>
-              <InputLabel>平台</InputLabel>
-              <Select value={platform} label="平台" onChange={(event) => setPlatform(event.target.value)}>
-                <MenuItem value="">全部</MenuItem>
-                {platformOptions.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
-              </Select>
-            </FormControl>
-            {activeTab === 'accounts' ? (
-              <FormControl size="small" sx={{ minWidth: 150 }}>
-                <InputLabel>账号控制权</InputLabel>
-                <Select value={permissionStatus} label="账号控制权" onChange={(event) => setPermissionStatus(event.target.value)}>
-                  <MenuItem value="">全部</MenuItem>
-                  {['已掌控', '待交接', '离职待回收', '已回收'].map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
-                </Select>
-              </FormControl>
-            ) : null}
-          </>
-        )}
-        {statusOptionsMap[activeTab] && (
-          <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel>{activeTab === 'matrix' || activeTab === 'offboarding' ? '处理状态' : '状态'}</InputLabel>
-            <Select value={status} label={activeTab === 'matrix' || activeTab === 'offboarding' ? '处理状态' : '状态'} onChange={(event) => setStatus(event.target.value)}>
-              <MenuItem value="">全部</MenuItem>
-              {statusOptionsMap[activeTab]?.map((item) => (
-                <MenuItem key={item} value={item}>{item}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        )}
+      <Box sx={{ mb: 2 }}>
+        <ModuleToolbar sx={{ mb: activeChips.length || moreFiltersOpen ? 1.25 : 0 }}>
+          <TextField size="small" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={searchPlaceholderMap[activeTab] || '搜索资产'} sx={{ width: isMobile ? '100%' : 320 }} />
+          {activeTab === 'devices' ? <>
+            {renderSelect('设备类型', deviceCategory, ['手机', '平板', '电脑', '摄影设备', '其他'].map((item) => option(item)), setDeviceCategory)}
+            {renderSelect('设备状态', status, (statusOptionsMap.devices || []).map((item) => option(item)), setStatus)}
+            {renderSelect('完善情况', profileStatus || '', [option('complete', '资料完整'), option('incomplete', '待完善')], (value) => setProfileStatus(value as AssetFilters['profileStatus'] | ''))}
+          </> : null}
+          {activeTab === 'phones' ? <>
+            {renderSelect('运营商', String(advancedFilters.operator || ''), ['移动', '联通', '电信', '广电', '未知'].map((item) => option(item)), (value) => setAdvancedFilter('operator', value))}
+            {renderSelect('卡状态', status, (statusOptionsMap.phones || []).map((item) => option(item)), setStatus)}
+            {renderSelect('设备绑定', String(advancedFilters.deviceBinding || ''), [option('bound', '已绑定'), option('unbound', '未绑定')], (value) => setAdvancedFilter('deviceBinding', value))}
+          </> : null}
+          {(activeTab === 'accounts' || activeTab === 'matrix') ? <>
+            {renderSelect('平台', platform, platformOptions.map((item) => option(item)), setPlatform)}
+            {activeTab === 'accounts' ? renderSelect('账号控制权', permissionStatus, ['已掌控', '待交接', '离职待回收', '已回收'].map((item) => option(item)), setPermissionStatus, 150) : null}
+          </> : null}
+          {activeTab === 'accounts' ? renderSelect('账号状态', status, (statusOptionsMap.accounts || []).map((item) => option(item)), setStatus) : null}
+          {!isAssetLedger && activeTab !== 'matrix' && statusOptionsMap[activeTab] ? renderSelect(activeTab === 'offboarding' ? '处理状态' : '状态', status, (statusOptionsMap[activeTab] || []).map((item) => option(item)), setStatus) : null}
+          {isAssetLedger ? <Button variant="outlined" startIcon={<TuneIcon />} onClick={() => setMoreFiltersOpen((open) => !open)}>{moreFilterCount ? `更多筛选 (${moreFilterCount})` : '更多筛选'}</Button> : null}
+        </ModuleToolbar>
+        {activeChips.length ? <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: moreFiltersOpen ? 1.25 : 0 }}>
+          {activeChips.map((chip) => <Chip key={chip.key} size="small" color="primary" variant="outlined" label={chip.label} onDelete={chip.clear} />)}
+          <Button size="small" onClick={clearAllAssetFilters}>清空全部</Button>
+        </Stack> : null}
         {activeTab === 'accounts' && loginDeviceIdFilter ? (
           <Chip
             color="primary"
@@ -1692,11 +1875,21 @@ const AssetManagement: React.FC = () => {
             color="primary"
             variant="outlined"
             label={`总览筛选：${bindingStatusLabels[bindingStatusFilter] || bindingStatusFilter}`}
-            onDelete={() => setSearchParams({ tab: activeTab })}
+            onDelete={() => {
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.delete('bindingStatus');
+              setSearchParams(nextParams, { replace: true });
+            }}
             sx={{ fontWeight: 800 }}
           />
         ) : null}
-      </ModuleToolbar>
+        {!isMobile && isAssetLedger && moreFiltersOpen ? <Paper variant="outlined" sx={{ mt: 1.25, p: 2, borderRadius: 2, bgcolor: '#F8FAFC' }}>{advancedContent}</Paper> : null}
+        <Drawer anchor="bottom" open={isMobile && isAssetLedger && moreFiltersOpen} onClose={() => setMoreFiltersOpen(false)} PaperProps={{ sx: { borderRadius: '20px 20px 0 0', p: 2.5, maxHeight: '78vh' } }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}><Typography variant="h6" sx={{ fontWeight: 900 }}>更多筛选</Typography><IconButton onClick={() => setMoreFiltersOpen(false)}><CloseIcon /></IconButton></Stack>
+          {advancedContent}
+          <Button variant="contained" fullWidth sx={{ mt: 2 }} onClick={() => setMoreFiltersOpen(false)}>查看筛选结果</Button>
+        </Drawer>
+      </Box>
     );
   };
 

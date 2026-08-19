@@ -17,7 +17,7 @@ import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
-import { readAccountControlStatus } from '../../src/domain/assets/assetFields';
+import { readAccountControlStatus, readDeviceCommunicationType } from '../../src/domain/assets/assetFields';
 import { normalizeAccountLoginDeviceIds } from '../../src/domain/assets/accountDeviceBindings';
 import { normalizeIdentityAccountIds } from '../../src/domain/assets/accountIdentityBindings';
 import { success } from '../api/response';
@@ -127,6 +127,86 @@ function matchesFilters(
       : (kind === 'accounts' ? value.accountStatus : value.status) === filters.status;
     if (!matchesStatus) return false;
   }
+  if (filters.deviceCategory && (kind !== 'devices' || value.deviceCategory !== filters.deviceCategory)) return false;
+  if (filters.brand && (kind !== 'devices' || value.brand !== filters.brand)) return false;
+  if (filters.communicationType && (kind !== 'devices' || readDeviceCommunicationType(value as unknown as AssetDevice) !== filters.communicationType)) return false;
+  if (filters.acquisitionType && (kind !== 'devices' || value.acquisitionType !== filters.acquisitionType)) return false;
+  if (filters.profileStatus) {
+    const complete = kind === 'devices' && Boolean(value.deviceCategory && value.brand && value.model && readDeviceCommunicationType(value as unknown as AssetDevice));
+    if ((filters.profileStatus === 'complete') !== complete) return false;
+  }
+  if (filters.operator && (kind !== 'phones' || value.operator !== filters.operator)) return false;
+  if (filters.attributionLocation && (kind !== 'phones' || value.attributionLocation !== filters.attributionLocation)) return false;
+  if (filters.simForm && (kind !== 'phones' || value.simForm !== filters.simForm)) return false;
+  if (filters.accountCategory && (kind !== 'accounts' || value.accountCategory !== filters.accountCategory)) return false;
+  if (filters.departmentId && value.departmentId !== filters.departmentId) return false;
+  if (filters.ownerId && value.ownerId !== filters.ownerId) return false;
+  if (filters.currentUserId && value.currentUserId !== filters.currentUserId) return false;
+  if (filters.userAssignment) {
+    const assigned = Boolean(value.currentUserId || value.currentUser);
+    if ((filters.userAssignment === 'assigned') !== assigned) return false;
+  }
+  if (filters.phoneBinding) {
+    const bound = kind === 'accounts'
+      ? Boolean(value.phoneId)
+      : kind === 'devices'
+        ? Number(value.phoneNumberCount || 0) > 0
+        : false;
+    if ((filters.phoneBinding === 'bound') !== bound) return false;
+  }
+  if (filters.deviceBinding) {
+    const bound = kind === 'phones' && Boolean(value.deviceId);
+    if ((filters.deviceBinding === 'bound') !== bound) return false;
+  }
+  if (filters.loginDeviceBinding) {
+    const bound = kind === 'accounts'
+      ? normalizeAccountLoginDeviceIds(value.loginDeviceIds as string[] | undefined).length > 0
+      : kind === 'devices'
+        ? Number(value.internetAccountCount || 0) > 0
+        : false;
+    if ((filters.loginDeviceBinding === 'with') !== bound) return false;
+  }
+  if (filters.accountBinding) {
+    const bound = kind === 'phones' && Boolean(accountById && [...accountById.values()].some((account) => account.phoneId === value.id));
+    if ((filters.accountBinding === 'with') !== bound) return false;
+  }
+  if (filters.identityBinding) {
+    const identityIds = normalizeIdentityAccountIds(value.identityAccountIds as string[] | undefined);
+    const identityPlatforms = identityIds.map((id) => accountById?.get(id)?.platform || '');
+    const matchesIdentity = filters.identityBinding === 'any'
+      ? identityIds.length > 0
+      : filters.identityBinding === 'none'
+        ? identityIds.length === 0
+        : identityPlatforms.some((identityPlatform) => filters.identityBinding === 'apple' ? identityPlatform === 'Apple ID' : identityPlatform === 'Google账号');
+    if (kind !== 'accounts' || !matchesIdentity) return false;
+  }
+  if (filters.credentialStatus) {
+    const pending = value.loginCredentialStatus === '待补齐' || value.paymentCredentialStatus === '待补齐';
+    const complete = value.loginCredentialStatus === '已设置'
+      && (!value.requiresPaymentPassword || value.paymentCredentialStatus === '已设置');
+    if (kind !== 'accounts' || (filters.credentialStatus === 'pending' ? !pending : !complete)) return false;
+  }
+  if (filters.twoFactorStatus) {
+    const configured = Boolean(text(value.twoFactorMethod).trim());
+    if (kind !== 'accounts' || (filters.twoFactorStatus === 'configured') !== configured) return false;
+  }
+  if (filters.servicePasswordStatus) {
+    const configured = Boolean(text(value.servicePassword).trim() || text(value.servicePasswordMasked).trim());
+    if (kind !== 'phones' || (filters.servicePasswordStatus === 'configured') !== configured) return false;
+  }
+  if (filters.packageName && (kind !== 'phones' || value.packageName !== filters.packageName)) return false;
+  if (filters.contractStatus) {
+    const expiresAt = text(value.contractExpiresAt).trim();
+    const expired = Boolean(expiresAt && new Date(expiresAt).getTime() < Date.now());
+    const matchesContract = filters.contractStatus === 'unset'
+      ? !expiresAt
+      : filters.contractStatus === 'expired'
+        ? expired
+        : Boolean(expiresAt) && !expired;
+    if (kind !== 'phones' || !matchesContract) return false;
+  }
+  if (filters.monthlyFeeMin !== undefined && (kind !== 'phones' || Number(value.monthlyFee || 0) < filters.monthlyFeeMin)) return false;
+  if (filters.monthlyFeeMax !== undefined && (kind !== 'phones' || Number(value.monthlyFee || 0) > filters.monthlyFeeMax)) return false;
   return true;
 }
 
@@ -169,7 +249,7 @@ export function createAssetListService(
       const visibleAccounts = hasPermission(user, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read')
         ? (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[]
         : [];
-      const accountById = kind === 'accounts' ? new Map(visibleAccounts.map((account) => [account.id, account])) : undefined;
+      const accountById = kind === 'accounts' || kind === 'phones' ? new Map(visibleAccounts.map((account) => [account.id, account])) : undefined;
       const visibleDevices = (visible[STORAGE_KEYS.ASSET_DEVICES] || []) as AssetDevice[];
       const deviceById = kind === 'accounts' ? new Map(visibleDevices.map((device) => [device.id, device])) : undefined;
       const accountCountByDeviceId = kind === 'devices'
@@ -180,10 +260,18 @@ export function createAssetListService(
           return counts;
         }, new Map<string, number>())
         : undefined;
+      const visiblePhones = (visible[STORAGE_KEYS.ASSET_PHONE_NUMBERS] || []) as AssetPhoneNumber[];
+      const phoneCountByDeviceId = kind === 'devices'
+        ? visiblePhones.reduce((counts, phone) => {
+          if (phone.deviceId) counts.set(phone.deviceId, (counts.get(phone.deviceId) || 0) + 1);
+          return counts;
+        }, new Map<string, number>())
+        : undefined;
       const rowsWithRelationshipCounts = kind === 'devices'
         ? (rows as AssetDevice[]).map((device) => ({
           ...device,
           internetAccountCount: accountCountByDeviceId?.get(device.id) || 0,
+          phoneNumberCount: phoneCountByDeviceId?.get(device.id) || 0,
         }))
         : rows;
       const filtered = rowsWithRelationshipCounts.filter((row) => matchesFilters(kind, row, filters, accountById, deviceById));

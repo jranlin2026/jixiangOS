@@ -47,11 +47,11 @@ const authenticatedAdmin: AuthenticatedUser = {
 
 const data: Record<string, unknown> = {
   [STORAGE_KEYS.ASSET_DEVICES]: [
-    { id: 'device-a', deviceCode: 'DEV-0001', deviceName: '直播一号机', owner: '管理员', currentUser: '管理员', imei1: '111', imei1Masked: '***111', status: '使用中', monthlyCost: 50 },
-    { id: 'device-b', deviceCode: 'DEV-0002', deviceName: '剪辑二号机', owner: '管理员', currentUser: '', imei1: '222', imei1Masked: '***222', status: '库存中', monthlyCost: 30 },
+    { id: 'device-a', deviceCode: 'DEV-0001', deviceName: '直播一号机', deviceCategory: '手机', brand: '苹果', model: '15 Pro', communicationType: '双卡', acquisitionType: '购买', departmentId: 'dept-live', ownerId: 'user-admin', currentUserId: 'user-admin', owner: '管理员', currentUser: '管理员', imei1: '111', imei1Masked: '***111', status: '使用中', riskLevel: '低', monthlyCost: 50 },
+    { id: 'device-b', deviceCode: 'DEV-0002', deviceName: '剪辑二号机', deviceCategory: '电脑', brand: '苹果', model: '', communicationType: '无SIM', acquisitionType: '租赁', departmentId: 'dept-edit', ownerId: 'user-admin', owner: '管理员', currentUser: '', imei1: '222', imei1Masked: '***222', status: '库存中', riskLevel: '中', monthlyCost: 30 },
   ],
   [STORAGE_KEYS.ASSET_PHONE_NUMBERS]: [
-    { id: 'phone-1', owner: '管理员', deviceId: 'device-a', phoneNumber: '13800000000', phoneNumberMasked: '138****0000', status: '使用中', monthlyFee: 38 },
+    { id: 'phone-1', owner: '管理员', ownerId: 'user-admin', deviceId: 'device-a', phoneNumber: '13800000000', phoneNumberMasked: '138****0000', operator: '移动', attributionLocation: '福建厦门', simForm: '实体SIM', servicePasswordMasked: '******', status: '使用中', monthlyFee: 38 },
   ],
   [STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS]: [],
   [STORAGE_KEYS.ASSET_RISKS]: [],
@@ -77,7 +77,7 @@ await service.list('phones', { page: 1, pageSize: 20 }, authenticatedAdmin);
 assert.equal(storageReadCount, 7, '未写入时应复用同一资产快照');
 
 data[STORAGE_KEYS.ASSET_PHONE_NUMBERS] = [
-  { id: 'phone-1', owner: '管理员', deviceId: 'device-b', phoneNumber: '13800000000', phoneNumberMasked: '138****0000', status: '使用中', monthlyFee: 38 },
+  { id: 'phone-1', owner: '管理员', ownerId: 'user-admin', deviceId: 'device-b', phoneNumber: '13800000000', phoneNumberMasked: '138****0000', operator: '移动', attributionLocation: '福建厦门', simForm: '实体SIM', servicePasswordMasked: '******', packageName: '企业畅联', contractExpiresAt: '2099-12-31', status: '使用中', monthlyFee: 38 },
 ];
 service.invalidate();
 
@@ -85,8 +85,8 @@ const second = await service.list('phones', { page: 1, pageSize: 20 }, authentic
 assert.equal((second.data.items[0] as AssetPhoneNumber | undefined)?.deviceId, 'device-b');
 
 data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] = [
-  { id: 'account-apple', platform: 'Apple ID', accountName: '企业身份', loginAccount: 'brand-identity@icloud.com', owner: '管理员', currentUser: '管理员', accountStatus: '使用中', loginCredentialStatus: '待补齐', monthlyFee: 12 },
-  { id: 'account-business', platform: 'TikTok', accountName: '品牌业务号', loginAccount: 'brand-business', phoneId: 'phone-1', loginDeviceIds: ['device-b'], identityAccountIds: ['account-apple'], owner: '管理员', currentUser: '管理员', accountStatus: '使用中', loginCredentialStatus: '已设置', monthlyFee: 20 },
+  { id: 'account-apple', platform: 'Apple ID', accountName: '企业身份', accountCategory: '主账号', loginAccount: 'brand-identity@icloud.com', owner: '管理员', currentUser: '管理员', accountStatus: '使用中', loginCredentialStatus: '待补齐', monthlyFee: 12 },
+  { id: 'account-business', platform: 'TikTok', accountName: '品牌业务号', accountCategory: '直播号', loginAccount: 'brand-business', phoneId: 'phone-1', loginDeviceIds: ['device-b'], identityAccountIds: ['account-apple'], ownerId: 'user-admin', owner: '管理员', currentUser: '管理员', accountStatus: '使用中', loginCredentialStatus: '已设置', twoFactorMethod: '验证器', monthlyFee: 20 },
 ];
 service.invalidate();
 const dashboard = await service.dashboard(authenticatedAdmin);
@@ -126,6 +126,20 @@ assert.deepEqual(
   '设备互联网账号明细应只返回当前设备的登录账号',
 );
 assert.equal(filteredByLoginDevice.data.pagination.total, 1, '设备互联网账号明细必须返回可分页的准确总数');
+const filteredDeviceCombination = await service.list('devices', {
+  deviceCategory: '电脑', profileStatus: 'incomplete', phoneBinding: 'bound', loginDeviceBinding: 'with', page: 1, pageSize: 10,
+}, authenticatedAdmin);
+assert.deepEqual(filteredDeviceCombination.data.items.map((item) => item.id), ['device-b'], '设备高级筛选应支持跨维度 AND 组合');
+const filteredPhoneCombination = await service.list('phones', {
+  operator: '移动', deviceBinding: 'bound', accountBinding: 'with', servicePasswordStatus: 'configured',
+  packageName: '企业畅联', contractStatus: 'active', monthlyFeeMin: 30, monthlyFeeMax: 40, page: 1, pageSize: 10,
+}, authenticatedAdmin);
+assert.deepEqual(filteredPhoneCombination.data.items.map((item) => item.id), ['phone-1'], '手机号筛选应同时识别设备、账号与服务密码配置状态');
+const filteredAccountCombination = await service.list('accounts', {
+  accountCategory: '直播号', phoneBinding: 'bound', loginDeviceBinding: 'with', identityBinding: 'apple',
+  credentialStatus: 'complete', twoFactorStatus: 'configured', page: 1, pageSize: 10,
+}, authenticatedAdmin);
+assert.deepEqual(filteredAccountCombination.data.items.map((item) => item.id), ['account-business'], '账号筛选应保持手机号、登录设备和身份账号为独立关系');
 const devicesWithAccountCount = await service.list('devices', { page: 1, pageSize: 10 }, authenticatedAdmin);
 assert.equal(
   (devicesWithAccountCount.data.items.find((device) => device.id === 'device-b') as { internetAccountCount?: number } | undefined)?.internetAccountCount,
