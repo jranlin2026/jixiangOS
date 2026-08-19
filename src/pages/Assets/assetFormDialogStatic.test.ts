@@ -31,9 +31,9 @@ assert.match(phoneFields, /MenuProps=\{phoneSlotMenuProps\}/, '卡槽下拉层�
 assert.match(source, /id: 'imei', label: '卡槽 \/ IMEI'/, '设备列表应将 IMEI 字段明确配置到卡槽');
 assert.match(source, /id: 'simType', label: '对应手机号'/, '设备列表手机号字段应表达与卡槽的对应关系');
 assert.match(source, /<Autocomplete[\s\S]*?freeSolo[\s\S]*?normalizeDeviceBrand/, '设备品牌应使用可搜索且允许自定义的标准化输入');
-assert.match(source, /buildDeviceSlotRows[\s\S]*?卡槽与通信绑定/, '设备详情应按卡槽组织 IMEI 和手机号关系');
+assert.match(source, /renderDeviceRelationshipOverview[\s\S]*?buildDeviceSlotRows[\s\S]*?关联关系/, '设备详情应按卡槽组织 IMEI 、手机号和账号关系');
 assert.match(source, /设备身份[\s\S]*?归属与使用[\s\S]*?取得与状态/, '设备详情应按业务语义分区');
-assert.match(source, /renderPhoneSummaryCard[\s\S]*?SIM身份信息[\s\S]*?设备绑定关系[\s\S]*?归属与使用[\s\S]*?套餐与状态/, '手机号详情应参考设备详情按业务语义分区');
+assert.match(source, /const renderPhoneDetailSections[\s\S]*?renderPhoneSummaryCard\(phone\)[\s\S]*?renderPhoneRelationshipOverview\(phone\)[\s\S]*?renderPhoneIdentityCard\(phone\)[\s\S]*?renderPhoneOwnershipCard\(phone\)[\s\S]*?renderPhonePlanCard\(phone\)/, '手机号详情应优先展示关系，再按业务语义分区');
 assert.match(source, /displayPhoneNumber[\s\S]*?renderCopyButton/, '手机号等运营字段应直接显示完整值并支持复制');
 assert.doesNotMatch(source, /label: '手机号', value: renderSensitiveInline/, '完整手机号不应继续依赖敏感字段查看按钮');
 assert.doesNotMatch(source, /label: '登录账号', value: renderSensitiveInline/, '登录账号不应继续依赖敏感字段查看按钮');

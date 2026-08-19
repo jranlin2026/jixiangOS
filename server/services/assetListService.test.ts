@@ -136,6 +136,24 @@ const accountDetail = await service.detail('account', 'account-business', authen
 assert.equal(accountDetail.data?.account?.id, 'account-business', '生产模式应能读取服务端实时账号详情');
 assert.deepEqual(accountDetail.data?.relatedDevices?.map((device) => device.id), ['device-b']);
 assert.deepEqual(accountDetail.data?.relatedAccounts?.map((account) => account.id).sort(), ['account-apple', 'account-business']);
+data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] = [
+  ...(data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as AssetInternetAccount[]),
+  { id: 'account-phone-only', platform: '微信', accountName: '仅绑手机号', loginAccount: 'phone-only', phoneId: 'phone-1', loginDeviceIds: [], owner: '管理员', accountStatus: '使用中' },
+  { id: 'account-device-only', platform: 'LINE', accountName: '无卡设备账号', loginAccount: 'device-only', loginDeviceIds: ['device-a'], owner: '管理员', accountStatus: '使用中' },
+];
+service.invalidate();
+const deviceWithPhoneDetail = await service.detail('device', 'device-b', authenticatedAdmin);
+assert.deepEqual(
+  deviceWithPhoneDetail.data?.relatedAccounts.map((account) => account.id).sort(),
+  ['account-business', 'account-phone-only'],
+  '设备详情应同时返回本机登录账号和绑定该设备手机号的账号',
+);
+const deviceWithoutPhoneDetail = await service.detail('device', 'device-a', authenticatedAdmin);
+assert.deepEqual(
+  deviceWithoutPhoneDetail.data?.relatedAccounts.map((account) => account.id),
+  ['account-device-only'],
+  '无 SIM 设备仍应返回独立配置的登录账号',
+);
 const deviceOnlyReader: AuthenticatedUser = {
   ...authenticatedAdmin,
   permissions: [

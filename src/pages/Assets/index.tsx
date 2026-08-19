@@ -106,6 +106,7 @@ import {
 } from '../../domain/assets/assetDisplay';
 import { ASSET_FORM_SECTIONS, buildDeviceSlotRows, createAssetFormDefaults, formatPhoneSlotImeiLabel, type AssetFormType } from './assetFormModel';
 import PlatformBrandMark from './PlatformBrandMark';
+import DeviceBrandMark from './DeviceBrandMark';
 import {
   findIdentityAccountForProvider,
   normalizeIdentityAccountIds,
@@ -221,7 +222,8 @@ const accountDeleteLabel = (account: AssetInternetAccount) => {
 const DEVICE_COLUMNS: AssetColumnConfig[] = [
   { id: 'deviceCode', label: '设备编号', width: 130 },
   { id: 'deviceName', label: '设备名称', width: 130 },
-  { id: 'brandModel', label: '类型 / 品牌型号', width: 180 },
+  { id: 'deviceCategory', label: '设备类型', width: 110 },
+  { id: 'brandModel', label: '品牌 / 型号', width: 200 },
   { id: 'imei', label: '卡槽 / IMEI', width: 250 },
   { id: 'simType', label: '对应手机号', width: 210 },
   { id: 'accountCount', label: '互联网账号', width: 120 },
@@ -264,7 +266,7 @@ const ACCOUNT_COLUMNS: AssetColumnConfig[] = [
 const DEFAULT_ACCOUNT_VISIBLE_COLUMN_IDS = ACCOUNT_COLUMNS.map((column) => column.id);
 
 const ASSET_VIEW_STORAGE_KEYS: Record<ConfigurableAssetTab, string> = {
-  devices: 'aaos_asset_devices_table_view_v4',
+  devices: 'aaos_asset_devices_table_view_v5',
   phones: 'aaos_asset_phones_table_view_v6',
   accounts: 'aaos_asset_accounts_table_view_v8',
 };
@@ -486,6 +488,7 @@ const AssetManagement: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<AssetDeleteTarget>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [detailSaveNotice, setDetailSaveNotice] = useState('');
+  const [showAllPhoneRelatedAccounts, setShowAllPhoneRelatedAccounts] = useState(false);
   const [deviceAccountDrawer, setDeviceAccountDrawer] = useState<DeviceAccountDrawerState>(emptyDeviceAccountDrawer);
   const [loginDeviceFilterContext, setLoginDeviceFilterContext] = useState<AssetDevice>();
   const [returnToDeviceAccountDrawer, setReturnToDeviceAccountDrawer] = useState(false);
@@ -1165,6 +1168,7 @@ const AssetManagement: React.FC = () => {
 
   const openDetail = (type: AssetType, id: string, options?: { returnToDeviceAccounts?: boolean }) => {
     setReturnToDeviceAccountDrawer(Boolean(options?.returnToDeviceAccounts));
+    setShowAllPhoneRelatedAccounts(false);
     setDetailDialogOpen(true);
     fetchDetail(type, id);
   };
@@ -1746,8 +1750,22 @@ const AssetManagement: React.FC = () => {
         return <Box sx={{ color: shell.tableLink, fontWeight: 900 }}>{device.deviceCode}</Box>;
       case 'deviceName':
         return device.deviceName;
+      case 'deviceCategory':
+        return <Chip size="small" label={device.deviceCategory || '手机'} variant="outlined" sx={{ height: 26, borderRadius: '6px', fontWeight: 800 }} />;
       case 'brandModel':
-        return `${device.deviceCategory || '手机'} / ${formatDeviceBrandModel(device)}`;
+        return (
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+            <DeviceBrandMark brand={device.brand} size={34} />
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 900, lineHeight: 1.25 }}>
+                {normalizeDeviceBrand(device.brand) || '未录入品牌'}
+              </Typography>
+              <Typography variant="caption" sx={{ color: shell.muted, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {device.model || '未录入型号'}
+              </Typography>
+            </Box>
+          </Stack>
+        );
       case 'imei':
         return renderDeviceImeis(device);
       case 'simType':
@@ -2439,15 +2457,20 @@ const AssetManagement: React.FC = () => {
   const renderDeviceSummaryCard = (device: AssetDevice) => (
     <Paper elevation={0} sx={{ ...detailCardSx, p: 2 }}>
       <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
-        <Box sx={{ minWidth: 0 }}>
-          <Typography sx={{ color: shell.ink, fontSize: 22, fontWeight: 950 }}>{device.deviceName}</Typography>
-          <Typography variant="body2" sx={{ color: shell.muted, mt: 0.25 }}>{formatDeviceBrandModel(device)}</Typography>
-          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mt: 0.8 }}>
-            <Chip size="small" label={device.deviceCode} variant="outlined" />
-            <Chip size="small" label={device.deviceCategory || '手机'} variant="outlined" />
-            <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} />
-          </Stack>
-        </Box>
+        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
+          <DeviceBrandMark brand={device.brand} size={56} />
+          <Box sx={{ minWidth: 0 }}>
+            <Typography sx={{ color: shell.ink, fontSize: 22, fontWeight: 950 }}>{device.deviceName}</Typography>
+            <Typography variant="body2" sx={{ color: shell.muted, mt: 0.25 }}>
+              {[normalizeDeviceBrand(device.brand), device.model].filter(Boolean).join(' / ') || '未录入品牌型号'}
+            </Typography>
+            <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mt: 0.8 }}>
+              <Chip size="small" label={device.deviceCode} variant="outlined" />
+              <Chip size="small" label={device.deviceCategory || '手机'} variant="outlined" />
+              <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} />
+            </Stack>
+          </Box>
+        </Stack>
         <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
           <Typography variant="caption" sx={{ color: shell.muted }}>当前使用人</Typography>
           <Typography sx={{ color: shell.ink, fontWeight: 900 }}>{device.currentUser || '未分配'}</Typography>
@@ -2456,11 +2479,14 @@ const AssetManagement: React.FC = () => {
     </Paper>
   );
 
-  const renderDeviceCommunicationCard = (device: AssetDevice) => {
+  const renderDeviceRelationshipOverview = (device: AssetDevice) => {
     const slots = buildDeviceSlotRows(device, detail?.relatedPhones || []);
-    return renderDetailCard('卡槽与通信绑定', slots.length ? (
+    const loginAccounts = (detail?.relatedAccounts || []).filter((account) => (
+      normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(device.id)
+    ));
+    return renderDetailCard('关联关系', (
       <Stack spacing={1}>
-        {slots.map((slot) => {
+        {slots.length ? slots.map((slot) => {
           const phone = detail?.relatedPhones.find((item) => item.id === slot.phoneId);
           const accounts = slot.phoneId
             ? detail?.relatedAccounts.filter((account) => account.phoneId === slot.phoneId) || []
@@ -2493,8 +2519,8 @@ const AssetManagement: React.FC = () => {
                     </Typography>
                   ) : null}
                 </Box>
-                <Box sx={{ flex: 1.2, minWidth: 0 }}>
-                  <Typography variant="caption" sx={{ color: shell.muted }}>互联网账号</Typography>
+                <Box sx={{ flex: 1.35, minWidth: 0 }}>
+                  <Typography variant="caption" sx={{ color: shell.muted }}>该号码关联账号 ({accounts.length})</Typography>
                   <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mt: 0.5 }}>
                     {accounts.length ? accounts.map((account) => (
                       <Button
@@ -2502,9 +2528,10 @@ const AssetManagement: React.FC = () => {
                         size="small"
                         variant="outlined"
                         onClick={() => openDetail('account', account.id)}
-                        sx={{ minWidth: 0, px: 1, fontWeight: 800 }}
+                        startIcon={<PlatformBrandMark platform={account.platform} size={24} />}
+                        sx={{ minWidth: 0, px: 1, fontWeight: 800, justifyContent: 'flex-start' }}
                       >
-                        {account.platform} / {account.accountName}
+                        {account.accountName}
                       </Button>
                     )) : <Typography variant="body2" sx={{ color: shell.muted }}>暂无关联账号</Typography>}
                   </Stack>
@@ -2512,16 +2539,44 @@ const AssetManagement: React.FC = () => {
               </Stack>
             </Paper>
           );
-        })}
+        }) : (
+          <Box sx={{ py: 1.5, border: `1px dashed ${shell.softLine}`, borderRadius: 1, textAlign: 'center', color: shell.muted }}>
+            该设备无 SIM 通信能力，无需配置卡槽绑定
+          </Box>
+        )}
+        <Box sx={{ pt: 0.25 }}>
+          <Typography sx={{ color: shell.ink, fontWeight: 900, mb: 0.75 }}>本机登录账号 ({loginAccounts.length})</Typography>
+          {loginAccounts.length ? (
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 0.9 }}>
+              {loginAccounts.map((account) => (
+                <Paper key={account.id} variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1, p: 1, minWidth: 0 }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <PlatformBrandMark platform={account.platform} size={34} />
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      {renderAssetNameLink(account.accountName, () => openDetail('account', account.id))}
+                      <Typography variant="caption" display="block" sx={{ color: shell.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {account.platform} · {displayAccountLogin(account)}
+                      </Typography>
+                    </Box>
+                    <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} />
+                  </Stack>
+                </Paper>
+              ))}
+            </Box>
+          ) : (
+            <Box sx={{ py: 1.25, border: `1px dashed ${shell.softLine}`, borderRadius: 1, textAlign: 'center', color: shell.muted }}>
+              暂无在该设备登录的互联网账号
+            </Box>
+          )}
+        </Box>
       </Stack>
-    ) : (
-      <Box sx={{ py: 1.5, textAlign: 'center', color: shell.muted }}>该设备无 SIM 通信能力，无需配置卡槽绑定。</Box>
-    ));
+    ), <Chip size="small" label={`${slots.length} 个卡槽 · ${loginAccounts.length} 个登录账号`} sx={chipSx(toneSx('low'))} />);
   };
 
   const renderDeviceDetailSections = (device: AssetDevice) => (
     <Stack spacing={1.25}>
       {renderDeviceSummaryCard(device)}
+      {renderDeviceRelationshipOverview(device)}
       {renderDetailCard('设备身份', renderInfoRows([
         { label: '设备编号', value: <Stack direction="row" alignItems="center" spacing={0.5}>{device.deviceCode}{renderCopyButton(device.deviceCode, '设备编号')}</Stack> },
         { label: '设备类型', value: device.deviceCategory || '手机' },
@@ -2530,22 +2585,23 @@ const AssetManagement: React.FC = () => {
         ...(device.serialNumber ? [{ label: '序列号', value: device.serialNumber }] : []),
         { label: '通信方式', value: readDeviceCommunicationType(device) },
       ], 2))}
-      {renderDeviceCommunicationCard(device)}
-      {renderDetailCard('归属与使用', renderInfoRows([
-        { label: '所属主体', value: device.ownerSubject },
-        ...(device.department ? [{ label: '所属部门', value: device.department }] : []),
-        ...(device.owner ? [{ label: '资产负责人', value: device.owner }] : []),
-        ...(device.currentUser ? [{ label: '当前使用人', value: device.currentUser }] : []),
-      ], 2))}
-      {renderDetailCard('取得与状态', renderInfoRows([
-        { label: '取得方式', value: device.acquisitionType || '-' },
-        { label: device.acquisitionType === '租赁' ? '月租金' : '购买金额', value: formatCurrency(device.acquisitionType === '租赁' ? device.monthlyRent || 0 : device.purchaseAmount || 0) },
-        ...(device.acquiredAt ? [{ label: '取得日期', value: formatDate(device.acquiredAt, 'yyyy-MM-dd') }] : []),
-        ...(device.warrantyExpiresAt ? [{ label: '保修到期', value: formatDate(device.warrantyExpiresAt, 'yyyy-MM-dd') }] : []),
-        { label: '设备状态', value: <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} /> },
-        { label: '更新时间', value: formatDate(device.updatedAt, 'yyyy-MM-dd') },
-        ...(device.remark ? [{ label: '备注', value: device.remark }] : []),
-      ], 2))}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
+        {renderDetailCard('归属与使用', renderInfoRows([
+          { label: '所属主体', value: device.ownerSubject },
+          ...(device.department ? [{ label: '所属部门', value: device.department }] : []),
+          ...(device.owner ? [{ label: '资产负责人', value: device.owner }] : []),
+          ...(device.currentUser ? [{ label: '当前使用人', value: device.currentUser }] : []),
+        ], 1))}
+        {renderDetailCard('取得与状态', renderInfoRows([
+          { label: '取得方式', value: device.acquisitionType || '-' },
+          { label: device.acquisitionType === '租赁' ? '月租金' : '购买金额', value: formatCurrency(device.acquisitionType === '租赁' ? device.monthlyRent || 0 : device.purchaseAmount || 0) },
+          ...(device.acquiredAt ? [{ label: '取得日期', value: formatDate(device.acquiredAt, 'yyyy-MM-dd') }] : []),
+          ...(device.warrantyExpiresAt ? [{ label: '保修到期', value: formatDate(device.warrantyExpiresAt, 'yyyy-MM-dd') }] : []),
+          { label: '设备状态', value: <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} /> },
+          { label: '更新时间', value: formatDate(device.updatedAt, 'yyyy-MM-dd') },
+          ...(device.remark ? [{ label: '备注', value: device.remark }] : []),
+        ], 1))}
+      </Box>
     </Stack>
   );
 
@@ -2589,31 +2645,87 @@ const AssetManagement: React.FC = () => {
     },
   ], 2));
 
-  const renderPhoneDeviceBindingCard = (phone: AssetPhoneNumber) => {
+  const renderPhoneRelationshipOverview = (phone: AssetPhoneNumber) => {
     const slot = phone.slotType;
     const imeiLabel = slot === '卡槽2' ? 'IMEI 2' : 'IMEI 1';
     const imei = primaryDevice && slot ? displayDeviceImei(primaryDevice, slot === '卡槽2' ? 2 : 1) : '';
-    return renderDetailCard('设备绑定关系', primaryDevice && slot ? (
-      <Paper variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.5 }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '0.7fr 1.2fr 1.3fr' }, gap: 1.5, alignItems: 'center' }}>
-          <Box>
-            <Typography variant="caption" sx={{ color: shell.muted }}>当前卡槽</Typography>
-            <Typography sx={{ color: shell.tableLink, fontWeight: 950 }}>{slot}</Typography>
-          </Box>
-          <Box>
-            <Typography variant="caption" sx={{ color: shell.muted }}>对应{imeiLabel}</Typography>
-            <Box sx={{ color: shell.ink, fontWeight: 850 }}>{renderOperationalValue(imei, imeiLabel)}</Box>
-          </Box>
-          <Box>
-            <Typography variant="caption" sx={{ color: shell.muted }}>所属设备</Typography>
-            <Box>{renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))}</Box>
-            <Typography variant="caption" sx={{ color: shell.muted }}>{formatDeviceBrandModel(primaryDevice)}</Typography>
-          </Box>
-        </Box>
-      </Paper>
-    ) : (
-      <Box sx={{ py: 1.5, textAlign: 'center', color: shell.muted }}>当前手机号尚未绑定设备与卡槽。</Box>
-    ));
+    const relatedAccounts = detail?.relatedAccounts || [];
+    const visibleAccounts = showAllPhoneRelatedAccounts ? relatedAccounts : relatedAccounts.slice(0, 4);
+    return renderDetailCard('关联关系', (
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '0.9fr 1.5fr' }, gap: 1.25, alignItems: 'stretch' }}>
+        <Paper variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.4, minWidth: 0 }}>
+          <Typography sx={{ color: shell.ink, fontWeight: 900, mb: 1 }}>设备与卡槽</Typography>
+          {primaryDevice && slot ? (
+            <Stack spacing={1.1}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <DeviceBrandMark brand={primaryDevice.brand} size={38} />
+                <Box sx={{ minWidth: 0 }}>
+                  {renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))}
+                  <Typography variant="caption" display="block" sx={{ color: shell.muted }}>
+                    {formatDeviceBrandModel(primaryDevice)}
+                  </Typography>
+                </Box>
+              </Stack>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '0.7fr 1.3fr', gap: 1 }}>
+                <Box>
+                  <Typography variant="caption" sx={{ color: shell.muted }}>当前卡槽</Typography>
+                  <Typography sx={{ color: shell.tableLink, fontWeight: 950 }}>{slot}</Typography>
+                </Box>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="caption" sx={{ color: shell.muted }}>对应{imeiLabel}</Typography>
+                  <Box sx={{ color: shell.ink, fontWeight: 850, minWidth: 0 }}>{renderOperationalValue(imei, imeiLabel)}</Box>
+                </Box>
+              </Box>
+            </Stack>
+          ) : (
+            <Box sx={{ py: 2, border: `1px dashed ${shell.softLine}`, borderRadius: 1, textAlign: 'center', color: shell.muted }}>
+              尚未绑定设备与卡槽
+            </Box>
+          )}
+        </Paper>
+        <Paper variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.4, minWidth: 0 }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+            <Typography sx={{ color: shell.ink, fontWeight: 900 }}>互联网账号 ({relatedAccounts.length})</Typography>
+            {relatedAccounts.length > 4 ? (
+              <Button size="small" onClick={() => setShowAllPhoneRelatedAccounts((value) => !value)} sx={{ fontWeight: 900 }}>
+                {showAllPhoneRelatedAccounts ? '收起' : `查看全部 ${relatedAccounts.length} 个`}
+              </Button>
+            ) : null}
+          </Stack>
+          {visibleAccounts.length ? (
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 0.9 }}>
+              {visibleAccounts.map((account) => (
+                <Paper
+                  component="button"
+                  type="button"
+                  key={account.id}
+                  variant="outlined"
+                  onClick={() => openDetail('account', account.id)}
+                  sx={{ borderColor: shell.softLine, borderRadius: 1, p: 1, bgcolor: '#fff', textAlign: 'left', cursor: 'pointer', minWidth: 0, '&:hover': { borderColor: shell.tableLink, bgcolor: '#F8FBFF' } }}
+                >
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <PlatformBrandMark platform={account.platform} size={34} />
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography variant="body2" sx={{ color: shell.tableLink, fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {account.accountName}
+                      </Typography>
+                      <Typography variant="caption" display="block" sx={{ color: shell.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {account.platform} · {displayAccountLogin(account)}
+                      </Typography>
+                    </Box>
+                    <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} />
+                  </Stack>
+                </Paper>
+              ))}
+            </Box>
+          ) : (
+            <Box sx={{ py: 2, border: `1px dashed ${shell.softLine}`, borderRadius: 1, textAlign: 'center', color: shell.muted }}>
+              暂无关联互联网账号
+            </Box>
+          )}
+        </Paper>
+      </Box>
+    ), <Chip size="small" label={`${primaryDevice ? '1 台设备' : '未绑设备'} · ${relatedAccounts.length} 个账号`} sx={chipSx(toneSx('low'))} />);
   };
 
   const renderPhoneOwnershipCard = (phone: AssetPhoneNumber) => renderDetailCard('归属与使用', renderInfoRows([
@@ -2637,11 +2749,12 @@ const AssetManagement: React.FC = () => {
   const renderPhoneDetailSections = (phone: AssetPhoneNumber) => (
     <Stack spacing={1.25}>
       {renderPhoneSummaryCard(phone)}
+      {renderPhoneRelationshipOverview(phone)}
       {renderPhoneIdentityCard(phone)}
-      {renderPhoneDeviceBindingCard(phone)}
-      {renderPhoneOwnershipCard(phone)}
-      {renderPhonePlanCard(phone)}
-      {renderRelatedAssetsSection()}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
+        {renderPhoneOwnershipCard(phone)}
+        {renderPhonePlanCard(phone)}
+      </Box>
     </Stack>
   );
 
@@ -2765,12 +2878,13 @@ const AssetManagement: React.FC = () => {
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
               {accountLoginDevices.map((device) => (
                 <Paper key={device.id} variant="outlined" sx={{ borderColor: shell.softLine, borderRadius: 1.25, p: 1.25, minWidth: 0 }}>
-                  <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <DeviceBrandMark brand={device.brand} size={34} />
                     <Box sx={{ minWidth: 0 }}>
                       {renderAssetNameLink(`${device.deviceCode} / ${device.deviceName}`, () => openDetail('device', device.id))}
                       <Typography variant="caption" display="block" sx={{ color: shell.muted }}>{formatDeviceBrandModel(device)}</Typography>
                     </Box>
-                    <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} />
+                    <Chip size="small" label={device.status} sx={{ ...chipSx(statusTone(device.status)), ml: 'auto' }} />
                   </Stack>
                 </Paper>
               ))}
@@ -2864,10 +2978,12 @@ const AssetManagement: React.FC = () => {
   const renderAccountDetailSections = (account: AssetInternetAccount) => (
     <Stack spacing={1.25}>
       {renderAccountSummaryCard(account)}
-      {renderAccountIdentitySection(account)}
-      {renderAccountSecuritySection(account)}
       {renderAccountBindingSection(account)}
-      {renderAccountOwnershipSection(account)}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
+        {renderAccountIdentitySection(account)}
+        {renderAccountOwnershipSection(account)}
+      </Box>
+      {renderAccountSecuritySection(account)}
       {renderAccountBusinessSection(account)}
       {renderAccountIdentityCard(account)}
     </Stack>
@@ -2942,9 +3058,9 @@ const AssetManagement: React.FC = () => {
       <Dialog
         open={detailDialogOpen}
         onClose={closeDetailDialog}
-        maxWidth={detail?.type === 'account' ? 'lg' : 'md'}
+        maxWidth="lg"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 1, overflow: 'hidden', maxWidth: detail?.type === 'account' ? 1040 : 960, maxHeight: '88vh' } }}
+        PaperProps={{ sx: { borderRadius: 1, overflow: 'hidden', maxWidth: 1120, maxHeight: '88vh' } }}
       >
         <DialogTitle sx={{ p: 0 }}>
           <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ px: { xs: 1.5, sm: 2.25 }, py: 1.5, borderBottom: `1px solid ${shell.softLine}` }}>

@@ -223,7 +223,11 @@ export function createAssetListService(
         const device = devices.find((item) => item.id === id);
         if (device) {
           const relatedPhones = phones.filter((phone) => phone.deviceId === id);
-          const relatedAccounts = accounts.filter((account) => normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(id));
+          const relatedPhoneIds = new Set(relatedPhones.map((phone) => phone.id));
+          const relatedAccounts = accounts.filter((account) => (
+            normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(id)
+            || Boolean(account.phoneId && relatedPhoneIds.has(account.phoneId))
+          ));
           const ids = new Set([id, ...relatedPhones.map((phone) => phone.id), ...relatedAccounts.map((account) => account.id)]);
           bundle = { type, device, relatedPhones, relatedAccounts, risks: risks.filter((risk) => ids.has(risk.targetId)), logs: logs.filter((log) => ids.has(log.targetId)) };
         }

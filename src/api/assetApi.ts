@@ -1899,7 +1899,11 @@ async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<Ass
     const device = visibleDeviceRows.find((item) => item.id === id);
     if (!device) return createSuccessResponse(null);
     const relatedPhones = visiblePhoneRows.filter((phone) => phone.deviceId === id);
-    const relatedAccounts = relatedAccountsForDevice(id).filter((account) => visibleAccountRows.some((item) => item.id === account.id));
+    const relatedPhoneIds = new Set(relatedPhones.map((phone) => phone.id));
+    const relatedAccounts = visibleAccountRows.filter((account) => (
+      normalizeAccountLoginDeviceIds(account.loginDeviceIds).includes(id)
+      || Boolean(account.phoneId && relatedPhoneIds.has(account.phoneId))
+    ));
     const detailAssetIds = [device.id, ...relatedPhones.map((phone) => phone.id), ...relatedAccounts.map((account) => account.id)];
     return createSuccessResponse({
       type,
