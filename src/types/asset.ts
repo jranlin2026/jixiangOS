@@ -120,6 +120,8 @@ export interface AssetInternetAccount {
   realName?: string;
   realNameMasked?: string;
   phoneId?: string;
+  /** Apple ID / Google 账号等用于登录或恢复该账号的独立身份账号资产。 */
+  identityAccountIds?: string[];
   boundEmail?: string;
   boundEmailMasked?: string;
   ownerSubject: '公司' | '法人' | '员工个人';

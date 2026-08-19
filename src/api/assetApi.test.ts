@@ -73,6 +73,57 @@ for (const platform of ['Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok
 }
 
 {
+  const apple = await assetApi.createInternetAccount({
+    platform: 'Apple ID',
+    accountName: '企业 Apple ID',
+    loginAccount: 'identity-apple@example.com',
+    loginPassword: 'apple-secret',
+  });
+  const google = await assetApi.createInternetAccount({
+    platform: 'Google账号',
+    accountName: '企业 Google 账号',
+    loginAccount: 'identity-google@example.com',
+    loginPassword: 'google-secret',
+  });
+  const business = await assetApi.createInternetAccount({
+    platform: 'TikTok',
+    accountName: '身份关联测试账号',
+    loginAccount: 'identity-business',
+    loginPassword: 'business-secret',
+    identityAccountIds: [apple.data.id, google.data.id],
+  });
+
+  assert.equal(business.code, 0);
+  assert.deepEqual(business.data.identityAccountIds, [apple.data.id, google.data.id]);
+  const detail = await assetApi.fetchDetail('account', business.data.id);
+  assert.deepEqual(
+    detail.data?.relatedAccounts.map((account) => account.id).sort(),
+    [apple.data.id, google.data.id, business.data.id].sort(),
+  );
+
+  const blockedProviderChange = await assetApi.updateInternetAccount(apple.data.id, { platform: 'LINE' });
+  assert.notEqual(blockedProviderChange.code, 0);
+  assert.match(blockedProviderChange.message, /正在被.*绑定/);
+
+  await assetApi.updateInternetAccount(apple.data.id, { accountStatus: '异常' });
+  const identityRisks = await assetApi.fetchRisks({ search: business.data.accountName, pageSize: 50 });
+  assert.ok(identityRisks.data.items.some((risk) => risk.riskKey === `account-identity-unavailable-${business.data.id}-${apple.data.id}`));
+  await assetApi.updateInternetAccount(apple.data.id, { accountStatus: '使用中' });
+
+  const blockedDelete = await assetApi.deleteInternetAccount(apple.data.id);
+  assert.notEqual(blockedDelete.code, 0);
+  assert.match(blockedDelete.message, /正在被.*绑定/);
+  const selfBinding = await assetApi.updateInternetAccount(business.data.id, { identityAccountIds: [business.data.id] });
+  assert.notEqual(selfBinding.code, 0);
+  assert.match(selfBinding.message, /自己/);
+
+  await assetApi.updateInternetAccount(business.data.id, { identityAccountIds: [] });
+  await assetApi.deleteInternetAccount(business.data.id);
+  await assetApi.deleteInternetAccount(apple.data.id);
+  await assetApi.deleteInternetAccount(google.data.id);
+}
+
+{
   const unassigned = await assetApi.createInternetAccount({
     platform: 'Douyin',
     accountName: 'No Assignee Matrix Account',

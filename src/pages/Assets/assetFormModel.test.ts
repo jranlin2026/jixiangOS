@@ -50,3 +50,5 @@ assert.deepEqual(buildDeviceSlotRows({
 const account = createAssetFormDefaults('account');
 assert.equal(account.controlStatus, '已掌控');
 assert.equal(account.accountStatus, '使用中');
+assert.equal(account.appleIdentityAccountId, '');
+assert.equal(account.googleIdentityAccountId, '');

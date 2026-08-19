@@ -3,7 +3,6 @@ import {
   useSearchParams } from 'react-router-dom';
 import {
   Autocomplete,
-  Avatar,
   Box,
   Button,
   Checkbox,
@@ -101,6 +100,12 @@ import {
   displayPhoneRealName,
 } from '../../domain/assets/assetDisplay';
 import { ASSET_FORM_SECTIONS, buildDeviceSlotRows, createAssetFormDefaults, formatPhoneSlotImeiLabel, type AssetFormType } from './assetFormModel';
+import PlatformBrandMark from './PlatformBrandMark';
+import {
+  findIdentityAccountForProvider,
+  normalizeIdentityAccountIds,
+  type AssetIdentityAccountPlatform,
+} from '../../domain/assets/accountIdentityBindings';
 
 type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'matrix' | 'logs' | 'offboarding';
 
@@ -152,7 +157,21 @@ const ASSET_TABS: Array<{ value: AssetTab; label: string; permissionKey: string 
 const CONFIGURABLE_ASSET_TABS = new Set<AssetTab>(['devices', 'phones', 'accounts']);
 
 const ASSET_ACTION_COLUMN_WIDTH = 132;
-const ASSET_LOOKUP_PAGE_SIZE = 200;
+const ASSET_LOOKUP_PAGE_SIZE = 500;
+
+async function fetchAllAccountLookupRows(): Promise<AssetInternetAccount[]> {
+  const rows: AssetInternetAccount[] = [];
+  let currentPage = 1;
+  let totalPages = 1;
+  do {
+    const result = await assetApi.fetchInternetAccounts({ page: currentPage, pageSize: ASSET_LOOKUP_PAGE_SIZE });
+    if (result.code !== 0) return [];
+    rows.push(...result.data.items);
+    totalPages = result.data.pagination.totalPages;
+    currentPage += 1;
+  } while (currentPage <= totalPages);
+  return rows;
+}
 
 const readAssetText = (asset: unknown, keys: string[], fallback: string): string => {
   const row = asset as Record<string, unknown>;
@@ -174,33 +193,6 @@ const accountDeleteLabel = (account: AssetInternetAccount) => {
   const platform = readAssetText(account, ['platform'], '互联网账号');
   const name = readAssetText(account, ['accountName', 'assetName', 'name', 'loginAccount', 'loginAccountMasked'], account.id);
   return `${platform} / ${name}`;
-};
-
-const PLATFORM_LOGOS = [
-  { keyword: 'Apple ID', label: 'A', color: '#111827' },
-  { keyword: 'Google账号', label: 'G', color: '#4285F4' },
-  { keyword: 'LINE', label: 'L', color: '#06C755' },
-  { keyword: 'Instagram', label: 'IG', color: '#E4405F' },
-  { keyword: 'TikTok', label: 'TK', color: '#111827' },
-  { keyword: '快手', label: '快', color: '#FF5B22' },
-  { keyword: '抖音', label: '抖', color: '#111827' },
-  { keyword: '微信', label: '微', color: '#18B566' },
-  { keyword: '视频号', label: '视', color: '#18B566' },
-  { keyword: '美团', label: '美', color: '#F6C343' },
-  { keyword: '饿了么', label: '饿', color: '#1677FF' },
-  { keyword: '小红书', label: '红', color: '#FF2442' },
-  { keyword: '百度', label: '百', color: '#315EFB' },
-  { keyword: '高德', label: '高', color: '#1677FF' },
-  { keyword: '58', label: '58', color: '#19A463' },
-];
-
-const platformLogoMeta = (platform: string) => {
-  const matched = PLATFORM_LOGOS.find((item) => platform.includes(item.keyword));
-  if (matched) return matched;
-  return {
-    label: platform.trim().slice(0, 1) || '账',
-    color: '#64748B',
-  };
 };
 
 const DEVICE_COLUMNS: AssetColumnConfig[] = [
@@ -241,6 +233,7 @@ const ACCOUNT_COLUMNS: AssetColumnConfig[] = [
   { id: 'loginAccount', label: '登录账号', width: 150 },
   { id: 'realName', label: '实名信息', width: 110 },
   { id: 'phone', label: '绑定手机号', width: 150 },
+  { id: 'identityBindings', label: '身份账号绑定', width: 220 },
   { id: 'device', label: '所属设备', width: 180 },
   { id: 'owner', label: '负责人', width: 120 },
   { id: 'permissionStatus', label: '控制权状态', width: 140 },
@@ -250,7 +243,7 @@ const DEFAULT_ACCOUNT_VISIBLE_COLUMN_IDS = ACCOUNT_COLUMNS.map((column) => colum
 const ASSET_VIEW_STORAGE_KEYS: Record<ConfigurableAssetTab, string> = {
   devices: 'aaos_asset_devices_table_view_v4',
   phones: 'aaos_asset_phones_table_view_v6',
-  accounts: 'aaos_asset_accounts_table_view_v6',
+  accounts: 'aaos_asset_accounts_table_view_v7',
 };
 
 const ASSET_VIEW_TITLES: Record<ConfigurableAssetTab, string> = {
@@ -545,6 +538,7 @@ const AssetManagement: React.FC = () => {
 
   const deviceById = useMemo(() => new Map(lookupDevices.map((device) => [device.id, device])), [lookupDevices]);
   const phoneById = useMemo(() => new Map(lookupPhones.map((phone) => [phone.id, phone])), [lookupPhones]);
+  const accountById = useMemo(() => new Map(lookupAccounts.map((account) => [account.id, account])), [lookupAccounts]);
   const userById = useMemo(() => new Map(lookupUsers.map((user) => [user.id, user])), [lookupUsers]);
   const departmentById = useMemo(() => new Map(lookupDepartments.map((department) => [department.id, department])), [lookupDepartments]);
   const phonesByDeviceId = useMemo(() => {
@@ -611,9 +605,7 @@ const AssetManagement: React.FC = () => {
     assetApi.fetchPhoneNumbers({ pageSize: ASSET_LOOKUP_PAGE_SIZE }).then((res) => {
       if (res.code === 0) setLookupPhones(res.data.items);
     });
-    assetApi.fetchInternetAccounts({ pageSize: ASSET_LOOKUP_PAGE_SIZE }).then((res) => {
-      if (res.code === 0) setLookupAccounts(res.data.items);
-    });
+    void fetchAllAccountLookupRows().then(setLookupAccounts);
     settingsApi.fetchAssignableDirectory().then((res) => {
       if (res.code === 0) {
         setLookupUsers(res.data.users);
@@ -665,14 +657,14 @@ const AssetManagement: React.FC = () => {
   };
 
   const refreshLookupData = async () => {
-    const [deviceRes, phoneRes, accountRes] = await Promise.all([
+    const [deviceRes, phoneRes, accountRows] = await Promise.all([
       assetApi.fetchDevices({ pageSize: ASSET_LOOKUP_PAGE_SIZE }),
       assetApi.fetchPhoneNumbers({ pageSize: ASSET_LOOKUP_PAGE_SIZE }),
-      assetApi.fetchInternetAccounts({ pageSize: ASSET_LOOKUP_PAGE_SIZE }),
+      fetchAllAccountLookupRows(),
     ]);
     if (deviceRes.code === 0) setLookupDevices(deviceRes.data.items);
     if (phoneRes.code === 0) setLookupPhones(phoneRes.data.items);
-    if (accountRes.code === 0) setLookupAccounts(accountRes.data.items);
+    setLookupAccounts(accountRows);
     const directoryRes = await settingsApi.fetchAssignableDirectory();
     if (directoryRes.code === 0) {
       setLookupUsers(directoryRes.data.users);
@@ -944,6 +936,8 @@ const AssetManagement: React.FC = () => {
       values.loginPassword = '';
       values.paymentPassword = '';
       values.requiresPaymentPassword = account.requiresPaymentPassword ? 'true' : 'false';
+      values.appleIdentityAccountId = findIdentityAccountForProvider(account, lookupAccounts, 'Apple ID')?.id || '';
+      values.googleIdentityAccountId = findIdentityAccountForProvider(account, lookupAccounts, 'Google账号')?.id || '';
     }
     setFormState({ open: true, type, mode: 'edit', id: item.id, values: normalizeAssetFormValues(values), validationAttempted: false });
   };
@@ -975,7 +969,13 @@ const AssetManagement: React.FC = () => {
       if (saved) await fetchDetail('phone', saved.id);
     }
     if (formState.type === 'account') {
-      const input = formState.values as Partial<AssetInternetAccountInput>;
+      const input = {
+        ...formState.values,
+        identityAccountIds: [
+          formState.values.platform === 'Apple ID' ? '' : formState.values.appleIdentityAccountId,
+          formState.values.platform === 'Google账号' ? '' : formState.values.googleIdentityAccountId,
+        ].filter(Boolean),
+      } as unknown as Partial<AssetInternetAccountInput>;
       saved = formState.mode === 'edit' && formState.id
         ? await updateAccount(formState.id, input)
         : await createAccount(input);
@@ -1131,6 +1131,9 @@ const AssetManagement: React.FC = () => {
       accounts: accounts.map((account) => {
         const phone = phoneById.get(account.phoneId || '');
         const device = deviceById.get(phone?.deviceId || '');
+        const identityAccounts = normalizeIdentityAccountIds(account.identityAccountIds)
+          .map((id) => accountById.get(id))
+          .filter((item): item is AssetInternetAccount => Boolean(item));
         return {
           账号编号: account.accountNo,
           平台: account.platform,
@@ -1140,6 +1143,8 @@ const AssetManagement: React.FC = () => {
           实名主体: account.realNameSubject || '',
           实名信息: displayAccountRealName(account),
           绑定手机号: phone ? displayPhoneNumber(phone) : '未绑定',
+          绑定AppleID: identityAccounts.find((item) => item.platform === 'Apple ID')?.loginAccount || '',
+          绑定Google账号: identityAccounts.find((item) => item.platform === 'Google账号')?.loginAccount || '',
           绑定邮箱: displayAccountEmail(account),
           所属设备: device?.deviceCode || '-',
           负责人: account.owner,
@@ -1558,7 +1563,7 @@ const AssetManagement: React.FC = () => {
       case 'accountNo':
         return <Box sx={{ color: shell.tableLink, fontWeight: 900 }}>{account.accountNo}</Box>;
       case 'platform':
-        return account.platform;
+        return <Stack direction="row" spacing={1} alignItems="center"><PlatformBrandMark platform={account.platform} /><Box>{account.platform}</Box></Stack>;
       case 'accountName':
         return account.accountName;
       case 'loginAccount':
@@ -1569,6 +1574,22 @@ const AssetManagement: React.FC = () => {
         return phone
           ? renderRelationLink(displayPhoneNumber(phone), () => openAccountPhoneDetail(account.phoneId))
           : <Box sx={{ color: shell.amber, fontWeight: 800 }}>未绑定</Box>;
+      case 'identityBindings': {
+        const identityAccounts = normalizeIdentityAccountIds(account.identityAccountIds)
+          .map((id) => accountById.get(id))
+          .filter((item): item is AssetInternetAccount => Boolean(item));
+        return identityAccounts.length ? (
+          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+            {identityAccounts.map((identityAccount) => (
+              <Tooltip key={identityAccount.id} title={`${identityAccount.platform} / ${displayAccountLogin(identityAccount)}`}>
+                <Box component="span" sx={{ display: 'inline-flex', cursor: 'pointer' }} onClick={(event) => { event.stopPropagation(); openDetail('account', identityAccount.id); }}>
+                  <PlatformBrandMark platform={identityAccount.platform} size={28} />
+                </Box>
+              </Tooltip>
+            ))}
+          </Stack>
+        ) : <Box sx={{ color: shell.muted }}>未绑定</Box>;
+      }
       case 'device':
         return device
           ? renderRelationLink(`${device.deviceCode} / ${device.deviceName}`, () => openDetail('device', device.id))
@@ -1986,23 +2007,7 @@ const AssetManagement: React.FC = () => {
   };
 
   const renderPlatformLogo = (account: AssetInternetAccount) => {
-    const logo = platformLogoMeta(account.platform);
-    return (
-      <Avatar
-        variant="rounded"
-        sx={{
-          width: 34,
-          height: 34,
-          bgcolor: logo.color,
-          color: '#fff',
-          fontSize: 13,
-          fontWeight: 900,
-          borderRadius: 1,
-        }}
-      >
-        {logo.label}
-      </Avatar>
-    );
+    return <PlatformBrandMark platform={account.platform} />;
   };
 
   const renderCopyButton = (text: string | undefined, label: string) => (
@@ -2320,20 +2325,7 @@ const AssetManagement: React.FC = () => {
     renderDetailCard('账号基本信息', (
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
         <Stack spacing={1} alignItems="center" sx={{ width: 96, flexShrink: 0 }}>
-          <Avatar
-            variant="rounded"
-            sx={{
-              width: 72,
-              height: 72,
-              bgcolor: platformLogoMeta(account.platform).color,
-              color: '#fff',
-              borderRadius: 1.5,
-              fontSize: 28,
-              fontWeight: 950,
-            }}
-          >
-            {platformLogoMeta(account.platform).label}
-          </Avatar>
+          <PlatformBrandMark platform={account.platform} size={72} />
           <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} />
         </Stack>
         <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -2354,6 +2346,24 @@ const AssetManagement: React.FC = () => {
               value: primaryPhone
                 ? renderAssetNameLink(displayPhoneNumber(primaryPhone), () => openDetail('phone', primaryPhone.id))
                 : '-',
+            },
+            {
+              label: '绑定 Apple ID',
+              value: (() => {
+                const identityAccount = findIdentityAccountForProvider(account, detail?.relatedAccounts || lookupAccounts, 'Apple ID');
+                return identityAccount
+                  ? renderAssetNameLink(`${identityAccount.accountName} / ${displayAccountLogin(identityAccount)}`, () => openDetail('account', identityAccount.id))
+                  : '未绑定';
+              })(),
+            },
+            {
+              label: '绑定 Google',
+              value: (() => {
+                const identityAccount = findIdentityAccountForProvider(account, detail?.relatedAccounts || lookupAccounts, 'Google账号');
+                return identityAccount
+                  ? renderAssetNameLink(`${identityAccount.accountName} / ${displayAccountLogin(identityAccount)}`, () => openDetail('account', identityAccount.id))
+                  : '未绑定';
+              })(),
             },
             {
               label: '所属设备',
@@ -2388,6 +2398,27 @@ const AssetManagement: React.FC = () => {
       </Stack>
     ))
   );
+
+  const renderAccountIdentityCard = (account: AssetInternetAccount) => {
+    const related = detail?.relatedAccounts || [];
+    const outboundIds = new Set(normalizeIdentityAccountIds(account.identityAccountIds));
+    const rows = related
+      .filter((item) => item.id !== account.id && (
+        outboundIds.has(item.id) || normalizeIdentityAccountIds(item.identityAccountIds).includes(account.id)
+      ))
+      .map((item) => [
+        outboundIds.has(item.id) ? '当前账号使用' : '被业务账号使用',
+        <Stack direction="row" spacing={1} alignItems="center"><PlatformBrandMark platform={item.platform} size={30} /><Box>{item.platform}</Box></Stack>,
+        renderAssetNameLink(item.accountName, () => openDetail('account', item.id)),
+        displayAccountLogin(item),
+        <Chip size="small" label={readAccountControlStatus(item)} sx={chipSx(statusTone(readAccountControlStatus(item)))} />,
+      ]);
+    return renderDetailCard('身份账号关联', renderCompactTable(
+      ['关联方向', '平台', '账号名称', '登录账号', '控制权'],
+      rows,
+      '暂无 Apple ID 或 Google 账号关联',
+    ));
+  };
 
   const renderAssetNameLink = (label: string, onClick: () => void) => (
     <Button
@@ -2448,6 +2479,7 @@ const AssetManagement: React.FC = () => {
     return (
       <Stack spacing={1.25}>
         {basicCard}
+        {detail.account ? renderAccountIdentityCard(detail.account) : null}
         {renderRelatedAssetsSection()}
       </Stack>
     );
@@ -2771,6 +2803,52 @@ const AssetManagement: React.FC = () => {
     </>
   );
 
+  const renderIdentityAccountSelect = (
+    platform: AssetIdentityAccountPlatform,
+    fieldName: 'appleIdentityAccountId' | 'googleIdentityAccountId',
+    label: string,
+  ) => {
+    const candidates = lookupAccounts.filter((account) => (
+      account.platform === platform
+      && account.id !== formState.id
+      && !['异常', '封禁', '已注销'].includes(account.accountStatus)
+      && readAccountControlStatus(account) === '已掌控'
+    ));
+    return (
+      <FormControl size="small" fullWidth>
+        <InputLabel>{label}</InputLabel>
+        <Select
+          label={label}
+          value={formState.values[fieldName] || ''}
+          onChange={(event) => updateFormValue(fieldName, event.target.value)}
+          renderValue={(selected) => {
+            const account = accountById.get(String(selected));
+            return account ? (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <PlatformBrandMark platform={account.platform} size={24} />
+                <Box>{account.accountName} / {displayAccountLogin(account)}</Box>
+              </Stack>
+            ) : '暂不绑定';
+          }}
+        >
+          <MenuItem value="">暂不绑定</MenuItem>
+          {candidates.map((account) => (
+            <MenuItem key={account.id} value={account.id}>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                <PlatformBrandMark platform={account.platform} size={28} />
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography sx={{ fontWeight: 850 }}>{account.accountName}</Typography>
+                  <Typography variant="caption" sx={{ color: shell.muted }}>{displayAccountLogin(account)} / {account.currentUser || '未分配'}</Typography>
+                </Box>
+              </Stack>
+            </MenuItem>
+          ))}
+          {!candidates.length ? <MenuItem value="__empty" disabled>暂无可绑定的{platform}，请先建档</MenuItem> : null}
+        </Select>
+      </FormControl>
+    );
+  };
+
   const renderAccountFields = () => (
     <>
       <BusinessFormSection step={1} solidStep title={ASSET_FORM_SECTIONS.account[0].title} summary={sectionSummary(['platform', 'accountCategory', 'accountName', 'loginAccount', 'realNameSubject'], ASSET_FORM_SECTIONS.account[0].summary)} errorCount={sectionErrorCount(['platform', 'accountCategory', 'accountName', 'loginAccount']) + (formState.validationErrorSection === 1 ? 1 : 0)}>
@@ -2781,7 +2859,7 @@ const AssetManagement: React.FC = () => {
         {renderTextField('realNameSubject', '实名主体')}
         {renderTextField('realName', '实名信息')}
       </BusinessFormSection>
-      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.account[1].title} summary={sectionSummary(['loginMethod', 'loginPassword', 'paymentPassword', 'twoFactorMethod'], ASSET_FORM_SECTIONS.account[1].summary)} errorCount={formState.validationErrorSection === 2 ? 1 : 0}>
+      <BusinessFormSection step={2} solidStep title={ASSET_FORM_SECTIONS.account[1].title} summary={sectionSummary(['loginMethod', 'loginPassword', 'paymentPassword', 'phoneId', 'appleIdentityAccountId', 'googleIdentityAccountId', 'twoFactorMethod'], ASSET_FORM_SECTIONS.account[1].summary)} errorCount={formState.validationErrorSection === 2 ? 1 : 0}>
         {renderSelectField('loginMethod', '登录方式', ['密码登录', '手机验证码', '扫码登录', 'SSO'], { required: true })}
         {formState.values.loginMethod === '密码登录' ? renderTextField('loginPassword', '登录密码', {
           type: 'password',
@@ -2815,6 +2893,12 @@ const AssetManagement: React.FC = () => {
           })}
         </Select>
       </FormControl>
+        {formState.values.platform !== 'Apple ID'
+          ? renderIdentityAccountSelect('Apple ID', 'appleIdentityAccountId', '绑定 Apple ID')
+          : <Box />}
+        {formState.values.platform !== 'Google账号'
+          ? renderIdentityAccountSelect('Google账号', 'googleIdentityAccountId', '绑定 Google 账号')
+          : <Box />}
         {renderTextField('boundEmail', '绑定邮箱')}
         {renderTextField('twoFactorMethod', '二次验证方式')}
       </BusinessFormSection>

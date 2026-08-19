@@ -307,9 +307,10 @@ assert.ok(
 );
 
 const riskPrisma = new FakePrisma();
+let riskIdSequence = 0;
 const riskService = createAssetCommandService(riskPrisma as any, {
   now: () => new Date(NOW),
-  id: (prefix) => `${prefix}-risk`,
+  id: (prefix) => `${prefix}-risk-${++riskIdSequence}`,
 });
 const unowned = await riskService.createDevice({
   deviceName: '待分配设备',
@@ -394,6 +395,50 @@ assert.equal(JSON.stringify(storedCredentials).includes('test-password'), false)
 const revealedLoginPassword = await riskService.revealAccountCredential(createdAccount.data!.id, 'loginPassword', sensitiveAssetAdmin);
 assert.equal(revealedLoginPassword.code, 0);
 assert.equal(revealedLoginPassword.data?.value, 'test-password');
+const appleIdentity = await riskService.createInternetAccount({
+  platform: 'Apple ID',
+  accountName: '企业 Apple ID',
+  loginAccount: 'server-identity-apple@example.com',
+  loginPassword: 'apple-password',
+  ownerSubject: '公司',
+  departmentId: 'dept-assets',
+  ownerId: assetAdmin.id,
+}, assetAdmin);
+const googleIdentity = await riskService.createInternetAccount({
+  platform: 'Google账号',
+  accountName: '企业 Google 账号',
+  loginAccount: 'server-identity-google@example.com',
+  loginPassword: 'google-password',
+  ownerSubject: '公司',
+  departmentId: 'dept-assets',
+  ownerId: assetAdmin.id,
+}, assetAdmin);
+assert.equal(appleIdentity.code, 0);
+assert.equal(googleIdentity.code, 0);
+const linkedIdentityAccounts = await riskService.updateInternetAccount(createdAccount.data!.id, {
+  identityAccountIds: [appleIdentity.data!.id, googleIdentity.data!.id],
+}, assetAdmin);
+assert.equal(linkedIdentityAccounts.code, 0);
+assert.deepEqual(linkedIdentityAccounts.data?.identityAccountIds, [appleIdentity.data!.id, googleIdentity.data!.id]);
+const blockedProviderChange = await riskService.updateInternetAccount(appleIdentity.data!.id, { platform: 'LINE' }, assetAdmin);
+assert.equal(blockedProviderChange.code, 409);
+assert.match(blockedProviderChange.message, /正在被.*绑定/);
+await riskService.updateInternetAccount(appleIdentity.data!.id, { accountStatus: '异常' }, assetAdmin);
+assert.ok(riskPrisma.read<AssetRisk[]>(STORAGE_KEYS.ASSET_RISKS).some((risk) => (
+  risk.riskKey === `account-identity-unavailable-${createdAccount.data!.id}-${appleIdentity.data!.id}`
+)));
+await riskService.updateInternetAccount(appleIdentity.data!.id, { accountStatus: '使用中' }, assetAdmin);
+const blockedIdentityDelete = await riskService.deleteInternetAccount(appleIdentity.data!.id, assetAdmin);
+assert.equal(blockedIdentityDelete.code, 409);
+assert.match(blockedIdentityDelete.message, /正在被.*绑定/);
+const rejectedSelfIdentity = await riskService.updateInternetAccount(createdAccount.data!.id, {
+  identityAccountIds: [createdAccount.data!.id],
+}, assetAdmin);
+assert.equal(rejectedSelfIdentity.code, 400);
+assert.match(rejectedSelfIdentity.message, /自己/);
+await riskService.updateInternetAccount(createdAccount.data!.id, { identityAccountIds: [] }, assetAdmin);
+assert.equal((await riskService.deleteInternetAccount(appleIdentity.data!.id, assetAdmin)).code, 0);
+assert.equal((await riskService.deleteInternetAccount(googleIdentity.data!.id, assetAdmin)).code, 0);
 const rejectedPasswordlessAccount = await riskService.createInternetAccount({
   platform: 'Apple ID',
   accountName: '不能绕过密码',

@@ -49,16 +49,28 @@ function text(value: unknown): string {
   return String(value || '').toLowerCase();
 }
 
-function matchesSearch(row: AssetRow, keyword: string): boolean {
+function matchesSearch(row: AssetRow, keyword: string, accountById?: Map<string, AssetInternetAccount>): boolean {
   if (!keyword) return true;
-  return Object.values(row as unknown as Record<string, unknown>).some((value) => {
+  const values = Object.values(row as unknown as Record<string, unknown>);
+  if (accountById && 'identityAccountIds' in row && Array.isArray(row.identityAccountIds)) {
+    row.identityAccountIds.forEach((id) => {
+      const identityAccount = accountById.get(id);
+      if (identityAccount) values.push(identityAccount.platform, identityAccount.accountName, identityAccount.loginAccount);
+    });
+  }
+  return values.some((value) => {
     if (Array.isArray(value)) return value.some((entry) => text(JSON.stringify(entry)).includes(keyword));
     return typeof value !== 'object' && text(value).includes(keyword);
   });
 }
 
-function matchesFilters(kind: AssetListKind, row: AssetRow, filters: AssetFilters): boolean {
-  if (!matchesSearch(row, text(filters.search).trim())) return false;
+function matchesFilters(
+  kind: AssetListKind,
+  row: AssetRow,
+  filters: AssetFilters,
+  accountById?: Map<string, AssetInternetAccount>,
+): boolean {
+  if (!matchesSearch(row, text(filters.search).trim(), accountById)) return false;
   const value = row as unknown as Record<string, unknown>;
   if (filters.platform && (kind === 'matrix-publish'
     ? !(value.targets as AssetMatrixPublishTask['targets']).some((target) => target.platform === filters.platform)
@@ -110,7 +122,9 @@ export function createAssetListService(
     async list(kind: AssetListKind, filters: AssetFilters, user: AuthenticatedUser) {
       const visible = await loadVisible(user);
       const rows = (Array.isArray(visible[KEY_BY_KIND[kind]]) ? visible[KEY_BY_KIND[kind]] : []) as AssetRow[];
-      const filtered = rows.filter((row) => matchesFilters(kind, row, filters));
+      const visibleAccounts = (visible[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] || []) as AssetInternetAccount[];
+      const accountById = kind === 'accounts' ? new Map(visibleAccounts.map((account) => [account.id, account])) : undefined;
+      const filtered = rows.filter((row) => matchesFilters(kind, row, filters, accountById));
       const page = Math.max(1, Number(filters.page) || 1);
       const pageSize = Math.min(500, Math.max(1, Number(filters.pageSize) || 20));
       const start = (page - 1) * pageSize;

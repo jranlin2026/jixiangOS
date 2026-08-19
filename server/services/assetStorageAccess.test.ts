@@ -167,6 +167,7 @@ const storageData = {
       owner: '童双全',
       currentUser: '童双全',
       phoneId: 'phone-self',
+      identityAccountIds: ['account-other'],
       loginAccount: 'self_raw',
       loginPassword: 'must-never-leak',
       loginAccountMasked: 'self_***',
@@ -213,6 +214,7 @@ assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].login
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].realName, '童**');
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].boundEmail, 'self@example.com');
 assert.equal((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginPassword, undefined);
+assert.deepEqual((salesData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].identityAccountIds, []);
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_RISKS] as any[]).map((item) => item.id), ['risk-self']);
 assert.equal(canWriteStorageKey(salesAuth, STORAGE_KEYS.ASSET_DEVICES), false);
 
@@ -225,6 +227,7 @@ assert.equal((opsData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].servicePass
 assert.equal((opsData[STORAGE_KEYS.ASSET_PHONE_NUMBERS] as any[])[0].realName, '童双全');
 assert.equal((opsData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].realName, '童双全');
 assert.equal((opsData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginPassword, undefined);
+assert.deepEqual((opsData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].identityAccountIds, ['account-other']);
 assert.equal(STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS in opsData, false);
 assert.equal(canWriteStorageKey(opsAuth, STORAGE_KEYS.ASSET_DEVICES), true);
 assert.equal(canReadStorageKey(opsAuth, STORAGE_KEYS.ASSET_ACCOUNT_CREDENTIALS), false);

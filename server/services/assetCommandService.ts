@@ -17,6 +17,10 @@ import {
   readAccountControlStatus,
   readDeviceCommunicationType,
 } from '../../src/domain/assets/assetFields';
+import {
+  normalizeIdentityAccountIds,
+  validateIdentityAccountIds,
+} from '../../src/domain/assets/accountIdentityBindings';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   AssetDevice,
@@ -423,6 +427,7 @@ function syncAccountRisks(state: AssetState, changedAt: string): void {
     || risk.riskKey.startsWith('account-no-owner-')
     || risk.riskKey.startsWith('account-login-credential-missing-')
     || risk.riskKey.startsWith('account-payment-credential-missing-')
+    || risk.riskKey.startsWith('account-identity-unavailable-')
   );
   const existing = new Map(state.risks.filter(managed).map((risk) => [risk.riskKey, risk]));
   const derived: AssetRisk[] = [];
@@ -451,6 +456,18 @@ function syncAccountRisks(state: AssetState, changedAt: string): void {
     });
   };
   state.accounts.forEach((account) => {
+    normalizeIdentityAccountIds(account.identityAccountIds).forEach((identityAccountId) => {
+      const identityAccount = state.accounts.find((item) => item.id === identityAccountId);
+      if (!identityAccount || ['异常', '封禁', '已注销'].includes(identityAccount.accountStatus) || readAccountControlStatus(identityAccount) !== '已掌控') {
+        add(
+          account,
+          `account-identity-unavailable-${account.id}-${identityAccountId}`,
+          '身份账号异常',
+          '高',
+          '关联的 Apple ID 或 Google账号不可用，登录与恢复链路可能中断。',
+        );
+      }
+    });
     if (account.loginMethod === '密码登录' && account.loginCredentialStatus !== '已设置') {
       add(account, `account-login-credential-missing-${account.id}`, '登录凭证待补齐', '高', '账号采用密码登录，但登录密码尚未进入企业凭证库。');
     }
@@ -1194,6 +1211,13 @@ export function createAssetCommandService(
             if (!phone) throw new AssetCommandError(400, '绑定手机号不存在');
             if (!visibleToScope(phone, scope, directory)) throw new AssetCommandError(403, '无权绑定该手机号');
           }
+          const identityAccountIds = normalizeIdentityAccountIds(input.identityAccountIds);
+          const identityError = validateIdentityAccountIds({ sourcePlatform: platform, identityAccountIds, accounts: state.accounts });
+          if (identityError) throw new AssetCommandError(400, identityError);
+          for (const identityAccountId of identityAccountIds) {
+            const identityAccount = state.accounts.find((item) => item.id === identityAccountId)!;
+            if (!visibleToScope(identityAccount, scope, directory)) throw new AssetCommandError(403, '无权绑定该身份账号');
+          }
           const controlStatus = input.controlStatus || (input.permissionStatus === '离职待回收' || input.permissionStatus === '已回收' ? input.permissionStatus : '已掌控');
           const account = normalizeAssetAccount({
             id: makeId('asset-account'),
@@ -1206,6 +1230,7 @@ export function createAssetCommandService(
             realName: cleanText(input.realName) || undefined,
             realNameMasked: maskRealName(input.realName),
             phoneId,
+            identityAccountIds,
             boundEmail: cleanText(input.boundEmail) || undefined,
             boundEmailMasked: maskEmail(input.boundEmail),
             accountCategory: input.accountCategory || '主账号',
@@ -1269,6 +1294,9 @@ export function createAssetCommandService(
               `绑定手机号 ${phone?.phoneNumberMasked || account.phoneId}`,
             );
           }
+          if (account.identityAccountIds?.length) {
+            addLog(state, makeId('asset-log'), createdAt, actor, '绑定资产', '互联网账号', account.id, account.accountName, `绑定${account.identityAccountIds.length}个身份账号`);
+          }
           await persistState(transaction, state);
           return account;
         }, {
@@ -1299,6 +1327,10 @@ export function createAssetCommandService(
           if (!existing) throw new AssetCommandError(404, '互联网账号不存在');
           if (!visibleToScope(existing, scope, directory)) throw new AssetCommandError(403, '无权编辑该互联网账号');
           const platform = cleanText(input.platform) || existing.platform;
+          if (platform !== existing.platform) {
+            const dependents = state.accounts.filter((item) => normalizeIdentityAccountIds(item.identityAccountIds).includes(id));
+            if (dependents.length) throw new AssetCommandError(409, `该账号正在被${dependents.length}个业务账号绑定，请先解绑再修改平台`);
+          }
           const loginAccount = cleanText(input.loginAccount) || existing.loginAccount;
           if (state.accounts.some((item) => item.id !== id && item.platform === platform && item.loginAccount === loginAccount)) {
             throw new AssetCommandError(409, '同一平台下登录账号已存在');
@@ -1306,6 +1338,20 @@ export function createAssetCommandService(
           const org = resolveOrgFields({ ...existing, ...input }, directory);
           const phoneId = input.phoneId === undefined ? existing.phoneId : cleanText(input.phoneId) || undefined;
           if (phoneId && !state.phones.some((item) => item.id === phoneId)) throw new AssetCommandError(400, '绑定手机号不存在');
+          const identityAccountIds = input.identityAccountIds === undefined
+            ? normalizeIdentityAccountIds(existing.identityAccountIds)
+            : normalizeIdentityAccountIds(input.identityAccountIds);
+          const identityError = validateIdentityAccountIds({
+            sourceAccountId: existing.id,
+            sourcePlatform: platform,
+            identityAccountIds,
+            accounts: state.accounts,
+          });
+          if (identityError) throw new AssetCommandError(400, identityError);
+          for (const identityAccountId of identityAccountIds) {
+            const identityAccount = state.accounts.find((item) => item.id === identityAccountId)!;
+            if (!visibleToScope(identityAccount, scope, directory)) throw new AssetCommandError(403, '无权绑定该身份账号');
+          }
           const loginMethod = input.loginMethod || existing.loginMethod || '密码登录';
           const requiresPaymentPassword = input.requiresPaymentPassword === undefined
             ? Boolean(existing.requiresPaymentPassword)
@@ -1330,6 +1376,7 @@ export function createAssetCommandService(
             realNameMasked: maskRealName(input.realName ?? existing.realName),
             boundEmailMasked: maskEmail(input.boundEmail ?? existing.boundEmail),
             phoneId,
+            identityAccountIds,
             loginMethod,
             requiresPaymentPassword,
             loginCredentialStatus: loginMethod === '密码登录' ? (hasLoginCredential ? '已设置' : '待补齐') : '不适用',
@@ -1360,6 +1407,20 @@ export function createAssetCommandService(
           syncAccountOffboardingTasks(state, changedAt);
           syncDeviceRisks(state, changedAt);
           addLog(state, makeId('asset-log'), changedAt, actor, '编辑资料', '互联网账号', next.id, next.accountName, `编辑账号 ${next.accountNo}`);
+          if (normalizeIdentityAccountIds(existing.identityAccountIds).join(',') !== identityAccountIds.join(',')) {
+            const identityCount = identityAccountIds.length;
+            addLog(
+              state,
+              makeId('asset-log'),
+              changedAt,
+              actor,
+              identityCount ? '绑定资产' : '解绑资产',
+              '互联网账号',
+              next.id,
+              next.accountName,
+              identityCount ? `更新${identityCount}个身份账号绑定` : '解除身份账号绑定',
+            );
+          }
           await persistState(transaction, state);
           return next;
         });
@@ -1437,6 +1498,10 @@ export function createAssetCommandService(
           const existing = state.accounts.find((item) => item.id === id);
           if (!existing) throw new AssetCommandError(404, '互联网账号不存在');
           if (!visibleToScope(existing, scope, directory)) throw new AssetCommandError(403, '无权删除该互联网账号');
+          const dependents = state.accounts.filter((item) => normalizeIdentityAccountIds(item.identityAccountIds).includes(id));
+          if (dependents.length) {
+            throw new AssetCommandError(409, `该账号正在被${dependents.length}个业务账号绑定，请先解绑或转移`);
+          }
           state.accounts = state.accounts.filter((item) => item.id !== id);
           state.accountCredentials = state.accountCredentials.filter((item) => item.accountId !== id);
           state.offboardingTasks = state.offboardingTasks.filter((item) => !(item.assetType === '互联网账号' && item.assetId === id));

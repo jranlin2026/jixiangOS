@@ -178,10 +178,14 @@ export function filterAssetStorageData(
     .filter((phone) => visiblePhone(phone, visibleDeviceIds, scope))
     .map((phone) => sanitizePhone(phone, canViewSensitive));
   const visiblePhoneIds = new Set(phones.map((phone) => phone.id));
-  const accounts = asArray<AssetInternetAccount>(data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS])
+  const visibleAccounts = asArray<AssetInternetAccount>(data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS])
     .map((account) => normalizeAssetAccount({ ...account }))
-    .filter((account) => visibleAccount(account, visiblePhoneIds, scope))
-    .map((account) => sanitizeAccount(account, canViewSensitive));
+    .filter((account) => visibleAccount(account, visiblePhoneIds, scope));
+  const visibleAccountIds = new Set(visibleAccounts.map((account) => account.id));
+  const accounts = visibleAccounts.map((account) => sanitizeAccount({
+    ...account,
+    identityAccountIds: (account.identityAccountIds || []).filter((id) => visibleAccountIds.has(id)),
+  }, canViewSensitive));
   const visibleAssetIds = new Set<string>([
     ...devices.map((device) => device.id),
     ...phones.map((phone) => phone.id),

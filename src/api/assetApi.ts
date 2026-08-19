@@ -40,6 +40,10 @@ import {
   readAccountControlStatus,
   readDeviceCommunicationType,
 } from '../domain/assets/assetFields';
+import {
+  normalizeIdentityAccountIds,
+  validateIdentityAccountIds,
+} from '../domain/assets/accountIdentityBindings';
 
 const delay = (ms?: number) => baseDelay(ms, 'assets');
 
@@ -289,6 +293,22 @@ function rebuildRisksAndOffboarding(): void {
   const nextRisks: AssetRisk[] = [];
 
   accountRows.forEach((account) => {
+    normalizeIdentityAccountIds(account.identityAccountIds).forEach((identityAccountId) => {
+      const identityAccount = accountRows.find((item) => item.id === identityAccountId);
+      if (!identityAccount || ['异常', '封禁', '已注销'].includes(identityAccount.accountStatus) || readAccountControlStatus(identityAccount) !== '已掌控') {
+        const key = `account-identity-unavailable-${account.id}-${identityAccountId}`;
+        nextRisks.push(makeRisk(
+          key,
+          '身份账号异常',
+          'account',
+          account.id,
+          `${account.platform} / ${account.accountName}`,
+          '高',
+          '关联的 Apple ID 或 Google账号不可用，登录与恢复链路可能中断。',
+          existingByKey.get(key),
+        ));
+      }
+    });
     if (account.loginMethod === '密码登录' && account.loginCredentialStatus !== '已设置') {
       const key = `account-login-credential-missing-${account.id}`;
       nextRisks.push(makeRisk(key, '登录凭证待补齐', 'account', account.id, `${account.platform} / ${account.accountName}`, '高', '账号采用密码登录，但登录密码尚未进入企业凭证库。', existingByKey.get(key)));
@@ -894,9 +914,14 @@ function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPh
 
 function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): AssetInternetAccount[] {
   const keyword = filters?.search?.trim().toLowerCase();
+  const accountById = new Map(accounts().map((account) => [account.id, account]));
   return rows.filter((row) => {
     const phone = getPhone(row.phoneId);
     const device = getPhoneDevice(phone);
+    const identitySearchValues = normalizeIdentityAccountIds(row.identityAccountIds).flatMap((id) => {
+      const identityAccount = accountById.get(id);
+      return identityAccount ? [identityAccount.platform, identityAccount.accountName, identityAccount.loginAccount] : [];
+    });
     const matchesKeyword = !keyword || [
       row.accountNo,
       row.platform,
@@ -918,6 +943,7 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
       phone?.phoneNumberMasked,
       device?.deviceCode,
       device?.deviceName,
+      ...identitySearchValues,
     ].some((value) => includesKeyword(value, keyword));
     const matchesPlatform = !filters?.platform || row.platform === filters.platform;
     const matchesPermission = !filters?.permissionStatus || readAccountControlStatus(row) === filters.permissionStatus;
@@ -1351,6 +1377,17 @@ function assertAccountBinding(input: Partial<AssetInternetAccountInput>, exclude
   }
   const phoneId = normalizePhoneId(input.phoneId);
   if (phoneId && !getPhone(phoneId)) throw new Error('绑定手机号不存在');
+  const identityError = validateIdentityAccountIds({
+    sourceAccountId: excludeId,
+    sourcePlatform: platform,
+    identityAccountIds: input.identityAccountIds,
+    accounts: accounts(),
+  });
+  if (identityError) throw new Error(identityError);
+  const visibleIdentityIds = new Set(visibleAccounts().map((account) => account.id));
+  if (normalizeIdentityAccountIds(input.identityAccountIds).some((id) => !visibleIdentityIds.has(id))) {
+    throw new Error('无权绑定该身份账号');
+  }
 }
 
 async function createInternetAccount(input: Partial<AssetInternetAccountInput>, allowCredentialBackfill = false): Promise<ApiResponse<AssetInternetAccount>> {
@@ -1378,6 +1415,7 @@ async function createInternetAccount(input: Partial<AssetInternetAccountInput>, 
       realName: input.realName || '',
       realNameMasked: maskRealName(input.realName),
       phoneId: normalizePhoneId(input.phoneId),
+      identityAccountIds: normalizeIdentityAccountIds(input.identityAccountIds),
       boundEmail: input.boundEmail || '',
       boundEmailMasked: maskEmail(input.boundEmail),
       ownerSubject: input.ownerSubject || '公司',
@@ -1412,6 +1450,9 @@ async function createInternetAccount(input: Partial<AssetInternetAccountInput>, 
     setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, [account, ...rows]);
     logAssetOperation('新增资产', '互联网账号', account.id, account.accountName, `新增账号 ${account.accountNo}`);
     if (account.phoneId) logAssetOperation('绑定资产', '互联网账号', account.id, account.accountName, `绑定手机号 ${getPhone(account.phoneId)?.phoneNumberMasked || account.phoneId}`);
+    if (account.identityAccountIds?.length) {
+      logAssetOperation('绑定资产', '互联网账号', account.id, account.accountName, `绑定${account.identityAccountIds.length}个身份账号`);
+    }
     rebuildRisksAndOffboarding();
     return account;
   });
@@ -1425,6 +1466,10 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
     const rows = accounts();
     const existing = rows.find((account) => account.id === id);
     if (!existing) throw new Error('互联网账号不存在');
+    if (input.platform && input.platform !== existing.platform) {
+      const dependents = rows.filter((account) => normalizeIdentityAccountIds(account.identityAccountIds).includes(id));
+      if (dependents.length) throw new Error(`该账号正在被${dependents.length}个业务账号绑定，请先解绑再修改平台`);
+    }
     assertAccountBinding({ ...existing, ...input }, id);
     const loginAccount = input.loginAccount === undefined ? existing.loginAccount : requiredText(input.loginAccount, '登录账号不能为空');
     const nextPhoneId = input.phoneId === undefined ? existing.phoneId : normalizePhoneId(input.phoneId);
@@ -1445,6 +1490,9 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
       ...existing,
       ...input,
       phoneId: nextPhoneId,
+      identityAccountIds: input.identityAccountIds === undefined
+        ? existing.identityAccountIds
+        : normalizeIdentityAccountIds(input.identityAccountIds),
       loginAccount,
       loginAccountMasked: maskLogin(loginAccount),
       realNameMasked: maskRealName(input.realName ?? existing.realName),
@@ -1478,6 +1526,16 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
         updated.phoneId ? `绑定手机号 ${getPhone(updated.phoneId)?.phoneNumberMasked || updated.phoneId}` : '解绑手机号',
       );
     }
+    if (normalizeIdentityAccountIds(existing.identityAccountIds).join(',') !== normalizeIdentityAccountIds(updated.identityAccountIds).join(',')) {
+      const identityCount = normalizeIdentityAccountIds(updated.identityAccountIds).length;
+      logAssetOperation(
+        identityCount ? '绑定资产' : '解绑资产',
+        '互联网账号',
+        updated.id,
+        updated.accountName,
+        identityCount ? `更新${identityCount}个身份账号绑定` : '解除身份账号绑定',
+      );
+    }
     rebuildRisksAndOffboarding();
     return updated;
   });
@@ -1491,6 +1549,10 @@ async function deleteInternetAccount(id: string): Promise<ApiResponse<AssetInter
     const rows = accounts();
     const existing = rows.find((account) => account.id === id);
     if (!existing) throw new Error('互联网账号不存在');
+    const dependents = rows.filter((account) => normalizeIdentityAccountIds(account.identityAccountIds).includes(id));
+    if (dependents.length) {
+      throw new Error(`该账号正在被${dependents.length}个业务账号绑定，请先解绑或转移`);
+    }
 
     setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, rows.filter((account) => account.id !== id));
     await deleteLocalAssetCredentials(id);
@@ -1676,13 +1738,20 @@ async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<Ass
   if (!account) return createSuccessResponse(null);
   const phone = getPhone(account.phoneId);
   const relatedDevice = getPhoneDevice(phone);
-  const detailAssetIds = [relatedDevice?.id || '', phone?.id || '', account.id];
+  const visibleAccountIds = new Set(visibleAccountRows.map((item) => item.id));
+  const identityIds = new Set(normalizeIdentityAccountIds(account.identityAccountIds));
+  const relatedAccounts = visibleAccountRows.filter((item) => (
+    item.id === account.id
+    || identityIds.has(item.id)
+    || (visibleAccountIds.has(item.id) && normalizeIdentityAccountIds(item.identityAccountIds).includes(account.id))
+  ));
+  const detailAssetIds = [relatedDevice?.id || '', phone?.id || '', ...relatedAccounts.map((item) => item.id)];
   return createSuccessResponse({
     type,
     account,
     relatedDevice,
     relatedPhones: phone ? [phone] : [],
-    relatedAccounts: [account],
+    relatedAccounts,
     risks: detailRisks(detailAssetIds),
     logs: detailLogs(detailAssetIds),
   });

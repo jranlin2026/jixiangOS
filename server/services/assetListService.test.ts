@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { AuthenticatedUser } from '../../src/types/auth';
-import type { AssetPhoneNumber } from '../../src/types/asset';
+import type { AssetInternetAccount, AssetPhoneNumber } from '../../src/types/asset';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { createAssetListService } from './assetListService';
@@ -82,6 +82,18 @@ service.invalidate();
 
 const second = await service.list('phones', { page: 1, pageSize: 20 }, authenticatedAdmin);
 assert.equal((second.data.items[0] as AssetPhoneNumber | undefined)?.deviceId, 'device-b');
+
+data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] = [
+  { id: 'account-apple', platform: 'Apple ID', accountName: '企业身份', loginAccount: 'brand-identity@icloud.com', owner: '管理员', currentUser: '管理员' },
+  { id: 'account-business', platform: 'TikTok', accountName: '品牌业务号', loginAccount: 'brand-business', identityAccountIds: ['account-apple'], owner: '管理员', currentUser: '管理员' },
+];
+service.invalidate();
+const searchedByIdentity = await service.list('accounts', { search: 'brand-identity@icloud.com', page: 1, pageSize: 20 }, authenticatedAdmin);
+assert.deepEqual(
+  (searchedByIdentity.data.items as AssetInternetAccount[]).map((account) => account.id).sort(),
+  ['account-apple', 'account-business'],
+  '通过身份账号登录名搜索时应找到被绑定的业务账号',
+);
 
 {
   let releaseOldRead!: () => void;

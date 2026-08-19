@@ -8,6 +8,7 @@ import type {
   AssetPhoneNumber,
   AssetPhoneStatus,
 } from '../../types/asset';
+import { normalizeIdentityAccountIds } from './accountIdentityBindings';
 
 type LooseAsset = Record<string, unknown>;
 
@@ -171,6 +172,7 @@ export function normalizeAssetAccount<T extends LooseAsset>(source: T): T & Asse
       || (requiresPaymentPassword ? '待补齐' : '不适用')) as AssetInternetAccount['paymentCredentialStatus'],
     credentialUpdatedAt: text(source.credentialUpdatedAt) || undefined,
     twoFactorMethod: text(source.twoFactorMethod) || undefined,
+    identityAccountIds: normalizeIdentityAccountIds(source.identityAccountIds),
     remark: text(source.remark) || undefined,
   } as T & AssetInternetAccount;
   delete (normalized as AssetInternetAccount & { loginPassword?: unknown }).loginPassword;
