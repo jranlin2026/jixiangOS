@@ -35,7 +35,7 @@ assert.deepEqual(desktop, {
   drawerVariant: 'permanent',
   drawerOpen: true,
   showMobileHeader: false,
-  sidebarLayoutWidth: 240,
+  sidebarLayoutWidth: 252,
 });
 
 assert.deepEqual(shellState.APP_SHELL_VIEWPORT_SX, {
@@ -44,14 +44,15 @@ assert.deepEqual(shellState.APP_SHELL_VIEWPORT_SX, {
   maxWidth: '100vw',
   height: '100dvh',
   overflow: 'hidden',
-  bgcolor: '#F6F8FB',
+  bgcolor: '#F8F7FC',
 });
 assert.deepEqual(shellState.APP_SHELL_MAIN_SX, {
+  display: 'flex',
+  flexDirection: 'column',
   flexGrow: 1,
   minWidth: 0,
   minHeight: 0,
   height: '100%',
-  overflowX: 'hidden',
-  overflowY: 'auto',
-  bgcolor: '#F6F8FB',
+  overflow: 'hidden',
+  bgcolor: '#F8F7FC',
 });

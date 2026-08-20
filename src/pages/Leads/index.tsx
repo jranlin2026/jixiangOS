@@ -2,6 +2,7 @@
 import { useSearchParams } from 'react-router-dom';
 import {
   Box,
+  Avatar,
   Button,
   Chip,
   FormControl,
@@ -78,10 +79,10 @@ type LeadViewConfig = {
   schemaVersion: number;
 };
 
-const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_view_v10';
-const LEAD_VIEW_SCHEMA_VERSION = 10;
-const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v5';
-const LEAD_ACTION_COLUMN_WIDTH = 180;
+const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_view_v11';
+const LEAD_VIEW_SCHEMA_VERSION = 11;
+const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v7';
+const LEAD_ACTION_COLUMN_WIDTH = 160;
 
 const getAssignedSalesName = (lead: Lead) => {
   const name = lead.assignedTo || lead.owner || '';
@@ -155,40 +156,31 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'name',
   'company',
   'phone',
-  'wechat',
-  'sourceType',
+  'lifecycleStatus',
+  'assignmentStatus',
   'source',
   'sourceProductName',
-  'sourcePaymentAmount',
-  'industry',
-  'city',
-  'inputBy',
-  'leadContributorName',
   'assignedTo',
-  'assignmentStatus',
-  'remark',
-  'intakeStatus',
-  'lifecycleStatus',
 ];
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
-  name: 180,
-  company: 220,
-  phone: 150,
+  name: 150,
+  company: 120,
+  phone: 140,
   wechat: 150,
   sourceType: 140,
-  source: 180,
-  sourceProductName: 180,
+  source: 150,
+  sourceProductName: 150,
   sourcePaymentAmount: 140,
   industry: 140,
   city: 120,
   inputBy: 140,
   leadContributorName: 140,
-  assignedTo: 140,
-  assignmentStatus: 150,
+  assignedTo: 120,
+  assignmentStatus: 130,
   remark: 260,
   intakeStatus: 140,
-  lifecycleStatus: 140,
+  lifecycleStatus: 110,
 };
 
 const LEAD_TEMPLATE_FILE_NAME = '\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f.xlsx';
@@ -551,7 +543,7 @@ const Leads: React.FC = () => {
   };
 
   return (
-    <ModulePage>
+    <ModulePage workspace={activeTab === 0 && canViewLeadList}>
       <ModuleHeader
         title="线索管理"
         description="线索录入、批量入库、分配和转客户。"
@@ -606,14 +598,27 @@ const Leads: React.FC = () => {
       </ModuleTabs>
 
       {activeTab === 0 && canViewLeadList && (
-        <>
-          <ModuleToolbar>
+        <Paper
+          elevation={0}
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            border: '1px solid #E8E4F1',
+            borderRadius: 2,
+            overflow: 'hidden',
+            bgcolor: '#FFFFFF',
+            boxShadow: '0 14px 40px rgba(73, 50, 120, 0.05)',
+          }}
+        >
+          <ModuleToolbar sx={{ mb: 0, p: 2, borderBottom: '1px solid #EEEAF5', flexShrink: 0 }}>
             <TextField
               placeholder="搜索姓名/公司/手机号/微信"
               value={filters.search || ''}
               onChange={handleSearch}
               size="small"
-              sx={{ minWidth: 260 }}
+              sx={{ minWidth: { xs: '100%', sm: 260 } }}
             />
             <FormControl size="small" sx={{ minWidth: 130 }}>
               <InputLabel>来源</InputLabel>
@@ -649,8 +654,9 @@ const Leads: React.FC = () => {
             </FormControl>
           </ModuleToolbar>
 
-          <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
-            <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
+          <Box sx={{ display: { xs: 'none', md: 'flex' }, flex: 1, minHeight: 0, flexDirection: 'column' }}>
+          <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { flex: 1, minHeight: 0, overflow: 'auto', border: 0, borderRadius: 0 }]}>
+            <Table stickyHeader sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
                   {visibleColumns.map((column, columnIndex) => (
@@ -732,6 +738,76 @@ const Leads: React.FC = () => {
               </TableBody>
             </Table>
           </TableContainer>
+          </Box>
+
+          <Box
+            sx={{
+              display: { xs: 'grid', md: 'none' },
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+              alignContent: 'start',
+              gap: 1.25,
+              p: 1.5,
+              bgcolor: '#FAF9FD',
+              borderTop: '1px solid #EEEAF5',
+            }}
+          >
+            {items.map((lead, leadIndex) => {
+              const assignment = getLeadAssignmentStatus(lead);
+              const lifecycleCode = normalizeLifecycleStatusCode(lead.lifecycleStatusCode || lead.lifecycleStatus || lead.status);
+              const lifecycle = lifecycleConfigs.find((item) => item.code === lifecycleCode) || getLifecycleConfigByCode(lifecycleCode);
+              const avatarColors = ['#7447F5', '#3B82F6', '#14B8A6', '#F59E0B', '#EC4899'];
+              return (
+                <Paper
+                  key={lead.id}
+                  elevation={0}
+                  sx={{ border: '1px solid #E8E4F1', borderRadius: 2, p: 1.5, bgcolor: '#fff' }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.25 }}>
+                    <Avatar sx={{ width: 40, height: 40, bgcolor: avatarColors[leadIndex % avatarColors.length], fontWeight: 900 }}>
+                      {(lead.name || '线').slice(0, 1)}
+                    </Avatar>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, alignItems: 'center' }}>
+                        <Typography variant="subtitle2" noWrap sx={{ fontWeight: 900, color: '#19142C' }}>{lead.name || '未命名线索'}</Typography>
+                        {canViewLeadDetail && (
+                          <Button size="small" onClick={() => handleViewDetail(lead)} sx={{ minWidth: 44, fontWeight: 800 }}>查看</Button>
+                        )}
+                      </Box>
+                      <Typography variant="caption" sx={{ color: '#7B7690', display: 'block' }}>
+                        {lead.company || '暂无公司'} · {formatContactPhoneSummary(lead.phone, lead.phones) || '暂无手机号'}
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 1 }}>
+                        <Chip label={assignment.label} size="small" color={assignment.color} />
+                        <Chip label={lifecycle.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycle.code} ${lifecycle.name}`)} />
+                      </Box>
+                      <Typography variant="caption" sx={{ color: '#5F5A72', display: 'block', mt: 1 }}>
+                        {[lead.source, lead.sourceName].filter(Boolean).join('-') || '暂无来源'} · {lead.sourceProductName || '暂无购买产品'}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  {!lead.customerId && (canStartFollowLead || canAssignLeads) && (
+                    <Box sx={{ display: 'flex', gap: 1, mt: 1.25, pt: 1.25, borderTop: '1px solid #EEEAF5' }}>
+                      {canStartFollowLead && (
+                        <Button size="small" variant="outlined" startIcon={<PersonAddAltIcon />} onClick={() => handleStartFollow(lead)}>
+                          开始跟进
+                        </Button>
+                      )}
+                      {canAssignLeads && (
+                        <Button size="small" variant="outlined" startIcon={<AssignmentIndIcon />} onClick={() => handleOpenAssign(lead)}>
+                          分配销售
+                        </Button>
+                      )}
+                    </Box>
+                  )}
+                </Paper>
+              );
+            })}
+            {items.length === 0 && (
+              <Typography variant="body2" sx={{ py: 6, textAlign: 'center', color: '#8B86A0' }}>暂无线索数据</Typography>
+            )}
+          </Box>
           <TablePagination
             component="div"
             count={pagination.total}
@@ -743,13 +819,13 @@ const Leads: React.FC = () => {
             labelRowsPerPage="每页条数"
             labelDisplayedRows={formatPaginationRows}
             sx={{
-              border: '1px solid #f0f0f0',
-              borderTop: 0,
+              borderTop: '1px solid #EEEAF5',
               bgcolor: '#fff',
+              flexShrink: 0,
               '& .MuiTablePagination-toolbar': { minHeight: 48 },
             }}
           />
-        </>
+        </Paper>
       )}
 
       {activeTab === 1 && canViewLeadIntake && <LeadIntakeTab viewSettingsSignal={intakeViewSettingsSignal} />}

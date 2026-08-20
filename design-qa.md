@@ -44,6 +44,131 @@ final result: passed
 
 ---
 
+# 全局导航、系统设置与列表滚动 Design QA（2026-08-20）
+
+## Source and implementation
+
+- Source visual truth: `/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-381f8f8c-02eb-4226-a592-95ed961e6fcb.png`
+- Settings source truth: `/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-625ee5eb-2c8d-417b-bd20-5ae3573648f5.png`
+- List implementation: `.codex_tmp/ui-audit-20260820/03-leads-workspace-final.png`
+- Settings implementation: `.codex_tmp/ui-audit-20260820/04-settings-navigation-final.png`
+- Side-by-side list comparison: `.codex_tmp/ui-audit-20260820/06-list-source-vs-final.png`
+- Side-by-side settings comparison: `.codex_tmp/ui-audit-20260820/07-settings-source-vs-final.png`
+- Source list pixels: 3414 × 1772, normalized from the supplied high-density capture to a 1718 × 896 CSS-scale reference.
+- List implementation: 1720 × 900 pixels and CSS viewport, DPR 1.
+- Settings source crop: 598 × 958 pixels; settings implementation: 1280 × 720 pixels. The settings comparison focuses on navigation hierarchy rather than equal full-page framing.
+- State: authenticated super administrator; lead list first page; product settings group selected.
+
+## Full-view comparison evidence
+
+- The desktop shell keeps one opaque 64px global header. Page title and action copy no longer pass underneath or remain visible through the header.
+- The global header now owns search, help, notifications and the only desktop account menu; `下载浏览器员工` remains a contextual lead-page action.
+- The desktop sidebar no longer repeats the user avatar, name, notification, password and logout controls. The enterprise state is reduced to one compact row.
+- The list page keeps the module title and page actions above a fixed-height data workspace. Filters and pagination stay outside the independently scrolling table body.
+- `系统设置` is restored as its own expandable navigation group with seven visible entries, matching the supplied hierarchy.
+
+## Focused comparison evidence
+
+- Typography: existing system font stack, weights and purple hierarchy are preserved; no new wrapping or truncation is visible in the header or setting labels.
+- Spacing/layout: the 64px header, compact enterprise row, fixed list card, and restored setting group reduce redundant vertical space while preserving the supplied page density.
+- Colors/tokens: all new surfaces reuse the existing purple, ink, muted, line and subtle tokens; the header is intentionally opaque white to eliminate text ghosting.
+- Image quality: the supplied official purple logo remains unchanged and renders sharply; no placeholder or code-drawn image assets were introduced.
+- Copy/content: all seven setting labels and existing page-specific actions remain intact. Account menu exposes `修改密码` and `退出登录`.
+
+## Findings and comparison history
+
+- Earlier P1: the semi-transparent sticky header covered page title and action copy during scrolling.
+  - Fix: the app shell now separates the fixed header from the scroll outlet, uses an opaque header, and gives list pages an internal table scroll area.
+  - Post-fix evidence: table scrollTop reaches 29.5 while the page remains at scrollY 0 and `线索管理` remains at y=88.
+- Earlier P1: six system-setting groups were unreachable because the sidebar had one merged entry and the settings page had no group switcher.
+  - Fix: restored seven sidebar entries with deep links and added a permission-filtered in-page group tablist.
+  - Post-fix evidence: all seven group tabs render; clicking `客户设置` changes the URL to `?group=leadCustomer` and marks the tab selected.
+- Earlier P2: desktop account and notification controls appeared in both the global header and sidebar footer.
+  - Fix: desktop sidebar account controls were removed; the header has one account menu. The mobile drawer retains its compact account controls.
+  - Post-fix evidence: desktop DOM contains one visible `打开账号菜单`, and the header contains no global `下载浏览器员工` label.
+
+No remaining P0, P1, or P2 visual findings.
+
+## Interaction and console checks
+
+- System setting group deep links and selected state: passed.
+- Header account menu -> 修改密码 / 退出登录 entries: passed.
+- Table body independent scroll while title remains stationary: passed.
+- Lead and settings console errors: none.
+- Targeted navigation and app-shell tests: passed.
+- TypeScript project build: passed.
+
+## Follow-up polish
+
+- P3: the settings page intentionally exposes the seven groups both in the desktop sidebar and in a compact page tablist. This duplicate is retained as a mobile/deep-link fallback and can later collapse to a select menu below the medium breakpoint if more setting groups are added.
+
+final result: passed
+
+---
+
+# 极享OS 2.0 线索、订单与财务中心 Design QA
+
+## 视觉依据与验证环境
+
+- Source visual truth：`/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-d56f7ebc-2ead-4d3f-adb9-e8d66ad71ea9.png`
+- 线索桌面实现：`.codex_tmp/design-qa-20260820/leads-desktop-final.png`
+- 线索移动实现：`.codex_tmp/design-qa-20260820/leads-mobile-final.png`
+- 订单桌面实现：`.codex_tmp/design-qa-20260820/orders-desktop-final.png`
+- 订单移动实现：`.codex_tmp/design-qa-20260820/orders-mobile-final.png`
+- 财务流水桌面实现：`.codex_tmp/design-qa-20260820/finance-flow-desktop-final.png`
+- 财务流水移动实现：`.codex_tmp/design-qa-20260820/finance-flow-mobile-final.png`
+- 订单分账实现：`.codex_tmp/design-qa-20260820/finance-settlement-desktop-final.png`
+- 同屏对照：`.codex_tmp/design-qa-20260820/leads-comparison-final.png`、`.codex_tmp/design-qa-20260820/orders-comparison-final.png`、`.codex_tmp/design-qa-20260820/finance-flow-comparison-final.png`
+- 桌面 CSS 视口与实现像素：1600 × 900，device scale factor 1。
+- 移动 CSS 视口与实现像素：390 × 844，device scale factor 1。
+- 参考图按比例归一化为 1600 × 900 后与实现并排，浏览器外壳不参与比较。
+- State：已登录系统管理员；线索列表、订单列表、财务收支流水和订单分账均展示本地真实业务数据。
+
+## Full-view comparison evidence
+
+- 三个模块沿用参考图的白色内容画布、浅紫页面底色、紫色主操作、轻边框圆角卡片、紧凑筛选栏和统一分页节奏。
+- 线索和订单在 1600 × 900 首屏完整展示核心列与操作列，没有横向滚动遮挡主要操作。
+- 财务中心保留自己的核账指标、流水详情和多工作区信息架构，但颜色、圆角、层级、按钮和表格密度已经服从同一设计系统。
+- 390 × 844 下，桌面表格切换为同一页数据的业务卡片；筛选、总数、页码、每页条数和跳页仍复用同一查询与分页状态。
+
+## Focused comparison evidence
+
+- Typography：页标题、说明、标签页、表头、卡片标题和小型状态标签使用现有系统中文字体栈；加粗层级、行高、截断和长订单号省略均可读。
+- Spacing and layout rhythm：模块页头、操作区、筛选区、数据区和分页形成与参考图一致的纵向节奏；桌面操作列保持可见，移动卡片使用 12–16 px 内部节奏。
+- Colors and tokens：主色统一为 `#7447F5`，页面底色、浅紫选中态、边框和阴影复用新版主题；收入、支出、确认和异常仍保留业务语义色。
+- Image quality：本轮三个列表没有新增业务图片需求；品牌 Logo 和图标继续使用仓库现有清晰资产与 MUI 图标，没有占位图或代码绘制资产。
+- Copy and content：保留线索分配、订单审核、退款/分账、财务核账等现有业务用语与动作，不以参考图示例内容替换真实字段。
+
+## Findings and comparison history
+
+1. Earlier P2：线索首版仍读取旧列宽状态，表格宽度为 1501 px，核心区域出现横向滚动。
+   - Fix：收敛默认核心列、缩短列宽并升级列宽缓存版本；停掉热更新服务后重新启动，确保新默认状态不被旧内存回写。
+   - Post-fix evidence：`leads-desktop-final.png` 中筛选、八个核心业务列、操作列和统一分页均在首屏完整可见。
+2. Earlier P2：订单移动卡片的“查看”按钮被长订单号挤压为两行。
+   - Fix：订单标题区域允许收缩并省略，查看按钮设置固定最小宽度和禁止收缩。
+   - Post-fix evidence：`orders-mobile-final.png` 中“查看”保持单行，订单号正常省略，状态和金额区域未被挤压。
+3. Earlier P2：财务子页面仍有大量旧蓝色硬编码，与新版紫色工作台形成明显视觉漂移。
+   - Fix：统一财务、订单分账、售后挽回分账和提成发放的强调色、墨色、边框色和浅色背景；收支流水补充移动卡片呈现。
+   - Post-fix evidence：`finance-flow-comparison-final.png` 与 `finance-settlement-desktop-final.png` 显示同一紫色设计语言，收入/支出语义色仍准确区分。
+
+No remaining P0, P1, or P2 visual findings.
+
+## Interaction and console checks
+
+- 线索移动卡片 -> 查看 -> 详情弹窗 -> 关闭：passed。
+- 订单移动卡片 -> 查看 -> 详情弹窗 -> 关闭：passed。
+- 财务流水 -> 选择第二条流水 -> 右侧详情同步切换：passed。
+- 全新浏览器标签打开最终线索页面后检查 console errors：none。
+- `npm run build`：passed。
+- 线索、订单、财务相关定向静态和 API 测试：passed。
+
+## Follow-up polish
+
+- P3：现有仓库品牌 Logo 为蓝紫渐变，而参考图 Logo 更偏纯紫；继续保留正式品牌资产，避免为了截图一致性修改品牌标识。
+
+final result: passed
+---
+
 # Device Internet Account Drill-down Design QA
 
 - Source visual truth: `/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-7b1abc52-f1f3-4be7-863d-802f2fa13f8f.png`
@@ -349,5 +474,94 @@ Focused-region comparison was required because the full dialog scrolls. Separate
 ## Follow-up Polish
 
 No P3 item is required for this release.
+
+final result: passed
+
+---
+
+# 极享OS 2.0 UI 改版设计 QA
+
+## 验收对象
+
+- 首页参考图：`/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-1d04d967-718c-4809-bdd9-50e91be3a849.png`
+- 客户列表参考图：`/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-d56f7ebc-2ead-4d3f-adb9-e8d66ad71ea9.png`
+- 本地实现：`http://127.0.0.1:3000/`
+- 桌面视口：1600 × 900
+- 移动视口：390 × 844
+
+## 视觉证据
+
+- 首页桌面对照：`.codex_tmp/design-qa-20260820/home-comparison-v2.png`
+- 客户列表桌面对照：`.codex_tmp/design-qa-20260820/customers-comparison.png`
+- 首页移动端：`.codex_tmp/design-qa-20260820/home-mobile.png`
+- 客户列表移动端：`.codex_tmp/design-qa-20260820/customers-mobile.png`
+- 参考图和实现截图按相同桌面视口归一化，并排对照检查信息密度、布局层级、留白、圆角、边框、颜色和主要操作位置。
+
+## 对照修正记录
+
+1. 首页首版缺少参考图右侧信息轨道；第二版补齐今日摘要、快捷操作和范围指标，并收紧主内容网格。
+2. 首页主视觉由内置图像生成能力产出真实紫色 3D 结算素材，替代占位绘制；客户待办空状态同样使用真实图片资产。
+3. 客户列表首版列宽沿用旧本地缓存，平台购买产品列被操作列挤压；将默认列宽总量收紧并升级列宽缓存版本，确保新布局生效。
+4. 客户列表移动端改为卡片呈现，但复用同一筛选结果、总数和分页状态，避免桌面与移动端数据语义分叉。
+5. 侧栏、顶部搜索、页面背景、按钮、卡片、状态色和圆角统一为参考图的紫色轻量工作台语言。
+
+## 交互与状态
+
+- 顶部全局搜索支持点击和 `Cmd/Ctrl + K` 聚焦。
+- 侧栏分组、首页快捷入口、客户列表视图设置、批量任务、导入、导出、新增和重置操作均保留真实交互入口。
+- 客户列表桌面表格支持选择、列宽调整、固定操作列和统一分页；移动端卡片保留查看入口和相同分页语义。
+- 已检查桌面与移动端首屏，无内容溢出、断裂、遮挡或不可读文本。
+
+## 工程验证
+
+- `npm run build`：通过。
+- 客户列表呈现、列配置、筛选工具栏，侧栏导航和首页业务模型定向测试：通过。
+- 生产构建仅保留既有的大包体提示，无类型错误或构建错误。
+
+## 严重度结论
+
+- P0：0
+- P1：0
+- P2：0
+- P3：0；品牌 Logo 已按 2026-08-20 用户提供的新紫色资产更新。
+
+final result: passed
+
+---
+
+# 极享OS 紫色 Logo 替换 Design QA
+
+- Source visual truth：`/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-c91b706e-5f3d-4cd3-97bd-6b81ecc264db.png`
+- 原始归档：`public/assets/brand/jixiangos-logo-purple-source.png`，1254 × 1254 RGBA。
+- 运行时品牌资产：`public/jixiang-os-logo.png`，512 × 512 RGBA；只做方形裁切、尺寸优化和白底透明化，没有重绘造型或改变原始颜色。
+- Desktop implementation：`.codex_tmp/design-qa-20260820/logo-desktop-final-v2.png`，1600 × 900，device scale factor 1。
+- Mobile implementation：`.codex_tmp/design-qa-20260820/logo-mobile-final.png`，390 × 844，device scale factor 1。
+- Focused comparison：`.codex_tmp/design-qa-20260820/logo-comparison-final.png`。
+- State：已登录线索列表；桌面侧栏和手机顶栏均显示新版 Logo。登录页、浏览器员工连接页和 favicon 继续引用同一个 `/jixiang-os-logo.png`，因此同步更新。
+
+## Full-view comparison evidence
+
+- 新紫色标识在桌面 42 px 和移动端顶栏尺寸下轮廓完整，六边形、内部白色路径和圆点均清晰可辨。
+- Logo 与“极享OS 2.0 / 员工工作台”文字保持原有对齐、间距和品牌层级，没有改变导航布局。
+- 透明背景避免源图白色方块在登录页和浅紫页面背景上形成边界。
+
+## Focused fidelity review
+
+- Typography：品牌文字未改动，继续使用系统字体、字重和行高。
+- Spacing/layout：桌面 42 px 品牌位和移动顶栏原尺寸保持不变，没有挤压标题或菜单按钮。
+- Colors/tokens：保留源图淡紫到深紫的渐变与柔光边缘，和新版 `#7447F5` 主色协调。
+- Image quality：运行时使用 512 px RGBA PNG，在 42–56 px 显示位仍有充分像素密度；无锯齿、白边或压缩块。
+- Copy/content：品牌名称仍为“极享OS 2.0”，没有把图中不存在的文字写入图片。
+
+## Findings
+
+No P0, P1, P2, or P3 findings remain.
+
+## Verification
+
+- 桌面侧栏：passed。
+- 手机顶栏：passed。
+- 同屏源图/实现对照：passed。
+- 新 Logo 没有新增交互，也未改变导航点击区域。
 
 final result: passed

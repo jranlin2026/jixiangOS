@@ -3,6 +3,7 @@ import {
   useNavigate,
   useSearchParams } from 'react-router-dom';
 import {
+  Avatar,
   Box,
   Button,
   Checkbox,
@@ -26,6 +27,8 @@ import {
   TextField,
   Tooltip,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
@@ -115,12 +118,16 @@ type CustomerViewConfig = {
   schemaVersion: number;
 };
 
-const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v9';
-const CUSTOMER_VIEW_SCHEMA_VERSION = 9;
-const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v3';
+const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v10';
+const CUSTOMER_VIEW_SCHEMA_VERSION = 10;
+const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v5';
 const CUSTOMER_ACTION_COLUMN_WIDTH = 190;
 const CUSTOMER_SELECTION_COLUMN_WIDTH = 52;
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
+const CUSTOMER_AVATAR_COLORS = ['#7447F5', '#3977F6', '#19A780', '#F5A524', '#EC6A8C', '#36B9D4'];
+const getCustomerAvatarColor = (name: string) => CUSTOMER_AVATAR_COLORS[
+  Array.from(name || '-').reduce((sum, char) => sum + char.charCodeAt(0), 0) % CUSTOMER_AVATAR_COLORS.length
+];
 
 export const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], scope: CustomerScope = 'active'): CustomerColumn[] => {
   const getLifecycleConfig = (customer: Customer) => {
@@ -128,7 +135,20 @@ export const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], 
     return lifecycleConfigs.find((item) => item.code === code) || getLifecycleConfigByCode(code);
   };
   return [
-  { id: 'name', label: '姓名', render: (customer) => customer.name || '-' },
+  {
+    id: 'name',
+    label: '姓名',
+    render: (customer) => (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.1, minWidth: 0 }}>
+        <Avatar sx={{ width: 30, height: 30, bgcolor: getCustomerAvatarColor(customer.name || '-'), fontSize: 12, fontWeight: 900 }}>
+          {(customer.name || '-').slice(0, 1)}
+        </Avatar>
+        <Typography variant="body2" sx={{ color: '#262238', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {customer.name || '-'}
+        </Typography>
+      </Box>
+    ),
+  },
   { id: 'company', label: '公司', render: (customer) => customer.company || '-' },
   { id: 'phone', label: '手机号', render: (customer) => formatContactPhoneSummary(customer.phone, customer.phones) || '-' },
   { id: 'wechat', label: '微信', render: (customer) => customer.wechat || '-' },
@@ -187,29 +207,18 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'tags',
   'leadSource',
   'sourceProductName',
-  'sourcePaymentAmount',
-  'sourceType',
-  'leadInputBy',
-  'leadContributorName',
-  'industry',
-  'previousOwner',
-  'totalSpent',
-  'orderCount',
-  'owner',
-  'remark',
-  'createdAt',
 ];
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
-  name: 180,
-  company: 220,
-  phone: 150,
+  name: 150,
+  company: 130,
+  phone: 140,
   wechat: 150,
-  lifecycleStatus: 140,
-  customerLevel: 130,
-  tags: 180,
-  leadSource: 160,
-  sourceProductName: 180,
+  lifecycleStatus: 105,
+  customerLevel: 105,
+  tags: 90,
+  leadSource: 155,
+  sourceProductName: 150,
   sourcePaymentAmount: 140,
   sourceType: 140,
   leadInputBy: 140,
@@ -277,6 +286,8 @@ const getCustomerScopeFromTab = (tab?: string | null): CustomerScope => (
 
 const Customers: React.FC = () => {
   const navigate = useNavigate();
+  const theme = useTheme();
+  const isDesktopTable = useMediaQuery(theme.breakpoints.up('md'));
   const [searchParams, setSearchParams] = useSearchParams();
   const { items, filters, pagination, fetchItems, setFilters, resetListFilters } = useCustomerStore();
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -735,8 +746,8 @@ const Customers: React.FC = () => {
           position: 'sticky' as const,
           left: getFrozenLeft(columnIndex),
           zIndex: isHeader ? 5 : 3,
-          bgcolor: isHeader ? '#f8fafc' : '#fff',
-          boxShadow: '1px 0 0 #e5e7eb',
+          bgcolor: isHeader ? '#FAF9FD' : '#fff',
+          boxShadow: '1px 0 0 #EEEAF5',
         }
       : {}
   );
@@ -748,11 +759,11 @@ const Customers: React.FC = () => {
     width: CUSTOMER_ACTION_COLUMN_WIDTH,
     minWidth: CUSTOMER_ACTION_COLUMN_WIDTH,
     bgcolor: '#fff',
-    boxShadow: '-1px 0 0 #e5e7eb',
+    boxShadow: '-1px 0 0 #EEEAF5',
   };
 
   return (
-    <ModulePage>
+    <ModulePage workspace>
       <ModuleHeader
         title={isPublicPoolScope ? '公海池' : '客户列表'}
         description={isPublicPoolScope ? '集中管理已释放客户，支持重新领取和后续跟进。' : '沉淀客户资产、跟进动态和订单关系。'}
@@ -788,7 +799,8 @@ const Customers: React.FC = () => {
       />
 
 
-      <ModuleToolbar>
+      <Paper elevation={0} sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: '1px solid #E8E4F1', borderRadius: 2, overflow: 'hidden', bgcolor: '#FFFFFF', boxShadow: '0 14px 40px rgba(73, 50, 120, 0.05)' }}>
+      <ModuleToolbar sx={{ mb: 0, p: 2, borderBottom: '1px solid #EEEAF5', bgcolor: '#FFFFFF' }}>
         <TextField
           placeholder="搜索客户姓名/公司/电话/微信"
           value={filters.search || ''}
@@ -895,14 +907,15 @@ const Customers: React.FC = () => {
         />
       )}
 
-      <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
-        <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
+      {isDesktopTable ? (
+      <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { flex: 1, minHeight: 0, overflow: 'auto', border: 0, borderRadius: 0 }]}>
+        <Table stickyHeader sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
               {hasCustomerSelectionActions && (
                 <TableCell
                   padding="checkbox"
-                  sx={{ position: 'sticky', left: 0, zIndex: 6, width: CUSTOMER_SELECTION_COLUMN_WIDTH, minWidth: CUSTOMER_SELECTION_COLUMN_WIDTH, bgcolor: '#f8fafc' }}
+                  sx={{ position: 'sticky', left: 0, zIndex: 6, width: CUSTOMER_SELECTION_COLUMN_WIDTH, minWidth: CUSTOMER_SELECTION_COLUMN_WIDTH, bgcolor: '#FAF9FD' }}
                 >
                   <Checkbox
                     size="small"
@@ -929,7 +942,7 @@ const Customers: React.FC = () => {
                   {column.label}
                 </ResizableHeaderCell>
               ))}
-              <TableCell align="center" sx={{ ...actionColumnSx, zIndex: 5, bgcolor: '#f8fafc' }}>操作</TableCell>
+              <TableCell align="center" sx={{ ...actionColumnSx, zIndex: 5, bgcolor: '#FAF9FD' }}>操作</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -954,7 +967,7 @@ const Customers: React.FC = () => {
                     sx={{
                       ...getResizableCellSx(columnWidths[column.id]),
                       ...getFrozenColumnSx(columnIndex),
-                      ...(column.id === 'name' ? { fontWeight: 500 } : {}),
+                      ...(column.id === 'name' ? { fontWeight: 700 } : {}),
                     }}
                     title={column.id === 'name' ? customer.name : undefined}
                   >
@@ -1036,6 +1049,45 @@ const Customers: React.FC = () => {
           </TableBody>
         </Table>
       </TableContainer>
+      ) : (
+        <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', alignContent: 'start', gap: 1.25, p: 1.5, bgcolor: '#FAF9FD' }}>
+          {items.map((customer) => {
+            const lifecycleCode = normalizeLifecycleStatusCode(customer.lifecycleStatusCode);
+            const lifecycleConfig = lifecycleConfigs.find((item) => item.code === lifecycleCode) || getLifecycleConfigByCode(lifecycleCode);
+            return (
+              <Paper key={customer.id} elevation={0} sx={{ p: 1.5, border: '1px solid #E8E4F1', borderRadius: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.25 }}>
+                  {hasCustomerSelectionActions && (
+                    <Checkbox
+                      size="small"
+                      checked={isCustomerSelected(batchSelection, customer.id)}
+                      disabled={batchSelection.mode === 'filter_snapshot'}
+                      onChange={() => setBatchSelection((current) => toggleCustomerSelection(current, customer.id))}
+                      inputProps={{ 'aria-label': `选择客户 ${customer.name || customer.id}` }}
+                    />
+                  )}
+                  <Avatar sx={{ width: 38, height: 38, bgcolor: getCustomerAvatarColor(customer.name || '-'), fontWeight: 900 }}>
+                    {(customer.name || '-').slice(0, 1)}
+                  </Avatar>
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Typography variant="body2" sx={{ color: '#262238', fontWeight: 900 }}>{customer.name || '-'}</Typography>
+                    <Typography variant="caption" sx={{ color: '#777186', display: 'block', mt: 0.25 }}>{customer.company || '暂无公司'} · {formatContactPhoneSummary(customer.phone, customer.phones) || '暂无手机号'}</Typography>
+                    <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mt: 1 }}>
+                      <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleConfig.code} ${lifecycleConfig.name}`)} />
+                      <CustomerLevelBadge level={customer.customerLevel} />
+                    </Box>
+                    <Typography variant="caption" sx={{ color: '#777186', display: 'block', mt: 1 }}>
+                      {formatCustomerSource(customer)} · {customer.sourceProductName || '暂无购买产品'}
+                    </Typography>
+                  </Box>
+                  <Button size="small" onClick={() => handleViewDetail(customer)}>查看</Button>
+                </Box>
+              </Paper>
+            );
+          })}
+          {items.length === 0 && <Typography variant="body2" sx={{ color: '#9B95AA', py: 6, textAlign: 'center' }}>暂无客户数据</Typography>}
+        </Box>
+      )}
       <TablePagination
         component="div"
         count={pagination.total}
@@ -1047,12 +1099,14 @@ const Customers: React.FC = () => {
         labelRowsPerPage="每页条数"
         labelDisplayedRows={formatPaginationRows}
         sx={{
-          border: '1px solid #f0f0f0',
+          border: 0,
           borderTop: 0,
           bgcolor: '#fff',
+          flexShrink: 0,
           '& .MuiTablePagination-toolbar': { minHeight: 48 },
         }}
       />
+      </Paper>
 
       {selectedCustomer && (
         <CustomerDetail

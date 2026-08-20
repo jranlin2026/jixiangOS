@@ -1,4 +1,4 @@
-export const APP_SIDEBAR_WIDTH = 240;
+export const APP_SIDEBAR_WIDTH = 252;
 
 export const APP_SHELL_VIEWPORT_SX = {
   display: 'flex',
@@ -6,17 +6,18 @@ export const APP_SHELL_VIEWPORT_SX = {
   maxWidth: '100vw',
   height: '100dvh',
   overflow: 'hidden',
-  bgcolor: '#F6F8FB',
+  bgcolor: '#F8F7FC',
 } as const;
 
 export const APP_SHELL_MAIN_SX = {
+  display: 'flex',
+  flexDirection: 'column',
   flexGrow: 1,
   minWidth: 0,
   minHeight: 0,
   height: '100%',
-  overflowX: 'hidden',
-  overflowY: 'auto',
-  bgcolor: '#F6F8FB',
+  overflow: 'hidden',
+  bgcolor: '#F8F7FC',
 } as const;
 
 export type MobileNavigationAction = { type: 'OPEN' | 'CLOSE' | 'NAVIGATE' };

@@ -3,29 +3,31 @@ import { Box, Button, Chip, Stack, Tab, Tabs, Typography } from '@mui/material';
 import type { BoxProps, ButtonProps, SxProps, Theme } from '@mui/material';
 
 export const moduleTokens = {
-  page: '#F6F8FB',
+  page: '#F8F7FC',
   surface: '#FFFFFF',
-  ink: '#101828',
-  muted: '#667085',
-  line: '#DDE4EC',
-  softLine: '#E5E7EB',
-  subtle: '#F8FAFC',
-  blue: '#1E6BFF',
+  ink: '#19152D',
+  muted: '#706B86',
+  line: '#E8E4F1',
+  softLine: '#EEEAF5',
+  subtle: '#FAF9FD',
+  blue: '#7447F5',
   green: '#059669',
   amber: '#B76A00',
   red: '#D92D20',
   gray: '#64748B',
 };
 
-export const moduleRadius = '6px';
+export const moduleRadius = '12px';
 
 type ModulePageProps = BoxProps & {
   maxWidth?: number | string;
+  workspace?: boolean;
 };
 
 export const ModulePage: React.FC<ModulePageProps> = ({
   children,
   maxWidth = 'none',
+  workspace = false,
   sx,
   ...props
 }) => (
@@ -33,12 +35,24 @@ export const ModulePage: React.FC<ModulePageProps> = ({
     sx={{
       minHeight: '100%',
       bgcolor: moduleTokens.page,
-      p: 3,
+      p: { xs: 2, md: 3 },
+      ...(workspace ? {
+        height: '100%',
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      } : {}),
       ...sx,
     }}
     {...props}
   >
-    <Box sx={{ width: '100%', maxWidth, mx: maxWidth === 'none' ? 0 : 'auto' }}>
+    <Box sx={{
+      width: '100%',
+      maxWidth,
+      mx: maxWidth === 'none' ? 0 : 'auto',
+      ...(workspace ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : {}),
+    }}>
       {children}
     </Box>
   </Box>
@@ -84,7 +98,7 @@ type ModuleTabsProps = React.ComponentProps<typeof Tabs> & {
 export const ModuleTabs: React.FC<ModuleTabsProps> = ({ children, sx, ...props }) => (
   <Tabs
     sx={{
-      mb: 2,
+      mb: 1.5,
       minHeight: 40,
       borderBottom: `1px solid ${moduleTokens.softLine}`,
       '& .MuiTab-root': {
@@ -228,8 +242,8 @@ export const moduleTablePaperSx = {
 
 export const moduleTableSx = {
   '& .MuiTableHead-root .MuiTableCell-root': {
-    bgcolor: '#F1F5F9',
-    color: '#475569',
+    bgcolor: '#FAF9FD',
+    color: '#625D76',
     fontWeight: 800,
     borderBottom: `1px solid ${moduleTokens.line}`,
   },
@@ -238,7 +252,7 @@ export const moduleTableSx = {
     fontSize: 13,
   },
   '& .MuiTableRow-hover:hover': {
-    bgcolor: '#F8FBFF',
+    bgcolor: '#FAF8FF',
   },
 } as const;
 

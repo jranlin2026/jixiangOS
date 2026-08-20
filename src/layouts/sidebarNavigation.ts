@@ -3,6 +3,7 @@ import { ACADEMY_ACCESS_PERMISSION_KEYS } from '../shared/utils/academyAccess';
 import { OKR_ACCESS_PERMISSION_KEYS } from '../shared/utils/okrAccess';
 import type { AuthenticatedUser } from '../types/auth';
 import { hasPermission, PERMISSION_KEYS } from '../shared/utils/permissions';
+import { isSuperAdminRoleName } from '../shared/utils/roles';
 
 export type SidebarNavigationItem = {
   id: string;
@@ -11,6 +12,7 @@ export type SidebarNavigationItem = {
   permissionKeys: string[];
   badge?: '试运行';
   relatedPaths?: string[];
+  superAdminOnly?: boolean;
 };
 
 export type SidebarNavigationGroup = {
@@ -128,22 +130,57 @@ export const navigationGroups: SidebarNavigationGroup[] = [
         id: 'assets', label: '资产管理', path: ROUTES.ASSETS,
         permissionKeys: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_OVERVIEW, PERMISSION_KEYS.ASSETS_DEVICES, PERMISSION_KEYS.ASSETS_PHONES, PERMISSION_KEYS.ASSETS_ACCOUNTS, PERMISSION_KEYS.ASSETS_RISKS, PERMISSION_KEYS.ASSETS_LOGS, PERMISSION_KEYS.ASSETS_OFFBOARDING],
       },
+    ],
+  },
+  {
+    id: 'settings',
+    label: '系统设置',
+    children: [
       {
-        id: 'settings', label: '系统设置', path: ROUTES.SETTINGS,
+        id: 'settings-organization', label: '组织架构', path: `${ROUTES.SETTINGS}?group=organization`,
         permissionKeys: [
-          PERMISSION_KEYS.SETTINGS,
           PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS,
           PERMISSION_KEYS.SETTINGS_ROLES,
           PERMISSION_KEYS.SETTINGS_ACCOUNT_RECYCLE,
+        ],
+      },
+      {
+        id: 'settings-product', label: '产品设置', path: `${ROUTES.SETTINGS}?group=product`,
+        permissionKeys: [
           PERMISSION_KEYS.SETTINGS_PRODUCTS,
+          PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES,
           PERMISSION_KEYS.SETTINGS_ORDER_TYPES,
+        ],
+      },
+      {
+        id: 'settings-customer', label: '客户设置', path: `${ROUTES.SETTINGS}?group=leadCustomer`,
+        permissionKeys: [
           PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS,
           PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS,
           PERMISSION_KEYS.SETTINGS_LIFECYCLE,
           PERMISSION_KEYS.SETTINGS_LEAD_SOURCES,
-          PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES,
           PERMISSION_KEYS.SETTINGS_LEAD_FLOW,
+        ],
+      },
+      {
+        id: 'settings-delivery', label: '交付设置', path: `${ROUTES.SETTINGS}?group=delivery`,
+        permissionKeys: [
           PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT,
+        ],
+      },
+      {
+        id: 'settings-ai-employee', label: 'AI员工设置', path: `${ROUTES.SETTINGS}?group=aiEmployee`,
+        permissionKeys: [PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE],
+        superAdminOnly: true,
+      },
+      {
+        id: 'settings-notifications', label: '消息与提醒', path: `${ROUTES.SETTINGS}?group=notifications`,
+        permissionKeys: [PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE],
+        superAdminOnly: true,
+      },
+      {
+        id: 'settings-maintenance', label: '系统维护', path: `${ROUTES.SETTINGS}?group=maintenance`,
+        permissionKeys: [
           PERMISSION_KEYS.SETTINGS_AI_CONFIG,
           PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE,
         ],
@@ -161,15 +198,20 @@ export const isNavigationItemActive = (
   const [itemPath, itemQuery = ''] = item.path.split('?');
   if (pathname !== itemPath) return false;
   if (!itemQuery) return true;
-  const expectedTab = new URLSearchParams(itemQuery).get('tab');
-  const currentTab = new URLSearchParams(search).get('tab');
-  return expectedTab === currentTab || (expectedTab === 'active' && !currentTab);
+  const expectedParams = new URLSearchParams(itemQuery);
+  const currentParams = new URLSearchParams(search);
+  return Array.from(expectedParams.entries()).every(([key, value]) => (
+    currentParams.get(key) === value || (key === 'tab' && value === 'active' && !currentParams.has(key))
+  ));
 };
 
 export const getVisibleSidebarNavigation = (
   user: Pick<AuthenticatedUser, 'role' | 'roleId' | 'permissions' | 'isActive'> | null | undefined,
 ) => {
-  const canSee = (item: SidebarNavigationItem) => item.permissionKeys.some((key) => hasPermission(user, key));
+  const canSee = (item: SidebarNavigationItem) => (
+    (!item.superAdminOnly || isSuperAdminRoleName(user?.role))
+    && item.permissionKeys.some((key) => hasPermission(user, key))
+  );
   return {
     fixedItems: fixedNavigationItems.filter(canSee),
     groups: navigationGroups

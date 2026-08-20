@@ -14,6 +14,7 @@ import GlobalTableColumnResizer from '../shared/components/GlobalTableColumnResi
 import ChangePasswordDialog from '../shared/components/ChangePasswordDialog';
 import useAuthStore from '../store/useAuthStore';
 import NotificationBell from '../shared/components/NotificationBell';
+import TopHeader from './TopHeader';
 
 const AppLayout: React.FC = () => {
   const theme = useTheme();
@@ -48,6 +49,7 @@ const AppLayout: React.FC = () => {
         component="main"
         sx={APP_SHELL_MAIN_SX}
       >
+        <TopHeader />
         {shellPresentation.showMobileHeader && <Box
           component="header"
           sx={{
@@ -60,14 +62,14 @@ const AppLayout: React.FC = () => {
             alignItems: 'center',
             gap: 1,
             bgcolor: '#FFFFFF',
-            borderBottom: '1px solid #DDE4EC',
+            borderBottom: '1px solid #EEEAF5',
           }}
         >
           <IconButton
             aria-label="打开导航菜单"
             edge="start"
             onClick={() => dispatchNavigation({ type: 'OPEN' })}
-            sx={{ color: '#1E6BFF' }}
+            sx={{ color: '#7447F5' }}
           >
             <MenuIcon />
           </IconButton>
@@ -77,12 +79,14 @@ const AppLayout: React.FC = () => {
             alt=""
             sx={{ width: 28, height: 28, objectFit: 'contain' }}
           />
-          <Typography variant="subtitle1" sx={{ color: '#101828', fontSize: '0.9375rem', fontWeight: 800 }}>
-            极享OS
+          <Typography variant="subtitle1" sx={{ color: '#19152D', fontSize: '0.9375rem', fontWeight: 800 }}>
+            极享OS 2.0
           </Typography>
           <Box sx={{ ml: 'auto' }}><NotificationBell /></Box>
         </Box>}
-        <Outlet />
+        <Box sx={{ flex: 1, minHeight: 0, overflowX: 'hidden', overflowY: 'auto' }}>
+          <Outlet />
+        </Box>
       </Box>
     </Box>
   );

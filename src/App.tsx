@@ -289,7 +289,23 @@ const App: React.FC = () => {
           ]} />}>
             <Route path={ROUTES.CO_CREATION} element={<Suspense fallback={<PageLoader />}><CoCreation /></Suspense>} />
           </Route>
-          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.SETTINGS} />}>
+          <Route element={<ProtectedRoute permissionKeys={[
+            PERMISSION_KEYS.SETTINGS,
+            PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS,
+            PERMISSION_KEYS.SETTINGS_ROLES,
+            PERMISSION_KEYS.SETTINGS_ACCOUNT_RECYCLE,
+            PERMISSION_KEYS.SETTINGS_PRODUCTS,
+            PERMISSION_KEYS.SETTINGS_ORDER_TYPES,
+            PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS,
+            PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS,
+            PERMISSION_KEYS.SETTINGS_LIFECYCLE,
+            PERMISSION_KEYS.SETTINGS_LEAD_SOURCES,
+            PERMISSION_KEYS.SETTINGS_LEAD_FLOW,
+            PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT,
+            PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES,
+            PERMISSION_KEYS.SETTINGS_AI_CONFIG,
+            PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE,
+          ]} />}>
             <Route path={ROUTES.SETTINGS} element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AFTER_SALES_REFUND, PERMISSION_KEYS.FINANCE_REFUND]} />}>

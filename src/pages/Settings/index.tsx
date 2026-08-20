@@ -188,6 +188,11 @@ const Settings: React.FC = () => {
     });
   };
 
+  const handleGroupChange = (groupKey: string) => {
+    setTabValue(0);
+    setSearchParams({ group: groupKey });
+  };
+
   return (
     <ModulePage>
       <ModuleHeader
@@ -200,6 +205,16 @@ const Settings: React.FC = () => {
           <Box sx={{ py: 6, textAlign: 'center', color: '#6b7280' }}>当前账号没有系统设置权限</Box>
         ) : (
           <Box sx={{ minHeight: 640 }}>
+            <ModuleTabs
+              value={activeGroup?.key || false}
+              onChange={(_, value) => handleGroupChange(value)}
+              variant="scrollable"
+              scrollButtons="auto"
+              aria-label="系统设置分组"
+              sx={{ mb: 0, px: { xs: 1, md: 2 }, bgcolor: '#FAF9FD' }}
+            >
+              {groups.map((group) => <Tab key={group.key} value={group.key} label={group.label} />)}
+            </ModuleTabs>
             <Box sx={{ minWidth: 0 }}>
               <Box sx={{ px: 3, pt: 2, pb: 1.5, borderBottom: `1px solid ${moduleTokens.softLine}` }}>
                 <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
