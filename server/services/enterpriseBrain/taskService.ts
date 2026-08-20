@@ -3,10 +3,12 @@ import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../../src/shared/utils/permissions';
 import type { EnterpriseTaskRepository, GeneratedTaskInput } from './taskRepository';
+import { createWorkbenchCommandService, type WorkbenchCommandService } from '../workbench/workbenchCommandService';
 
 type Dependencies = {
   repository: EnterpriseTaskRepository;
   now?: () => Date;
+  commandService?: WorkbenchCommandService;
   summarizeReview?: (input: {
     employeeName: string;
     workDate: string;
@@ -40,6 +42,7 @@ const validTime = (value: unknown): string | null => {
 
 export function createEnterpriseTaskService(deps: Dependencies) {
   const clock = deps.now || (() => new Date());
+  const commandService = deps.commandService || createWorkbenchCommandService({ repository: deps.repository, now: clock });
   return {
     async listTemplates(raw: any, actor: AuthenticatedUser) {
       if (!hasPermission(actor, PERMISSION_KEYS.STANDARD_MAINTAIN) && !hasPermission(actor, PERMISSION_KEYS.TASK_ASSIGN)) {
@@ -167,36 +170,17 @@ export function createEnterpriseTaskService(deps: Dependencies) {
     },
 
     async completeTask(taskId: string, raw: any, actor: AuthenticatedUser) {
-      if (!hasPermission(actor, PERMISSION_KEYS.TASK_SELF, 'write')) return failure<never>('无权完成本人任务', 403);
-      const task = await deps.repository.findTask(taskId);
-      if (!task || task.employeeId !== actor.id) return failure<never>('任务不存在或不属于当前员工', 404);
-      const result = String(raw?.result || '').trim();
-      const actualValue = raw?.actualValue === null || raw?.actualValue === undefined || raw?.actualValue === '' ? null : Number(raw.actualValue);
-      const evidence = Array.isArray(raw?.evidence) ? raw.evidence.map((item: any) => ({
-        type: String(item?.type || 'TEXT').slice(0, 32),
-        referenceId: String(item?.referenceId || '').trim().slice(0, 160) || undefined,
-        content: String(item?.content || '').trim().slice(0, 10000) || undefined,
-      })).filter((item: any) => item.referenceId || item.content) : [];
-      if (!result || (task.targetValue !== null && (actualValue === null || !Number.isFinite(actualValue)))) return failure<never>('请填写完成结果和实际值', 400);
-      if (task.evidenceRequired && evidence.length === 0) return failure<never>('该任务必须提交证据', 400);
-      if (['MARKETING_PUBLISH', 'ASSET_MATRIX_PUBLISH'].includes(task.sourceType || '') && !evidence.some((item: any) => ['PUBLISH_URL', 'SCREENSHOT_URL'].includes(item.type) && /^https?:\/\//i.test(item.content || ''))) {
-        return failure<never>('发布任务必须提交有效的发布链接或截图链接', 400);
-      }
-      const completed = await deps.repository.completeTaskAtomic({ taskId, employeeId: actor.id, actualValue, result, evidence, now: clock() });
-      return completed ? success(completed) : failure<never>('任务状态已变化，请刷新后重试', 409);
+      return commandService.completeTask(taskId, raw || {}, actor);
     },
 
     async confirmTask(taskId: string, raw: any, actor: AuthenticatedUser) {
-      if (!hasPermission(actor, PERMISSION_KEYS.TASK_CONFIRM, 'write')) return failure<never>('无权确认团队任务', 403);
-      const task = await deps.repository.findTask(taskId);
-      if (!task || !actor.departmentId) return failure<never>('任务不存在', 404);
-      const allowedDepartments = await deps.repository.listDepartmentTree(actor.departmentId);
-      if (!allowedDepartments.includes(task.departmentIdSnapshot || '')) return failure<never>('任务不在授权团队范围内', 403);
-      const action = raw?.action === 'RETURN' ? 'RETURN' : 'CONFIRM';
-      const reason = String(raw?.reason || '').trim();
-      if (action === 'RETURN' && !reason) return failure<never>('退回任务必须填写原因', 400);
-      const result = await deps.repository.confirmTaskAtomic({ taskId, actorId: actor.id, actorName: actor.name, action, reason, now: clock() });
-      return result ? success(result) : failure<never>('任务状态已变化，请刷新后重试', 409);
+      if (raw?.action === 'RETURN') {
+        return commandService.returnTask(taskId, { reason: String(raw?.reason || '') }, actor);
+      }
+      return commandService.confirmTask(taskId, {
+        qualityScore: raw?.qualityScore,
+        comment: raw?.comment,
+      }, actor);
     },
 
     async submitReview(raw: any, actor: AuthenticatedUser) {

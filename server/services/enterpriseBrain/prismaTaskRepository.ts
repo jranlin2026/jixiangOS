@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { createPrismaWorkbenchRepository } from '../workbench/prismaWorkbenchRepository';
 import type {
   DailyReviewRecord,
   EmployeeTaskRecord,
@@ -9,13 +10,18 @@ import type {
 
 type Client = {
   $transaction<T>(callback: (tx: any) => Promise<T>, options?: { isolationLevel: 'Serializable' }): Promise<T>;
+  $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
   taskTemplate: any;
   position: any;
   employeeTask: any;
   taskEvidence: any;
+  taskActivity: any;
   dailyReview: any;
   user: any;
+  role: any;
   department: any;
+  leadRecord: any;
+  businessRecord: any;
 };
 
 const dateText = (value: unknown): string => new Date(value as string).toISOString().slice(0, 10);
@@ -77,6 +83,7 @@ function generatedData(row: GeneratedTaskInput) {
 
 export function createPrismaEnterpriseTaskRepository(prisma: Client): EnterpriseTaskRepository {
   return {
+    ...createPrismaWorkbenchRepository(prisma),
     async listTemplates(positionId) {
       const rows = await prisma.taskTemplate.findMany({ where: positionId ? { positionId } : {}, orderBy: [{ positionId: 'asc' }, { createdAt: 'asc' }] });
       return rows.map(mapTemplate);

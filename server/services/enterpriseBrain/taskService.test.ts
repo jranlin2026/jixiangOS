@@ -65,6 +65,17 @@ const team = await service.listTeamTasks({ date: '2026-07-29' }, manager);
 assert.equal(team.code, 0);
 assert.equal(team.data?.items.length, 2, '负责人可读取本部门及下级部门任务');
 
+const completed = await service.completeTask(mine.data!.items[0]!.id, {
+  result: '已完成客户跟进',
+  actualValue: 10,
+  evidence: [{ type: 'URL', content: 'https://example.com/follow-up' }],
+}, employee);
+assert.equal(completed.code, 0, '旧完成任务API应继续可用');
+assert.equal(completed.data?.status, 'COMPLETED');
+const confirmed = await service.confirmTask(mine.data!.items[0]!.id, { action: 'CONFIRM' }, manager);
+assert.equal(confirmed.code, 0, '旧确认任务API应继续可用');
+assert.equal(confirmed.data?.status, 'CONFIRMED');
+
 const invalidTime = await service.saveTemplate({ positionId: 'pos-sales-consultant', name: '非法时间模板', weekdays: [1], dueTime: '99:99' }, manager);
 assert.equal(invalidTime.code, 400, '模板截止时间必须是合法24小时制时间');
 const childManager = { ...manager, id: 'manager-child', departmentId: 'dept-sales-one' };

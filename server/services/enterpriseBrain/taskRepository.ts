@@ -1,4 +1,6 @@
 import type { AuthenticatedUser } from '../../../src/types/auth';
+import type { EmployeeTask } from '../../../src/types/enterpriseBrain';
+import { createMemoryWorkbenchRepository, type WorkbenchRepository } from '../workbench/workbenchRepository';
 
 export type TaskTemplateRecord = {
   id: string;
@@ -41,7 +43,7 @@ export type EmployeeTaskRecord = {
   actualValue: number | null;
   unit: string | null;
   evidenceRequired: boolean;
-  status: string;
+  status: EmployeeTask['status'];
   result: string | null;
   dueAt: string | null;
   returnedReason: string | null;
@@ -70,7 +72,7 @@ export type DailyReviewRecord = {
   submittedAt: string;
 };
 
-export interface EnterpriseTaskRepository {
+export interface EnterpriseTaskRepository extends WorkbenchRepository {
   listTemplates(positionId?: string): Promise<TaskTemplateRecord[]>;
   saveTemplate(input: TaskTemplateRecord & { actorId: string; actorName: string }): Promise<TaskTemplateRecord>;
   findPosition(id: string): Promise<TaskPositionRecord | null>;
@@ -103,6 +105,7 @@ export function createMemoryEnterpriseTaskRepository(input: MemoryInput = {}): E
   const tasks: EmployeeTaskRecord[] = [];
   const reviews: DailyReviewRecord[] = [];
   let sequence = 0;
+  const workbench = createMemoryWorkbenchRepository({ tasks, employees: input.employees, departments });
 
   const taskPage = (filter: { employeeId?: string; departmentIds?: string[]; date?: string; status?: string; page: number; pageSize: number }) => {
     const rows = tasks.filter((task) => (
@@ -115,6 +118,7 @@ export function createMemoryEnterpriseTaskRepository(input: MemoryInput = {}): E
   };
 
   return {
+    ...workbench.repository,
     async listTemplates(positionId) { return templates.filter((item) => !positionId || item.positionId === positionId); },
     async saveTemplate(row) {
       const existing = templates.find((item) => item.id === row.id);
