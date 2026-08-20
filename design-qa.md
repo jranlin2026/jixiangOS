@@ -44,6 +44,36 @@ final result: passed
 
 ---
 
+# 全局页签与应用框架 Design QA（2026-08-20）
+
+## 对比目标
+
+- 页签来源：`codex-clipboard-7dd81396-decf-44f0-94af-0715f0b78326.png`
+- 旧模块问题参考：`codex-clipboard-e5b2fe57-0700-4c01-a293-1fdb5a714d88.png`
+- 顶部栏与侧边栏来源：`codex-clipboard-9cbb2270-d4bb-4ca0-8c17-f973e27035f6.png`
+- 实现页面：`/settings?group=organization`、`/finance?tab=recovery-settlement`
+- 桌面验收：1280 × 800，device scale factor 1；窄屏验收：820 × 780，device scale factor 1。
+- 对比证据：`/tmp/jixiangos-settings-tabs-comparison.png`、`/tmp/jixiangos-shell-comparison.png`
+
+## 最终核对
+
+- 字体与层级：通过。活动页签使用品牌紫和 800 字重，非活动页签与导航使用柔和灰紫，标题、说明、导航层级清楚。
+- 间距与布局：通过。主 Tab 统一为 52px 高度、稳定横向间距、4px 短下划线和完整分隔线；双层 Tab 仍保持清晰层级。820px 下页签和内容不被顶部栏遮挡。
+- 色彩与令牌：通过。顶部栏、侧边栏、选中态和 hover 统一复用浅紫白表面、灰紫文字、品牌紫与柔和边框/阴影。
+- 图片与图标：通过。继续使用用户提供的极享OS Logo 和现有 MUI 图标库，没有用临时图形替换品牌资产。
+- 文案与业务内容：通过。参考图只作为视觉来源；未复制无关功能，现有菜单、权限、业务按钮和模块文案均保留。
+- 交互：通过。财务中心“提成发放”点击后 URL 更新为 `?tab=disbursement`，选中态与内容同步切换。
+- 控制台：通过。无应用错误；仅存在 React Router v7 未来版本提示，不影响当前交互。
+
+## 可接受差异
+
+- 参考图三的语言、客户端、小程序和创作按钮不属于当前极享OS功能，本次只复用其表面色、字体层级、边框与阴影语言。
+- 极享OS侧边栏保留分组折叠、权限过滤和企业版状态卡，避免为了视觉相似破坏现有信息架构。
+
+final result: passed
+
+---
+
 # 可调列宽表格吸顶表头修复 Design QA（2026-08-20）
 
 ## 验收对象

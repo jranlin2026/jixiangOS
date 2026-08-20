@@ -20,7 +20,6 @@ import {
   CardContent,
   IconButton,
   Tooltip,
-  Tabs,
   Tab,
   Button,
 } from '@mui/material';
@@ -49,6 +48,7 @@ import ResizableHeaderCell, {
 } from '../../shared/components/ResizableTable';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
 import useResetListFiltersOnPageExit from '../../shared/hooks/useResetListFiltersOnPageExit';
+import { ModuleTabs } from '../../shared/components/ModuleShell';
 
 type RefundColumn = {
   id: string;
@@ -304,10 +304,10 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
       )}
 
       {showInternalTabs && (
-        <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
+        <ModuleTabs value={activeTab} onChange={(_, value) => setActiveTab(value)}>
           <Tab label="退款挽回" />
           <Tab label="售后工单" />
-        </Tabs>
+        </ModuleTabs>
       )}
 
       {!showInternalTabs || activeTab === 0 ? (

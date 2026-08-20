@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Box, Button, Chip, MenuItem, Paper, Tab, Tabs, Table, TableBody, TableCell,
+  Box, Button, Chip, MenuItem, Paper, Tab, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, TextField, Typography,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
@@ -12,6 +12,7 @@ import useDepartmentStore from '../../store/useDepartmentStore';
 import TablePagination from '../../shared/components/TablePagination';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { isPositionApplicableToDepartment } from '../../shared/utils/positionApplicability';
+import { ModuleTabs } from '../../shared/components/ModuleShell';
 
 const matchLabels: Record<string, string> = {
   UNIQUE_MATCH: '唯一匹配', MULTIPLE_MATCHES: '多个候选', DEPARTMENT_CONFLICT: '部门冲突', NO_MATCH: '未匹配',
@@ -191,9 +192,9 @@ const PositionGovernance: React.FC = () => {
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>历史岗位治理</Typography>
         <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>先预览、再人工确认；系统不会根据自由文本自动修改员工岗位。</Typography>
       </Box>
-      <Tabs value={tab} onChange={(_event, value) => setTab(value)} sx={{ mb: 2 }}>
+      <ModuleTabs value={tab} onChange={(_event, value) => setTab(value)}>
         <Tab label="治理盘点" /><Tab label="映射预览与回填" /><Tab label="岗位变更记录" />
-      </Tabs>
+      </ModuleTabs>
 
       {tab === 0 && <>
         <Paper elevation={0} sx={{ p: 2, mb: 2, border: '1px solid #e5e7eb' }}>

@@ -22,6 +22,7 @@ import {
 import useAuthStore from '../store/useAuthStore';
 import NotificationBell from '../shared/components/NotificationBell';
 import ChangePasswordDialog from '../shared/components/ChangePasswordDialog';
+import { shellSurfaceShadow, shellVisualTokens as shell } from './shellVisualTokens';
 
 const TopHeader: React.FC = () => {
   const navigate = useNavigate();
@@ -53,11 +54,12 @@ const TopHeader: React.FC = () => {
       sx={{
         display: { xs: 'none', md: 'flex' },
         alignItems: 'center',
-        minHeight: 64,
+        minHeight: 68,
         px: { md: 2.5, xl: 3.5 },
         gap: 2,
-        bgcolor: '#FFFFFF',
-        borderBottom: '1px solid #EEEAF5',
+        bgcolor: shell.header,
+        borderBottom: `1px solid ${shell.line}`,
+        boxShadow: shellSurfaceShadow,
         flexShrink: 0,
         zIndex: 1050,
       }}
@@ -70,7 +72,11 @@ const TopHeader: React.FC = () => {
         sx={{
           width: { md: 280, xl: 360 },
           ml: 'auto',
-          '& .MuiOutlinedInput-root': { bgcolor: '#FBFAFE', minHeight: 42 },
+          '& .MuiOutlinedInput-root': {
+            bgcolor: shell.surface,
+            minHeight: 42,
+            boxShadow: '0 5px 18px rgba(69, 48, 112, 0.035)',
+          },
         }}
         InputProps={{
           startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 20, color: '#9B95AA' }} /></InputAdornment>,
@@ -84,17 +90,17 @@ const TopHeader: React.FC = () => {
           ),
         }}
       />
-      <Button startIcon={<HelpOutlineIcon />} sx={{ color: '#706B86', whiteSpace: 'nowrap', boxShadow: 'none' }}>
+      <Button startIcon={<HelpOutlineIcon />} sx={{ color: shell.mutedStrong, whiteSpace: 'nowrap', boxShadow: 'none', fontWeight: 800 }}>
         帮助中心
       </Button>
       <NotificationBell />
-      <Box sx={{ height: 32, width: '1px', bgcolor: '#EEEAF5' }} />
+      <Box sx={{ height: 32, width: '1px', bgcolor: shell.line }} />
       <ButtonBase
         aria-label="打开账号菜单"
         aria-haspopup="menu"
         aria-expanded={Boolean(accountAnchor)}
         onClick={(event) => setAccountAnchor(event.currentTarget)}
-        sx={{ borderRadius: 2, px: 0.75, py: 0.5, minWidth: 168, justifyContent: 'flex-start', '&:hover': { bgcolor: '#FAF8FF' } }}
+        sx={{ borderRadius: 2.25, px: 0.75, py: 0.5, minWidth: 168, justifyContent: 'flex-start', '&:hover': { bgcolor: shell.violetHover } }}
       >
         <Stack direction="row" spacing={1.1} alignItems="center" sx={{ width: '100%' }}>
           <Avatar

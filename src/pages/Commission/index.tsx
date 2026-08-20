@@ -86,7 +86,7 @@ import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { Position } from '../../types/position';
 import type { User } from '../../types/settings';
-import { moduleRadius, moduleTablePaperSx, moduleTableSx, moduleTokens, StatusSegmentBar } from '../../shared/components/ModuleShell';
+import { ModuleTabs, moduleRadius, moduleTablePaperSx, moduleTableSx, moduleTokens, StatusSegmentBar } from '../../shared/components/ModuleShell';
 import {
   getActiveCommissions,
   getCommissionSplitAmountPresentation,
@@ -3983,11 +3983,11 @@ const Commission: React.FC<CommissionProps> = ({
             )}
           </Box>
 
-          <Tabs value={tabValue} onChange={(_event, value) => setTabValue(value)} sx={{ mb: 3, borderBottom: '1px solid #e5e7eb' }}>
+          <ModuleTabs value={tabValue} onChange={(_event, value) => setTabValue(value)}>
             <Tab label="订单分账台" />
             <Tab label="员工提成月报" />
             <Tab label="规则配置" />
-          </Tabs>
+          </ModuleTabs>
         </>
       )}
       {embedded && tabValue === 0 && !hideEmbeddedOrderSplitViewButton && (

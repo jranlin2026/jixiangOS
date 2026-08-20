@@ -97,23 +97,44 @@ type ModuleTabsProps = React.ComponentProps<typeof Tabs> & {
 
 export const ModuleTabs: React.FC<ModuleTabsProps> = ({ children, sx, ...props }) => (
   <Tabs
+    data-module-tabs="primary"
     sx={{
-      mb: 1.5,
-      minHeight: 40,
-      borderBottom: `1px solid ${moduleTokens.softLine}`,
-      '& .MuiTab-root': {
-        minHeight: 40,
-        px: 2,
-        fontWeight: 700,
-        color: moduleTokens.muted,
+      mb: 2,
+      minHeight: 52,
+      px: { xs: 0.5, md: 1.5 },
+      bgcolor: '#FCFBFF',
+      borderTop: `1px solid ${moduleTokens.softLine}`,
+      borderBottom: `1px solid ${moduleTokens.line}`,
+      '& .MuiTabs-flexContainer': {
+        gap: { xs: 0, md: 0.5 },
       },
-      '& .Mui-selected': {
-        color: moduleTokens.blue,
+      '& .MuiTab-root': {
+        minHeight: 52,
+        px: { xs: 1.5, md: 2.5 },
+        py: 1.25,
+        minWidth: 0,
+        fontSize: { xs: '0.8125rem', md: '0.875rem' },
+        lineHeight: 1.35,
+        fontWeight: 800,
+        letterSpacing: 0,
+        textTransform: 'none',
+        color: moduleTokens.muted,
+        transition: 'color 160ms ease, background-color 160ms ease',
+        '&:hover': {
+          color: moduleTokens.blue,
+          bgcolor: '#F7F3FF',
+        },
+      },
+      '& .MuiTab-root.Mui-selected': {
+        color: `${moduleTokens.blue} !important`,
       },
       '& .MuiTabs-indicator': {
-        height: 3,
-        borderRadius: '3px 3px 0 0',
+        height: 4,
+        borderRadius: '4px 4px 0 0',
         bgcolor: moduleTokens.blue,
+      },
+      '& .MuiTabs-scrollButtons': {
+        color: moduleTokens.muted,
       },
       ...sx,
     }}

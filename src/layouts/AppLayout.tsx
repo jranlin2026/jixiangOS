@@ -15,6 +15,7 @@ import ChangePasswordDialog from '../shared/components/ChangePasswordDialog';
 import useAuthStore from '../store/useAuthStore';
 import NotificationBell from '../shared/components/NotificationBell';
 import TopHeader from './TopHeader';
+import { shellSurfaceShadow, shellVisualTokens as shell } from './shellVisualTokens';
 
 const AppLayout: React.FC = () => {
   const theme = useTheme();
@@ -61,8 +62,9 @@ const AppLayout: React.FC = () => {
             px: 1.5,
             alignItems: 'center',
             gap: 1,
-            bgcolor: '#FFFFFF',
-            borderBottom: '1px solid #EEEAF5',
+            bgcolor: shell.header,
+            borderBottom: `1px solid ${shell.line}`,
+            boxShadow: shellSurfaceShadow,
           }}
         >
           <IconButton

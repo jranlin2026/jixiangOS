@@ -22,6 +22,7 @@ import useAuthStore from '../store/useAuthStore';
 import ChangePasswordDialog from '../shared/components/ChangePasswordDialog';
 import NotificationBell from '../shared/components/NotificationBell';
 import { getVisibleSidebarNavigation, isNavigationItemActive } from './sidebarNavigation';
+import { shellSurfaceShadow, shellVisualTokens as shell } from './shellVisualTokens';
 
 interface SidebarProps {
   width: number;
@@ -32,7 +33,6 @@ interface SidebarProps {
   onNavigate?: () => void;
 }
 
-const shell = { ink: '#19152D', muted: '#706B86', line: '#E8E4F1', softLine: '#F0EDF6', violet: '#7447F5', surface: '#FFFFFF', page: '#F8F7FC' };
 const fixedIcons: Record<string, React.ReactElement> = { workbench: <HomeIcon />, cockpit: <DashboardIcon /> };
 const groupIcons: Record<string, React.ReactElement> = {
   customer: <GroupsIcon />, finance: <PaidIcon />, growth: <CampaignOutlinedIcon />,
@@ -75,9 +75,9 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
   ) : null;
 
   return (
-    <Drawer variant={variant} open={open} onClose={onClose} ModalProps={{ keepMounted: true }} sx={{ width: layoutWidth, flexShrink: 0, '& .MuiDrawer-paper': { width, boxSizing: 'border-box', bgcolor: shell.surface, borderRight: `1px solid ${shell.line}`, boxShadow: '8px 0 30px rgba(69, 48, 112, 0.03)' } }}>
+    <Drawer variant={variant} open={open} onClose={onClose} ModalProps={{ keepMounted: true }} sx={{ width: layoutWidth, flexShrink: 0, '& .MuiDrawer-paper': { width, boxSizing: 'border-box', bgcolor: shell.sidebar, borderRight: `1px solid ${shell.line}`, boxShadow: shellSurfaceShadow } }}>
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Box sx={{ px: 2.25, display: 'flex', alignItems: 'center', gap: 1.25, height: 82, borderBottom: `1px solid ${shell.softLine}` }}>
+        <Box sx={{ px: 2.25, display: 'flex', alignItems: 'center', gap: 1.25, height: 82, bgcolor: shell.header, borderBottom: `1px solid ${shell.softLine}` }}>
           <Box component="img" src="/jixiang-os-logo.png" alt="极享OS" sx={{ width: 42, height: 42, borderRadius: 2, objectFit: 'contain', flexShrink: 0 }} />
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 900, color: shell.ink, fontSize: '1.05rem', lineHeight: 1.15 }}>极享OS 2.0</Typography>
@@ -97,8 +97,8 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
             const isActive = isNavigationItemActive(item, location.pathname, location.search);
             return (
               <ListItem key={item.id} disablePadding sx={{ mb: 0.25 }}>
-                <ListItemButton onClick={() => navigateTo(item.path)} sx={{ borderRadius: 2, py: 1, px: 1.35, minHeight: 46, bgcolor: isActive ? '#EEE7FF' : 'transparent', color: isActive ? shell.violet : shell.muted, '&:hover': { bgcolor: isActive ? '#EEE7FF' : shell.page } }}>
-                  <ListItemIcon sx={{ minWidth: 36, color: isActive ? shell.violet : '#9791AA' }}>{fixedIcons[item.id]}</ListItemIcon>
+                <ListItemButton onClick={() => navigateTo(item.path)} sx={{ borderRadius: 2.25, py: 1, px: 1.35, minHeight: 46, bgcolor: isActive ? shell.violetSoft : 'transparent', color: isActive ? shell.violet : shell.mutedStrong, '&:hover': { bgcolor: isActive ? shell.violetSoft : shell.violetHover } }}>
+                  <ListItemIcon sx={{ minWidth: 36, color: isActive ? shell.violet : shell.icon }}>{fixedIcons[item.id]}</ListItemIcon>
                   <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: '0.8125rem', fontWeight: isActive ? 900 : 700 }} />
                 </ListItemButton>
               </ListItem>
@@ -113,8 +113,8 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
             return (
               <React.Fragment key={group.id}>
                 <ListItem disablePadding sx={{ mb: 0.25 }}>
-                  <ListItemButton onClick={() => setExpandedGroupId((current) => current === group.id ? null : group.id)} aria-expanded={isExpanded} sx={{ borderRadius: 2, py: 0.9, px: 1.35, minHeight: 44, color: isActive ? shell.violet : shell.ink, '&:hover': { bgcolor: shell.page } }}>
-                    <ListItemIcon sx={{ minWidth: 36, color: isActive ? shell.violet : '#9791AA' }}>{groupIcons[group.id]}</ListItemIcon>
+                  <ListItemButton onClick={() => setExpandedGroupId((current) => current === group.id ? null : group.id)} aria-expanded={isExpanded} sx={{ borderRadius: 2.25, py: 0.9, px: 1.35, minHeight: 44, bgcolor: isActive ? '#F8F5FF' : 'transparent', color: isActive ? shell.violet : shell.ink, '&:hover': { bgcolor: shell.violetHover } }}>
+                    <ListItemIcon sx={{ minWidth: 36, color: isActive ? shell.violet : shell.icon }}>{groupIcons[group.id]}</ListItemIcon>
                     <ListItemText primary={group.label} primaryTypographyProps={{ fontSize: '0.8125rem', fontWeight: 900 }} />
                     {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                   </ListItemButton>
@@ -125,7 +125,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
                       const childActive = isNavigationItemActive(item, location.pathname, location.search);
                       return (
                         <ListItem key={item.id} disablePadding sx={{ mb: 0.25 }}>
-                          <ListItemButton onClick={() => navigateTo(item.path)} sx={{ borderRadius: 2, py: 0.75, px: 1.25, minHeight: 36, bgcolor: childActive ? '#F1ECFF' : 'transparent', color: childActive ? shell.violet : shell.muted, '&:hover': { bgcolor: childActive ? '#F1ECFF' : shell.page } }}>
+                          <ListItemButton onClick={() => navigateTo(item.path)} sx={{ borderRadius: 2.25, py: 0.75, px: 1.25, minHeight: 36, bgcolor: childActive ? shell.violetSoft : 'transparent', color: childActive ? shell.violet : shell.mutedStrong, '&:hover': { bgcolor: childActive ? shell.violetSoft : shell.violetHover } }}>
                             <ListItemText primary={<Box sx={{ display: 'flex', alignItems: 'center' }}>{item.label}{renderBadge(item.badge)}</Box>} primaryTypographyProps={{ fontSize: '0.765rem', fontWeight: childActive ? 900 : 700 }} />
                           </ListItemButton>
                         </ListItem>
@@ -139,7 +139,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
         </List>
 
         <Box sx={{ px: 1.75, pb: 1 }}>
-          <Box sx={{ px: 1.25, py: 1, borderRadius: 2.25, bgcolor: '#FAF8FF', border: '1px solid #ECE6FA' }}>
+          <Box sx={{ px: 1.25, py: 1, borderRadius: 2.25, bgcolor: '#F9F6FF', border: `1px solid ${shell.line}`, boxShadow: '0 8px 22px rgba(86, 48, 201, 0.045)' }}>
             <Stack direction="row" spacing={1} alignItems="center">
               <Box sx={{ width: 30, height: 30, display: 'grid', placeItems: 'center', borderRadius: 1.75, bgcolor: '#EEE7FF', color: shell.violet }}>
                 <WorkspacePremiumOutlinedIcon fontSize="small" />

@@ -39,7 +39,7 @@ import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { formatCurrency, formatDateTime, formatPaginationRows } from '../../shared/utils/formatters';
 import TablePagination from '../../shared/components/TablePagination';
-import { moduleTablePaperSx, moduleTableSx } from '../../shared/components/ModuleShell';
+import { ModuleTabs, moduleTablePaperSx, moduleTableSx } from '../../shared/components/ModuleShell';
 import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
 import { isRecoveryCommission } from '../../shared/utils/commissionConfiguration';
 import type {
@@ -780,9 +780,9 @@ const CommissionPayout: React.FC = () => {
           </Button>
         )}
       </Stack>
-      <Tabs value={view} onChange={(_: React.SyntheticEvent, value: PayoutView) => setView(value)} sx={{ mt: 1.5 }}>
+      <ModuleTabs value={view} onChange={(_: React.SyntheticEvent, value: PayoutView) => setView(value)} sx={{ mt: 1.5, mb: 0 }}>
         <Tab value="pending" label="待发放" /><Tab value="records" label="发放记录" /><Tab value="corrections" label="更正与差额" /><Tab value="summary" label="月度报告" />
-      </Tabs>
+      </ModuleTabs>
     </Paper>
     {loadError && <Alert severity="error" onClose={() => setLoadError('')}>{loadError}</Alert>}
     {view === 'pending' && renderPending()}
