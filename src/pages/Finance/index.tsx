@@ -741,7 +741,6 @@ const Finance: React.FC = () => {
         )}
           </>
         )}
-        sx={{ mb: 1.5 }}
       />
 
       <ModuleTabs

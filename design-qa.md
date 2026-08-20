@@ -44,6 +44,46 @@ final result: passed
 
 ---
 
+# 模块工作台统一 Design QA（2026-08-21）
+
+## 对比目标
+
+- Source visual truth：用户标注的财务中心问题截图，以及已确认的系统设置连续工作台样式。
+- Implementation states：`/tmp/jixiangos-module-workspace/01-finance.png`、`02-settings.png`、`03-orders.png`、`04-customers.png`、`05-leads.png`、`07-refund-center.png`、`08-customer-merge.png`。
+- Full-view comparison：`/tmp/jixiangos-module-workspace/09-settings-vs-finance.png`。
+- Focused comparison：`/tmp/jixiangos-module-workspace/10-header-tabs-focus.png`。
+- Responsive state：`/tmp/jixiangos-module-workspace/06-finance-narrow.png`，820 × 780 pixels。
+
+## Required fidelity surfaces
+
+- Fonts and typography：模块标题、说明文字、页签字重和选中态统一复用 `ModuleHeader` 与 `ModuleTabs`，没有引入新的字体或不一致字号。
+- Spacing and layout rhythm：标题、操作区、一级页签和内容归入同一白色工作台；页签横向铺满容器，底部分隔线连续，不再出现标题与正文悬浮分离。
+- Colors and visual tokens：工作台底色、边线、阴影、主色和弱文字全部复用模块令牌；紫色仅用于选中态和主要操作。
+- Image quality and asset fidelity：本次没有新增图片资产；现有品牌 Logo 与图标保持清晰。
+- Copy and content：各模块原有标题、说明、页签、筛选、表格与分页语义保持不变，仅统一容器关系和视觉层级。
+
+## Findings and comparison history
+
+1. Earlier P2：财务中心等模块的标题、页签和正文分别落在页面底色上，视觉上像三块互不关联的区域。
+   - Fix：由 `ModulePage` 提供统一白色工作台，`ModuleHeader` 和 `ModuleTabs` 在容器内连续排布，页签分隔线铺满工作台宽度。
+   - Post-fix evidence：系统设置与财务中心全景对照中，两侧均呈现完整连续的模块工作区。
+2. Earlier P2：退款中心和重复客户治理绕过共享模块壳层，后续会继续产生页面风格漂移。
+   - Fix：两个特殊页面迁移至共享 `ModulePage`、`ModuleHeader`、`ModuleTabs`；嵌入模式仍保留原业务容器行为。
+   - Post-fix evidence：独立路由下标题、操作、页签和内容已与订单、财务、客户模块一致。
+
+## Interaction, responsive, and console checks
+
+- 财务、订单、客户、线索、系统设置、退款中心、重复客户治理均完成浏览器实页检查。
+- 820 × 780 窄屏下操作区自动换行，页签保持连续，页面无整页横向溢出。
+- 客户与线索表格继续保留固定表头、横向表格滚动和统一分页区，正文未覆盖页头文案。
+- 浏览器控制台无本次修改引入的 error；静态契约测试和生产构建通过。
+
+No remaining P0, P1, or P2 visual findings.
+
+final result: passed
+
+---
+
 # 全局页签与应用框架 Design QA（2026-08-20）
 
 ## 对比目标

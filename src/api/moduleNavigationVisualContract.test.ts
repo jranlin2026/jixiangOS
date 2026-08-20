@@ -9,6 +9,8 @@ const sidebar = readFileSync(join(root, 'src/layouts/Sidebar.tsx'), 'utf8');
 const topHeader = readFileSync(join(root, 'src/layouts/TopHeader.tsx'), 'utf8');
 
 assert.match(moduleShell, /data-module-tabs="primary"/, '模块主页签必须具备统一视觉标识。');
+assert.match(moduleShell, /data-module-workspace="true"/, '模块标题、页签和内容必须归入统一工作台容器。');
+assert.match(moduleShell, /data-module-header="true"/, '模块标题栏必须具备统一视觉标识。');
 assert.match(moduleShell, /minHeight: 52/, '模块主页签应保持统一的舒展高度。');
 assert.match(moduleShell, /height: 4/, '模块主页签应使用清晰的紫色短下划线。');
 assert.match(moduleShell, /borderBottom: `1px solid \$\{moduleTokens\.line\}`/, '模块主页签必须保留完整底部分隔线。');

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Box, Paper, Tab, Tabs, Typography } from '@mui/material';
+import { Box, Tab, Tabs, Typography } from '@mui/material';
 import RolePermission from './RolePermission';
 import ProductConfigPage from './ProductConfig';
 import BrowserAgentConfigPage from './BrowserAgentConfig';
@@ -24,7 +24,7 @@ import NotificationSettings from './NotificationSettings';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
-import { ModuleHeader, ModulePage, ModuleTabs, moduleRadius, moduleTokens } from '../../shared/components/ModuleShell';
+import { ModuleHeader, ModulePage, ModuleTabs, moduleTokens } from '../../shared/components/ModuleShell';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -200,7 +200,7 @@ const Settings: React.FC = () => {
         description="统一配置组织、产品、客户规则和系统维护项。"
       />
 
-      <Paper elevation={0} sx={{ border: `1px solid ${moduleTokens.line}`, borderRadius: moduleRadius, overflow: 'hidden' }}>
+      <Box>
         {groups.length === 0 ? (
           <Box sx={{ py: 6, textAlign: 'center', color: '#6b7280' }}>当前账号没有系统设置权限</Box>
         ) : (
@@ -241,7 +241,7 @@ const Settings: React.FC = () => {
             </Box>
           </Box>
         )}
-      </Paper>
+      </Box>
     </ModulePage>
   );
 };

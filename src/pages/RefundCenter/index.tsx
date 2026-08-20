@@ -48,7 +48,7 @@ import ResizableHeaderCell, {
 } from '../../shared/components/ResizableTable';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
 import useResetListFiltersOnPageExit from '../../shared/hooks/useResetListFiltersOnPageExit';
-import { ModuleTabs } from '../../shared/components/ModuleShell';
+import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/ModuleShell';
 
 type RefundColumn = {
   id: string;
@@ -287,24 +287,28 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
     boxShadow: '-1px 0 0 #e5e7eb',
   };
 
+  const RootComponent: React.ElementType = embedded ? Box : ModulePage;
+
   return (
-    <Box sx={{ p: embedded ? 0 : 3 }}>
+    <RootComponent sx={embedded ? { p: 0 } : undefined}>
       {!embedded && (
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2 }}>
-          <Typography variant="h5" sx={{ fontWeight: 600 }}>
-            退款中心
-          </Typography>
-          <Box sx={{ flex: 1 }} />
-          {(!showInternalTabs || activeTab === 0) && (
+        <ModuleHeader
+          title="退款中心"
+          description="统一处理退款挽回、财务退款和售后工单。"
+          actions={(!showInternalTabs || activeTab === 0) ? (
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
               视图设置
             </Button>
-          )}
-        </Box>
+          ) : undefined}
+        />
       )}
 
       {showInternalTabs && (
-        <ModuleTabs value={activeTab} onChange={(_, value) => setActiveTab(value)}>
+        <ModuleTabs
+          value={activeTab}
+          onChange={(_, value) => setActiveTab(value)}
+          sx={embedded ? { mx: 0, width: '100%' } : undefined}
+        >
           <Tab label="退款挽回" />
           <Tab label="售后工单" />
         </ModuleTabs>
@@ -497,7 +501,7 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
       ) : (
         <ServiceTicketTab />
       )}
-    </Box>
+    </RootComponent>
   );
 };
 

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Alert, Box, Button, Card, CardActionArea, CardContent, Chip, CircularProgress, Divider,
   Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel,
-  LinearProgress, Paper, Radio, Stack, Tab, Tabs, TextField, Typography,
+  LinearProgress, Paper, Radio, Stack, Tab, TextField, Typography,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
@@ -23,6 +23,7 @@ import { PERMISSION_KEYS, hasExplicitPermission } from '../../shared/utils/permi
 import useAuthStore from '../../store/useAuthStore';
 import { ROUTES } from '../../shared/utils/constants';
 import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDialog';
+import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/ModuleShell';
 
 const fields: Array<{ key: CustomerMergeField; label: string }> = [
   { key: 'name', label: '客户姓名' },
@@ -254,21 +255,17 @@ const CustomerDuplicateGovernance: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1440, mx: 'auto' }}>
-      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} gap={1} mb={2}>
-        <Box>
-          <Typography variant="h5" fontWeight={800}>合并重复客户</Typography>
-          <Typography color="text.secondary">把同一个客户的多条资料整理成一份完整档案</Typography>
-        </Box>
-        <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(ROUTES.CUSTOMERS)}>返回客户列表</Button>
-      </Stack>
+    <ModulePage maxWidth={1440}>
+      <ModuleHeader
+        title="合并重复客户"
+        description="把同一个客户的多条资料整理成一份完整档案。"
+        actions={<Button startIcon={<ArrowBackIcon />} onClick={() => navigate(ROUTES.CUSTOMERS)}>返回客户列表</Button>}
+      />
 
-      <Paper sx={{ mb: 2 }}>
-        <Tabs value={tab} onChange={(_, value) => setTab(value)}>
-          <Tab value="candidates" label={`待处理重复资料 ${candidates.length}`} />
-          <Tab value="history" label={`合并记录 ${history.length}`} />
-        </Tabs>
-      </Paper>
+      <ModuleTabs value={tab} onChange={(_, value) => setTab(value)}>
+        <Tab value="candidates" label={`待处理重复资料 ${candidates.length}`} />
+        <Tab value="history" label={`合并记录 ${history.length}`} />
+      </ModuleTabs>
 
       {tab === 'candidates' && (
         <Stack spacing={2}>
@@ -536,7 +533,7 @@ const CustomerDuplicateGovernance: React.FC = () => {
         </DialogActions>
       </Dialog>
       <OperationFeedbackDialog open={Boolean(notice)} severity={notice?.type} message={notice?.text || ''} onClose={() => setNotice(null)} />
-    </Box>
+    </ModulePage>
   );
 };
 

@@ -51,9 +51,28 @@ export const ModulePage: React.FC<ModulePageProps> = ({
       width: '100%',
       maxWidth,
       mx: maxWidth === 'none' ? 0 : 'auto',
-      ...(workspace ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : {}),
+      bgcolor: moduleTokens.surface,
+      border: `1px solid ${moduleTokens.line}`,
+      borderRadius: moduleRadius,
+      boxShadow: '0 10px 40px -18px rgba(31, 41, 55, 0.18)',
+      p: { xs: 2, md: 3 },
+      ...(workspace ? {
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      } : {}),
     }}>
-      {children}
+      <Box
+        data-module-workspace="true"
+        sx={{
+          minWidth: 0,
+          ...(workspace ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : {}),
+        }}
+      >
+        {children}
+      </Box>
     </Box>
   </Box>
 );
@@ -67,11 +86,12 @@ type ModuleHeaderProps = {
 
 export const ModuleHeader: React.FC<ModuleHeaderProps> = ({ title, description, actions, sx }) => (
   <Stack
+    data-module-header="true"
     direction={{ xs: 'column', lg: 'row' }}
     justifyContent="space-between"
     alignItems={{ xs: 'stretch', lg: 'flex-start' }}
     spacing={2}
-    sx={{ mb: 2.5, ...sx }}
+    sx={{ mb: 0, pb: 2.5, ...sx }}
   >
     <Box sx={{ minWidth: 0 }}>
       <Typography variant="h5" sx={{ fontSize: { xs: '1.25rem', md: '1.5rem' }, fontWeight: 900, color: moduleTokens.ink, lineHeight: 1.25, letterSpacing: '-0.015em' }}>
@@ -99,9 +119,11 @@ export const ModuleTabs: React.FC<ModuleTabsProps> = ({ children, sx, ...props }
   <Tabs
     data-module-tabs="primary"
     sx={{
-      mb: 2,
+      mb: 2.5,
+      mx: { xs: -2, md: -3 },
+      width: { xs: 'calc(100% + 32px)', md: 'calc(100% + 48px)' },
       minHeight: 52,
-      px: { xs: 0.5, md: 1.5 },
+      px: { xs: 1, md: 2 },
       bgcolor: '#FBFBFD',
       borderTop: `1px solid ${moduleTokens.softLine}`,
       borderBottom: `1px solid ${moduleTokens.line}`,
