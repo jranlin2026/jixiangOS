@@ -1569,7 +1569,7 @@ const AssetManagement: React.FC = () => {
     const renderPhoneBadges = (row: AssetOverviewRelationshipRow) => row.phones.length ? (
       <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
         {row.phones.map((phone) => (
-          <Chip key={phone.id} size="small" label={`${phone.slotType || '卡槽'} ${displayPhoneNumber(phone)}`} onClick={() => openDetail('phone', phone.id)} sx={{ ...chipSx(toneSx('low')), cursor: 'pointer' }} />
+          <Chip key={phone.id} size="small" label={`${phone.slotType || '卡槽'}:${displayPhoneNumber(phone)}`} onClick={() => openDetail('phone', phone.id)} sx={{ ...chipSx(toneSx('low')), cursor: 'pointer' }} />
         ))}
       </Stack>
     ) : <Typography variant="body2" sx={{ color: shell.amber, fontWeight: 800 }}>未绑定手机号</Typography>;

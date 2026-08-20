@@ -30,6 +30,10 @@ assert.match(source, /fontVariantNumeric: 'tabular-nums'/, 'IMEI 号码应使用
 assert.match(phoneFields, /MenuProps=\{phoneSlotMenuProps\}/, '卡槽下拉层应使用收紧的统一弹层样式');
 assert.match(source, /id: 'imei', label: '卡槽 \/ IMEI'/, '设备列表应将 IMEI 字段明确配置到卡槽');
 assert.match(source, /id: 'simType', label: '对应手机号'/, '设备列表手机号字段应表达与卡槽的对应关系');
+assert.ok(
+  source.includes("label={`${phone.slotType || '卡槽'}:${displayPhoneNumber(phone)}`}"),
+  '对应手机号应使用“卡槽1:15359878565”格式',
+);
 assert.match(source, /<Autocomplete[\s\S]*?freeSolo[\s\S]*?normalizeDeviceBrand/, '设备品牌应使用可搜索且允许自定义的标准化输入');
 assert.match(source, /renderDeviceRelationshipOverview[\s\S]*?buildDeviceSlotRows[\s\S]*?关联关系/, '设备详情应按卡槽组织 IMEI 、手机号和账号关系');
 assert.match(source, /设备身份[\s\S]*?归属与使用[\s\S]*?取得与状态/, '设备详情应按业务语义分区');
