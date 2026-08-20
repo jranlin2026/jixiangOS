@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 const root = process.cwd();
 const app = readFileSync(join(root, 'src/App.tsx'), 'utf8');
-const sidebar = readFileSync(join(root, 'src/layouts/Sidebar.tsx'), 'utf8');
+const sidebarNavigation = readFileSync(join(root, 'src/layouts/sidebarNavigation.ts'), 'utf8');
 const enablement = readFileSync(join(root, 'src/pages/Enablement/index.tsx'), 'utf8');
 const academy = readFileSync(join(root, 'src/pages/Academy/index.tsx'), 'utf8');
 const academyPlans = readFileSync(join(root, 'src/pages/Academy/AcademyPlans.tsx'), 'utf8');
@@ -12,13 +12,13 @@ const globalTableResizer = readFileSync(join(root, 'src/shared/components/Global
 const systemDataTable = readFileSync(join(root, 'src/shared/components/SystemDataTable.tsx'), 'utf8');
 
 assert.match(app, /ROUTES\.ACADEMY/, '商学院必须有独立受权路由');
-assert.match(sidebar, /label: '极享商学院'[\s\S]*path: ROUTES\.ACADEMY/, '商学院必须是左侧一级菜单');
+assert.match(sidebarNavigation, /id: 'academy', label: '极享商学院', path: ROUTES\.ACADEMY/, '商学院必须保留在组织效能分组');
 assert.match(
   app,
   /<ProtectedRoute permissionKeys=\{\[\.\.\.ACADEMY_ACCESS_PERMISSION_KEYS\]\}[\s\S]*?<Route path=\{`\$\{ROUTES\.ACADEMY\}\/\*`\}/,
   '商学院路由必须校验任一商学院功能权限',
 );
-const academySidebarBlock = sidebar.match(/\{\s*label: '极享商学院',[\s\S]*?\n  \},/)?.[0] || '';
+const academySidebarBlock = sidebarNavigation.match(/\{ id: 'academy', label: '极享商学院',[^\n]+/)?.[0] || '';
 assert.ok(academySidebarBlock, '必须找到极享商学院菜单配置');
 assert.doesNotMatch(academySidebarBlock, /publicForAuthenticated:\s*true/, '商学院菜单不得绕过角色权限向所有登录用户开放');
 assert.match(academySidebarBlock, /permissionKeys: \[\.\.\.ACADEMY_ACCESS_PERMISSION_KEYS\]/, '商学院菜单和路由必须复用同一权限集合');

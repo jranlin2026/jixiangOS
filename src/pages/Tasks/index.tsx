@@ -35,6 +35,7 @@ import {
   ModuleTabs,
 } from "../../shared/components/ModuleShell";
 import TablePagination from "../../shared/components/TablePagination";
+import { useSearchParams } from "react-router-dom";
 
 const today = () =>
   new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
@@ -117,13 +118,29 @@ const TaskCenter: React.FC = () => {
     PERMISSION_KEYS.TASK_CONFIRM,
     "write",
   );
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const selectedTaskId = searchParams.get("taskId") || "";
+  const initialTab = requestedTab === "team" && canTeam
+    ? "team"
+    : requestedTab === "review"
+      ? "review"
+      : requestedTab === "templates" && canAssign
+        ? "templates"
+        : "mine";
   const [tab, setTab] = useState<"mine" | "team" | "review" | "templates">(
-    "mine",
+    initialTab,
   );
-  const [date, setDate] = useState(today());
+  const [date, setDate] = useState(() => {
+    const requestedDate = searchParams.get("date") || "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) ? requestedDate : today();
+  });
   const [tasks, setTasks] = useState<EmployeeTask[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(() => {
+    const requestedPage = Number(searchParams.get("page"));
+    return Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage - 1 : 0;
+  });
   const [pageSize, setPageSize] = useState(10);
   const [message, setMessage] = useState<{
     tone: "success" | "error" | "info";
@@ -159,6 +176,24 @@ const TaskCenter: React.FC = () => {
   });
   const [reviewSummary, setReviewSummary] = useState("");
 
+  useEffect(() => {
+    const nextRequestedTab = searchParams.get("tab");
+    const nextTab = nextRequestedTab === "team" && canTeam
+      ? "team"
+      : nextRequestedTab === "review"
+        ? "review"
+        : nextRequestedTab === "templates" && canAssign
+          ? "templates"
+          : "mine";
+    const nextRequestedDate = searchParams.get("date") || "";
+    const nextDate = /^\d{4}-\d{2}-\d{2}$/.test(nextRequestedDate) ? nextRequestedDate : today();
+    const nextRequestedPage = Number(searchParams.get("page"));
+    const nextPage = Number.isInteger(nextRequestedPage) && nextRequestedPage > 0 ? nextRequestedPage - 1 : 0;
+    setTab(nextTab);
+    setDate(nextDate);
+    setPage(nextPage);
+  }, [canAssign, canTeam, searchParams]);
+
   const loadTasks = useCallback(async () => {
     if (tab !== "mine" && tab !== "team") return;
     const response =
@@ -182,8 +217,9 @@ const TaskCenter: React.FC = () => {
     void loadTasks();
   }, [loadTasks]);
   useEffect(() => {
-    setPage(0);
-  }, [date, pageSize, tab]);
+    if (!selectedTaskId || !tasks.some((task) => task.id === selectedTaskId)) return;
+    requestAnimationFrame(() => document.getElementById(`task-${selectedTaskId}`)?.scrollIntoView({ block: "center" }));
+  }, [selectedTaskId, tasks]);
   useEffect(() => {
     if (tab !== "templates") return;
     Promise.all([
@@ -335,15 +371,20 @@ const TaskCenter: React.FC = () => {
   return (
     <ModulePage sx={{ p: { xs: 2, md: 3 } }}>
       <ModuleHeader
-        title="员工任务中心"
-        description="岗位标准通过任务模板落到每天执行；完成结果、证据和复盘形成可追踪反馈。"
+        title="工作任务台账"
+        description="从我的工作台进入具体事项，完成提交、确认和复盘；这里保留完整执行记录。"
         actions={
           <TextField
             size="small"
             type="date"
             label="工作日期"
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(e) => {
+              const nextDate = e.target.value;
+              setDate(nextDate);
+              setPage(0);
+              setSearchParams({ tab, date: nextDate });
+            }}
             InputLabelProps={{ shrink: true }}
           />
         }
@@ -359,7 +400,11 @@ const TaskCenter: React.FC = () => {
       )}
       <ModuleTabs
         value={tab}
-        onChange={(_, value) => setTab(value)}
+        onChange={(_, value) => {
+          setTab(value);
+          setPage(0);
+          setSearchParams({ tab: value, date });
+        }}
         variant="scrollable"
       >
         <Tab value="mine" label="我的任务" />
@@ -386,7 +431,7 @@ const TaskCenter: React.FC = () => {
                   )
                   .flatMap((line) => line.slice(5).split("、"));
                 return (
-                  <Paper key={task.id} variant="outlined" sx={{ p: 2 }}>
+                  <Paper id={`task-${task.id}`} key={task.id} variant="outlined" sx={{ p: 2, bgcolor: selectedTaskId === task.id ? '#F0F6FF' : undefined, borderColor: selectedTaskId === task.id ? 'primary.main' : undefined }}>
                     <Stack direction="row" justifyContent="space-between">
                       <Box>
                         <Typography sx={{ fontWeight: 900 }}>
@@ -476,7 +521,7 @@ const TaskCenter: React.FC = () => {
                 </TableHead>
                 <TableBody>
                   {tasks.map((task) => (
-                    <TableRow key={task.id}>
+                    <TableRow id={`task-${task.id}`} key={task.id} selected={selectedTaskId === task.id}>
                       <TableCell>
                         <Typography variant="body2" sx={{ fontWeight: 800 }}>
                           {task.title}
@@ -525,8 +570,15 @@ const TaskCenter: React.FC = () => {
             count={total}
             page={page}
             rowsPerPage={pageSize}
-            onPageChange={(_, next) => setPage(next)}
-            onRowsPerPageChange={(e) => setPageSize(Number(e.target.value))}
+            onPageChange={(_, next) => {
+              setPage(next);
+              setSearchParams({ tab, date, page: String(next + 1) });
+            }}
+            onRowsPerPageChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setPage(0);
+              setSearchParams({ tab, date, page: "1" });
+            }}
             sx={{ mt: 1 }}
           />
         </>
