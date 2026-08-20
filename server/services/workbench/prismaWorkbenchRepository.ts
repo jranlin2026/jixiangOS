@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import type { EmployeeTask, TaskActivity } from '../../../src/types/enterpriseBrain';
+import type { WorkbenchTaskListItem } from '../../../src/types/workbench';
 import type { Customer } from '../../../src/types/customer';
 import type { Lead } from '../../../src/types/lead';
 import type { Order } from '../../../src/types/order';
@@ -23,12 +24,15 @@ import type {
   EvidenceReferencesAuthorizationInput,
   TaskActivityInput,
   WorkbenchRepository,
+  WorkbenchTaskMetrics,
+  WorkbenchTaskPageQuery,
+  WorkbenchTaskQuery,
   WorkbenchTaskUpdate,
   WorkbenchTransactionRepository,
 } from './workbenchRepository';
 
 type Client = {
-  $transaction<T>(callback: (tx: any) => Promise<T>, options?: { isolationLevel: 'Serializable' }): Promise<T>;
+  $transaction<T>(callback: (tx: any) => Promise<T>, options?: { isolationLevel: 'Serializable' | 'RepeatableRead' }): Promise<T>;
   $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
   employeeTask: any;
   taskActivity: any;
@@ -341,6 +345,199 @@ function mapActivity(row: any): TaskActivity {
   };
 }
 
+const ACTIVE_OVERDUE_STATUSES = ['PENDING', 'IN_PROGRESS', 'RETURNED'] as const;
+
+function shanghaiDayWindow(now: Date): { startAt: Date; endAtExclusive: Date } {
+  const shifted = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  const startAt = new Date(Date.UTC(
+    shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate(), -8,
+  ));
+  return { startAt, endAtExclusive: new Date(startAt.getTime() + 24 * 60 * 60 * 1000) };
+}
+
+function sqlPlaceholders(values: readonly unknown[]): string {
+  return values.map(() => '?').join(', ');
+}
+
+function taskWhereSql(query: WorkbenchTaskQuery): { sql: string; params: unknown[] } {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (query.scope.kind === 'mine') {
+    clauses.push('(t.`employeeId` = ? OR JSON_CONTAINS(COALESCE(t.`collaboratorIds`, JSON_ARRAY()), JSON_QUOTE(?)))');
+    params.push(query.scope.actorId, query.scope.actorId);
+  } else if (query.scope.kind === 'departments') {
+    if (!query.scope.departmentIds.length) clauses.push('1 = 0');
+    else {
+      clauses.push(`t.\`departmentIdSnapshot\` IN (${sqlPlaceholders(query.scope.departmentIds)})`);
+      params.push(...query.scope.departmentIds);
+    }
+  }
+  if (query.dateFrom) {
+    clauses.push('t.`workDate` >= ?');
+    params.push(query.dateFrom);
+  }
+  if (query.dateToExclusive) {
+    clauses.push('t.`workDate` < ?');
+    params.push(query.dateToExclusive);
+  }
+  if (query.status) {
+    clauses.push('t.`status` = ?');
+    params.push(query.status);
+  }
+  if (query.businessModule) {
+    clauses.push('t.`businessModule` = ?');
+    params.push(query.businessModule);
+  }
+  if (query.priority) {
+    clauses.push('t.`priority` = ?');
+    params.push(query.priority);
+  }
+  if (query.employeeId) {
+    clauses.push('t.`employeeId` = ?');
+    params.push(query.employeeId);
+  }
+  if (query.departmentIds) {
+    if (!query.departmentIds.length) clauses.push('1 = 0');
+    else {
+      clauses.push(`t.\`departmentIdSnapshot\` IN (${sqlPlaceholders(query.departmentIds)})`);
+      params.push(...query.departmentIds);
+    }
+  }
+  if (query.overdue !== undefined) {
+    const predicate = `t.\`status\` IN (${sqlPlaceholders(ACTIVE_OVERDUE_STATUSES)}) AND t.\`dueAt\` IS NOT NULL AND t.\`dueAt\` < ?`;
+    clauses.push(query.overdue ? `(${predicate})` : `NOT (${predicate})`);
+    params.push(...ACTIVE_OVERDUE_STATUSES, query.now);
+  }
+  if (query.confirmation !== undefined) {
+    clauses.push(query.confirmation ? 't.`status` = ?' : 't.`status` <> ?');
+    params.push('COMPLETED');
+  }
+  return { sql: clauses.length ? clauses.join(' AND ') : '1 = 1', params };
+}
+
+async function listWorkbenchTasks(
+  client: Client,
+  query: WorkbenchTaskPageQuery,
+): Promise<{ items: WorkbenchTaskListItem[]; total: number }> {
+  if (!client.$queryRawUnsafe) throw new Error('Prisma client does not support database-backed workbench queries');
+  const where = taskWhereSql(query);
+  const countRows = await client.$queryRawUnsafe<Array<{ total: unknown }>>(
+    `SELECT COUNT(*) AS \`total\` FROM \`employee_tasks\` t WHERE ${where.sql}`,
+    ...where.params,
+  );
+  const total = Number(countRows[0]?.total || 0);
+  const { startAt, endAtExclusive } = shanghaiDayWindow(query.now);
+  const offset = (query.page - 1) * query.pageSize;
+  const idRows = await client.$queryRawUnsafe<Array<{ id: string }>>(
+    `SELECT t.\`id\`
+       FROM \`employee_tasks\` t
+      WHERE ${where.sql}
+      ORDER BY CASE
+        WHEN t.\`status\` = 'RETURNED' THEN 0
+        WHEN t.\`status\` IN ('PENDING', 'IN_PROGRESS', 'RETURNED') AND t.\`dueAt\` IS NOT NULL AND t.\`dueAt\` < ? THEN 1
+        WHEN t.\`priority\` = 'URGENT' THEN 2
+        WHEN t.\`status\` IN ('PENDING', 'IN_PROGRESS', 'RETURNED') AND t.\`dueAt\` >= ? AND t.\`dueAt\` < ? THEN 3
+        WHEN t.\`priority\` = 'HIGH' THEN 4
+        ELSE 5
+      END ASC,
+      CASE WHEN t.\`dueAt\` IS NULL THEN 1 ELSE 0 END ASC,
+      t.\`dueAt\` ASC, t.\`createdAt\` ASC, t.\`id\` ASC
+      LIMIT ? OFFSET ?`,
+    ...where.params, query.now, startAt, endAtExclusive, query.pageSize, offset,
+  );
+  const ids = idRows.map((row) => row.id);
+  if (!ids.length) return { items: [], total };
+  const rows = await client.employeeTask.findMany({ where: { id: { in: ids } } });
+  const rowById = new Map(rows.map((row: any) => [row.id, row]));
+  return {
+    items: ids.flatMap((id) => {
+      const row = rowById.get(id);
+      if (!row) return [];
+      const { evidence: _evidence, activities: _activities, ...item } = mapTask({ ...row, evidence: [] });
+      return [item as WorkbenchTaskListItem];
+    }),
+    total,
+  };
+}
+
+const metricNumber = (row: Record<string, unknown>, key: string): number => Number(row[key] || 0);
+
+async function summarizeWorkbenchTasks(client: Client, query: WorkbenchTaskQuery): Promise<WorkbenchTaskMetrics> {
+  if (!client.$queryRawUnsafe) throw new Error('Prisma client does not support grouped workbench queries');
+  const where = taskWhereSql(query);
+  const { startAt, endAtExclusive } = shanghaiDayWindow(query.now);
+  const collaborationSql = query.scope.kind === 'mine'
+    ? 'SUM(t.`employeeId` <> ? AND JSON_CONTAINS(COALESCE(t.`collaboratorIds`, JSON_ARRAY()), JSON_QUOTE(?)))'
+    : 'SUM(JSON_LENGTH(COALESCE(t.`collaboratorIds`, JSON_ARRAY())) > 0)';
+  const collaborationParams = query.scope.kind === 'mine'
+    ? [query.scope.actorId, query.scope.actorId]
+    : [];
+  const rows = await client.$queryRawUnsafe<Array<Record<string, unknown>>>(
+    `SELECT
+       COUNT(*) AS \`total\`,
+       SUM(t.\`status\` = 'PENDING') AS \`pending\`,
+       SUM(t.\`status\` = 'IN_PROGRESS') AS \`inProgress\`,
+       SUM(t.\`status\` = 'COMPLETED') AS \`completed\`,
+       SUM(t.\`status\` = 'CONFIRMED') AS \`confirmed\`,
+       SUM(t.\`status\` = 'RETURNED') AS \`returned\`,
+       SUM(t.\`status\` = 'CANCELED') AS \`canceled\`,
+       SUM(t.\`status\` IN ('PENDING', 'IN_PROGRESS', 'RETURNED') AND t.\`dueAt\` IS NOT NULL AND t.\`dueAt\` < ?) AS \`overdue\`,
+       SUM(t.\`status\` IN ('PENDING', 'IN_PROGRESS', 'RETURNED') AND t.\`dueAt\` >= ? AND t.\`dueAt\` < ?) AS \`dueToday\`,
+       ${collaborationSql} AS \`collaboration\`,
+       COALESCE(SUM(t.\`estimatedMinutes\`), 0) AS \`estimatedMinutes\`,
+       SUM(t.\`estimatedMinutes\` IS NOT NULL) AS \`estimatedMinutesTaskCount\`,
+       SUM(t.\`status\` = 'CONFIRMED' AND t.\`dueAt\` IS NOT NULL AND COALESCE(a.\`firstCompleteAt\`, t.\`completedAt\`) IS NOT NULL AND COALESCE(a.\`firstCompleteAt\`, t.\`completedAt\`) <= t.\`dueAt\`) AS \`onTime\`,
+       SUM(t.\`status\` = 'CONFIRMED' AND t.\`dueAt\` IS NOT NULL AND COALESCE(a.\`firstCompleteAt\`, t.\`completedAt\`) IS NOT NULL) AS \`onTimeDenominator\`,
+       SUM(t.\`status\` <> 'CANCELED' AND t.\`dueAt\` IS NOT NULL) AS \`overdueDenominator\`,
+       COALESCE(SUM(a.\`returnCount\`), 0) AS \`historicalReturnEventCount\`,
+       SUM(t.\`status\` <> 'CANCELED' AND COALESCE(a.\`returnCount\`, 0) > 0) AS \`returnedTaskCount\`,
+       SUM(t.\`status\` = 'RETURNED' OR (t.\`status\` IN ('PENDING', 'IN_PROGRESS') AND t.\`dueAt\` IS NOT NULL AND t.\`dueAt\` < ?)) AS \`blocked\`,
+       COALESCE(SUM(CASE WHEN COALESCE(a.\`firstStartAt\`, t.\`startedAt\`) IS NOT NULL AND COALESCE(a.\`firstStartAt\`, t.\`startedAt\`) >= t.\`createdAt\` THEN TIMESTAMPDIFF(SECOND, t.\`createdAt\`, COALESCE(a.\`firstStartAt\`, t.\`startedAt\`)) / 60 ELSE 0 END), 0) AS \`firstActionMinutesTotal\`,
+       SUM(COALESCE(a.\`firstStartAt\`, t.\`startedAt\`) IS NOT NULL AND COALESCE(a.\`firstStartAt\`, t.\`startedAt\`) >= t.\`createdAt\`) AS \`firstActionDenominator\`,
+       COALESCE(SUM(CASE WHEN COALESCE(a.\`firstCompleteAt\`, t.\`completedAt\`) IS NOT NULL AND COALESCE(a.\`firstConfirmAt\`, t.\`confirmedAt\`) IS NOT NULL AND COALESCE(a.\`firstConfirmAt\`, t.\`confirmedAt\`) >= COALESCE(a.\`firstCompleteAt\`, t.\`completedAt\`) THEN TIMESTAMPDIFF(SECOND, COALESCE(a.\`firstCompleteAt\`, t.\`completedAt\`), COALESCE(a.\`firstConfirmAt\`, t.\`confirmedAt\`)) / 60 ELSE 0 END), 0) AS \`confirmationMinutesTotal\`,
+       SUM(COALESCE(a.\`firstCompleteAt\`, t.\`completedAt\`) IS NOT NULL AND COALESCE(a.\`firstConfirmAt\`, t.\`confirmedAt\`) IS NOT NULL AND COALESCE(a.\`firstConfirmAt\`, t.\`confirmedAt\`) >= COALESCE(a.\`firstCompleteAt\`, t.\`completedAt\`)) AS \`confirmationDurationDenominator\`
+     FROM \`employee_tasks\` t
+     LEFT JOIN (
+       SELECT \`taskId\`,
+         MIN(CASE WHEN \`action\` = 'START' THEN \`createdAt\` END) AS \`firstStartAt\`,
+         MIN(CASE WHEN \`action\` = 'COMPLETE' THEN \`createdAt\` END) AS \`firstCompleteAt\`,
+         MIN(CASE WHEN \`action\` = 'CONFIRM' THEN \`createdAt\` END) AS \`firstConfirmAt\`,
+         SUM(\`action\` = 'RETURN') AS \`returnCount\`
+       FROM \`task_activities\`
+       GROUP BY \`taskId\`
+     ) a ON a.\`taskId\` = t.\`id\`
+     WHERE ${where.sql}`,
+    query.now, startAt, endAtExclusive, ...collaborationParams, query.now, ...where.params,
+  );
+  const row = rows[0] || {};
+  return {
+    total: metricNumber(row, 'total'),
+    statusCounts: {
+      PENDING: metricNumber(row, 'pending'),
+      IN_PROGRESS: metricNumber(row, 'inProgress'),
+      COMPLETED: metricNumber(row, 'completed'),
+      CONFIRMED: metricNumber(row, 'confirmed'),
+      RETURNED: metricNumber(row, 'returned'),
+      CANCELED: metricNumber(row, 'canceled'),
+    },
+    overdue: metricNumber(row, 'overdue'),
+    dueToday: metricNumber(row, 'dueToday'),
+    collaboration: metricNumber(row, 'collaboration'),
+    estimatedMinutes: metricNumber(row, 'estimatedMinutes'),
+    estimatedMinutesTaskCount: metricNumber(row, 'estimatedMinutesTaskCount'),
+    onTime: metricNumber(row, 'onTime'),
+    onTimeDenominator: metricNumber(row, 'onTimeDenominator'),
+    overdueDenominator: metricNumber(row, 'overdueDenominator'),
+    historicalReturnEventCount: metricNumber(row, 'historicalReturnEventCount'),
+    returnedTaskCount: metricNumber(row, 'returnedTaskCount'),
+    blocked: metricNumber(row, 'blocked'),
+    firstActionMinutesTotal: metricNumber(row, 'firstActionMinutesTotal'),
+    firstActionDenominator: metricNumber(row, 'firstActionDenominator'),
+    confirmationMinutesTotal: metricNumber(row, 'confirmationMinutesTotal'),
+    confirmationDurationDenominator: metricNumber(row, 'confirmationDurationDenominator'),
+  };
+}
+
 function taskUpdateData(update: WorkbenchTaskUpdate) {
   const { evidence: _evidence, evidenceActorId: _evidenceActorId, ...raw } = update;
   const data: Record<string, unknown> = { ...raw };
@@ -414,6 +611,7 @@ function createTransactionRepository(client: Client): WorkbenchTransactionReposi
 
     async listDepartmentTree(rootId) {
       const rows = await client.department.findMany({ where: { isActive: true }, select: { id: true, parentId: true } });
+      if (!rows.some((department: any) => department.id === rootId)) return [];
       const ids = new Set([rootId]);
       let changed = true;
       while (changed) {
@@ -443,6 +641,15 @@ export function createPrismaWorkbenchRepository(prisma: Client): WorkbenchReposi
         (transaction) => work(createTransactionRepository(transaction)),
         { isolationLevel: 'Serializable' },
       );
+    },
+    listWorkbenchTasks(query) {
+      return prisma.$transaction(
+        (transaction) => listWorkbenchTasks(transaction, query),
+        { isolationLevel: 'RepeatableRead' },
+      );
+    },
+    summarizeWorkbenchTasks(query) {
+      return summarizeWorkbenchTasks(prisma, query);
     },
   };
 }

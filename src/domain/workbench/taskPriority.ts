@@ -12,6 +12,7 @@ export type WorkbenchTaskForPriority = {
 
 const noDateSortValue = Number.MAX_SAFE_INTEGER;
 const shanghaiOffsetMilliseconds = 8 * 60 * 60 * 1000;
+const activeStatuses = new Set<EmployeeTaskStatus>(['PENDING', 'IN_PROGRESS', 'RETURNED']);
 
 const parseDate = (value: string | Date | null | undefined): number | null => {
   if (value === null || value === undefined) return null;
@@ -30,10 +31,11 @@ const isDueToday = (dueAt: number, now: Date): boolean => {
 
 export const rankWorkbenchTask = (task: WorkbenchTaskForPriority, now: Date): number => {
   const dueAt = parseDate(task.dueAt);
+  const isActive = activeStatuses.has(task.status);
   if (task.status === 'RETURNED') return 0;
-  if (dueAt !== null && dueAt < now.getTime()) return 1;
+  if (isActive && dueAt !== null && dueAt < now.getTime()) return 1;
   if (task.priority === 'URGENT') return 2;
-  if (dueAt !== null && isDueToday(dueAt, now)) return 3;
+  if (isActive && dueAt !== null && isDueToday(dueAt, now)) return 3;
   if (task.priority === 'HIGH') return 4;
   return 5;
 };

@@ -43,6 +43,16 @@ assert.equal(rankWorkbenchTask(task({ id: 'urgent', priority: 'URGENT' }), now),
 assert.equal(rankWorkbenchTask(task({ id: 'today', dueAt: '2026-08-20T12:00:00.000Z' }), now), 3);
 assert.equal(rankWorkbenchTask(task({ id: 'high', priority: 'HIGH' }), now), 4);
 assert.equal(rankWorkbenchTask(normal, now), 5);
+assert.equal(
+  rankWorkbenchTask(task({ id: 'confirmed-past-due', status: 'CONFIRMED', dueAt: '2026-08-19T10:00:00.000Z' }), now),
+  5,
+  '已确认任务不得因保留的截止时间重新进入逾期队列',
+);
+assert.equal(
+  rankWorkbenchTask(task({ id: 'completed-due-today', status: 'COMPLETED', dueAt: '2026-08-20T12:00:00.000Z' }), now),
+  5,
+  '待确认任务不得重新进入今日到期队列',
+);
 
 assert.equal(
   rankWorkbenchTask(
