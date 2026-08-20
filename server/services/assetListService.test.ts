@@ -180,6 +180,10 @@ const filteredPhoneCombination = await service.list('phones', {
 assert.deepEqual(filteredPhoneCombination.data.items.map((item) => item.id), ['phone-1'], '手机号筛选应同时识别设备、账号与服务密码配置状态');
 const phoneOptions = await service.filterOptions('phones', authenticatedAdmin);
 assert.deepEqual(phoneOptions.data.operators, [{ value: '移动', label: '移动' }], '旧运营商名称应归一为标准筛选项');
+const accountOptions = await service.filterOptions('accounts', authenticatedAdmin);
+for (const platform of ['抖音', '快手', '小红书', '微信', '视频号', '企业微信', '百度', 'Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok']) {
+  assert.ok(accountOptions.data.platforms.some((option) => option.value === platform), `新增账号平台 ${platform} 应映射到平台筛选`);
+}
 const restrictedDevices = await service.list('devices', { phoneBinding: 'bound', loginDeviceBinding: 'with', page: 1, pageSize: 10 }, authenticatedDeviceOnly);
 assert.equal(restrictedDevices.data.pagination.total, 2, '无关联模块权限时应忽略关系筛选，不得推断隐藏关系');
 assert.equal('phoneNumberCount' in (restrictedDevices.data.items[0] as object), false, '无手机号权限时不得返回关系计数');

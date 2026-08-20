@@ -12,6 +12,7 @@ const channels = resolvePlatformBrand('视频号');
 const wecom = resolvePlatformBrand('企业微信');
 
 assert.equal(channels.variant, 'wechat-channels', '视频号应使用独立品牌图形');
+assert.equal(channels.hex, 'FFFFFF', '视频号应使用浅色背景承载橙色标识');
 assert.equal(wecom.variant, 'wecom', '企业微信应使用独立品牌图形');
 assert.notEqual(channels.title, wechat.title, '视频号不应复用普通微信品牌标题');
 assert.notEqual(wecom.title, wechat.title, '企业微信不应复用普通微信品牌标题');

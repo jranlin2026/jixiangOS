@@ -38,7 +38,7 @@ async function resetAssets() {
 
 await resetAssets();
 
-for (const platform of ['百度', '企业微信', 'Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok']) {
+for (const platform of ['抖音', '快手', '小红书', '微信', '视频号', '企业微信', '百度', 'Apple ID', 'Google账号', 'LINE', 'Instagram', 'TikTok']) {
   assert.ok(assetApi.getAccountPlatformOptions().includes(platform), `互联网账号平台应包含 ${platform}`);
 }
 

@@ -35,7 +35,7 @@ const CUSTOM_BRANDS: Array<{ keyword: string; brand: PlatformBrand }> = [
     keyword: '视频号',
     brand: {
       title: '微信视频号',
-      hex: 'FA7D18',
+      hex: 'FFFFFF',
       fallbackLabel: '视',
       variant: 'wechat-channels',
     },

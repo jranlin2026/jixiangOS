@@ -24,6 +24,7 @@ import { readAccountControlStatus, readDeviceCommunicationType } from '../../src
 import { normalizeAccountLoginDeviceIds } from '../../src/domain/assets/accountDeviceBindings';
 import { normalizeIdentityAccountIds } from '../../src/domain/assets/accountIdentityBindings';
 import { isMatrixTargetDone } from '../../src/domain/assets/assetGovernance';
+import { ACCOUNT_PLATFORM_OPTIONS } from '../../src/domain/assets/accountPlatformCatalog';
 import { success } from '../api/response';
 import { filterAssetStorageData } from './assetStorageAccess';
 
@@ -484,7 +485,10 @@ export function createAssetListService(
         options.simForms = toFieldOptions('simForm');
         options.packageNames = toFieldOptions('packageName');
       } else {
-        options.platforms = toFieldOptions('platform');
+        options.platforms = uniqueOptions([
+          ...ACCOUNT_PLATFORM_OPTIONS.map((platform) => ({ value: platform, label: platform })),
+          ...toFieldOptions('platform'),
+        ]);
         options.controlStatuses = uniqueOptions(rows.map((row) => {
           const value = readAccountControlStatus(row);
           return value ? { value, label: value } : undefined;

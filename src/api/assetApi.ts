@@ -52,23 +52,9 @@ import {
   validateAccountLoginDeviceIds,
 } from '../domain/assets/accountDeviceBindings';
 import { isMatrixTargetDone } from '../domain/assets/assetGovernance';
+import { ACCOUNT_PLATFORM_OPTIONS } from '../domain/assets/accountPlatformCatalog';
 
 const delay = (ms?: number) => baseDelay(ms, 'assets');
-
-const DEFAULT_ACCOUNT_PLATFORM_OPTIONS = [
-  '抖音',
-  '快手',
-  '小红书',
-  '微信',
-  '视频号',
-  '企业微信',
-  '百度',
-  'Apple ID',
-  'Google账号',
-  'LINE',
-  'Instagram',
-  'TikTok',
-];
 import {
   canViewAssetAccount,
   canViewAssetDevice,
@@ -1734,7 +1720,10 @@ async function fetchAssetFilterOptions(kind: 'devices' | 'phones' | 'accounts'):
     options.simForms = fieldOptions('simForm');
     options.packageNames = fieldOptions('packageName');
   } else {
-    options.platforms = fieldOptions('platform');
+    options.platforms = uniqueLocalOptions([
+      ...ACCOUNT_PLATFORM_OPTIONS.map((platform) => ({ value: platform, label: platform })),
+      ...fieldOptions('platform'),
+    ]);
     options.controlStatuses = uniqueLocalOptions((rows as AssetInternetAccount[]).map((account) => {
       const value = readAccountControlStatus(account);
       return value ? { value, label: value } : undefined;
@@ -2376,7 +2365,7 @@ async function fetchMatrixPublishStats(nowIso = now()): Promise<ApiResponse<Asse
 
 function getAccountPlatformOptions(): string[] {
   return Array.from(new Set([
-    ...DEFAULT_ACCOUNT_PLATFORM_OPTIONS,
+    ...ACCOUNT_PLATFORM_OPTIONS,
     ...visibleAccounts().map((account) => account.platform),
   ])).filter(Boolean);
 }
