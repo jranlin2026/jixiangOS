@@ -179,6 +179,9 @@ export function createEnterpriseTaskService(deps: Dependencies) {
       })).filter((item: any) => item.referenceId || item.content) : [];
       if (!result || (task.targetValue !== null && (actualValue === null || !Number.isFinite(actualValue)))) return failure<never>('请填写完成结果和实际值', 400);
       if (task.evidenceRequired && evidence.length === 0) return failure<never>('该任务必须提交证据', 400);
+      if (task.sourceType === 'ASSET_MATRIX_PUBLISH' && !evidence.some((item: any) => ['PUBLISH_URL', 'SCREENSHOT_URL'].includes(item.type) && /^https?:\/\//i.test(item.content || ''))) {
+        return failure<never>('发布任务必须提交有效的发布链接或截图链接', 400);
+      }
       const completed = await deps.repository.completeTaskAtomic({ taskId, employeeId: actor.id, actualValue, result, evidence, now: clock() });
       return completed ? success(completed) : failure<never>('任务状态已变化，请刷新后重试', 409);
     },

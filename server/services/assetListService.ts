@@ -431,10 +431,14 @@ export function createAssetListService(
         return Array.from(groups.entries()).map(([key, value]) => ({ [groupKey]: key, ...value }));
       };
       const completedTargets = targets.filter((target) => isMatrixTargetDone(target.status)).length;
+      const confirmedTargets = targets.filter((target) => target.status === 'confirmed').length;
+      const awaitingConfirmationTargets = targets.filter((target) => target.status === 'completed').length;
       const overdueAccounts = targets.filter(isOverdue);
       return success<AssetMatrixPublishStats>({
         totalTargets: targets.length,
         completedTargets,
+        confirmedTargets,
+        awaitingConfirmationTargets,
         pendingTargets: targets.length - completedTargets,
         overdueTargets: overdueAccounts.length,
         completionRate: targets.length ? Math.round((completedTargets / targets.length) * 100) : 0,

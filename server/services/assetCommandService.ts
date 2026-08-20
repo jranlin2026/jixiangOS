@@ -44,6 +44,8 @@ import type { Department } from '../../src/types/department';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { createAssetCredentialCrypto, type AssetCredentialCrypto, type AssetEncryptedCredential } from './assetCredentialCrypto';
+import { assertMarketingContentReadyForPublish } from '../../src/domain/marketing/marketingContent';
+import type { MarketingContent } from '../../src/types/marketing';
 
 type AssetCommandPrisma = Pick<PrismaClient, 'appStorage' | 'user' | 'role' | 'department' | 'employeeTask' | '$transaction'>;
 type LockedStorageRow = { key: string; value: unknown };
@@ -66,6 +68,7 @@ type AssetState = {
   logs: AssetOperationLog[];
   offboardingTasks: AssetOffboardingTask[];
   matrixTasks: AssetMatrixPublishTask[];
+  marketingContents: MarketingContent[];
 };
 
 export interface AssetCommandServiceOptions {
@@ -98,6 +101,7 @@ const STATE_KEYS = [
   STORAGE_KEYS.ASSET_OPERATION_LOGS,
   STORAGE_KEYS.ASSET_OFFBOARDING_TASKS,
   STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS,
+  STORAGE_KEYS.MARKETING_CONTENTS,
 ] as const;
 
 function jsonValue(value: unknown): Prisma.InputJsonValue {
@@ -135,6 +139,7 @@ async function lockState(transaction: Prisma.TransactionClient): Promise<AssetSt
     logs: readArray<AssetOperationLog>(values, STORAGE_KEYS.ASSET_OPERATION_LOGS),
     offboardingTasks: readArray<AssetOffboardingTask>(values, STORAGE_KEYS.ASSET_OFFBOARDING_TASKS),
     matrixTasks: readArray<AssetMatrixPublishTask>(values, STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS),
+    marketingContents: readArray<MarketingContent>(values, STORAGE_KEYS.MARKETING_CONTENTS),
   };
 }
 
@@ -148,6 +153,7 @@ async function persistState(transaction: Prisma.TransactionClient, state: AssetS
     [STORAGE_KEYS.ASSET_OPERATION_LOGS, state.logs],
     [STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, state.offboardingTasks],
     [STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS, state.matrixTasks],
+    [STORAGE_KEYS.MARKETING_CONTENTS, state.marketingContents],
   ];
   for (const [key, value] of values) {
     await transaction.appStorage.upsert({
@@ -173,6 +179,16 @@ async function loadDirectory(prisma: AssetCommandPrisma): Promise<Directory> {
 
 function cleanText(value: unknown): string {
   return String(value || '').trim();
+}
+
+function shanghaiBusinessDate(value: unknown): string {
+  const date = new Date(cleanText(value));
+  if (Number.isNaN(date.getTime())) throw new AssetCommandError(400, '计划发布时间格式不正确');
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
 function requiredText(value: unknown, message: string): string {
@@ -1609,10 +1625,13 @@ export function createAssetCommandService(
       input: Partial<AssetMatrixPublishTaskInput>,
       actor: AuthenticatedUser,
     ): Promise<ApiResponse<AssetMatrixPublishTask | null>> {
-      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write')) {
+      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write')
+        && !hasPermission(actor, PERMISSION_KEYS.MARKETING_PUBLISH, 'write')) {
         return failure('无权创建发布批次', 403);
       }
-      if (!hasPermission(actor, PERMISSION_KEYS.TASK_ASSIGN, 'write')) {
+      const marketingPublisher = Boolean(cleanText(input.contentId))
+        && hasPermission(actor, PERMISSION_KEYS.MARKETING_PUBLISH, 'write');
+      if (!hasPermission(actor, PERMISSION_KEYS.TASK_ASSIGN, 'write') && !marketingPublisher) {
         return failure('无权向员工任务中心派发任务', 403);
       }
       const title = cleanText(input.title);
@@ -1631,9 +1650,24 @@ export function createAssetCommandService(
         const batchId = makeId('matrix-task');
         const created = await prisma.$transaction(async (transaction) => {
           const state = await lockState(transaction);
+          const contentId = cleanText(input.contentId);
+          const content = contentId ? state.marketingContents.find((item) => item.id === contentId) : undefined;
+          if (contentId && !content) throw new AssetCommandError(404, '营销内容不存在');
+          if (content) {
+            try {
+              assertMarketingContentReadyForPublish(content);
+            } catch (error) {
+              throw new AssetCommandError(400, error instanceof Error ? error.message : '营销内容不可发布');
+            }
+          }
+          const taskVideoUrl = cleanText(content?.videoUrl || input.videoUrl);
+          const taskCopywriting = cleanText(content?.copywriting || input.copywriting);
           const selected = accountIds.map((accountId) => {
             const account = state.accounts.find((item) => item.id === accountId);
             if (!account) throw new AssetCommandError(404, '发布账号不存在');
+            if (content && !content.platforms.includes(account.platform)) {
+              throw new AssetCommandError(400, `${account.platform} / ${account.accountName} 与内容适用平台不一致`);
+            }
             if (!visibleToScope(account, scope, directory)) throw new AssetCommandError(403, '无权派发该互联网账号');
             const employeeId = cleanText(account.currentUserId);
             const employeeById = employeeId ? directory.users.find((item) => item.id === employeeId) : undefined;
@@ -1661,12 +1695,13 @@ export function createAssetCommandService(
                 positionIdSnapshot: employee.positionId || null,
                 positionNameSnapshot: employee.positionName || null,
                 standardVersionIdSnapshot: null,
-                workDate: new Date(`${createdAt.slice(0, 10)}T00:00:00Z`),
+                workDate: new Date(`${shanghaiBusinessDate(input.plannedAt || content?.plannedAt || createdAt)}T00:00:00Z`),
                 title: `发布执行：${title}`,
                 description: [
                   `平台账号：${account.platform} / ${account.accountName}`,
-                  cleanText(input.videoUrl) ? `素材链接：${cleanText(input.videoUrl)}` : '',
-                  cleanText(input.copywriting) ? `发布文案：${cleanText(input.copywriting)}` : '',
+                  taskVideoUrl ? `素材链接：${taskVideoUrl}` : '',
+                  (content?.imageLinks || input.imageLinks || []).length ? `图片链接：${(content?.imageLinks || input.imageLinks || []).join('、')}` : '',
+                  taskCopywriting ? `发布文案：${taskCopywriting}` : '',
                   cleanText(input.remark) ? `备注：${cleanText(input.remark)}` : '',
                 ].filter(Boolean).join('\n'),
                 targetValue: 1,
@@ -1705,9 +1740,17 @@ export function createAssetCommandService(
           const batch: AssetMatrixPublishTask = {
             id: batchId,
             title,
-            videoUrl: cleanText(input.videoUrl),
+            contentId: content?.id || contentId || undefined,
+            contentTitle: content?.title || cleanText(input.contentTitle) || undefined,
+            contentVersion: content?.version || Number(input.contentVersion || 0) || undefined,
+            contentType: content?.contentType || cleanText(input.contentType) || undefined,
+            contentPlatforms: content?.platforms || input.contentPlatforms || [],
+            imageLinks: content?.imageLinks || input.imageLinks || [],
+            groupNames: Array.from(new Set((input.groupNames || []).map((item) => cleanText(item)).filter(Boolean))),
+            plannedAt: cleanText(input.plannedAt || content?.plannedAt) || undefined,
+            videoUrl: taskVideoUrl,
             videoFileName: cleanText(input.videoFileName),
-            copywriting: cleanText(input.copywriting),
+            copywriting: taskCopywriting,
             remark: cleanText(input.remark),
             dueAt: dueDate.toISOString(),
             targets,

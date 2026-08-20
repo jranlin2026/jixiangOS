@@ -2266,6 +2266,14 @@ async function createMatrixPublishTask(input: Partial<AssetMatrixPublishTaskInpu
     const task: AssetMatrixPublishTask = {
       id: `matrix-task-${Date.now()}`,
       title,
+      contentId: input.contentId,
+      contentTitle: input.contentTitle,
+      contentVersion: input.contentVersion,
+      contentType: input.contentType,
+      contentPlatforms: input.contentPlatforms || [],
+      imageLinks: input.imageLinks || [],
+      groupNames: input.groupNames || [],
+      plannedAt: input.plannedAt,
       videoUrl: input.videoUrl || '',
       videoFileName: input.videoFileName || '',
       copywriting: input.copywriting || '',
@@ -2349,9 +2357,13 @@ async function fetchMatrixPublishStats(nowIso = now()): Promise<ApiResponse<Asse
   });
   const overdueAccounts = targets.filter((target) => isMatrixTargetOverdue(target, dueAtByTargetId.get(target.id) || '', nowIso));
   const completedTargets = targets.filter((target) => isMatrixTargetDone(target.status)).length;
+  const confirmedTargets = targets.filter((target) => target.status === 'confirmed').length;
+  const awaitingConfirmationTargets = targets.filter((target) => target.status === 'completed').length;
   const stats: AssetMatrixPublishStats = {
     totalTargets: targets.length,
     completedTargets,
+    confirmedTargets,
+    awaitingConfirmationTargets,
     pendingTargets: targets.length - completedTargets,
     overdueTargets: overdueAccounts.length,
     completionRate: targets.length ? Math.round((completedTargets / targets.length) * 100) : 0,

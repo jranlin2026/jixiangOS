@@ -102,6 +102,15 @@ const PERMISSION_TREE: RolePermissionNode[] = [
     ],
   },
   {
+    label: '营销内容中心',
+    children: [
+      { label: '内容库', key: PERMISSION_KEYS.MARKETING_CONTENT },
+      { label: '内容审核', key: PERMISSION_KEYS.MARKETING_REVIEW },
+      { label: '发布任务', key: PERMISSION_KEYS.MARKETING_PUBLISH },
+      { label: '账号分组', key: PERMISSION_KEYS.MARKETING_GROUPS },
+    ],
+  },
+  {
     label: 'AI助手',
     children: [
       { label: 'AI对话', key: PERMISSION_KEYS.AI_CHAT },

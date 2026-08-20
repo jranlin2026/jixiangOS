@@ -72,6 +72,18 @@ const ASSET_SELF_SERVICE_PERMISSIONS: Role['permissions'] = [
 
 const ASSET_SELF_SERVICE_PERMISSION_KEYS = new Set(ASSET_SELF_SERVICE_PERMISSIONS.map((permission) => permission.module));
 
+const MARKETING_CONTENT_READER_PERMISSIONS: Role['permissions'] = [
+  { module: PERMISSION_KEYS.MARKETING_CONTENT, actions: ['read'] },
+  { module: PERMISSION_KEYS.MARKETING_PUBLISH, actions: ['read'] },
+];
+
+const MARKETING_MANAGER_PERMISSIONS: Role['permissions'] = [
+  { module: PERMISSION_KEYS.MARKETING_CONTENT, actions: ['read', 'write'] },
+  { module: PERMISSION_KEYS.MARKETING_REVIEW, actions: ['read', 'write'] },
+  { module: PERMISSION_KEYS.MARKETING_PUBLISH, actions: ['read', 'write'] },
+  { module: PERMISSION_KEYS.MARKETING_GROUPS, actions: ['read', 'write'] },
+];
+
 const CO_CREATION_EMPLOYEE_PERMISSION: Permission = {
   module: PERMISSION_KEYS.CO_CREATION_SUBMIT,
   actions: ['read', 'write'],
@@ -137,6 +149,7 @@ export const DEFAULT_ROLES: Role[] = [
       CO_CREATION_EMPLOYEE_PERMISSION,
       { module: PERMISSION_KEYS.CO_CREATION_SUPERVISE, actions: ['read', 'write'] },
       ...ASSET_SELF_SERVICE_PERMISSIONS,
+      ...MARKETING_CONTENT_READER_PERMISSIONS,
     ],
     dataScopes: { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department', okr: 'department', assets: 'department' },
     memberCount: 0,
@@ -169,6 +182,7 @@ export const DEFAULT_ROLES: Role[] = [
       ...OKR_EMPLOYEE_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
+      ...MARKETING_CONTENT_READER_PERMISSIONS,
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', okr: 'self', assets: 'self' },
     memberCount: 0,
@@ -193,6 +207,7 @@ export const DEFAULT_ROLES: Role[] = [
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS.filter((permission) => permission.module !== PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH),
       { module: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, actions: ['read', 'write'] },
+      ...MARKETING_MANAGER_PERMISSIONS,
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', okr: 'self', assets: 'self' },
     memberCount: 0,
@@ -215,6 +230,7 @@ export const DEFAULT_ROLES: Role[] = [
       ...OKR_EMPLOYEE_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
+      ...MARKETING_CONTENT_READER_PERMISSIONS,
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', okr: 'self', assets: 'self' },
     memberCount: 0,
@@ -236,6 +252,7 @@ export const DEFAULT_ROLES: Role[] = [
       ...OKR_EMPLOYEE_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
+      ...MARKETING_CONTENT_READER_PERMISSIONS,
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', okr: 'self', assets: 'self' },
     memberCount: 0,
@@ -265,6 +282,7 @@ export const DEFAULT_ROLES: Role[] = [
       ...OKR_EMPLOYEE_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
+      ...MARKETING_CONTENT_READER_PERMISSIONS,
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'all', orderApplications: 'all', okr: 'self', assets: 'self' },
     memberCount: 0,
@@ -291,6 +309,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ASSETS, actions: ['read', 'write'] },
+      ...MARKETING_MANAGER_PERMISSIONS,
       ...OKR_EMPLOYEE_PERMISSIONS,
       CO_CREATION_EMPLOYEE_PERMISSION,
       { module: PERMISSION_KEYS.CO_CREATION_DECIDE, actions: ['read', 'write'] },

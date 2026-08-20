@@ -279,6 +279,14 @@ export interface AssetMatrixPublishTarget {
 export interface AssetMatrixPublishTask {
   id: string;
   title: string;
+  contentId?: string;
+  contentTitle?: string;
+  contentVersion?: number;
+  contentType?: string;
+  contentPlatforms?: string[];
+  imageLinks?: string[];
+  groupNames?: string[];
+  plannedAt?: string;
   videoUrl?: string;
   videoFileName?: string;
   copywriting: string;
@@ -292,6 +300,14 @@ export interface AssetMatrixPublishTask {
 
 export interface AssetMatrixPublishTaskInput {
   title: string;
+  contentId?: string;
+  contentTitle?: string;
+  contentVersion?: number;
+  contentType?: string;
+  contentPlatforms?: string[];
+  imageLinks?: string[];
+  groupNames?: string[];
+  plannedAt?: string;
   videoUrl?: string;
   videoFileName?: string;
   copywriting: string;
@@ -303,6 +319,8 @@ export interface AssetMatrixPublishTaskInput {
 export interface AssetMatrixPublishStats {
   totalTargets: number;
   completedTargets: number;
+  confirmedTargets: number;
+  awaitingConfirmationTargets: number;
   pendingTargets: number;
   overdueTargets: number;
   completionRate: number;

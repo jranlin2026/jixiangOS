@@ -76,6 +76,7 @@ import { createStorageService } from './services/storageService';
 import { createBusinessAttachmentService, createPrismaBusinessAttachmentRepository } from './services/businessAttachmentService';
 import { createAssetListService, isAssetListKind } from './services/assetListService';
 import { createAssetCommandService } from './services/assetCommandService';
+import { createMarketingContentService } from './services/marketingContentService';
 import type { AssetFilters } from '../src/types/asset';
 import { createOrderApplicationService } from './services/orderApplicationService';
 import {
@@ -302,6 +303,7 @@ const assetListService = createAssetListService(storageService, assetStorageCont
   });
 });
 const assetCommandService = createAssetCommandService(prisma);
+const marketingContentService = createMarketingContentService(prisma);
 const deliveryAssignmentService = createDeliveryAssignmentService(prisma);
 const financeTransactionService = createFinanceTransactionService(prisma);
 const orderApprovalEffects = createOrderApprovalDownstreamEffects(deliveryAssignmentService);
@@ -530,8 +532,15 @@ const requireFinanceFlowReadAccess = createRequireAuth(authService, PERMISSION_K
 const requireFinanceFlowExportAccess = createRequireAuth(authService, PERMISSION_KEYS.FINANCE_FLOW_EXPORT);
 const requireMatrixPublishUploadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
 const requireAssetReadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS);
+const requireAssetOrMarketingPublishReadAccess = createRequireAnyPermission(authService, [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.MARKETING_PUBLISH]);
 const requireAssetSensitiveViewAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW);
 const requireAssetImportExportAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write');
+const requireMarketingAccess = createRequireAnyPermission(authService, [
+  PERMISSION_KEYS.MARKETING_CONTENT,
+  PERMISSION_KEYS.MARKETING_REVIEW,
+  PERMISSION_KEYS.MARKETING_PUBLISH,
+  PERMISSION_KEYS.MARKETING_GROUPS,
+]);
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
 const requireEnablementRead = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE);
@@ -2091,6 +2100,58 @@ app.get('/api/assets/dashboard', requireAssetReadAccess, async (req: Authenticat
   res.json(await assetListService.dashboard(req.currentUser!));
 });
 
+app.get('/api/marketing/contents', requireMarketingAccess, async (req: AuthenticatedRequest, res) => {
+  res.json(await marketingContentService.listContents({
+    search: queryParam(req.query.search),
+    contentType: queryParam(req.query.contentType),
+    status: queryParam(req.query.status),
+    platform: queryParam(req.query.platform),
+    plannedDate: queryParam(req.query.plannedDate),
+    page: Number(queryParam(req.query.page) || 1),
+    pageSize: Number(queryParam(req.query.pageSize) || 10),
+  }, req.currentUser!));
+});
+
+app.post('/api/marketing/contents', requireMarketingAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await marketingContentService.createContent(req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.put('/api/marketing/contents/:id', requireMarketingAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await marketingContentService.updateContent(routeParam(req.params.id), req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.post('/api/marketing/contents/:id/transition', requireMarketingAccess, async (req: AuthenticatedRequest, res) => {
+  const action = String(req.body?.action || '') as 'SUBMIT' | 'APPROVE' | 'REJECT' | 'RETIRE';
+  if (!['SUBMIT', 'APPROVE', 'REJECT', 'RETIRE'].includes(action)) {
+    res.status(400).json(failure('无效的内容操作', 400));
+    return;
+  }
+  const result = await marketingContentService.transitionContent(routeParam(req.params.id), action, String(req.body?.comment || ''), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.get('/api/marketing/account-groups', requireMarketingAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await marketingContentService.listGroups(req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.post('/api/marketing/account-groups', requireMarketingAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await marketingContentService.saveGroup(undefined, req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.put('/api/marketing/account-groups/:id', requireMarketingAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await marketingContentService.saveGroup(routeParam(req.params.id), req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.delete('/api/marketing/account-groups/:id', requireMarketingAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await marketingContentService.deleteGroup(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
 app.post('/api/assets/phones/:id/reveal/service-password', requireAssetSensitiveViewAccess, async (req: AuthenticatedRequest, res) => {
   const result = await assetCommandService.revealPhoneServicePassword(routeParam(req.params.id), req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code).json(result);
@@ -2121,7 +2182,7 @@ app.post('/api/assets/accounts/mark-offboarding', requireAssetReadAccess, async 
   res.status(result.code === 0 ? 200 : result.code).json(result);
 });
 
-app.post('/api/assets/matrix-publish', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+app.post('/api/assets/matrix-publish', requireAssetOrMarketingPublishReadAccess, async (req: AuthenticatedRequest, res) => {
   const result = await assetCommandService.createMatrixPublishTask(req.body || {}, req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code).json(result);
 });
@@ -2131,8 +2192,9 @@ app.post('/api/assets/offboarding/:id/complete', requireAssetReadAccess, async (
   res.status(result.code === 0 ? 200 : result.code).json(result);
 });
 
-app.get('/api/assets/matrix-publish/stats', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
-  if (!hasPermission(req.currentUser!, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'read')) {
+app.get('/api/assets/matrix-publish/stats', requireAssetOrMarketingPublishReadAccess, async (req: AuthenticatedRequest, res) => {
+  if (!hasPermission(req.currentUser!, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'read')
+    && !hasPermission(req.currentUser!, PERMISSION_KEYS.MARKETING_PUBLISH, 'read')) {
     res.status(403).json(failure('无权查看发布批次统计', 403));
     return;
   }
@@ -2206,7 +2268,7 @@ app.get('/api/assets/filter-options/:kind', requireAssetReadAccess, async (req: 
   res.json(await assetListService.filterOptions(kind, req.currentUser!));
 });
 
-app.get('/api/assets/:kind', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+app.get('/api/assets/:kind', requireAssetOrMarketingPublishReadAccess, async (req: AuthenticatedRequest, res) => {
   const kind = routeParam(req.params.kind);
   if (!isAssetListKind(kind)) {
     res.status(404).json({ code: 404, data: null, message: 'Unknown asset list' });
@@ -2221,7 +2283,14 @@ app.get('/api/assets/:kind', requireAssetReadAccess, async (req: AuthenticatedRe
     offboarding: PERMISSION_KEYS.ASSETS_OFFBOARDING,
     'matrix-publish': PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH,
   } as const;
-  if (!hasPermission(req.currentUser!, permissionByKind[kind], 'read')) {
+  const canReadKind = kind === 'matrix-publish'
+    ? hasPermission(req.currentUser!, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'read') || hasPermission(req.currentUser!, PERMISSION_KEYS.MARKETING_PUBLISH, 'read')
+    : kind === 'accounts'
+      ? hasPermission(req.currentUser!, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read')
+        || hasPermission(req.currentUser!, PERMISSION_KEYS.MARKETING_PUBLISH, 'read')
+        || hasPermission(req.currentUser!, PERMISSION_KEYS.MARKETING_GROUPS, 'read')
+      : hasPermission(req.currentUser!, permissionByKind[kind], 'read');
+  if (!canReadKind) {
     res.status(403).json(failure('无权查看该资产列表', 403));
     return;
   }

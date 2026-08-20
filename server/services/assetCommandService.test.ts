@@ -465,6 +465,7 @@ assert.equal(rejectedPasswordlessAccount.code, 400);
 const publishBatch = await riskService.createMatrixPublishTask({
   title: '八月矩阵发布',
   dueAt: '2026-08-31T18:00:00.000Z',
+  plannedAt: '2026-08-27T17:00:00.000Z',
   videoUrl: 'https://example.com/video',
   copywriting: '统一发布文案',
   accountIds: [createdAccount.data!.id],
@@ -476,12 +477,27 @@ assert.equal(riskPrisma.employeeTasks[0]?.employeeId, assetAdmin.id);
 assert.equal(riskPrisma.employeeTasks[0]?.sourceType, 'ASSET_MATRIX_PUBLISH');
 assert.equal(riskPrisma.employeeTasks[0]?.sourceId, publishBatch.data?.id);
 assert.equal(riskPrisma.employeeTasks[0]?.sourceItemId, createdAccount.data!.id);
+assert.equal(new Date(String(riskPrisma.employeeTasks[0]?.workDate)).toISOString().slice(0, 10), '2026-08-28', '员工任务工作日必须跟随计划发布时间');
 assert.equal(publishBatch.data?.targets[0]?.employeeTaskId, riskPrisma.employeeTasks[0]?.id);
 assert.equal(
   riskPrisma.read<AssetMatrixPublishTask[]>(STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS)[0]?.targets[0]?.status,
   'pending',
   '发布批次只能汇总员工任务状态，创建时不得直接完成',
 );
+riskPrisma.values.set(STORAGE_KEYS.MARKETING_CONTENTS, [{
+  id: 'marketing-approved', title: '已审核朋友圈', contentType: 'MOMENTS', theme: '', platforms: ['抖音'],
+  copywriting: '已审核文案', imageLinks: ['https://example.com/a.jpg'], ownerId: assetAdmin.id, owner: assetAdmin.name,
+  visibility: 'ALL', status: 'APPROVED', version: 1, createdBy: assetAdmin.name, createdAt: NOW, updatedAt: NOW,
+}]);
+const marketingPublisherOnly: AuthenticatedUser = {
+  ...assetAdmin,
+  permissions: [{ module: PERMISSION_KEYS.MARKETING_PUBLISH, actions: ['read', 'write'] }],
+};
+const publisherBatch = await riskService.createMatrixPublishTask({
+  title: '营销发布权限独立派发', contentId: 'marketing-approved', dueAt: '2026-08-31T18:00:00.000Z',
+  plannedAt: '2026-08-28T01:00:00+08:00', copywriting: '不得绕过已审核快照', accountIds: [createdAccount.data!.id],
+}, marketingPublisherOnly);
+assert.equal(publisherBatch.code, 0, '营销发布角色不应再额外依赖通用任务派发权限');
 const deniedOffboarding = await riskService.markInternetAccountsForOffboarding([createdAccount.data!.id], deviceWriter);
 assert.equal(deniedOffboarding.code, 403);
 const markedOffboarding = await riskService.markInternetAccountsForOffboarding([createdAccount.data!.id], assetAdmin);

@@ -24,6 +24,7 @@ import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import PaidIcon from '@mui/icons-material/Paid';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
+import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SchoolIcon from '@mui/icons-material/School';
@@ -167,6 +168,18 @@ const navItems: NavItem[] = [
       PERMISSION_KEYS.ASSETS_RISKS,
       PERMISSION_KEYS.ASSETS_LOGS,
       PERMISSION_KEYS.ASSETS_OFFBOARDING,
+    ],
+  },
+  {
+    label: '营销内容中心',
+    icon: <CampaignOutlinedIcon />,
+    path: ROUTES.MARKETING,
+    permissionKey: PERMISSION_KEYS.MARKETING,
+    permissionKeys: [
+      PERMISSION_KEYS.MARKETING_CONTENT,
+      PERMISSION_KEYS.MARKETING_REVIEW,
+      PERMISSION_KEYS.MARKETING_PUBLISH,
+      PERMISSION_KEYS.MARKETING_GROUPS,
     ],
   },
   {

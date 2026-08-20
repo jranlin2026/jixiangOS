@@ -25,6 +25,7 @@ const RefundCenter = React.lazy(() => import('./pages/RefundCenter'));
 const Finance = React.lazy(() => import('./pages/Finance'));
 const EcommerceSettlement = React.lazy(() => import('./pages/EcommerceSettlement'));
 const Assets = React.lazy(() => import('./pages/Assets'));
+const Marketing = React.lazy(() => import('./pages/Marketing'));
 const GEO = React.lazy(() => import('./pages/GEO'));
 const AIAssistant = React.lazy(() => import('./pages/AIAssistant'));
 const Academy = React.lazy(() => import('./pages/Academy'));
@@ -238,6 +239,14 @@ const App: React.FC = () => {
             PERMISSION_KEYS.ASSETS_OFFBOARDING,
           ]} />}>
             <Route path={ROUTES.ASSETS} element={<Suspense fallback={<PageLoader />}><Assets /></Suspense>} />
+          </Route>
+          <Route element={<ProtectedRoute permissionKeys={[
+            PERMISSION_KEYS.MARKETING_CONTENT,
+            PERMISSION_KEYS.MARKETING_REVIEW,
+            PERMISSION_KEYS.MARKETING_PUBLISH,
+            PERMISSION_KEYS.MARKETING_GROUPS,
+          ]} />}>
+            <Route path={ROUTES.MARKETING} element={<Suspense fallback={<PageLoader />}><Marketing /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[
             PERMISSION_KEYS.GEO,
