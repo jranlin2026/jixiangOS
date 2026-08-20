@@ -2533,9 +2533,13 @@ const AssetManagement: React.FC = () => {
                   })}
                 </Stack>
               </TableCell>
-              <TableCell sx={{ minWidth: 150 }}>
-                <Typography sx={{ color: shell.ink, fontWeight: 900 }}>{group.completed} / {group.total}</Typography>
-                <Chip size="small" label={group.status} sx={chipSx(statusTone(group.status))} />
+              <TableCell sx={{ minWidth: 230 }}>
+                <Stack direction="row" spacing={0.75} alignItems="center" sx={{ whiteSpace: 'nowrap' }}>
+                  <Chip size="small" label={group.status} sx={{ ...chipSx(statusTone(group.status)), flexShrink: 0 }} />
+                  <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 800 }}>
+                    {group.completed} 项 / 共 {group.total} 项
+                  </Typography>
+                </Stack>
               </TableCell>
               <TableCell>{group.dueAt || '-'}</TableCell>
               <TableCell align="center" sx={{ minWidth: 170 }}>
@@ -4376,7 +4380,7 @@ const AssetManagement: React.FC = () => {
               </Button>
             ) : null}
             {activeTab === 'matrix' && canManageMatrixPublish ? (
-              <Button variant="contained" startIcon={<AddIcon />} onClick={openMatrixPublishDialog}>
+              <Button variant="contained" startIcon={<AddIcon />} href="/marketing?tab=tasks&create=1">
                 创建发布任务
               </Button>
             ) : null}

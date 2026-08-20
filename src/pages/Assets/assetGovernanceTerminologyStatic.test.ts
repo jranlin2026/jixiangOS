@@ -21,5 +21,15 @@ assert.ok(
   assetPage.includes("textOverflow: 'ellipsis'"),
   '资产交接明细的长名称必须截断，不能覆盖状态标签',
 );
+assert.doesNotMatch(
+  assetPage,
+  /\{group\.completed\} \/ \{group\.total\}/,
+  '资产交接进度不得继续显示含义不明的裸数字比例',
+);
+assert.match(
+  assetPage,
+  /<Stack direction="row" spacing=\{0\.75\} alignItems="center"[\s\S]{0,500}?\{group\.completed\} 项 \/ 共 \{group\.total\} 项/,
+  '资产交接状态和明确的完成项数应在同一行展示',
+);
 
 console.log('asset governance terminology static tests passed');
