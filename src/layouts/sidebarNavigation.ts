@@ -36,8 +36,12 @@ export const navigationGroups: SidebarNavigationGroup[] = [
     children: [
       { id: 'leads', label: '线索', path: ROUTES.LEADS, permissionKeys: [PERMISSION_KEYS.LEADS] },
       {
-        id: 'customers', label: '客户', path: ROUTES.CUSTOMERS,
-        permissionKeys: [PERMISSION_KEYS.CUSTOMERS, PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW],
+        id: 'customers', label: '客户列表', path: `${ROUTES.CUSTOMERS}?tab=active`,
+        permissionKeys: [PERMISSION_KEYS.CUSTOMER_LIST],
+      },
+      {
+        id: 'public-pool', label: '公海池', path: `${ROUTES.CUSTOMERS}?tab=public_pool`,
+        permissionKeys: [PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW],
       },
       {
         id: 'orders', label: '订单', path: ROUTES.ORDERS,
@@ -151,8 +155,16 @@ export const navigationGroups: SidebarNavigationGroup[] = [
 export const isNavigationItemActive = (
   item: SidebarNavigationItem,
   pathname: string,
-  _search: string,
-) => pathname === item.path || Boolean(item.relatedPaths?.includes(pathname));
+  search: string,
+) => {
+  if (item.relatedPaths?.includes(pathname)) return true;
+  const [itemPath, itemQuery = ''] = item.path.split('?');
+  if (pathname !== itemPath) return false;
+  if (!itemQuery) return true;
+  const expectedTab = new URLSearchParams(itemQuery).get('tab');
+  const currentTab = new URLSearchParams(search).get('tab');
+  return expectedTab === currentTab || (expectedTab === 'active' && !currentTab);
+};
 
 export const getVisibleSidebarNavigation = (
   user: Pick<AuthenticatedUser, 'role' | 'roleId' | 'permissions' | 'isActive'> | null | undefined,

@@ -15,7 +15,7 @@ assert.deepEqual(
     children: group.children.map((item) => item.label),
   })),
   [
-    { label: '客户经营', children: ['线索', '客户', '订单', '交付', '售后与退款'] },
+    { label: '客户经营', children: ['线索', '客户列表', '公海池', '订单', '交付', '售后与退款'] },
     { label: '财务结算', children: ['公司财务', '电商结算'] },
     { label: '增长运营', children: ['内容运营', 'GEO增长'] },
     { label: '组织效能', children: ['目标管理', '企业标准', '极享商学院', '改善共创'] },
@@ -34,6 +34,25 @@ const afterSales = navigationGroups[0].children.find((item) => item.id === 'afte
 assert.ok(afterSales);
 assert.equal(isNavigationItemActive(afterSales, '/refund-center', ''), true, '退款中心归入售后入口');
 assert.equal(isNavigationItemActive(afterSales, '/orders', ''), false);
+
+const customerList = navigationGroups[0].children.find((item) => item.id === 'customers');
+const publicPool = navigationGroups[0].children.find((item) => item.id === 'public-pool');
+assert.equal(customerList?.path, '/customers?tab=active');
+assert.equal(publicPool?.path, '/customers?tab=public_pool');
+assert.deepEqual(publicPool?.permissionKeys, [PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW]);
+assert.equal(isNavigationItemActive(customerList!, '/customers', '?tab=public_pool'), false);
+assert.equal(isNavigationItemActive(publicPool!, '/customers', '?tab=public_pool'), true);
+
+const publicPoolOnlyNavigation = getVisibleSidebarNavigation({
+  role: '公海专员',
+  isActive: true,
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW, actions: ['read'] }],
+});
+assert.deepEqual(
+  publicPoolOnlyNavigation.groups.find((group) => group.id === 'customer')?.children.map((item) => item.id),
+  ['public-pool'],
+  '仅有公海查看权限时不得展示无权访问的客户列表',
+);
 
 const userWithOnlyContentPermission = {
   role: '内容专员',
