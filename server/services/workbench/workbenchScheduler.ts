@@ -8,7 +8,10 @@ import type {
 
 export type SchedulerJobType = 'DAILY_GENERATION' | 'RECONCILIATION' | 'REMINDER_SCAN';
 export type SchedulerRunStatus = 'RUNNING' | 'SUCCEEDED' | 'PARTIAL' | 'FAILED' | 'ABANDONED';
-export type SchedulerCursorState = Partial<Record<WorkbenchBusinessModule, string>>;
+export type ReminderScanCursor = Readonly<{ dueAt: string; id: string }>;
+export type SchedulerCursorState = Partial<Record<WorkbenchBusinessModule, string>> & {
+  REMINDER_SCAN?: ReminderScanCursor;
+};
 
 export type SchedulerLease = {
   leaseKey: string;
@@ -43,6 +46,11 @@ export type SchedulerFailureSummary = {
   module?: WorkbenchBusinessModule;
 };
 
+export type SchedulerCursorUpdate =
+  | Readonly<{ mode: 'PRESERVE' }>
+  | Readonly<{ mode: 'SET'; cursors: SchedulerCursorState }>
+  | Readonly<{ mode: 'CLEAR' }>;
+
 export type SchedulerRunCompletion = {
   runId: string;
   ownerToken: string;
@@ -53,7 +61,7 @@ export type SchedulerRunCompletion = {
   skippedCount: number;
   failedCount: number;
   failureSummary: SchedulerFailureSummary[];
-  cursors: SchedulerCursorState | null;
+  cursorUpdate: SchedulerCursorUpdate;
 };
 
 export type WorkbenchSchedulerStore = {
@@ -72,8 +80,15 @@ export type WorkbenchSchedulerStore = {
     jobType: SchedulerJobType;
     businessDate: string | null;
     startedAt: Date;
+    cursors?: SchedulerCursorState;
   }): Promise<SchedulerRunRecord | null>;
   finishRun(input: SchedulerRunCompletion): Promise<boolean>;
+  checkpointRun(input: {
+    runId: string;
+    ownerToken: string;
+    leaseEpoch: number;
+    cursors: SchedulerCursorState | null;
+  }): Promise<boolean>;
   releaseLease(input: SchedulerLease): Promise<boolean>;
   loadLatestCursors(leaseKey: string, jobType: SchedulerJobType): Promise<SchedulerCursorState | undefined>;
 };
@@ -115,7 +130,12 @@ type WorkbenchSchedulerOptions = {
   store: WorkbenchSchedulerStore;
   generateDailyTasks(input: { date: string; signal: AbortSignal; lease: SchedulerLeaseGuard }): Promise<DailyGenerationResult>;
   reconcile?(input: ReconcileContext): Promise<ReconcileResult>;
-  scanReminders?(input: { now: Date; signal: AbortSignal }): Promise<ReminderScanResult>;
+  scanReminders?(input: {
+    now: Date;
+    signal: AbortSignal;
+    cursor?: ReminderScanCursor;
+    checkpoint(cursor: ReminderScanCursor | null): Promise<void>;
+  }): Promise<ReminderScanResult>;
   workerId?: string;
   now?: () => Date;
   timers?: TimerApi;
@@ -124,6 +144,12 @@ type WorkbenchSchedulerOptions = {
   maxLeaseDurationMs?: number;
   stopTimeoutMs?: number;
   onError?: (error: unknown) => void;
+  onRunFailed?: (input: {
+    jobType: SchedulerJobType;
+    businessDate: string | null;
+    runId: string;
+    at: Date;
+  }) => Promise<unknown> | unknown;
 };
 
 export type WorkbenchScheduler = {
@@ -140,7 +166,7 @@ type JobOutcome = {
   skippedCount: number;
   failedCount: number;
   failureSummary: SchedulerFailureSummary[];
-  cursors: SchedulerCursorState | null;
+  cursorUpdate: SchedulerCursorUpdate;
 };
 
 const LEASE_KEY = 'workbench:scheduler';
@@ -248,10 +274,32 @@ export function normalizeSchedulerCursors(value: unknown): SchedulerCursorState 
   return cursors;
 }
 
+export function normalizeReminderScanCursor(value: unknown): ReminderScanCursor | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const cursor = value as Record<string, unknown>;
+  if (Object.keys(cursor).some((key) => key !== 'dueAt' && key !== 'id')) return undefined;
+  if (typeof cursor.dueAt !== 'string'
+    || cursor.dueAt.length > 40
+    || !Number.isFinite(new Date(cursor.dueAt).getTime())
+    || typeof cursor.id !== 'string'
+    || cursor.id.length < 1
+    || cursor.id.length > 64
+    || /[\u0000-\u001f\u007f]/.test(cursor.id)) return undefined;
+  return { dueAt: new Date(cursor.dueAt).toISOString(), id: cursor.id };
+}
+
+export function normalizeSchedulerRunCursors(value: unknown): SchedulerCursorState {
+  const cursors = normalizeSchedulerCursors(value);
+  const reminder = value && typeof value === 'object' && !Array.isArray(value)
+    ? normalizeReminderScanCursor((value as Record<string, unknown>).REMINDER_SCAN)
+    : undefined;
+  return { ...cursors, ...(reminder ? { REMINDER_SCAN: reminder } : {}) };
+}
+
 function reconciledCursors(
   previous: SchedulerCursorState | undefined,
   result: ReconcileResult,
-): { cursors: SchedulerCursorState | null; invalidModules: WorkbenchBusinessModule[] } {
+): { cursorUpdate: SchedulerCursorUpdate; invalidModules: WorkbenchBusinessModule[] } {
   const prior = normalizeSchedulerCursors(previous);
   const cursors = normalizeSchedulerCursors(result.nextCursors);
   const invalidModules = Object.entries(result.nextCursors || {}).flatMap(([rawModule, cursor]) => {
@@ -267,9 +315,13 @@ function reconciledCursors(
     const module = safeModule(error);
     if (!module || failedModules.has(module)) continue;
     failedModules.add(module);
-    if (cursors[module] === undefined && prior[module]) cursors[module] = prior[module];
+    delete cursors[module];
+    if (prior[module]) cursors[module] = prior[module];
   }
-  return { cursors: Object.keys(cursors).length ? cursors : null, invalidModules: [...new Set(invalidModules)] };
+  return {
+    cursorUpdate: Object.keys(cursors).length ? { mode: 'SET', cursors } : { mode: 'CLEAR' },
+    invalidModules: [...new Set(invalidModules)],
+  };
 }
 
 function outcomeStatus(successCount: number, skippedCount: number, failedCount: number): JobOutcome['status'] {
@@ -303,7 +355,13 @@ export function createWorkbenchScheduler(options: WorkbenchSchedulerOptions): Wo
   const execute = (
     jobType: SchedulerJobType,
     businessDate: string | null,
-    work: (context: { now: Date; signal: AbortSignal; lease: SchedulerLeaseGuard; cursors?: SchedulerCursorState }) => Promise<JobOutcome>,
+    work: (context: {
+      now: Date;
+      signal: AbortSignal;
+      lease: SchedulerLeaseGuard;
+      cursors?: SchedulerCursorState;
+      checkpointCursors(cursors: SchedulerCursorState | null): Promise<void>;
+    }) => Promise<JobOutcome>,
   ): Promise<SchedulerRunResult> => {
     if (activeRun) return Promise.resolve(skipped('LOCAL_RUN_ACTIVE'));
     if (stopped) return Promise.resolve(skipped('SCHEDULER_STOPPED'));
@@ -312,9 +370,13 @@ export function createWorkbenchScheduler(options: WorkbenchSchedulerOptions): Wo
       const ownerToken = `${workerId}:${randomUUID()}`;
       let lease: SchedulerLease | null = null;
       let run: SchedulerRunRecord | null = null;
+      let priorCursors: SchedulerCursorState | undefined;
       try {
         lease = await options.store.acquireLease({ leaseKey: LEASE_KEY, ownerToken, leaseMs });
         if (!lease) return skipped('LEASE_HELD');
+        priorCursors = jobType === 'RECONCILIATION' || jobType === 'REMINDER_SCAN'
+          ? await options.store.loadLatestCursors(LEASE_KEY, jobType)
+          : undefined;
         const runStartedAt = now();
         run = await options.store.beginRun({
           id: `workbench-run-${randomUUID()}`,
@@ -324,6 +386,7 @@ export function createWorkbenchScheduler(options: WorkbenchSchedulerOptions): Wo
           jobType,
           businessDate,
           startedAt: runStartedAt,
+          ...(jobType === 'REMINDER_SCAN' && priorCursors ? { cursors: priorCursors } : {}),
         });
         if (!run) {
           await options.store.releaseLease(lease).catch(reportError);
@@ -411,17 +474,30 @@ export function createWorkbenchScheduler(options: WorkbenchSchedulerOptions): Wo
       };
       activeLeaseCleanup = clearLeaseTimers;
 
+      const checkpointCursors = async (cursors: SchedulerCursorState | null) => {
+        const checkpointed = await options.store.checkpointRun({
+          runId: run!.id,
+          ownerToken,
+          leaseEpoch: currentLease.leaseEpoch,
+          cursors,
+        });
+        if (!checkpointed) {
+          abortForLeaseLoss();
+          throw controller.signal.reason;
+        }
+      };
+
       let outcome: JobOutcome;
       try {
-        const cursors = jobType === 'RECONCILIATION'
-          ? await options.store.loadLatestCursors(LEASE_KEY, jobType)
-          : undefined;
         const leaseGuard: SchedulerLeaseGuard = {
           leaseKey: currentLease.leaseKey,
           ownerToken,
           leaseEpoch: currentLease.leaseEpoch,
         };
-        outcome = await work({ now: startedAt, signal: controller.signal, lease: leaseGuard, cursors });
+        outcome = await work({
+          now: startedAt, signal: controller.signal, lease: leaseGuard,
+          cursors: priorCursors, checkpointCursors,
+        });
         if (jobType === 'DAILY_GENERATION' || renewalNeedsBoundaryValidation) {
           const validation = await confirmLeaseWithDatabaseTime();
           if (validation === 'LOST') abortForLeaseLoss();
@@ -431,7 +507,7 @@ export function createWorkbenchScheduler(options: WorkbenchSchedulerOptions): Wo
         reportError(error);
         outcome = {
           status: 'FAILED', successCount: 0, skippedCount: 0, failedCount: 1,
-          failureSummary: [{ code: 'JOB_FAILED' }], cursors: null,
+          failureSummary: [{ code: 'JOB_FAILED' }], cursorUpdate: { mode: 'PRESERVE' },
         };
       } finally {
         clearLeaseTimers();
@@ -451,20 +527,29 @@ export function createWorkbenchScheduler(options: WorkbenchSchedulerOptions): Wo
           skippedCount: outcome.skippedCount,
           failedCount: outcome.failedCount,
           failureSummary: outcome.failureSummary,
-          cursors: outcome.cursors,
+          cursorUpdate: outcome.cursorUpdate,
         });
       } catch (error) {
         reportError(error);
       }
       await options.store.releaseLease(currentLease).catch(reportError);
       if (!finalized) return skipped('LEASE_LOST');
+      if (outcome.status === 'FAILED' && options.onRunFailed) {
+        try {
+          await options.onRunFailed({ jobType, businessDate, runId: run.id, at: finishedAt });
+        } catch (error) {
+          // Failure reporting is deliberately terminal: report locally and never
+          // feed it back into the scheduler-notification path.
+          reportError(error);
+        }
+      }
       return {
         status: outcome.status,
         runId: run.id,
         succeeded: outcome.successCount,
         skipped: outcome.skippedCount,
         failed: outcome.failedCount,
-        ...(outcome.cursors ? { cursors: outcome.cursors } : {}),
+        ...(outcome.cursorUpdate.mode === 'SET' ? { cursors: outcome.cursorUpdate.cursors } : {}),
         ...(outcome.status === 'FAILED' ? { reason: 'JOB_FAILED' as const } : {}),
       };
     })();
@@ -482,7 +567,7 @@ export function createWorkbenchScheduler(options: WorkbenchSchedulerOptions): Wo
       const skippedCount = Math.max(finiteCount(result.skippedCount), candidateCount - successCount);
       return {
         status: 'SUCCEEDED', successCount, skippedCount, failedCount: 0,
-        failureSummary: [], cursors: null,
+        failureSummary: [], cursorUpdate: { mode: 'CLEAR' },
       };
     });
   };
@@ -502,7 +587,7 @@ export function createWorkbenchScheduler(options: WorkbenchSchedulerOptions): Wo
         skippedCount,
         failedCount,
         failureSummary: adapterFailures(result.errors, cursorResult.invalidModules),
-        cursors: cursorResult.cursors,
+        cursorUpdate: cursorResult.cursorUpdate,
       };
     },
   ) : Promise.resolve(skipped('JOB_DISABLED'));
@@ -510,8 +595,13 @@ export function createWorkbenchScheduler(options: WorkbenchSchedulerOptions): Wo
   const runReminderScan = (): Promise<SchedulerRunResult> => options.scanReminders ? execute(
     'REMINDER_SCAN',
     null,
-    async ({ now: runAt, signal }) => {
-      const result = await options.scanReminders!({ now: runAt, signal });
+    async ({ now: runAt, signal, cursors, checkpointCursors }) => {
+      const result = await options.scanReminders!({
+        now: runAt,
+        signal,
+        ...(cursors?.REMINDER_SCAN ? { cursor: cursors.REMINDER_SCAN } : {}),
+        checkpoint: (cursor) => checkpointCursors(cursor ? { REMINDER_SCAN: cursor } : null),
+      });
       const successCount = finiteCount(result.notified);
       const skippedCount = finiteCount(result.skipped);
       const failedCount = finiteCount(result.failed);
@@ -521,7 +611,7 @@ export function createWorkbenchScheduler(options: WorkbenchSchedulerOptions): Wo
         skippedCount,
         failedCount,
         failureSummary: Array.from({ length: Math.min(failedCount, 100) }, () => ({ code: 'REMINDER_FAILED' as const })),
-        cursors: null,
+        cursorUpdate: { mode: 'PRESERVE' },
       };
     },
   ) : Promise.resolve(skipped('JOB_DISABLED'));

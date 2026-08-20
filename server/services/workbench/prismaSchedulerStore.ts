@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import type {
   SchedulerCursorState,
   SchedulerFailureSummary,
@@ -6,7 +7,7 @@ import type {
   SchedulerRunRecord,
   WorkbenchSchedulerStore,
 } from './workbenchScheduler';
-import { normalizeSchedulerCursors } from './workbenchScheduler';
+import { normalizeReminderScanCursor, normalizeSchedulerCursors, normalizeSchedulerRunCursors } from './workbenchScheduler';
 
 type PrismaLike = any;
 
@@ -18,16 +19,24 @@ function mapLease(row: any): SchedulerLease {
 }
 
 function cursorState(value: unknown): SchedulerCursorState | null {
-  const cursors = normalizeSchedulerCursors(value);
+  const cursors = normalizeSchedulerRunCursors(value);
   return Object.keys(cursors).length ? cursors : null;
 }
 
 function assertPersistableCursors(value: SchedulerCursorState | null): SchedulerCursorState | null {
   if (!value) return null;
-  const normalized = normalizeSchedulerCursors(value);
+  const normalized = normalizeSchedulerRunCursors(value);
   const entries = Object.entries(value);
-  if (entries.length !== Object.keys(normalized).length
-    || entries.some(([module, cursor]) => normalized[module as keyof SchedulerCursorState] !== cursor)) {
+  const valid = entries.length === Object.keys(normalized).length && entries.every(([key, cursor]) => {
+    if (key === 'REMINDER_SCAN') {
+      const reminder = normalizeReminderScanCursor(cursor);
+      return Boolean(reminder)
+        && reminder!.dueAt === (cursor as any).dueAt
+        && reminder!.id === (cursor as any).id;
+    }
+    return normalizeSchedulerCursors({ [key]: cursor })[key as keyof SchedulerCursorState] === cursor;
+  });
+  if (!valid) {
     throw new Error('INVALID_SCHEDULER_CURSOR_STATE');
   }
   return normalized;
@@ -131,10 +140,12 @@ export function createPrismaSchedulerStore(prisma: PrismaLike): WorkbenchSchedul
             failureSummary: [{ code: 'LEASE_EXPIRED' }],
           },
         });
+        const { cursors, ...runInput } = input;
         const row = await tx.workbenchSchedulerRun.create({
           data: {
-            ...input, startedAt: databaseNow, status: 'RUNNING', successCount: 0,
-            skippedCount: 0, failedCount: 0, failureSummary: [], cursors: undefined,
+            ...runInput, startedAt: databaseNow, status: 'RUNNING', successCount: 0,
+            skippedCount: 0, failedCount: 0, failureSummary: [],
+            cursors: cursors ? assertPersistableCursors(cursors) : undefined,
           },
         });
         return mapRun(row);
@@ -142,7 +153,9 @@ export function createPrismaSchedulerStore(prisma: PrismaLike): WorkbenchSchedul
     },
 
     async finishRun(input: SchedulerRunCompletion) {
-      const cursors = assertPersistableCursors(input.cursors);
+      const cursors = input.cursorUpdate.mode === 'SET'
+        ? assertPersistableCursors(input.cursorUpdate.cursors)
+        : null;
       return prisma.$transaction(async (tx: PrismaLike) => {
         const run = await tx.workbenchSchedulerRun.findFirst({
           where: {
@@ -164,8 +177,35 @@ export function createPrismaSchedulerStore(prisma: PrismaLike): WorkbenchSchedul
             status: input.status, finishedAt: new Date(lease.databaseNow),
             successCount: input.successCount, skippedCount: input.skippedCount,
             failedCount: input.failedCount, failureSummary: failureSummary(input.failureSummary),
-            cursors: cursors || undefined,
+            ...(input.cursorUpdate.mode === 'PRESERVE'
+              ? {}
+              : { cursors: input.cursorUpdate.mode === 'CLEAR' ? Prisma.DbNull : cursors }),
           },
+        });
+        return updated.count === 1;
+      });
+    },
+
+    async checkpointRun(input) {
+      const cursors = assertPersistableCursors(input.cursors);
+      return prisma.$transaction(async (tx: PrismaLike) => {
+        const run = await tx.workbenchSchedulerRun.findFirst({
+          where: {
+            id: input.runId, ownerToken: input.ownerToken,
+            leaseEpoch: input.leaseEpoch, status: 'RUNNING',
+          },
+        });
+        if (!run) return false;
+        const lease = await lockedCurrentLease(tx, {
+          leaseKey: run.leaseKey, ownerToken: input.ownerToken, leaseEpoch: input.leaseEpoch,
+        });
+        if (!lease) return false;
+        const updated = await tx.workbenchSchedulerRun.updateMany({
+          where: {
+            id: input.runId, ownerToken: input.ownerToken,
+            leaseEpoch: input.leaseEpoch, status: 'RUNNING',
+          },
+          data: { cursors: cursors || Prisma.DbNull },
         });
         return updated.count === 1;
       });
@@ -181,7 +221,12 @@ export function createPrismaSchedulerStore(prisma: PrismaLike): WorkbenchSchedul
 
     async loadLatestCursors(leaseKey, jobType) {
       const row = await prisma.workbenchSchedulerRun.findFirst({
-        where: { leaseKey, jobType, status: { in: ['SUCCEEDED', 'PARTIAL'] } },
+        where: {
+          leaseKey, jobType,
+          status: jobType === 'REMINDER_SCAN'
+            ? { in: ['RUNNING', 'SUCCEEDED', 'PARTIAL', 'FAILED', 'ABANDONED'] }
+            : { in: ['SUCCEEDED', 'PARTIAL'] },
+        },
         orderBy: [{ leaseEpoch: 'desc' }, { id: 'desc' }],
       });
       return cursorState(row?.cursors) || undefined;

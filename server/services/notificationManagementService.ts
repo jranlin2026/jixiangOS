@@ -11,6 +11,7 @@ const RULE_LABELS: Record<string, { label: string; description: string }> = {
   LEAD_WORKFLOW: { label: '线索分配与首次跟进', description: '新线索确认、首次跟进以及主管升级规则' },
   CUSTOMER_TODO_WORKFLOW: { label: '客户待办', description: '待办临期、到期、逾期以及主管升级规则' },
   OKR_WORKFLOW: { label: '目标管理', description: '周检视提前提醒、风险即时提醒以及主管升级规则' },
+  WORKBENCH_WORKFLOW: { label: '员工工作台', description: '任务生命周期、临期、逾期与调度失败提醒' },
 };
 
 function channels(value: unknown) {
@@ -24,6 +25,12 @@ function configFor(eventType: string, input: unknown) {
   return Object.fromEntries(Object.entries(defaults).map(([key, fallback]) => {
     if (typeof fallback === 'boolean') return [key, typeof source[key] === 'boolean' ? source[key] : fallback];
     const value = Math.trunc(Number(source[key]));
+    if (eventType === 'WORKBENCH_WORKFLOW' && key === 'dueSoonMinutes') {
+      return [key, Number.isFinite(value) ? Math.max(0, Math.min(7 * 24 * 60, value)) : fallback];
+    }
+    if (eventType === 'WORKBENCH_WORKFLOW' && key === 'schedulerFailureThreshold') {
+      return [key, Number.isFinite(value) ? Math.max(1, Math.min(10, value)) : fallback];
+    }
     return [key, Number.isFinite(value) && value >= 0 && value <= 30 * 24 * 60 ? value : fallback];
   }));
 }
@@ -35,7 +42,7 @@ function ruleView(eventType: string, stored?: any) {
     label: meta.label,
     description: meta.description,
     enabled: stored?.enabled !== false,
-    channels: stored ? channels(stored.channels) : ['FEISHU'],
+    channels: eventType === 'WORKBENCH_WORKFLOW' ? [] : stored ? channels(stored.channels) : ['FEISHU'],
     config: configFor(eventType, stored?.config) || {},
     updatedAt: stored?.updatedAt?.toISOString(),
     updatedByName: stored?.updatedByName || undefined,
@@ -62,14 +69,14 @@ export function createNotificationManagementService(prisma: ManagementPrisma) {
           id: `notification-rule-${randomUUID()}`,
           eventType,
           enabled: input?.enabled !== false,
-          channels: channels(input?.channels),
+          channels: eventType === 'WORKBENCH_WORKFLOW' ? [] : channels(input?.channels),
           config,
           updatedById: user.id,
           updatedByName: user.name,
         },
         update: {
           enabled: input?.enabled !== false,
-          channels: channels(input?.channels),
+          channels: eventType === 'WORKBENCH_WORKFLOW' ? [] : channels(input?.channels),
           config,
           updatedById: user.id,
           updatedByName: user.name,

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
+import { Prisma } from '@prisma/client';
 import { createTaskSyncService } from './taskSyncService';
 import type { ReconcileResult, WorkbenchSourceAdapter } from './sourceAdapter';
 import {
@@ -13,6 +14,7 @@ import {
   type WorkbenchSchedulerStore,
 } from './workbenchScheduler';
 import { createPrismaSchedulerStore } from './prismaSchedulerStore';
+import { createWorkbenchNotificationService } from './workbenchNotificationService';
 
 function emptyReconcile(overrides: Partial<ReconcileResult> = {}): ReconcileResult {
   return {
@@ -81,7 +83,7 @@ function memoryStore(): WorkbenchSchedulerStore & { runs: SchedulerRunRecord[]; 
         skippedCount: 0,
         failedCount: 0,
         failureSummary: [],
-        cursors: null,
+        cursors: input.cursors ? structuredClone(input.cursors) : null,
       };
       runs.push(run);
       return { ...run };
@@ -92,7 +94,19 @@ function memoryStore(): WorkbenchSchedulerStore & { runs: SchedulerRunRecord[]; 
         || lease.ownerToken !== input.ownerToken
         || lease.leaseEpoch !== input.leaseEpoch
         || lease.expiresAt <= databaseNow()) return false;
-      Object.assign(run, input, { status: input.status });
+      const { cursorUpdate, ...completion } = input;
+      Object.assign(run, completion, { status: input.status });
+      if (cursorUpdate.mode === 'SET') run.cursors = structuredClone(cursorUpdate.cursors);
+      if (cursorUpdate.mode === 'CLEAR') run.cursors = null;
+      return true;
+    },
+    async checkpointRun(input) {
+      const run = runs.find((item) => item.id === input.runId);
+      if (!run || run.status !== 'RUNNING' || !lease
+        || lease.ownerToken !== input.ownerToken
+        || lease.leaseEpoch !== input.leaseEpoch
+        || lease.expiresAt <= databaseNow()) return false;
+      run.cursors = input.cursors ? structuredClone(input.cursors) : null;
       return true;
     },
     async releaseLease(input) {
@@ -107,8 +121,9 @@ function memoryStore(): WorkbenchSchedulerStore & { runs: SchedulerRunRecord[]; 
         run.leaseKey === leaseKey
         &&
         run.jobType === jobType
-        && ['SUCCEEDED', 'PARTIAL'].includes(run.status)
-        && run.cursors
+        && (jobType === 'REMINDER_SCAN'
+          ? ['RUNNING', 'SUCCEEDED', 'PARTIAL', 'FAILED', 'ABANDONED'].includes(run.status)
+          : ['SUCCEEDED', 'PARTIAL'].includes(run.status))
       ));
       return latest?.cursors ? { ...latest.cursors } : undefined;
     },
@@ -168,6 +183,27 @@ test('one worker does not overlap different scheduler jobs locally', async () =>
   await daily;
   assert.equal(reconciliation.status, 'SKIPPED');
   assert.equal(reconciliation.reason, 'LOCAL_RUN_ACTIVE');
+});
+
+test('failed runs notify only after durable finalization and notification failure does not recurse', async () => {
+  const store = memoryStore();
+  let callbackCount = 0;
+  let errorCount = 0;
+  const scheduler = schedulerWith(store, {
+    scanReminders: async () => { throw new Error('reminder scan failed'); },
+    onRunFailed: async ({ runId }: { runId: string }) => {
+      callbackCount += 1;
+      assert.equal(store.runs.find((run) => run.id === runId)?.status, 'FAILED');
+      throw new Error('notification infrastructure failed');
+    },
+    onError: () => { errorCount += 1; },
+  });
+
+  const result = await scheduler.runReminderScan();
+
+  assert.equal(result.status, 'FAILED');
+  assert.equal(callbackCount, 1);
+  assert.equal(errorCount, 2, '作业失败和通知失败各上报一次，不得递归发通知');
 });
 
 test('startup compensation runs once and repeated generation reports database duplicates as skipped', async () => {
@@ -275,6 +311,55 @@ test('reconciliation isolates an adapter failure and durably continues each modu
     FINANCE: 'finance-page-3',
   }, 'failed modules retain their last durable cursor while successful modules advance');
   assert.equal(JSON.stringify(latestRun?.failureSummary).includes('secret'), false);
+});
+
+test('reconciliation clears an exhausted module cursor before the next scheduler run', async () => {
+  const store = memoryStore();
+  const observed: Array<string | undefined> = [];
+  let round = 0;
+  const create = (workerId: string) => schedulerWith(store, {
+    workerId,
+    reconcile: async ({ cursors }: any) => {
+      observed.push(cursors?.CRM);
+      round += 1;
+      return emptyReconcile({
+        updated: 1,
+        ...(round === 1 ? { nextCursors: { CRM: 'crm-page-2' } } : {}),
+      });
+    },
+  });
+
+  assert.equal((await create('worker-cursor-1').runReconciliation()).status, 'SUCCEEDED');
+  assert.equal((await create('worker-cursor-2').runReconciliation()).status, 'SUCCEEDED');
+  assert.equal((await create('worker-cursor-3').runReconciliation()).status, 'SUCCEEDED');
+
+  assert.deepEqual(observed, [undefined, 'crm-page-2', undefined]);
+  assert.deepEqual(store.runs.map((run) => run.cursors), [
+    { CRM: 'crm-page-2' },
+    null,
+    null,
+  ]);
+});
+
+test('a failed reconciliation module preserves its prior cursor instead of accepting a next cursor', async () => {
+  const store = memoryStore();
+  let round = 0;
+  const scheduler = schedulerWith(store, {
+    reconcile: async () => {
+      round += 1;
+      return round === 1
+        ? emptyReconcile({ updated: 1, nextCursors: { CRM: 'crm-page-2' } })
+        : emptyReconcile({
+          failed: 1,
+          errors: [{ module: 'CRM', message: 'adapter failed after emitting an unsafe cursor' }],
+          nextCursors: { CRM: 'crm-page-3' },
+        });
+    },
+  });
+
+  assert.equal((await scheduler.runReconciliation()).status, 'SUCCEEDED');
+  assert.equal((await scheduler.runReconciliation()).status, 'FAILED');
+  assert.deepEqual(store.runs[1]?.cursors, { CRM: 'crm-page-2' });
 });
 
 test('invalid reconciliation cursors fail their modules and retain the prior durable cursor', async () => {
@@ -615,6 +700,93 @@ test('reminder scan aborts before a later send when renewal and DB-time validati
   assert.equal(result.status, 'FAILED');
 });
 
+test('a hard-aborted reminder run resumes after 1000 unprocessable rows and reaches the valid task', async () => {
+  type FakeTimer = { kind: 'timeout' | 'interval'; callback: () => void; cleared: boolean; unref(): void };
+  const timers: FakeTimer[] = [];
+  const make = (kind: FakeTimer['kind']) => (callback: () => void) => {
+    const timer: FakeTimer = { kind, callback, cleared: false, unref() {} };
+    timers.push(timer);
+    return timer;
+  };
+  const dueAt = '2026-08-21T01:00:00.000Z';
+  const rows = Array.from({ length: 1_002 }, (_, index) => ({
+    id: `scheduler-resume-${String(index + 1).padStart(4, '0')}`,
+    employeeId: index === 1_001 ? 'employee-valid' : `inactive-${index + 1}`,
+    employeeName: `employee-${index + 1}`,
+    departmentIdSnapshot: 'dept-sales', departmentNameSnapshot: '销售部',
+    workDate: '2026-08-21', dueAt, sourceVersion: 'v1', status: 'PENDING',
+    remindedAt: null, lastOverdueNotifiedAt: null,
+  }));
+  let firstRun = true;
+  let recipientReads = 0;
+  const secondRunTaskReads: string[] = [];
+  const prisma: any = {
+    employeeTask: {
+      findMany: async ({ where, take }: any) => {
+        const cursorClause = (where.AND || []).flatMap((clause: any) => clause.OR || [])
+          .find((clause: any) => clause.id?.gt);
+        const afterId = cursorClause?.id?.gt || '';
+        return rows.filter((row) => row.id > afterId && row.remindedAt == null).slice(0, take);
+      },
+      findUnique: async ({ where }: any) => {
+        if (!firstRun) secondRunTaskReads.push(where.id);
+        return rows.find((row) => row.id === where.id) || null;
+      },
+      updateMany: async ({ where, data }: any) => {
+        const row = rows.find((item) => item.id === where.id);
+        if (!row) return { count: 0 };
+        Object.assign(row, data);
+        return { count: 1 };
+      },
+    },
+    user: { findUnique: async ({ where }: any) => {
+      recipientReads += 1;
+      if (firstRun && recipientReads === 1_000) {
+        timers.find((timer) => timer.kind === 'timeout' && !timer.cleared)?.callback();
+      }
+      const active = where.id === 'employee-valid';
+      return { id: where.id, name: where.id, isActive: active, employmentStatus: active ? 'active' : 'left' };
+    } },
+    $queryRawUnsafe: async () => [],
+  };
+  prisma.$transaction = async (work: (tx: any) => Promise<unknown>) => work(prisma);
+  const notificationService = createWorkbenchNotificationService({
+    prisma,
+    workflow: { publishWorkbench: async () => ({ accepted: true, created: true }) },
+  });
+  const store = memoryStore();
+  const create = (workerId: string) => schedulerWith(store, {
+    workerId,
+    now: () => new Date('2026-08-21T00:30:00.000Z'),
+    scanReminders: (input: any) => notificationService.scanReminders(input),
+    timers: {
+      setTimeout: make('timeout'),
+      clearTimeout: (timer: FakeTimer) => { timer.cleared = true; },
+      setInterval: make('interval'),
+      clearInterval: (timer: FakeTimer) => { timer.cleared = true; },
+    },
+  });
+
+  const aborted = await create('worker-aborted').runReminderScan();
+  assert.equal(aborted.status, 'FAILED');
+  assert.deepEqual(store.runs[0]?.cursors, {
+    REMINDER_SCAN: { dueAt, id: 'scheduler-resume-1000' },
+  });
+
+  firstRun = false;
+  const resumed = await create('worker-resumed').runReminderScan();
+
+  assert.equal(resumed.status, 'SUCCEEDED');
+  assert.equal(resumed.succeeded, 1);
+  assert.deepEqual(secondRunTaskReads, ['scheduler-resume-1001', 'scheduler-resume-1002']);
+  assert.equal(store.runs[1]?.cursors, null, 'the successful end-of-scan checkpoint must wrap');
+
+  secondRunTaskReads.length = 0;
+  const wrapped = await create('worker-wrapped').runReminderScan();
+  assert.equal(wrapped.status, 'SUCCEEDED');
+  assert.equal(secondRunTaskReads[0], 'scheduler-resume-0001', 'the run after wrap must restart at the first page');
+});
+
 test('a genuinely lost owner is rejected by DB-time validation before run finalization', async () => {
   type FakeTimer = { kind: 'timeout' | 'interval'; callback: () => void; cleared: boolean; unref(): void };
   const timers: FakeTimer[] = [];
@@ -757,8 +929,13 @@ test('Prisma store uses lease epoch fencing so an expired owner cannot renew or 
   assert.equal(await store.finishRun({
     runId: runA.id, ownerToken: 'owner-a', leaseEpoch: leaseA.leaseEpoch,
     status: 'SUCCEEDED', finishedAt: new Date(2_100), successCount: 1, skippedCount: 0,
-    failedCount: 0, failureSummary: [], cursors: { CRM: 'stale' },
+    failedCount: 0, failureSummary: [], cursorUpdate: { mode: 'SET', cursors: { CRM: 'stale' } },
   }), false);
+  assert.equal(await store.checkpointRun({
+    runId: runA.id, ownerToken: 'owner-a', leaseEpoch: leaseA.leaseEpoch,
+    cursors: { REMINDER_SCAN: { dueAt: '2026-08-21T01:00:00.000Z', id: 'stale-task' } },
+  }), false, 'a stale owner must not checkpoint reminder progress into an abandoned run');
+  assert.equal(runs.get('run-a').cursors, undefined);
   assert.equal(runs.get('run-a').status, 'ABANDONED');
   assert.equal(runs.get('run-b').status, 'RUNNING');
 });
@@ -873,7 +1050,14 @@ test('Prisma store uses DB-time SQL and locks the fenced lease before run mutati
   await store.finishRun({
     runId: 'run-a', ownerToken: 'owner-a', leaseEpoch: 1, status: 'SUCCEEDED',
     finishedAt: new Date('2200-01-01T00:00:00.000Z'), successCount: 1, skippedCount: 0,
-    failedCount: 0, failureSummary: [], cursors: { CRM: 'safe' },
+    failedCount: 0, failureSummary: [], cursorUpdate: { mode: 'SET', cursors: { CRM: 'safe' } },
+  });
+  assert.deepEqual(calls.map((item) => item.split(':')[0]), ['run', 'query', 'run']);
+  assert.match(calls[1]!, /`ownerToken` = \?.*`leaseEpoch` = \?.*CURRENT_TIMESTAMP\(3\).*FOR UPDATE/);
+  calls.length = 0;
+  await store.checkpointRun({
+    runId: 'run-a', ownerToken: 'owner-a', leaseEpoch: 1,
+    cursors: { REMINDER_SCAN: { dueAt: '2026-08-21T01:00:00.000Z', id: 'task-0500' } },
   });
   assert.deepEqual(calls.map((item) => item.split(':')[0]), ['run', 'query', 'run']);
   assert.match(calls[1]!, /`ownerToken` = \?.*`leaseEpoch` = \?.*CURRENT_TIMESTAMP\(3\).*FOR UPDATE/);
@@ -886,6 +1070,50 @@ test('Prisma store uses DB-time SQL and locks the fenced lease before run mutati
   assert.match(source, /`expiresAt` > CURRENT_TIMESTAMP\(3\)/);
   assert.doesNotMatch(source, /input\.now/);
   assert.match(calls[0]!, /SET `ownerToken` = NULL, `expiresAt` = CURRENT_TIMESTAMP\(3\)/);
+});
+
+test('Prisma store distinguishes cursor preservation, setting, and durable SQL NULL clearing', async () => {
+  let updatedData: any;
+  const lease = {
+    leaseKey: 'workbench', ownerToken: 'owner-a', leaseEpoch: 1,
+    expiresAt: new Date('2099-01-01T00:00:00.000Z'), databaseNow: new Date('2026-08-20T01:00:00.000Z'),
+  };
+  const run = {
+    id: 'run-a', ...lease, jobType: 'RECONCILIATION', businessDate: null, status: 'RUNNING',
+    startedAt: lease.databaseNow, finishedAt: null, successCount: 0, skippedCount: 0,
+    failedCount: 0, failureSummary: [], cursors: { CRM: 'crm-page-2' },
+  };
+  const prisma: any = {
+    async $queryRawUnsafe() { return [{ ...lease }]; },
+    workbenchSchedulerRun: {
+      async findFirst() { return run; },
+      async updateMany({ data }: any) { updatedData = data; return { count: 1 }; },
+    },
+  };
+  prisma.$transaction = async (work: any) => work(prisma);
+
+  const finalized = await createPrismaSchedulerStore(prisma).finishRun({
+    runId: run.id, ownerToken: lease.ownerToken, leaseEpoch: lease.leaseEpoch,
+    status: 'SUCCEEDED', finishedAt: lease.databaseNow, successCount: 1, skippedCount: 0,
+    failedCount: 0, failureSummary: [], cursorUpdate: { mode: 'CLEAR' },
+  });
+
+  assert.equal(finalized, true);
+  assert.equal(updatedData.cursors, Prisma.DbNull);
+
+  await createPrismaSchedulerStore(prisma).finishRun({
+    runId: run.id, ownerToken: lease.ownerToken, leaseEpoch: lease.leaseEpoch,
+    status: 'FAILED', finishedAt: lease.databaseNow, successCount: 0, skippedCount: 0,
+    failedCount: 1, failureSummary: [{ code: 'JOB_FAILED' }], cursorUpdate: { mode: 'PRESERVE' },
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(updatedData, 'cursors'), false);
+
+  await createPrismaSchedulerStore(prisma).finishRun({
+    runId: run.id, ownerToken: lease.ownerToken, leaseEpoch: lease.leaseEpoch,
+    status: 'SUCCEEDED', finishedAt: lease.databaseNow, successCount: 1, skippedCount: 0,
+    failedCount: 0, failureSummary: [], cursorUpdate: { mode: 'SET', cursors: { CRM: 'crm-page-3' } },
+  });
+  assert.deepEqual(updatedData.cursors, { CRM: 'crm-page-3' });
 });
 
 test('latest cursor lookup is scoped and ordered by monotonic lease epoch despite clock rollback', async () => {
@@ -907,6 +1135,25 @@ test('latest cursor lookup is scoped and ordered by monotonic lease epoch despit
   const cursors = await createPrismaSchedulerStore(prisma).loadLatestCursors('workbench', 'RECONCILIATION');
   assert.deepEqual(cursors, { CRM: 'new' });
   assert.deepEqual(query.where, { leaseKey: 'workbench', jobType: 'RECONCILIATION', status: { in: ['SUCCEEDED', 'PARTIAL'] } });
+  assert.deepEqual(query.orderBy, [{ leaseEpoch: 'desc' }, { id: 'desc' }]);
+});
+
+test('reminder cursor lookup includes an expired owners still-RUNNING checkpoint before abandonment', async () => {
+  let query: any;
+  const row = {
+    leaseKey: 'workbench', jobType: 'REMINDER_SCAN', status: 'RUNNING', leaseEpoch: 9,
+    id: 'expired-owner-run',
+    cursors: { REMINDER_SCAN: { dueAt: '2026-08-21T01:00:00.000Z', id: 'task-1000' } },
+  };
+  const prisma: any = { workbenchSchedulerRun: {
+    async findFirst(input: any) { query = input; return row; },
+  } };
+
+  const cursors = await createPrismaSchedulerStore(prisma)
+    .loadLatestCursors('workbench', 'REMINDER_SCAN');
+
+  assert.deepEqual(cursors, row.cursors);
+  assert.ok(query.where.status.in.includes('RUNNING'));
   assert.deepEqual(query.orderBy, [{ leaseEpoch: 'desc' }, { id: 'desc' }]);
 });
 
@@ -933,5 +1180,8 @@ test('server lifecycle starts and gracefully stops the workbench scheduler', asy
   assert.match(source, /await workbenchScheduler\.stop\(\)/);
   const schedulerWiring = source.slice(source.indexOf('const workbenchScheduler = createWorkbenchScheduler({'), source.indexOf('const enterpriseAiService'));
   assert.doesNotMatch(schedulerWiring, /reconcile\s*:/, 'production reconciliation stays disabled until concrete adapters are registered');
-  assert.doesNotMatch(schedulerWiring, /scanReminders\s*:/, 'production reminders stay disabled until a concrete scanner is registered');
+  assert.match(schedulerWiring, /scanReminders:\s*\(input\)\s*=>\s*workbenchNotificationService\.scanReminders\(input\)/,
+    'production must register the concrete Task 7 reminder scanner');
+  assert.match(schedulerWiring, /onRunFailed:\s*\(input\)\s*=>\s*workbenchNotificationService\.schedulerFailed\(input\)/,
+    'durably finalized scheduler failures must flow to the throttled notification path');
 });

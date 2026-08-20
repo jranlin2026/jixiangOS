@@ -17,6 +17,7 @@ const configLabels: Record<string, { label: string; suffix?: string }> = {
   escalateNextWorkday: { label: '下一工作日仍未完成时升级主管' },
   checkInReminderMinutes: { label: '周检视提前提醒', suffix: '分钟' },
   riskEscalationMinutes: { label: '风险升级主管', suffix: '分钟' },
+  schedulerFailureThreshold: { label: '调度连续失败阈值', suffix: '次' },
 };
 
 export default function NotificationSettings() {
@@ -56,7 +57,7 @@ export default function NotificationSettings() {
     {rules.map((rule) => <Paper key={rule.eventType} variant="outlined" sx={{ p: 2.5 }}>
       <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
         <Box><Typography variant="h6" fontWeight={800}>{rule.label}</Typography><Typography variant="body2" color="text.secondary">{rule.description}</Typography></Box>
-        <Stack direction="row" spacing={2}><FormControlLabel control={<Switch checked={rule.enabled} onChange={(_, enabled) => updateRule(rule.eventType, { enabled })} />} label="启用规则" /><FormControlLabel control={<Switch checked={rule.channels.includes('FEISHU')} onChange={(_, enabled) => updateRule(rule.eventType, { channels: enabled ? ['FEISHU'] : [] })} />} label="飞书私信" /></Stack>
+        <Stack direction="row" spacing={2} alignItems="center"><FormControlLabel control={<Switch checked={rule.enabled} onChange={(_, enabled) => updateRule(rule.eventType, { enabled })} />} label="启用规则" />{rule.eventType === 'WORKBENCH_WORKFLOW' && <Chip size="small" label="仅站内消息" />}{rule.eventType !== 'WORKBENCH_WORKFLOW' && <FormControlLabel control={<Switch checked={rule.channels.includes('FEISHU')} onChange={(_, enabled) => updateRule(rule.eventType, { channels: enabled ? ['FEISHU'] : [] })} />} label="飞书私信" />}</Stack>
       </Stack>
       <Divider sx={{ my: 2 }} />
       <Stack direction="row" flexWrap="wrap" gap={2}>{Object.entries(rule.config).map(([key, value]) => typeof value === 'boolean' ? <FormControlLabel key={key} control={<Switch checked={value} onChange={(_, checked) => updateRule(rule.eventType, { config: { ...rule.config, [key]: checked } })} />} label={configLabels[key]?.label || key} /> : <TextField key={key} size="small" type="number" label={configLabels[key]?.label || key} value={value} onChange={(event) => updateRule(rule.eventType, { config: { ...rule.config, [key]: Math.max(0, Number(event.target.value)) } })} InputProps={{ endAdornment: configLabels[key]?.suffix }} sx={{ width: 210 }} />)}</Stack>

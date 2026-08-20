@@ -435,16 +435,30 @@ async function synchronizeDesiredOnce(client: Client, desired: DesiredEmployeeTa
   assertDesiredIdentity(task, desired);
   const changedFields = changedSourceOwnedFields(task, desired);
   if (!changedFields.length) return task;
+  const reminderIdentityChanged = changedFields.some((field) => [
+    'employeeId', 'departmentId', 'departmentNameSnapshot', 'dueAt', 'workDate',
+  ].includes(field));
   const changed = await client.employeeTask.updateMany({
     where: { id: task.id, sourceKey: desired.sourceKey },
-    data: desiredSourceOwnedData(desired),
+    data: {
+      ...desiredSourceOwnedData(desired),
+      ...(reminderIdentityChanged ? { remindedAt: null, lastOverdueNotifiedAt: null } : {}),
+    },
   });
   if (changed.count !== 1) throw new DesiredSyncRetryError('source task changed during synchronization');
   await client.taskActivity.create({
     data: {
       id: `task-activity-${randomUUID()}`, taskId: task.id, action: 'SOURCE_SYNC', actorId: null,
       actorName: null, fromStatus: task.status, toStatus: task.status, comment: null,
-      metadata: { source: 'RECONCILIATION', changedFields },
+      metadata: {
+        source: 'RECONCILIATION', changedFields,
+        ...(changedFields.includes('employeeId') ? {
+          previousEmployeeId: task.employeeId,
+          previousEmployeeName: task.employeeName,
+          employeeId: desired.employeeId,
+          employeeName: desired.employeeNameSnapshot,
+        } : {}),
+      },
     },
   });
   const updated = await findTaskBySourceKey(client, desired.sourceKey);
@@ -471,7 +485,7 @@ async function upsertDesiredTask(client: Client, desired: DesiredEmployeeTask): 
 
 function mapActivity(row: any): TaskActivity {
   return {
-    id: row.id, taskId: row.taskId, action: row.action, actorId: row.actorId || null,
+    id: row.id, sequence: String(row.sequence ?? 0), taskId: row.taskId, action: row.action, actorId: row.actorId || null,
     actorName: row.actorName || null, fromStatus: row.fromStatus || null, toStatus: row.toStatus || null,
     comment: row.comment || null, metadata: row.metadata ?? null, createdAt: new Date(row.createdAt).toISOString(),
   };
@@ -673,7 +687,7 @@ async function summarizeWorkbenchTasks(client: Client, query: WorkbenchTaskQuery
 function taskUpdateData(update: WorkbenchTaskUpdate) {
   const { evidence: _evidence, evidenceActorId: _evidenceActorId, ...raw } = update;
   const data: Record<string, unknown> = { ...raw };
-  for (const field of ['startedAt', 'completedAt', 'confirmedAt', 'canceledAt', 'remindedAt'] as const) {
+  for (const field of ['startedAt', 'completedAt', 'confirmedAt', 'canceledAt', 'remindedAt', 'lastOverdueNotifiedAt'] as const) {
     if (raw[field] !== undefined) data[field] = raw[field] === null ? null : new Date(raw[field]!);
   }
   return data;

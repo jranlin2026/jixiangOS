@@ -69,14 +69,14 @@ export type WorkbenchTaskUpdate = Partial<Pick<EmployeeTask,
   | 'positionIdSnapshot' | 'positionNameSnapshot' | 'actualValue' | 'result'
   | 'returnedReason' | 'startedAt' | 'completedAt' | 'confirmedAt'
   | 'confirmedById' | 'confirmedByName' | 'canceledAt' | 'canceledById'
-  | 'canceledReason' | 'qualityScore' | 'qualityComment' | 'remindedAt'
+  | 'canceledReason' | 'qualityScore' | 'qualityComment' | 'remindedAt' | 'lastOverdueNotifiedAt'
 >> & {
   departmentNameSnapshot?: string | null;
   evidence?: WorkbenchEvidenceInput[];
   evidenceActorId?: string;
 };
 
-export type TaskActivityInput = Omit<TaskActivity, 'id' | 'createdAt'> & { createdAt?: Date };
+export type TaskActivityInput = Omit<TaskActivity, 'id' | 'sequence' | 'createdAt'> & { createdAt?: Date };
 
 export type EvidenceReferencesAuthorizationInput = {
   task: EmployeeTask;
@@ -174,7 +174,14 @@ export function createMemoryWorkbenchRepository(input: MemoryWorkbenchInput = {}
   let taskSequence = tasks.length;
 
   const updateFromDesired = (task: EmployeeTask, desired: DesiredEmployeeTask): EmployeeTask => {
+    const changedFields = changedSourceOwnedFields(task, desired);
     Object.assign(task, sourceOwnedTaskUpdate(desired));
+    if (changedFields.some((field) => [
+      'employeeId', 'departmentId', 'departmentNameSnapshot', 'dueAt', 'workDate',
+    ].includes(field))) {
+      task.remindedAt = null;
+      task.lastOverdueNotifiedAt = null;
+    }
     return task;
   };
 
@@ -222,6 +229,7 @@ export function createMemoryWorkbenchRepository(input: MemoryWorkbenchInput = {}
       const created: TaskActivity = {
         ...activity,
         id: `task-activity-${++activitySequence}`,
+        sequence: String(activitySequence),
         createdAt: (activity.createdAt || new Date()).toISOString(),
       };
       transactionActivities.push(created);
@@ -326,18 +334,25 @@ export function createMemoryWorkbenchRepository(input: MemoryWorkbenchInput = {}
         if (existing.taskType !== desired.taskType) throw new TaskSyncInvariantError('taskType 与已有任务身份不一致');
         const changedFields = changedSourceOwnedFields(existing, desired);
         if (!changedFields.length) return existing;
+        const previousEmployee = { id: existing.employeeId, name: existing.employeeName };
         updateFromDesired(existing, desired);
         activities.push({
-          id: `task-activity-${++activitySequence}`, taskId: existing.id, action: 'SOURCE_SYNC',
+          id: `task-activity-${++activitySequence}`, sequence: String(activitySequence), taskId: existing.id, action: 'SOURCE_SYNC',
           actorId: null, actorName: null, fromStatus: existing.status, toStatus: existing.status,
-          comment: null, metadata: { source: 'RECONCILIATION', changedFields }, createdAt: new Date().toISOString(),
+          comment: null, metadata: {
+            source: 'RECONCILIATION', changedFields,
+            ...(changedFields.includes('employeeId') ? {
+              previousEmployeeId: previousEmployee.id, previousEmployeeName: previousEmployee.name,
+              employeeId: desired.employeeId, employeeName: desired.employeeNameSnapshot,
+            } : {}),
+          }, createdAt: new Date().toISOString(),
         });
         return existing;
       }
       const created = createFromDesired(desired);
       tasks.push(created);
       activities.push({
-        id: `task-activity-${++activitySequence}`, taskId: created.id, action: 'CREATE',
+        id: `task-activity-${++activitySequence}`, sequence: String(activitySequence), taskId: created.id, action: 'CREATE',
         actorId: null, actorName: null, fromStatus: null, toStatus: 'PENDING', comment: null,
         metadata: { source: 'RECONCILIATION', sourceKey: desired.sourceKey, businessModule: desired.businessModule },
         createdAt: new Date().toISOString(),
@@ -352,11 +367,18 @@ export function createMemoryWorkbenchRepository(input: MemoryWorkbenchInput = {}
       if (task.taskType !== desired.taskType) throw new TaskSyncInvariantError('taskType 与已有任务身份不一致');
       const changedFields = changedSourceOwnedFields(task, desired);
       if (!changedFields.length) return task;
+      const previousEmployee = { id: task.employeeId, name: task.employeeName };
       updateFromDesired(task, desired);
       activities.push({
-        id: `task-activity-${++activitySequence}`, taskId: task.id, action: 'SOURCE_SYNC',
+        id: `task-activity-${++activitySequence}`, sequence: String(activitySequence), taskId: task.id, action: 'SOURCE_SYNC',
         actorId: null, actorName: null, fromStatus: task.status, toStatus: task.status,
-        comment: null, metadata: { source: 'RECONCILIATION', changedFields }, createdAt: new Date().toISOString(),
+        comment: null, metadata: {
+          source: 'RECONCILIATION', changedFields,
+          ...(changedFields.includes('employeeId') ? {
+            previousEmployeeId: previousEmployee.id, previousEmployeeName: previousEmployee.name,
+            employeeId: desired.employeeId, employeeName: desired.employeeNameSnapshot,
+          } : {}),
+        }, createdAt: new Date().toISOString(),
       });
       return task;
     },

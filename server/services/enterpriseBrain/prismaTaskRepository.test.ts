@@ -20,6 +20,7 @@ function transactionalPrisma(input: {
   simulatedBatchDurationMs?: number;
 } = {}) {
   const committed: any[] = [];
+  const committedActivities: any[] = [];
   const calls: string[] = [];
   let transactionCount = 0;
   let mutationCount = 0;
@@ -48,6 +49,7 @@ function transactionalPrisma(input: {
       transactionCount += 1;
       transactionOptions = options;
       const staged: any[] = [];
+      const stagedActivities: any[] = [];
       let stagedLeaseExtensionMs: number | undefined;
       const tx = {
         async $queryRawUnsafe(sql: string) {
@@ -62,11 +64,18 @@ function transactionalPrisma(input: {
         },
         employeeTask: {
           async createMany({ data }: any) { return mutate(data, staged); },
+          async findMany({ where }: any) {
+            return staged.filter((row) => where.id.in.includes(row.id)).map((row) => ({ id: row.id }));
+          },
+        },
+        taskActivity: {
+          async createMany({ data }: any) { stagedActivities.push(...data); return { count: data.length }; },
         },
       };
       const result = await work(tx);
       if (simulatedElapsedMs > (options?.timeout || 5_000)) throw new Error('SIMULATED_PRISMA_TRANSACTION_TIMEOUT');
       committed.push(...staged);
+      committedActivities.push(...stagedActivities);
       committedLeaseExtensionMs = stagedLeaseExtensionMs;
       return result;
     },
@@ -74,6 +83,7 @@ function transactionalPrisma(input: {
   return {
     prisma,
     committed,
+    committedActivities,
     calls,
     get transactionCount() { return transactionCount; },
     get transactionOptions() { return transactionOptions; },
@@ -110,6 +120,8 @@ test('delayed multi-chunk generation exceeds Prisma default 5s but commits withi
   assert.ok(database.transactionOptions.timeout > database.simulatedElapsedMs);
   assert.equal(database.calls.some((call) => call.startsWith('extend:')), false, 'manual generation must not mutate the scheduler lease');
   assert.equal(database.committed.length, 251);
+  assert.equal(database.committedActivities.length, 251);
+  assert.ok(database.committedActivities.every((item) => item.action === 'CREATE'));
 });
 
 test('leased generation extends DB-time expiry beyond the transaction timeout before task mutation', async () => {
@@ -183,4 +195,35 @@ test('an abort observed inside generation rolls back the whole transaction', asy
 
   assert.equal(database.transactionCount, 1);
   assert.equal(database.committed.length, 0);
+});
+
+test('manual one-off creation commits exactly one CREATE activity with the task', async () => {
+  const committed = { tasks: [] as any[], activities: [] as any[] };
+  const prisma: any = {
+    async $transaction(work: (tx: any) => Promise<any>) {
+      const staged = structuredClone(committed);
+      const tx = {
+        employeeTask: {
+          async create({ data }: any) {
+            const row = { ...data, status: 'PENDING', actualValue: null, result: null, returnedReason: null, evidence: [] };
+            staged.tasks.push(row);
+            return row;
+          },
+        },
+        taskActivity: { async create({ data }: any) { staged.activities.push(data); return data; } },
+      };
+      const result = await work(tx);
+      Object.assign(committed, staged);
+      return result;
+    },
+  };
+  const repository = createPrismaEnterpriseTaskRepository(prisma);
+  const created = await repository.createOneOffTask({
+    ...generated(1), templateId: null, assignedById: 'manager-1', assignedByName: '主管',
+  });
+
+  assert.equal(committed.tasks.length, 1);
+  assert.deepEqual(committed.activities.map((item) => [item.taskId, item.action, item.actorId]), [
+    [created.id, 'CREATE', 'manager-1'],
+  ]);
 });

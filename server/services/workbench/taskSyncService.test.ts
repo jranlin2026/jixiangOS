@@ -185,6 +185,9 @@ function createConcurrentPrismaHarness() {
   assert.equal(memory.activities.length, 1, '首次创建及重复无变化同步只能留一条创建活动');
   assert.equal(memory.activities[0]?.action, 'CREATE');
 
+  memory.tasks[0]!.remindedAt = '2026-08-21T01:00:00.000Z';
+  memory.tasks[0]!.lastOverdueNotifiedAt = '2026-08-21T02:00:00.000Z';
+
   const changed = desiredTask({
     collaboratorIds: [],
     title: '回访重点客户二次',
@@ -201,6 +204,21 @@ function createConcurrentPrismaHarness() {
     changedFields: ['title', 'dueAt', 'sourceVersion'],
   });
   assert.equal(JSON.stringify(memory.activities[1]?.metadata).includes('回访重点客户二次'), false);
+  assert.equal(memory.tasks[0]?.remindedAt, null, '来源截止时间变化后必须重置临期提醒');
+  assert.equal(memory.tasks[0]?.lastOverdueNotifiedAt, null, '来源截止时间变化后必须重置逾期提醒');
+
+  memory.tasks[0]!.remindedAt = '2026-08-22T01:00:00.000Z';
+  memory.tasks[0]!.lastOverdueNotifiedAt = '2026-08-22T02:00:00.000Z';
+  const movedDepartment = desiredTask({
+    collaboratorIds: [], title: changed.title, dueAt: changed.dueAt,
+    departmentId: 'dept-support', departmentNameSnapshot: '支持部', sourceVersion: 'v3',
+  });
+  await service.syncDesiredTask(movedDepartment, movedDepartment.sourceKey);
+  assert.equal(memory.tasks[0]?.remindedAt, null, '来源部门变化后必须重置临期提醒');
+  assert.equal(memory.tasks[0]?.lastOverdueNotifiedAt, null, '来源部门名称变化后必须重置逾期提醒');
+  assert.deepEqual(memory.activities[2]?.metadata, {
+    source: 'RECONCILIATION', changedFields: ['departmentId', 'departmentNameSnapshot', 'sourceVersion'],
+  });
 }
 
 {
@@ -219,7 +237,11 @@ function createConcurrentPrismaHarness() {
   assert.deepEqual(harness.rows.get(desired.sourceKey)?.collaboratorIds, [], '明确的空协作人列表不应被改写为 null');
   assert.deepEqual(harness.activities.map((item) => item.action), ['CREATE'], '并发创建必须只审计一次');
 
-  const changed = desiredTask({ collaboratorIds: [], title: '并发后更新', sourceVersion: 'v2' });
+  harness.rows.get(desired.sourceKey)!.remindedAt = new Date('2026-08-21T01:00:00.000Z');
+  harness.rows.get(desired.sourceKey)!.lastOverdueNotifiedAt = new Date('2026-08-21T02:00:00.000Z');
+  const changed = desiredTask({
+    collaboratorIds: [], title: '并发后更新', dueAt: '2026-08-22T09:00:00.000Z', sourceVersion: 'v2',
+  });
   await Promise.all([
     service.syncDesiredTask(changed, changed.sourceKey),
     service.syncDesiredTask(changed, changed.sourceKey),
@@ -227,8 +249,23 @@ function createConcurrentPrismaHarness() {
   assert.deepEqual(harness.activities.map((item) => item.action), ['CREATE', 'SOURCE_SYNC'], '并发相同更新必须只审计一次');
   assert.equal(harness.rows.get(desired.sourceKey)?.title, '并发后更新');
   assert.equal(harness.rows.get(desired.sourceKey)?.sourceVersion, 'v2');
+  assert.equal(harness.rows.get(desired.sourceKey)?.remindedAt, null);
+  assert.equal(harness.rows.get(desired.sourceKey)?.lastOverdueNotifiedAt, null);
   assert.deepEqual(harness.activities[1]?.metadata, {
-    source: 'RECONCILIATION', changedFields: ['title', 'sourceVersion'],
+    source: 'RECONCILIATION', changedFields: ['title', 'dueAt', 'sourceVersion'],
+  });
+
+  harness.rows.get(desired.sourceKey)!.remindedAt = new Date('2026-08-22T01:00:00.000Z');
+  harness.rows.get(desired.sourceKey)!.lastOverdueNotifiedAt = new Date('2026-08-22T02:00:00.000Z');
+  const movedDepartment = desiredTask({
+    collaboratorIds: [], title: changed.title, dueAt: changed.dueAt,
+    departmentId: 'dept-support', departmentNameSnapshot: '支持部', sourceVersion: 'v3',
+  });
+  await service.syncDesiredTask(movedDepartment, movedDepartment.sourceKey);
+  assert.equal(harness.rows.get(desired.sourceKey)?.remindedAt, null);
+  assert.equal(harness.rows.get(desired.sourceKey)?.lastOverdueNotifiedAt, null);
+  assert.deepEqual(harness.activities[2]?.metadata, {
+    source: 'RECONCILIATION', changedFields: ['departmentId', 'departmentNameSnapshot', 'sourceVersion'],
   });
 }
 

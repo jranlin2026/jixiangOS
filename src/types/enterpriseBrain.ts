@@ -92,6 +92,8 @@ export type EmployeeTask = {
 
 export type TaskActivity = {
   id: string;
+  /** Database-monotonic ordering used by durable lifecycle publication. */
+  sequence?: string;
   taskId: string;
   action: string;
   actorId: string | null;

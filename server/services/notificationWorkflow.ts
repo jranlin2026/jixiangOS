@@ -1,4 +1,4 @@
-import type { NotificationPublisher } from './notificationService';
+import type { NotificationEventInput, NotificationPublisher } from './notificationService';
 
 type Recipient = { id: string; name: string };
 type WorkflowClient = {
@@ -29,6 +29,13 @@ const DEFAULT_OKR_RULE = {
   checkInReminderMinutes: 24 * 60,
   riskEscalationMinutes: 24 * 60,
 };
+
+const DEFAULT_WORKBENCH_RULE = {
+  dueSoonMinutes: 60,
+  schedulerFailureThreshold: 3,
+};
+
+export type WorkbenchRuleConfig = typeof DEFAULT_WORKBENCH_RULE;
 
 const LEAD_POLICY_VERSION = 'v2';
 
@@ -71,6 +78,27 @@ async function loadRule<T extends Record<string, any>>(
   };
 }
 
+function boundedInteger(value: unknown, fallback: number, minimum: number, maximum: number) {
+  const parsed = Math.trunc(Number(value));
+  return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback;
+}
+
+async function loadWorkbenchRule(client: WorkflowClient): Promise<Rule<WorkbenchRuleConfig>> {
+  const stored = await client.notificationRule.findUnique({ where: { eventType: 'WORKBENCH_WORKFLOW' } });
+  const source = stored?.config && typeof stored.config === 'object' ? stored.config : {};
+  return {
+    enabled: stored?.enabled !== false,
+    // Phase 3 deliberately keeps workbench events in the in-app inbox only.
+    channels: [],
+    config: {
+      dueSoonMinutes: boundedInteger(source.dueSoonMinutes, DEFAULT_WORKBENCH_RULE.dueSoonMinutes, 0, 7 * 24 * 60),
+      schedulerFailureThreshold: boundedInteger(
+        source.schedulerFailureThreshold, DEFAULT_WORKBENCH_RULE.schedulerFailureThreshold, 1, 10,
+      ),
+    },
+  };
+}
+
 function nextShanghaiWorkdayNine(value: Date) {
   const local = new Date(value.getTime() + 8 * 60 * 60_000);
   let year = local.getUTCFullYear();
@@ -91,6 +119,25 @@ function nextShanghaiWorkdayNine(value: Date) {
 
 export function createNotificationWorkflow(publisher: NotificationPublisher) {
   return {
+    workbenchRule(client: WorkflowClient) {
+      return loadWorkbenchRule(client);
+    },
+
+    async publishWorkbench(
+      client: WorkflowClient,
+      input: Omit<NotificationEventInput, 'businessType' | 'channels' | 'requiresAck'>,
+    ) {
+      const rule = await loadWorkbenchRule(client);
+      if (!rule.enabled) return { accepted: false, created: false };
+      const result = await publisher.publish(client as any, {
+        ...input,
+        businessType: 'employee_task',
+        requiresAck: false,
+        channels: rule.channels,
+      });
+      return { accepted: true, created: result.created };
+    },
+
     async assignLead(client: WorkflowClient, input: {
       leadId: string;
       leadName: string;
@@ -412,4 +459,5 @@ export const notificationRuleDefaults = {
   LEAD_WORKFLOW: DEFAULT_LEAD_RULE,
   CUSTOMER_TODO_WORKFLOW: DEFAULT_TODO_RULE,
   OKR_WORKFLOW: DEFAULT_OKR_RULE,
+  WORKBENCH_WORKFLOW: DEFAULT_WORKBENCH_RULE,
 };

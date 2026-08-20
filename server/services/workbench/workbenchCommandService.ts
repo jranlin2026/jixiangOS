@@ -1,5 +1,5 @@
 import type { AuthenticatedUser } from '../../../src/types/auth';
-import type { EmployeeTask } from '../../../src/types/enterpriseBrain';
+import type { EmployeeTask, TaskActivity } from '../../../src/types/enterpriseBrain';
 import { transitionTaskStatus, TaskLifecycleDomainError } from '../../../src/domain/workbench/taskLifecycle';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../../src/shared/utils/permissions';
 import { failure as apiFailure, success, type ApiResponse } from '../../api/response';
@@ -27,7 +27,7 @@ const MAX_EVIDENCE_ITEMS = 20;
 type Dependencies = {
   repository: WorkbenchRepository;
   now?: () => Date;
-  notify?: (event: WorkbenchNotificationEvent) => Promise<void> | void;
+  notify?: (event: WorkbenchNotificationEvent) => Promise<unknown> | unknown;
 };
 
 const failure = (message: string, code: number): ApiResponse<EmployeeTask> => (
@@ -39,6 +39,7 @@ export type WorkbenchNotificationEvent = {
   task: EmployeeTask;
   actor: AuthenticatedUser;
   recipientIds: string[];
+  activity: TaskActivity;
 };
 
 export function createWorkbenchCommandService(deps: Dependencies) {
@@ -48,14 +49,20 @@ export function createWorkbenchCommandService(deps: Dependencies) {
     action: WorkbenchNotificationEvent['action'],
     response: ApiResponse<EmployeeTask>,
     actor: AuthenticatedUser,
+    activity: TaskActivity | undefined,
     recipientIds?: string[],
   ): Promise<ApiResponse<EmployeeTask>> => {
-    if (response.code === 0 && response.data && deps.notify) {
+    if (response.code === 0 && response.data && activity && deps.notify) {
       try {
-        await deps.notify({
+        const notificationResult = await deps.notify({
           action, task: response.data, actor,
           recipientIds: recipientIds || [response.data.employeeId],
+          activity,
         });
+        if (notificationResult && typeof notificationResult === 'object' && 'task' in notificationResult) {
+          const updated = (notificationResult as { task?: EmployeeTask | null }).task;
+          if (updated) return success(updated);
+        }
       } catch {
         // 通知是已提交业务事务之后的尽力操作，失败不得回滚任务。
       }
@@ -107,6 +114,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
         return failure('无权开始本人任务', 403);
       }
 
+      let notificationActivity: TaskActivity | undefined;
       const response = await deps.repository.transaction(async (repository) => {
         const task = await repository.findTaskForUpdate(taskId);
         if (!task || task.employeeId !== actor.id) {
@@ -125,13 +133,13 @@ export function createWorkbenchCommandService(deps: Dependencies) {
         const fromStatus = task.status;
         const updated = await repository.updateTask(task.id, { status, startedAt: now.toISOString() });
         if (!updated) return failure('任务状态已变化，请刷新后重试', 409);
-        await repository.appendActivity({
+        notificationActivity = await repository.appendActivity({
           taskId: task.id, action: 'START', actorId: actor.id, actorName: actor.name,
           fromStatus, toStatus: status, comment: null, metadata: null, createdAt: now,
         });
         return success(updated);
       });
-      return notifyAfterCommit('START', response, actor);
+      return notifyAfterCommit('START', response, actor, notificationActivity);
     },
 
     async completeTask(taskId: string, input: CompleteTaskInput, actor: AuthenticatedUser): Promise<ApiResponse<EmployeeTask>> {
@@ -151,6 +159,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
       if (!evidence) return failure('任务证据格式不正确，链接只允许 http 或 https', 400);
       if (activityComment === undefined) return failure('评论不能超过500个字符', 400);
 
+      let notificationActivity: TaskActivity | undefined;
       const response = await deps.repository.transaction(async (repository) => {
         const task = await repository.findTaskForUpdate(taskId);
         if (!task || task.employeeId !== actor.id) {
@@ -186,13 +195,13 @@ export function createWorkbenchCommandService(deps: Dependencies) {
           completedAt: now.toISOString(), returnedReason: null,
         });
         if (!updated) return failure('任务状态已变化，请刷新后重试', 409);
-        await repository.appendActivity({
+        notificationActivity = await repository.appendActivity({
           taskId: task.id, action: 'COMPLETE', actorId: actor.id, actorName: actor.name,
           fromStatus, toStatus: status, comment: activityComment, metadata: null, createdAt: now,
         });
         return success(updated);
       });
-      return notifyAfterCommit('COMPLETE', response, actor);
+      return notifyAfterCommit('COMPLETE', response, actor, notificationActivity);
     },
 
     async confirmTask(taskId: string, input: ConfirmTaskInput, actor: AuthenticatedUser): Promise<ApiResponse<EmployeeTask>> {
@@ -209,6 +218,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
       if (activityComment === undefined) return failure('评论不能超过500个字符', 400);
       if (!actor.departmentId) return failure('当前账号未绑定部门', 409);
 
+      let notificationActivity: TaskActivity | undefined;
       const response = await deps.repository.transaction(async (repository) => {
         const task = await repository.findTaskForUpdate(taskId);
         if (!task) return failure('任务不存在', 404);
@@ -232,14 +242,14 @@ export function createWorkbenchCommandService(deps: Dependencies) {
           returnedReason: null, qualityScore, qualityComment: activityComment,
         });
         if (!updated) return failure('任务状态已变化，请刷新后重试', 409);
-        await repository.appendActivity({
+        notificationActivity = await repository.appendActivity({
           taskId: task.id, action: 'CONFIRM', actorId: actor.id, actorName: actor.name,
           fromStatus, toStatus: status, comment: activityComment,
           metadata: qualityScore === null ? null : { qualityScore }, createdAt: now,
         });
         return success(updated);
       });
-      return notifyAfterCommit('CONFIRM', response, actor);
+      return notifyAfterCommit('CONFIRM', response, actor, notificationActivity);
     },
 
     async returnTask(taskId: string, input: { reason: string }, actor: AuthenticatedUser): Promise<ApiResponse<EmployeeTask>> {
@@ -251,6 +261,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
       if (!reason) return failure('退回任务必须填写原因', 400);
       if (!actor.departmentId) return failure('当前账号未绑定部门', 409);
 
+      let notificationActivity: TaskActivity | undefined;
       const response = await deps.repository.transaction(async (repository) => {
         const task = await repository.findTaskForUpdate(taskId);
         if (!task) return failure('任务不存在', 404);
@@ -274,13 +285,13 @@ export function createWorkbenchCommandService(deps: Dependencies) {
           confirmedByName: null, qualityScore: null, qualityComment: null,
         });
         if (!updated) return failure('任务状态已变化，请刷新后重试', 409);
-        await repository.appendActivity({
+        notificationActivity = await repository.appendActivity({
           taskId: task.id, action: 'RETURN', actorId: actor.id, actorName: actor.name,
           fromStatus, toStatus: status, comment: reason, metadata: null, createdAt: now,
         });
         return success(updated);
       });
-      return notifyAfterCommit('RETURN', response, actor);
+      return notifyAfterCommit('RETURN', response, actor, notificationActivity);
     },
 
     async reassignTask(taskId: string, input: { employeeId: string; reason: string }, actor: AuthenticatedUser): Promise<ApiResponse<EmployeeTask>> {
@@ -294,6 +305,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
       if (!actor.departmentId) return failure('当前账号未绑定部门', 409);
 
       let previousEmployeeId: string | undefined;
+      let notificationActivity: TaskActivity | undefined;
       const response = await deps.repository.transaction(async (repository) => {
         const task = await repository.findTaskForUpdate(taskId);
         if (!task) return failure('任务不存在', 404);
@@ -321,9 +333,11 @@ export function createWorkbenchCommandService(deps: Dependencies) {
           departmentNameSnapshot: employee.departmentName || null,
           positionIdSnapshot: employee.positionId || null,
           positionNameSnapshot: employee.positionName || null,
+          remindedAt: null,
+          lastOverdueNotifiedAt: null,
         });
         if (!updated) return failure('任务状态已变化，请刷新后重试', 409);
-        await repository.appendActivity({
+        notificationActivity = await repository.appendActivity({
           taskId: task.id, action: 'REASSIGN', actorId: actor.id, actorName: actor.name,
           fromStatus: task.status, toStatus: task.status, comment: reason,
           metadata: {
@@ -335,7 +349,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
         return success(updated);
       });
       return notifyAfterCommit(
-        'REASSIGN', response, actor,
+        'REASSIGN', response, actor, notificationActivity,
         previousEmployeeId && response.data
           ? Array.from(new Set([previousEmployeeId, response.data.employeeId]))
           : undefined,
@@ -348,6 +362,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
       }
       if (!actor.departmentId) return failure('当前账号未绑定部门', 409);
 
+      let notificationActivity: TaskActivity | undefined;
       const response = await deps.repository.transaction(async (repository) => {
         const task = await repository.findTaskForUpdate(taskId);
         if (!task) return failure('任务不存在', 404);
@@ -360,15 +375,21 @@ export function createWorkbenchCommandService(deps: Dependencies) {
         }
 
         const now = clock();
-        const updated = await repository.updateTask(task.id, { remindedAt: now.toISOString() });
-        if (!updated) return failure('任务状态已变化，请刷新后重试', 409);
-        await repository.appendActivity({
+        notificationActivity = await repository.appendActivity({
           taskId: task.id, action: 'REMIND', actorId: actor.id, actorName: actor.name,
-          fromStatus: task.status, toStatus: task.status, comment: null, metadata: null, createdAt: now,
+          fromStatus: task.status, toStatus: task.status, comment: null,
+          metadata: {
+            expectedEmployeeId: task.employeeId,
+            expectedDepartmentIdSnapshot: task.departmentIdSnapshot ?? null,
+            expectedDueAt: task.dueAt ?? null,
+            expectedWorkDate: task.workDate,
+            expectedSourceVersion: task.sourceVersion ?? null,
+          },
+          createdAt: now,
         });
-        return success(updated);
+        return success(task);
       });
-      return notifyAfterCommit('REMIND', response, actor);
+      return notifyAfterCommit('REMIND', response, actor, notificationActivity);
     },
 
     async cancelTask(taskId: string, input: { reason: string }, actor: AuthenticatedUser): Promise<ApiResponse<EmployeeTask>> {
@@ -380,6 +401,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
       if (!reason) return failure('取消任务必须填写原因', 400);
       if (!actor.departmentId) return failure('当前账号未绑定部门', 409);
 
+      let notificationActivity: TaskActivity | undefined;
       const response = await deps.repository.transaction(async (repository) => {
         const task = await repository.findTaskForUpdate(taskId);
         if (!task) return failure('任务不存在', 404);
@@ -402,13 +424,13 @@ export function createWorkbenchCommandService(deps: Dependencies) {
           status, canceledAt: now.toISOString(), canceledById: actor.id, canceledReason: reason,
         });
         if (!updated) return failure('任务状态已变化，请刷新后重试', 409);
-        await repository.appendActivity({
+        notificationActivity = await repository.appendActivity({
           taskId: task.id, action: 'CANCEL', actorId: actor.id, actorName: actor.name,
           fromStatus, toStatus: status, comment: reason, metadata: null, createdAt: now,
         });
         return success(updated);
       });
-      return notifyAfterCommit('CANCEL', response, actor);
+      return notifyAfterCommit('CANCEL', response, actor, notificationActivity);
     },
 
     async reopenTask(taskId: string, input: { reason: string }, actor: AuthenticatedUser): Promise<ApiResponse<EmployeeTask>> {
@@ -417,6 +439,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
       if (reason === undefined) return failure('重开原因不能超过500个字符', 400);
       if (!reason) return failure('重开任务必须填写原因', 400);
 
+      let notificationActivity: TaskActivity | undefined;
       const response = await deps.repository.transaction(async (repository) => {
         const task = await repository.findTaskForUpdate(taskId);
         if (!task) return failure('任务不存在', 404);
@@ -433,13 +456,13 @@ export function createWorkbenchCommandService(deps: Dependencies) {
           qualityScore: null, qualityComment: null,
         });
         if (!updated) return failure('任务状态已变化，请刷新后重试', 409);
-        await repository.appendActivity({
+        notificationActivity = await repository.appendActivity({
           taskId: task.id, action: 'REOPEN', actorId: actor.id, actorName: actor.name,
           fromStatus, toStatus: 'PENDING', comment: reason, metadata: null, createdAt: now,
         });
         return success(updated);
       });
-      return notifyAfterCommit('REOPEN', response, actor);
+      return notifyAfterCommit('REOPEN', response, actor, notificationActivity);
     },
   };
 }

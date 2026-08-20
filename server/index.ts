@@ -122,6 +122,8 @@ import { createEnterpriseTaskService } from './services/enterpriseBrain/taskServ
 import { createPrismaEnterpriseTaskRepository } from './services/enterpriseBrain/prismaTaskRepository';
 import { createWorkbenchScheduler } from './services/workbench/workbenchScheduler';
 import { createPrismaSchedulerStore } from './services/workbench/prismaSchedulerStore';
+import { createWorkbenchCommandService } from './services/workbench/workbenchCommandService';
+import { createWorkbenchNotificationService } from './services/workbench/workbenchNotificationService';
 import { createEnterpriseAiAssistantService } from './services/enterpriseBrain/aiAssistantService';
 import { createPrismaEnterpriseAiRepository } from './services/enterpriseBrain/prismaAiRepository';
 import { createEnterpriseCockpitService } from './services/enterpriseBrain/cockpitService';
@@ -219,6 +221,10 @@ const aiChatClient = createAiChatClient({ configReader: aiConfigService });
 const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
 const notificationPublisher = createNotificationPublisher();
 const notificationWorkflow = createNotificationWorkflow(notificationPublisher);
+const workbenchNotificationService = createWorkbenchNotificationService({
+  prisma,
+  workflow: notificationWorkflow,
+});
 const notificationInboxService = createNotificationInboxService(prisma);
 const notificationManagementService = createNotificationManagementService(prisma);
 const notificationWorker = createNotificationWorker({
@@ -413,6 +419,10 @@ const positionStandardService = createPositionStandardService({
 const enterpriseTaskRepository = createPrismaEnterpriseTaskRepository(prisma as any);
 const enterpriseTaskService = createEnterpriseTaskService({
   repository: enterpriseTaskRepository,
+  commandService: createWorkbenchCommandService({
+    repository: enterpriseTaskRepository,
+    notify: (event) => workbenchNotificationService.handleCommandEvent(event),
+  }),
   summarizeReview: (input) => aiChatClient.complete([
     {
       role: 'system',
@@ -438,6 +448,8 @@ const workbenchScheduler = createWorkbenchScheduler({
     if (result.code !== 0 || !result.data) throw new Error('WORKBENCH_DAILY_GENERATION_FAILED');
     return result.data;
   },
+  scanReminders: (input) => workbenchNotificationService.scanReminders(input),
+  onRunFailed: (input) => workbenchNotificationService.schedulerFailed(input),
   onError: () => console.error('WORKBENCH_SCHEDULER_FAILED'),
 });
 const enterpriseAiService = createEnterpriseAiAssistantService({

@@ -165,6 +165,27 @@ export function createPrismaEnterpriseTaskRepository(prisma: Client): Enterprise
           if (options?.signal?.aborted) throw options.signal.reason;
           const result = await tx.employeeTask.createMany({ data: batch, skipDuplicates: true });
           created += result.count;
+          if (result.count > 0) {
+            const inserted = await tx.employeeTask.findMany({
+              where: { id: { in: batch.map((row) => row.id) } },
+              select: { id: true },
+            });
+            if (inserted.length) {
+              await tx.taskActivity.createMany({
+                data: inserted.map((row: any) => ({
+                  id: `task-activity-${randomUUID()}`,
+                  taskId: row.id,
+                  action: 'CREATE',
+                  actorId: null,
+                  actorName: null,
+                  fromStatus: null,
+                  toStatus: 'PENDING',
+                  comment: null,
+                  metadata: { source: 'DAILY_GENERATION' },
+                })),
+              });
+            }
+          }
           if (options?.signal?.aborted) throw options.signal.reason;
         }
         return created;
@@ -231,8 +252,24 @@ export function createPrismaEnterpriseTaskRepository(prisma: Client): Enterprise
       return row ? mapTask(row) : null;
     },
     async createOneOffTask(input) {
-      const row = await prisma.employeeTask.create({ data: { ...generatedData(input), templateId: null, assignedById: input.assignedById, assignedByName: input.assignedByName }, include: { evidence: true } });
-      return mapTask(row);
+      return prisma.$transaction(async (tx: any) => {
+        const row = await tx.employeeTask.create({
+          data: {
+            ...generatedData(input), templateId: null,
+            assignedById: input.assignedById, assignedByName: input.assignedByName,
+          },
+          include: { evidence: true },
+        });
+        await tx.taskActivity.create({
+          data: {
+            id: `task-activity-${randomUUID()}`, taskId: row.id, action: 'CREATE',
+            actorId: input.assignedById, actorName: input.assignedByName,
+            fromStatus: null, toStatus: 'PENDING', comment: null,
+            metadata: { source: 'MANUAL_ASSIGNMENT' },
+          },
+        });
+        return mapTask(row);
+      }, { isolationLevel: 'Serializable' });
     },
     async upsertDailyReview(input) {
       const data = {

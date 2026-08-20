@@ -57,6 +57,7 @@ const tx = {
   },
   notificationDelivery: {
     create: async ({ data }: any) => {
+      if (deliveries.some((item) => item.notificationId === data.notificationId && item.channel === data.channel)) throw uniqueError();
       deliveries.push({ ...data, createdAt: at, updatedAt: at });
       return deliveries[deliveries.length - 1];
     },
@@ -103,6 +104,58 @@ const assigned = {
   dedupeKey: 'lead.assigned:lead-1:sales-1:2026-08-08T02:00:00.000Z',
   channels: ['FEISHU'] as const,
 };
+
+{
+  const state: { notifications: any[]; projections: any[]; deliveries: any[] } = {
+    notifications: [], projections: [], deliveries: [],
+  };
+  let failDelivery = true;
+  const root: any = {
+    async $transaction(work: (client: any) => Promise<unknown>) {
+      const staged = structuredClone(state);
+      const client: any = {
+        notification: {
+          create: async ({ data }: any) => {
+            if (staged.notifications.some((item) => item.dedupeKey === data.dedupeKey)) throw uniqueError();
+            const row = { ...data, resolvedAt: null, createdAt: at };
+            staged.notifications.push(row);
+            return row;
+          },
+          findUnique: async ({ where }: any) => staged.notifications.find((item) => item.dedupeKey === where.dedupeKey) || null,
+          findMany: async () => staged.notifications.filter((item) => !item.resolvedAt),
+          updateMany: async () => ({ count: 0 }),
+        },
+        notificationActivityProjection: {
+          findUnique: async ({ where }: any) => staged.projections.find((item) => item.activityKey === where.activityKey) || null,
+          create: async ({ data }: any) => { staged.projections.push(data); return data; },
+          updateMany: async () => ({ count: 0 }),
+        },
+        notificationDelivery: {
+          create: async ({ data }: any) => {
+            if (failDelivery) throw new Error('delivery write failed');
+            if (staged.deliveries.some((item) => item.notificationId === data.notificationId && item.channel === data.channel)) throw uniqueError();
+            staged.deliveries.push(data);
+            return data;
+          },
+        },
+      };
+      const result = await work(client);
+      Object.assign(state, staged);
+      return result;
+    },
+  };
+  const atomicPublisher = createNotificationPublisher({ now: () => at, createId: (prefix) => `${prefix}-atomic` });
+  await assert.rejects(() => atomicPublisher.publish(root, assigned), /delivery write failed/);
+  assert.deepEqual(state, { notifications: [], projections: [], deliveries: [] },
+    'notification, projection and deliveries must roll back together');
+
+  failDelivery = false;
+  (state.notifications as any[]).push({ ...assigned, id: 'legacy-partial', resolvedAt: null, createdAt: at });
+  const repaired = await atomicPublisher.publish(root, assigned);
+  assert.equal(repaired.created, false);
+  assert.equal(state.projections.length, 1, 'dedupe retry repairs a missing projection');
+  assert.equal(state.deliveries.length, 1, 'dedupe retry repairs a missing delivery');
+}
 
 const first = await publisher.publish(tx as any, assigned);
 const duplicate = await publisher.publish(tx as any, assigned);
@@ -199,5 +252,64 @@ const resolved = await publisher.resolveBusiness(tx as any, {
 assert.deepEqual(resolved, { notifications: 0, schedules: 1 });
 assert.equal(notifications[0].resolvedAt?.toISOString(), at.toISOString());
 assert.equal(schedules[0].status, 'CANCELED');
+
+await publisher.publish(tx as any, {
+  eventType: 'WORKBENCH_TASK_CONFIRMED', businessType: 'employee_task', businessId: 'workbench-task-1',
+  recipientId: 'sales-1', recipientName: '销售甲', title: '任务已确认', severity: 'S2',
+  actionUrl: '/tasks?taskId=workbench-task-1', requiresAck: false,
+  dedupeKey: 'workbench:workbench-task-1:activity-new:sales-1', channels: [],
+  metadata: { activityVersion: '2026-08-08T04:00:00.000Z' },
+});
+await publisher.publish(tx as any, {
+  eventType: 'WORKBENCH_TASK_RETURNED', businessType: 'employee_task', businessId: 'workbench-task-1',
+  recipientId: 'sales-1', recipientName: '销售甲', title: '任务已退回', severity: 'S1',
+  actionUrl: '/tasks?taskId=workbench-task-1', requiresAck: false,
+  dedupeKey: 'workbench:workbench-task-1:activity-old:sales-1', channels: [],
+  metadata: { activityVersion: '2026-08-08T03:00:00.000Z' },
+});
+const workbenchNotifications = notifications.filter((item) => item.businessId === 'workbench-task-1');
+assert.equal(workbenchNotifications.filter((item) => !item.resolvedAt).length, 1);
+assert.equal(workbenchNotifications.find((item) => !item.resolvedAt)?.eventType, 'WORKBENCH_TASK_CONFIRMED',
+  '延迟补发的旧活动不得覆盖较新的任务状态');
+
+const publishWorkbenchActivity = (businessId: string, eventType: string, recipientId: string, activityId: string, sequenceValue: string) => (
+  publisher.publish(tx as any, {
+    eventType, businessType: 'employee_task', businessId,
+    recipientId, recipientName: recipientId, title: eventType, severity: 'S1',
+    actionUrl: `/tasks?taskId=${businessId}`, dedupeKey: `workbench:${businessId}:${activityId}:${recipientId}`,
+    channels: [], metadata: {
+      activityId, activitySequence: sequenceValue, activityVersion: '2026-08-08T05:00:00.000Z',
+    },
+  })
+);
+
+await publishWorkbenchActivity('cross-confirm', 'WORKBENCH_TASK_COMPLETED', 'manager-1', 'complete-1', '101');
+await publishWorkbenchActivity('cross-confirm', 'WORKBENCH_TASK_CONFIRMED', 'employee-1', 'confirm-1', '102');
+assert.deepEqual(notifications.filter((item) => item.businessId === 'cross-confirm' && !item.resolvedAt)
+  .map((item) => item.eventType), ['WORKBENCH_TASK_CONFIRMED'],
+  'confirmation resolves the prior manager-audience completion notification');
+
+await publishWorkbenchActivity('cross-return', 'WORKBENCH_TASK_COMPLETED', 'manager-1', 'complete-2', '201');
+await publishWorkbenchActivity('cross-return', 'WORKBENCH_TASK_RETURNED', 'employee-1', 'return-2', '202');
+assert.deepEqual(notifications.filter((item) => item.businessId === 'cross-return' && !item.resolvedAt)
+  .map((item) => item.eventType), ['WORKBENCH_TASK_RETURNED'],
+  'return resolves the prior manager-audience completion notification');
+
+await publishWorkbenchActivity('cross-assignment', 'WORKBENCH_TASK_REASSIGNED', 'employee-old', 'assign-3', '301');
+await publishWorkbenchActivity('cross-assignment', 'WORKBENCH_TASK_REASSIGNED', 'employee-new', 'assign-3', '301');
+await publishWorkbenchActivity('cross-assignment', 'WORKBENCH_TASK_COMPLETED', 'manager-1', 'complete-3', '302');
+assert.deepEqual(notifications.filter((item) => item.businessId === 'cross-assignment' && !item.resolvedAt)
+  .map((item) => item.recipientId), ['manager-1'],
+  'a later activity resolves all assignment audiences while preserving the same-activity recipient batch');
+
+await publishWorkbenchActivity('same-time-reopen', 'WORKBENCH_TASK_CANCELED', 'employee-1', 'cancel-4', '401');
+await publishWorkbenchActivity('same-time-reopen', 'WORKBENCH_TASK_CREATED', 'employee-1', 'reopen-4', '402');
+assert.equal(notifications.find((item) => item.businessId === 'same-time-reopen' && !item.resolvedAt)?.eventType,
+  'WORKBENCH_TASK_CREATED', 'monotonic sequence orders same-millisecond reopen after cancellation');
+
+await publishWorkbenchActivity('same-time-complete', 'WORKBENCH_TASK_RETURNED', 'employee-1', 'return-5', '501');
+await publishWorkbenchActivity('same-time-complete', 'WORKBENCH_TASK_COMPLETED', 'manager-1', 'complete-5', '502');
+assert.equal(notifications.find((item) => item.businessId === 'same-time-complete' && !item.resolvedAt)?.eventType,
+  'WORKBENCH_TASK_COMPLETED', 'monotonic sequence orders same-millisecond completion after return');
 
 console.log('notification service tests passed');

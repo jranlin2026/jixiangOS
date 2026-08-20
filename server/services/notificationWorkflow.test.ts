@@ -162,4 +162,28 @@ await disabledWorkflow.riskOkr({ notificationRule: { findUnique: async () => ({ 
 assert.equal(published.length, 0, '目标提醒规则停用后不得发布通知');
 assert.equal(scheduled.length, 0, '目标提醒规则停用后不得建立定时提醒');
 
+published.length = 0;
+const workbenchResult = await workflow.publishWorkbench(tx as any, {
+  eventType: 'WORKBENCH_TASK_RETURNED', businessId: 'task-1',
+  recipientId: 'employee-1', recipientName: '员工甲',
+  title: '任务已被退回', content: '请进入我的工作台查看任务摘要并处理。',
+  severity: 'S1', actionUrl: '/tasks?taskId=task-1',
+  dedupeKey: 'workbench:task-1:activity-1:employee-1',
+  metadata: { activityId: 'activity-1' },
+});
+assert.deepEqual(workbenchResult, { accepted: true, created: true });
+assert.equal(published.length, 1);
+assert.equal(published[0].businessType, 'employee_task');
+assert.deepEqual(published[0].channels, [], '工作台第一阶段只生成站内通知');
+
+const storedWorkbenchRule = await workflow.workbenchRule({
+  notificationRule: { findUnique: async () => ({
+    enabled: true, channels: ['FEISHU'],
+    config: { dueSoonMinutes: 999999, schedulerFailureThreshold: 0 },
+  }) },
+} as any);
+assert.deepEqual(storedWorkbenchRule, {
+  enabled: true, channels: [], config: { dueSoonMinutes: 10080, schedulerFailureThreshold: 1 },
+});
+
 console.log('notification workflow tests passed');

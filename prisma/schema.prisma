@@ -674,6 +674,7 @@ model NotificationActivityProjection {
   activityKey          String   @id @db.VarChar(191)
   currentNotificationId String  @db.VarChar(64)
   versionAt            DateTime
+  versionSequence      BigInt   @default(0)
   stage                Int
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
@@ -1037,21 +1038,26 @@ model EmployeeTask {
 }
 
 model TaskActivity {
-  id         String   @id @db.VarChar(64)
-  taskId     String   @db.VarChar(64)
-  action     String   @db.VarChar(40)
-  actorId    String?  @db.VarChar(64)
-  actorName  String?  @db.VarChar(100)
-  fromStatus String?  @db.VarChar(24)
-  toStatus   String?  @db.VarChar(24)
-  comment    String?  @db.VarChar(500)
-  metadata   Json?
-  createdAt  DateTime @default(now())
+  id                      String   @id @db.VarChar(64)
+  sequence                BigInt   @unique @default(autoincrement())
+  taskId                  String   @db.VarChar(64)
+  action                  String   @db.VarChar(40)
+  actorId                 String?  @db.VarChar(64)
+  actorName               String?  @db.VarChar(100)
+  fromStatus              String?  @db.VarChar(24)
+  toStatus                String?  @db.VarChar(24)
+  comment                 String?  @db.VarChar(500)
+  metadata                Json?
+  notificationState       String   @default("PENDING") @db.VarChar(24)
+  notificationPublishedAt DateTime?
+  notificationSkipReason  String?  @db.VarChar(100)
+  createdAt               DateTime @default(now())
 
   task EmployeeTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId, createdAt])
   @@index([actorId, createdAt])
+  @@index([notificationState, sequence])
   @@map("task_activities")
 }
 

@@ -115,7 +115,7 @@ const last = <T>(items: T[]): T | undefined => items[items.length - 1];
 
 {
   const memory = createMemoryWorkbenchRepository({
-    tasks: [task()],
+    tasks: [task({ remindedAt: '2026-08-20T08:00:00.000Z', lastOverdueNotifiedAt: '2026-08-20T09:00:00.000Z' })],
     employees: [
       { id: 'employee-2', name: '员工乙', departmentId: 'dept-sales-child', departmentName: '销售一部', isActive: true },
       { id: 'outside', name: '外部员工', departmentId: 'dept-market', isActive: true },
@@ -140,6 +140,8 @@ const last = <T>(items: T[]): T | undefined => items[items.length - 1];
   assert.equal(reassigned.data?.employeeId, 'employee-2');
   assert.equal(reassigned.data?.departmentIdSnapshot, 'dept-sales-child');
   assert.equal(memory.tasks[0]?.departmentNameSnapshot, '销售一部', '内存仓储必须与 Prisma 一样保留转派部门名称快照');
+  assert.equal(memory.tasks[0]?.remindedAt, null, '转派后新负责人必须重新获得临期提醒');
+  assert.equal(memory.tasks[0]?.lastOverdueNotifiedAt, null, '转派后新负责人必须重新获得逾期提醒');
   assert.equal(last(memory.activities)?.action, 'REASSIGN');
   assert.deepEqual(last(memory.activities)?.metadata, {
     previousEmployeeId: 'employee-1',
@@ -153,10 +155,12 @@ const last = <T>(items: T[]): T | undefined => items[items.length - 1];
 {
   const memory = createMemoryWorkbenchRepository({ tasks: [task()] });
   let notificationAttempts = 0;
+  let notificationActivityId: string | undefined;
   const service = createWorkbenchCommandService({
     repository: memory.repository,
-    notify: async () => {
+    notify: async (event) => {
       notificationAttempts += 1;
+      notificationActivityId = event.activity?.id;
       assert.equal(memory.tasks[0]?.status, 'IN_PROGRESS', '通知必须在事务提交后调用');
       assert.equal(last(memory.activities)?.action, 'START', '通知时活动记录必须已提交');
       throw new Error('通知服务不可用');
@@ -165,8 +169,43 @@ const last = <T>(items: T[]): T | undefined => items[items.length - 1];
 
   const started = await service.startTask('task-1', employee);
   assert.equal(notificationAttempts, 1);
+  assert.equal(notificationActivityId, last(memory.activities)?.id, '通知必须携带已提交的不可变活动 ID');
   assert.equal(started.code, 0, '通知失败不得回滚任务');
   assert.equal(memory.tasks[0]?.status, 'IN_PROGRESS');
+}
+
+{
+  const memory = createMemoryWorkbenchRepository({
+    tasks: [task()],
+    departments: [
+      { id: 'dept-sales', parentId: null },
+      { id: 'dept-sales-child', parentId: 'dept-sales' },
+    ],
+  });
+  let markerWasUnsetAtPublish = false;
+  const service = createWorkbenchCommandService({
+    repository: memory.repository,
+    now: () => new Date('2026-08-20T10:00:00.000Z'),
+    notify: async (event) => {
+      markerWasUnsetAtPublish = !memory.tasks[0]?.remindedAt;
+      return { task: { ...event.task, remindedAt: event.activity.createdAt } };
+    },
+  });
+
+  const reminded = await service.remindTask('task-1', manager);
+  assert.equal(reminded.code, 0);
+  assert.equal(markerWasUnsetAtPublish, true, '通知成功前不得写入催办时间');
+  assert.equal(reminded.data?.remindedAt, '2026-08-20T10:00:00.000Z');
+  assert.equal(last(memory.activities)?.action, 'REMIND');
+  assert.equal(last(memory.activities)?.fromStatus, 'PENDING');
+  assert.equal(last(memory.activities)?.toStatus, 'PENDING');
+  assert.deepEqual(last(memory.activities)?.metadata, {
+    expectedEmployeeId: 'employee-1',
+    expectedDepartmentIdSnapshot: 'dept-sales-child',
+    expectedDueAt: null,
+    expectedWorkDate: '2026-08-20',
+    expectedSourceVersion: null,
+  });
 }
 
 {
@@ -180,14 +219,13 @@ const last = <T>(items: T[]): T | undefined => items[items.length - 1];
   const service = createWorkbenchCommandService({
     repository: memory.repository,
     now: () => new Date('2026-08-20T10:00:00.000Z'),
+    notify: async () => { throw new Error('notification unavailable'); },
   });
 
   const reminded = await service.remindTask('task-1', manager);
-  assert.equal(reminded.code, 0);
-  assert.equal(reminded.data?.remindedAt, '2026-08-20T10:00:00.000Z');
+  assert.equal(reminded.code, 0, '通知失败不得回滚已提交的催办活动');
+  assert.equal(memory.tasks[0]?.remindedAt, undefined, '通知失败必须保留无标记的可重试状态');
   assert.equal(last(memory.activities)?.action, 'REMIND');
-  assert.equal(last(memory.activities)?.fromStatus, 'PENDING');
-  assert.equal(last(memory.activities)?.toStatus, 'PENDING');
 }
 
 {
