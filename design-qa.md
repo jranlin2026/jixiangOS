@@ -44,6 +44,48 @@ final result: passed
 
 ---
 
+# 可调列宽表格吸顶表头修复 Design QA（2026-08-20）
+
+## 验收对象
+
+- Source visual truth：`browser:Selected browser region / Comment 1`（用户标注的客户列表表头错位区域，1280 px 宽）。
+- Customer implementation：`/tmp/jixiangos-customers-sticky-header-fixed.jpg`，1280 × 720，device scale factor 1。
+- Lead implementation：`/tmp/jixiangos-leads-sticky-header-fixed.jpg`，1280 × 720，device scale factor 1。
+- State：桌面端表格同时横向与纵向滚动；表头、左侧选择列和右侧操作列处于吸顶/冻结状态。
+- Normalization：源图与实现按相同 1280 px 页面宽度、相同桌面断点和表格滚动状态对照；焦点对比仅判断表头与首行交界区，不使用整页高度差异做视觉结论。
+
+## Findings and comparison history
+
+1. Initial P1：可调列宽普通表头被 `ResizableHeaderCell` 的 `position: relative` 覆盖，纵向滚动后离开吸顶位置；选择列和操作列仍吸顶，造成表头断层、头像穿入表头。
+2. Evidence before fix：客户表格 `scrollTop=90`、`scrollLeft=420` 时，普通表头为 `position: relative`、`y=194`，选择/操作表头为 `position: sticky`、`y=284`。
+3. Fix：通用可调列宽表头在 `.MuiTableCell-stickyHeader` 状态下显式恢复 `position: sticky; top: 0; z-index: 2`，同时保留普通表格的列宽拖拽定位容器。
+4. Post-fix customer evidence：同样滚动量下 10 个表头全部为 `position: sticky`且 `y=284`，选择列、普通表头、操作列同一高度。
+5. Post-fix lead evidence：`scrollTop=80`、`scrollLeft=258` 时 9 个表头全部为 `position: sticky`且 `y=280`。
+6. Scope audit：代码扫描确认同时使用 `ResizableHeaderCell` 和 `stickyHeader` 的业务页只有客户列表与线索列表；修复位于通用组件，后续新增同类表格自动获得正确行为。导入对话框等其他 `stickyHeader` 表格不使用该可调列宽组件，未受此缺陷影响。
+
+## Required fidelity surfaces
+
+- Fonts and typography：表头文字字体、字重、行高和截断策略未改变；滚动后文字不再消失。
+- Spacing and layout rhythm：表头、选择列、操作列保持同一 y 轴和原有列宽；分页仍固定在工作区底部。
+- Colors and visual tokens：继续使用原有表头底色、分隔线和语义状态色，没有新增视觉语言。
+- Image quality and asset fidelity：本次不涉及新图像资产；客户头像清晰度和裁切未改变，且不再穿透表头。
+- Copy and content：所有表头、数据、操作与分页文案未改动。
+- Accessibility and interactions：列宽拖拽手柄仍保留 `role="separator"` 和 aria label；横纵滚动、冻结列和分页交互正常。
+
+## Verification
+
+- Browser page identity / meaningful DOM / framework overlay：passed。
+- Customer horizontal + vertical scroll assertion：passed。
+- Lead horizontal + vertical scroll assertion：passed。
+- Console：无应用错误；仅有已知 React Router v7 future-flag warnings。
+- `npx tsx src/shared/components/ResizableTable.test.ts`：passed。
+- `npx tsc -b --pretty false`：passed。
+- `npm run build`：passed；仅保留既有 chunk-size warning。
+
+final result: passed
+
+---
+
 # 全局导航、系统设置与列表滚动 Design QA（2026-08-20）
 
 ## Source and implementation

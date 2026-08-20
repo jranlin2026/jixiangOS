@@ -4,6 +4,7 @@ import {
   createAutoTableStorageKey,
   getAutoColumnId,
   readColumnWidths,
+  RESIZABLE_HEADER_CELL_POSITION_SX,
   resizeColumnWidths,
   type ColumnWidthMap,
 } from './ResizableTable';
@@ -47,3 +48,16 @@ assert.deepEqual(resizeColumnWidths(defaults, 'name', -200), { name: 96, phone: 
 assert.equal(createAutoTableStorageKey('/refund-center', 2), 'aaos_auto_table_column_widths_v2:/refund-center:2');
 assert.equal(getAutoColumnId('客户 客户列宽调整', 1), '客户');
 assert.equal(getAutoColumnId('', 3), 'column-3');
+
+assert.equal(
+  RESIZABLE_HEADER_CELL_POSITION_SX.position,
+  'relative',
+  '普通表头需作为列宽拖拽手柄的定位容器',
+);
+assert.deepEqual(
+  RESIZABLE_HEADER_CELL_POSITION_SX['&.MuiTableCell-stickyHeader'],
+  { position: 'sticky', top: 0, zIndex: 2 },
+  '可调列宽表头必须保留 MUI stickyHeader 的吸顶定位和层级',
+);
+
+console.log('resizable table tests passed');

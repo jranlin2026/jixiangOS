@@ -67,6 +67,15 @@ export const getResizableCellSx = (width?: number): SxProps<Theme> => ({
   whiteSpace: 'nowrap',
 });
 
+export const RESIZABLE_HEADER_CELL_POSITION_SX = {
+  position: 'relative' as const,
+  '&.MuiTableCell-stickyHeader': {
+    position: 'sticky' as const,
+    top: 0,
+    zIndex: 2,
+  },
+};
+
 type ResizableHeaderCellProps = TableCellProps & {
   columnId: string;
   width: number;
@@ -121,7 +130,7 @@ const ResizableHeaderCell: React.FC<ResizableHeaderCellProps> = ({
       sx={[
         getResizableCellSx(width),
         {
-          position: 'relative',
+          ...RESIZABLE_HEADER_CELL_POSITION_SX,
           pr: 2.5,
           userSelect: 'none',
         },
