@@ -34,7 +34,7 @@ function mapTemplate(row: any): TaskTemplateRecord {
 
 function mapTask(row: any): EmployeeTaskRecord {
   return {
-    id: row.id, templateId: row.templateId || null, employeeId: row.employeeId, employeeName: row.employeeName,
+    id: row.id, templateId: row.templateId || null, sourceKey: row.sourceKey || null, employeeId: row.employeeId, employeeName: row.employeeName,
     departmentIdSnapshot: row.departmentIdSnapshot || null, departmentNameSnapshot: row.departmentNameSnapshot || null,
     positionIdSnapshot: row.positionIdSnapshot || null, positionNameSnapshot: row.positionNameSnapshot || null,
     standardVersionIdSnapshot: row.standardVersionIdSnapshot || null, workDate: dateText(row.workDate),
@@ -57,8 +57,15 @@ function mapReview(row: any): DailyReviewRecord {
 }
 
 function generatedData(row: GeneratedTaskInput) {
+  const id = `task-${randomUUID()}`;
   return {
-    id: `task-${randomUUID()}`, templateId: row.templateId, employeeId: row.employeeId, employeeName: row.employeeName,
+    id,
+    templateId: row.templateId,
+    sourceKey: row.templateId
+      ? `template:${row.templateId}:${row.employeeId}:${row.workDate}`
+      : `manual:${id}`,
+    employeeId: row.employeeId,
+    employeeName: row.employeeName,
     departmentIdSnapshot: row.departmentIdSnapshot, departmentNameSnapshot: row.departmentNameSnapshot,
     positionIdSnapshot: row.positionIdSnapshot, positionNameSnapshot: row.positionNameSnapshot,
     standardVersionIdSnapshot: row.standardVersionIdSnapshot, workDate: new Date(`${row.workDate}T00:00:00Z`),

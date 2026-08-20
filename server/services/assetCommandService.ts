@@ -1690,6 +1690,7 @@ export function createAssetCommandService(
               data: {
                 id: employeeTaskId,
                 templateId: null,
+                sourceKey: `marketing_publish:${batchId}:${account.id}`,
                 employeeId: employee.id,
                 employeeName: employee.name,
                 departmentIdSnapshot: employee.departmentId || null,

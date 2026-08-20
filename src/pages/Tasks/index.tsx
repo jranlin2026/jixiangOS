@@ -44,9 +44,11 @@ const statusMap: Record<
   { label: string; color: "default" | "info" | "warning" | "success" }
 > = {
   PENDING: { label: "待完成", color: "warning" },
+  IN_PROGRESS: { label: "处理中", color: "info" },
   COMPLETED: { label: "待确认", color: "info" },
   CONFIRMED: { label: "已确认", color: "success" },
   RETURNED: { label: "已退回", color: "default" },
+  CANCELED: { label: "已取消", color: "default" },
 };
 
 const isMarketingPublishTask = (task: Pick<EmployeeTask, "sourceType"> | null | undefined) =>

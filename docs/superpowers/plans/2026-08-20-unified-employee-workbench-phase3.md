@@ -59,7 +59,7 @@ Expected: FAIL because the migration and new schema fields do not exist.
 - [ ] **Step 3: Add schema fields and activity relation**
 
 ```prisma
-sourceKey             String    @unique @db.VarChar(180)
+sourceKey             String?   @unique @db.VarChar(180)
 taskType              String    @default("ACTION") @db.VarChar(32)
 priority              String    @default("NORMAL") @db.VarChar(16)
 businessModule        String    @default("GENERAL") @db.VarChar(40)
@@ -79,7 +79,7 @@ sourceVersion         String?   @db.VarChar(80)
 activities            TaskActivity[]
 ```
 
-Define `TaskActivity` with task ID, action, actor snapshots, from/to status, comment, JSON metadata, and `createdAt`. In SQL, add nullable columns first, backfill `sourceKey = CONCAT('legacy:employee_task:', id)`, then make it non-null and unique.
+Define `TaskActivity` with task ID, action, actor snapshots, from/to status, comment, JSON metadata, and `createdAt`. In SQL, add nullable columns first, backfill `sourceKey = CONCAT('legacy:employee_task:', id)`, and add its unique index while the column remains nullable so old-release writers can coexist during deployment. Task 17 owns the separate final backfill audit and immutable migration that makes `sourceKey` non-null only after all old writers are retired.
 
 - [ ] **Step 4: Regenerate Prisma and run migration contract**
 
@@ -907,6 +907,7 @@ git commit -m "feat(workbench): add owner execution cockpit"
 
 **Interfaces:**
 - Backfills source keys/modules/routes, links old marketing targets to tasks, reports counts and broken references, and never deletes legacy rows.
+- After the old API and all old task writers are retired, verifies no null `sourceKey` remains and applies a separate immutable contract migration that makes `employee_tasks.sourceKey` non-null.
 - Runbook defines migration, enablement order, rollback switches, health checks, and role setup.
 
 - [ ] **Step 1: Write failing backfill and compatibility tests**
@@ -920,7 +921,7 @@ Expected: FAIL because backfill and release contract are absent.
 
 - [ ] **Step 3: Implement backfill, startup registration, and runbook**
 
-Backfill in batches with stable cursors. Produce `{ scanned, updated, skipped, brokenReferences, conflicts }`. Startup logs only counts and safe error codes. Feature switches independently control reconciliation, reminders, new UI, and structured marketing reads.
+Backfill in batches with stable cursors. Produce `{ scanned, updated, skipped, brokenReferences, conflicts }`. Startup logs only counts and safe error codes. Feature switches independently control reconciliation, reminders, new UI, and structured marketing reads. After a verify-only run reports zero null source keys and old writers are stopped, add and apply the separate `sourceKey` NOT NULL contract migration.
 
 ```ts
 export type WorkbenchBackfillReport = {

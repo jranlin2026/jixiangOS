@@ -26,6 +26,7 @@ export type TaskPositionRecord = { id: string; departmentId: string | null; isAc
 export type EmployeeTaskRecord = {
   id: string;
   templateId: string | null;
+  sourceKey?: string | null;
   employeeId: string;
   employeeName: string;
   departmentIdSnapshot: string | null;
