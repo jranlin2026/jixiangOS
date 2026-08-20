@@ -2,9 +2,9 @@ import type { PaletteOptions } from '@mui/material/styles/createPalette';
 
 const palette: PaletteOptions = {
   primary: {
-    main: '#1E6BFF',
-    light: '#5B91FF',
-    dark: '#124BB8',
+    main: '#7C3AED',
+    light: '#9B72F2',
+    dark: '#5B21B6',
     contrastText: '#ffffff',
   },
   secondary: {
@@ -38,15 +38,15 @@ const palette: PaletteOptions = {
     contrastText: '#ffffff',
   },
   background: {
-    default: '#F6F8FB',
+    default: '#F2F2F7',
     paper: '#ffffff',
   },
   text: {
-    primary: '#101828',
-    secondary: '#667085',
-    disabled: '#98A2B3',
+    primary: '#1F2937',
+    secondary: '#6B7280',
+    disabled: '#A0A5AF',
   },
-  divider: '#DDE4EC',
+  divider: '#E5E7EB',
 };
 
 /** 产品等级颜色映射 */

@@ -3,21 +3,21 @@ import { Box, Button, Chip, Stack, Tab, Tabs, Typography } from '@mui/material';
 import type { BoxProps, ButtonProps, SxProps, Theme } from '@mui/material';
 
 export const moduleTokens = {
-  page: '#F8F7FC',
+  page: '#F2F2F7',
   surface: '#FFFFFF',
-  ink: '#19152D',
-  muted: '#706B86',
-  line: '#E8E4F1',
-  softLine: '#EEEAF5',
-  subtle: '#FAF9FD',
-  blue: '#7447F5',
+  ink: '#1F2937',
+  muted: '#6B7280',
+  line: '#E5E7EB',
+  softLine: '#EEF0F3',
+  subtle: '#F9F9FC',
+  blue: '#7C3AED',
   green: '#059669',
   amber: '#B76A00',
   red: '#D92D20',
   gray: '#64748B',
 };
 
-export const moduleRadius = '12px';
+export const moduleRadius = '14px';
 
 type ModulePageProps = BoxProps & {
   maxWidth?: number | string;
@@ -74,7 +74,7 @@ export const ModuleHeader: React.FC<ModuleHeaderProps> = ({ title, description, 
     sx={{ mb: 2.5, ...sx }}
   >
     <Box sx={{ minWidth: 0 }}>
-      <Typography variant="h5" sx={{ fontWeight: 800, color: moduleTokens.ink, lineHeight: 1.25 }}>
+      <Typography variant="h5" sx={{ fontWeight: 900, color: moduleTokens.ink, lineHeight: 1.25, letterSpacing: '-0.015em' }}>
         {title}
       </Typography>
       {description ? (
@@ -102,7 +102,7 @@ export const ModuleTabs: React.FC<ModuleTabsProps> = ({ children, sx, ...props }
       mb: 2,
       minHeight: 52,
       px: { xs: 0.5, md: 1.5 },
-      bgcolor: '#FCFBFF',
+      bgcolor: '#FBFBFD',
       borderTop: `1px solid ${moduleTokens.softLine}`,
       borderBottom: `1px solid ${moduleTokens.line}`,
       '& .MuiTabs-flexContainer': {
@@ -122,7 +122,7 @@ export const ModuleTabs: React.FC<ModuleTabsProps> = ({ children, sx, ...props }
         transition: 'color 160ms ease, background-color 160ms ease',
         '&:hover': {
           color: moduleTokens.blue,
-          bgcolor: '#F7F3FF',
+          bgcolor: '#F5F3FF',
         },
       },
       '& .MuiTab-root.Mui-selected': {

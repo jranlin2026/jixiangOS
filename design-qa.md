@@ -637,3 +637,34 @@ No P0, P1, P2, or P3 findings remain.
 - 新 Logo 没有新增交互，也未改变导航点击区域。
 
 final result: passed
+
+---
+
+# 参考站视觉令牌同步 Design QA
+
+- Reference source：`https://agent2.taojinshidai.com/#/`，在用户已登录的 Chrome 中只读审查。
+- Reference states：`/tmp/jixiangos-reference-audit/01-home.png`、`02-works.png`、`03-create.png`。
+- Local states：`/tmp/jixiangos-reference-audit/04-settings-after.png`、`05-finance-after.png`、`06-orders-after.png`。
+- Scope：应用底色、顶部栏、侧边栏、模块标题、主次按钮、输入框聚焦态、卡片、表格表头和分页色彩；不改业务结构和数据语义。
+
+## 视觉结论
+
+- 页面底色统一为 `#F2F2F7`，正文统一为 `#1F2937`，弱文字和边线改为中性灰，减少原先偏粉紫的泛色。
+- 主操作色统一为 `#7C3AED`；紫色只用于主按钮、选中态、链接和聚焦反馈，避免大面积抢夺表格内容层级。
+- 顶部栏和侧栏改为近白半层级表面，保留极弱阴影；侧栏选中项增加窄紫色竖线，提升长菜单中的定位效率。
+- 主模块页签继续使用已确认的下划线方案；参考站的分段胶囊仅用于局部切换，不强行替换系统一级导航。
+- 卡片、输入框、按钮圆角和焦点环统一；高密度业务表格继续保持紧凑行高、固定表头与统一分页语义。
+
+## 交互与回归
+
+- 系统设置：一级与二级页签、组织树、成员表格和统一分页均正常。
+- 财务中心：高密度售后挽回分账表格无断裂，筛选器和状态色仍可辨。
+- 订单管理：订单列表无溢出；点击“订单审核台”后 URL 更新为 `?tab=review`，选中态正确。
+- Chrome 控制台无新增 error；仅保留既有 React Router v7 future-flag warning。
+- `moduleNavigationVisualContract.test.ts`、`appShellResponsive.test.ts`、`uiPolishStatic.test.ts` 和 `npm run build` 均通过。
+
+## Findings
+
+No P0, P1, P2, or P3 findings remain.
+
+final result: passed

@@ -54,7 +54,7 @@ const TopHeader: React.FC = () => {
       sx={{
         display: { xs: 'none', md: 'flex' },
         alignItems: 'center',
-        minHeight: 68,
+        minHeight: 72,
         px: { md: 2.5, xl: 3.5 },
         gap: 2,
         bgcolor: shell.header,
@@ -74,8 +74,9 @@ const TopHeader: React.FC = () => {
           ml: 'auto',
           '& .MuiOutlinedInput-root': {
             bgcolor: shell.surface,
-            minHeight: 42,
-            boxShadow: '0 5px 18px rgba(69, 48, 112, 0.035)',
+            minHeight: 44,
+            borderRadius: 3,
+            boxShadow: '0 2px 12px rgba(31, 41, 55, 0.04)',
           },
         }}
         InputProps={{
@@ -105,12 +106,12 @@ const TopHeader: React.FC = () => {
         <Stack direction="row" spacing={1.1} alignItems="center" sx={{ width: '100%' }}>
           <Avatar
             src={currentUser?.avatar}
-            sx={{ width: 38, height: 38, bgcolor: '#E8DEFF', color: '#7447F5', fontWeight: 900 }}
+            sx={{ width: 38, height: 38, bgcolor: shell.violetSoft, color: shell.violet, fontWeight: 900 }}
           >
             {currentUser?.name?.slice(0, 1) || '享'}
           </Avatar>
           <Box sx={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-            <Typography variant="body2" sx={{ color: '#19152D', fontWeight: 900, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 900, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {currentUser?.name || '系统用户'}
             </Typography>
             <Typography variant="caption" sx={{ color: '#8A849A', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

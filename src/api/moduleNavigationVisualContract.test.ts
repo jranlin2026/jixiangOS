@@ -14,6 +14,8 @@ assert.match(moduleShell, /height: 4/, '模块主页签应使用清晰的紫色�
 assert.match(moduleShell, /borderBottom: `1px solid \$\{moduleTokens\.line\}`/, '模块主页签必须保留完整底部分隔线。');
 assert.match(sidebar, /shellVisualTokens as shell/, '侧边栏必须复用应用框架视觉令牌。');
 assert.match(topHeader, /shellVisualTokens as shell/, '顶部栏必须复用应用框架视觉令牌。');
-assert.equal(shellVisualTokens.sidebar, '#FCFBFF');
-assert.equal(shellVisualTokens.header, '#FDFCFF');
-assert.equal(shellVisualTokens.violet, '#7447F5');
+assert.equal(shellVisualTokens.page, '#F2F2F7');
+assert.equal(shellVisualTokens.sidebar, '#FAFAFD');
+assert.equal(shellVisualTokens.header, '#FCFCFE');
+assert.equal(shellVisualTokens.ink, '#1F2937');
+assert.equal(shellVisualTokens.violet, '#7C3AED');

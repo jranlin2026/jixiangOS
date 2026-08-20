@@ -6,7 +6,7 @@ export const APP_SHELL_VIEWPORT_SX = {
   maxWidth: '100vw',
   height: '100dvh',
   overflow: 'hidden',
-  bgcolor: '#F8F7FC',
+  bgcolor: '#F2F2F7',
 } as const;
 
 export const APP_SHELL_MAIN_SX = {
@@ -17,7 +17,7 @@ export const APP_SHELL_MAIN_SX = {
   minHeight: 0,
   height: '100%',
   overflow: 'hidden',
-  bgcolor: '#F8F7FC',
+  bgcolor: '#F2F2F7',
 } as const;
 
 export type MobileNavigationAction = { type: 'OPEN' | 'CLOSE' | 'NAVIGATE' };

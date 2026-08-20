@@ -1,17 +1,17 @@
 export const shellVisualTokens = {
-  page: '#F8F7FC',
-  sidebar: '#FCFBFF',
-  header: '#FDFCFF',
+  page: '#F2F2F7',
+  sidebar: '#FAFAFD',
+  header: '#FCFCFE',
   surface: '#FFFFFF',
-  ink: '#19152D',
-  muted: '#706B86',
-  mutedStrong: '#625D73',
-  icon: '#918AA3',
-  line: '#E9E4F2',
-  softLine: '#F0ECF6',
-  violet: '#7447F5',
-  violetSoft: '#F1EBFF',
-  violetHover: '#F7F3FF',
+  ink: '#1F2937',
+  muted: '#6B7280',
+  mutedStrong: '#5F6674',
+  icon: '#8A909C',
+  line: '#E5E7EB',
+  softLine: '#EEF0F3',
+  violet: '#7C3AED',
+  violetSoft: '#EDE9FE',
+  violetHover: '#F5F3FF',
 } as const;
 
-export const shellSurfaceShadow = '0 10px 30px rgba(69, 48, 112, 0.055)';
+export const shellSurfaceShadow = '0 4px 24px -12px rgba(31, 41, 55, 0.14)';

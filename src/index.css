@@ -16,8 +16,8 @@ body {
     'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f6f8fb;
-  color: #101828;
+  background-color: #f2f2f7;
+  color: #1f2937;
 }
 
 #root {
@@ -43,13 +43,13 @@ body {
 }
 
 :root {
-  --jx-page: #f6f8fb;
+  --jx-page: #f2f2f7;
   --jx-surface: #ffffff;
-  --jx-ink: #101828;
-  --jx-muted: #667085;
-  --jx-line: #dde4ec;
-  --jx-soft-line: #eef2f6;
-  --jx-blue: #1e6bff;
+  --jx-ink: #1f2937;
+  --jx-muted: #6b7280;
+  --jx-line: #e5e7eb;
+  --jx-soft-line: #eef0f3;
+  --jx-blue: #7c3aed;
   --jx-cyan: #087c8c;
   --jx-green: #16845b;
   --jx-amber: #b46a08;

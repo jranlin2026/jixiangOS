@@ -44,7 +44,7 @@ assert.deepEqual(shellState.APP_SHELL_VIEWPORT_SX, {
   maxWidth: '100vw',
   height: '100dvh',
   overflow: 'hidden',
-  bgcolor: '#F8F7FC',
+  bgcolor: '#F2F2F7',
 });
 assert.deepEqual(shellState.APP_SHELL_MAIN_SX, {
   display: 'flex',
@@ -54,5 +54,5 @@ assert.deepEqual(shellState.APP_SHELL_MAIN_SX, {
   minHeight: 0,
   height: '100%',
   overflow: 'hidden',
-  bgcolor: '#F8F7FC',
+  bgcolor: '#F2F2F7',
 });

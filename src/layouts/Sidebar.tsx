@@ -97,7 +97,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
             const isActive = isNavigationItemActive(item, location.pathname, location.search);
             return (
               <ListItem key={item.id} disablePadding sx={{ mb: 0.25 }}>
-                <ListItemButton onClick={() => navigateTo(item.path)} sx={{ borderRadius: 2.25, py: 1, px: 1.35, minHeight: 46, bgcolor: isActive ? shell.violetSoft : 'transparent', color: isActive ? shell.violet : shell.mutedStrong, '&:hover': { bgcolor: isActive ? shell.violetSoft : shell.violetHover } }}>
+                <ListItemButton onClick={() => navigateTo(item.path)} sx={{ position: 'relative', overflow: 'hidden', borderRadius: 2.5, py: 1, px: 1.35, minHeight: 48, bgcolor: isActive ? shell.violetSoft : 'transparent', color: isActive ? shell.violet : shell.mutedStrong, '&::before': isActive ? { content: '""', position: 'absolute', left: 0, top: 10, bottom: 10, width: 4, borderRadius: '0 4px 4px 0', bgcolor: shell.violet } : undefined, '&:hover': { bgcolor: isActive ? shell.violetSoft : shell.violetHover } }}>
                   <ListItemIcon sx={{ minWidth: 36, color: isActive ? shell.violet : shell.icon }}>{fixedIcons[item.id]}</ListItemIcon>
                   <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: '0.8125rem', fontWeight: isActive ? 900 : 700 }} />
                 </ListItemButton>
@@ -113,7 +113,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
             return (
               <React.Fragment key={group.id}>
                 <ListItem disablePadding sx={{ mb: 0.25 }}>
-                  <ListItemButton onClick={() => setExpandedGroupId((current) => current === group.id ? null : group.id)} aria-expanded={isExpanded} sx={{ borderRadius: 2.25, py: 0.9, px: 1.35, minHeight: 44, bgcolor: isActive ? '#F8F5FF' : 'transparent', color: isActive ? shell.violet : shell.ink, '&:hover': { bgcolor: shell.violetHover } }}>
+                  <ListItemButton onClick={() => setExpandedGroupId((current) => current === group.id ? null : group.id)} aria-expanded={isExpanded} sx={{ borderRadius: 2.5, py: 0.9, px: 1.35, minHeight: 46, bgcolor: isActive ? '#F7F5FF' : 'transparent', color: isActive ? shell.violet : shell.ink, '&:hover': { bgcolor: shell.violetHover } }}>
                     <ListItemIcon sx={{ minWidth: 36, color: isActive ? shell.violet : shell.icon }}>{groupIcons[group.id]}</ListItemIcon>
                     <ListItemText primary={group.label} primaryTypographyProps={{ fontSize: '0.8125rem', fontWeight: 900 }} />
                     {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
@@ -125,7 +125,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
                       const childActive = isNavigationItemActive(item, location.pathname, location.search);
                       return (
                         <ListItem key={item.id} disablePadding sx={{ mb: 0.25 }}>
-                          <ListItemButton onClick={() => navigateTo(item.path)} sx={{ borderRadius: 2.25, py: 0.75, px: 1.25, minHeight: 36, bgcolor: childActive ? shell.violetSoft : 'transparent', color: childActive ? shell.violet : shell.mutedStrong, '&:hover': { bgcolor: childActive ? shell.violetSoft : shell.violetHover } }}>
+                          <ListItemButton onClick={() => navigateTo(item.path)} sx={{ position: 'relative', overflow: 'hidden', borderRadius: 2.5, py: 0.75, px: 1.25, minHeight: 38, bgcolor: childActive ? shell.violetSoft : 'transparent', color: childActive ? shell.violet : shell.mutedStrong, '&::before': childActive ? { content: '""', position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, borderRadius: '0 3px 3px 0', bgcolor: shell.violet } : undefined, '&:hover': { bgcolor: childActive ? shell.violetSoft : shell.violetHover } }}>
                             <ListItemText primary={<Box sx={{ display: 'flex', alignItems: 'center' }}>{item.label}{renderBadge(item.badge)}</Box>} primaryTypographyProps={{ fontSize: '0.765rem', fontWeight: childActive ? 900 : 700 }} />
                           </ListItemButton>
                         </ListItem>
