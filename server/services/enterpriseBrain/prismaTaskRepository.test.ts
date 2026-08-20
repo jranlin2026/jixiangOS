@@ -1,0 +1,186 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createPrismaEnterpriseTaskRepository } from './prismaTaskRepository';
+import type { GeneratedTaskInput } from './taskRepository';
+
+function generated(index: number): GeneratedTaskInput {
+  return {
+    templateId: 'template-1', employeeId: `employee-${index}`, employeeName: `员工${index}`,
+    departmentIdSnapshot: null, departmentNameSnapshot: null, positionIdSnapshot: null,
+    positionNameSnapshot: null, standardVersionIdSnapshot: null, workDate: '2026-08-20',
+    title: '日任务', description: null, targetValue: null, unit: null, evidenceRequired: false,
+    dueAt: null,
+  };
+}
+
+function transactionalPrisma(input: {
+  failAt?: number;
+  counts?: number[];
+  afterMutation?: () => void;
+  simulatedBatchDurationMs?: number;
+} = {}) {
+  const committed: any[] = [];
+  const calls: string[] = [];
+  let transactionCount = 0;
+  let mutationCount = 0;
+  let transactionOptions: any;
+  let leaseExtensionMs: number | undefined;
+  let committedLeaseExtensionMs: number | undefined;
+  let simulatedElapsedMs = 0;
+  const mutate = async (data: any[], target: any[]) => {
+    mutationCount += 1;
+    calls.push(`tasks:${mutationCount}`);
+    simulatedElapsedMs += input.simulatedBatchDurationMs || 0;
+    if (mutationCount === input.failAt) throw new Error('SIMULATED_CHUNK_FAILURE');
+    target.push(...data);
+    input.afterMutation?.();
+    return { count: input.counts?.[mutationCount - 1] ?? data.length };
+  };
+  const prisma: any = {
+    async $queryRawUnsafe(sql: string) {
+      calls.push(`lease:${sql}`);
+      return [{ leaseKey: 'workbench:scheduler' }];
+    },
+    employeeTask: {
+      async createMany({ data }: any) { return mutate(data, committed); },
+    },
+    async $transaction(work: any, options?: any) {
+      transactionCount += 1;
+      transactionOptions = options;
+      const staged: any[] = [];
+      let stagedLeaseExtensionMs: number | undefined;
+      const tx = {
+        async $queryRawUnsafe(sql: string) {
+          calls.push(`lease:${sql}`);
+          return [{ leaseKey: 'workbench:scheduler' }];
+        },
+        async $executeRawUnsafe(sql: string, ...values: any[]) {
+          calls.push(`extend:${sql}`);
+          leaseExtensionMs = Number(values[0]) / 1_000;
+          stagedLeaseExtensionMs = leaseExtensionMs;
+          return 1;
+        },
+        employeeTask: {
+          async createMany({ data }: any) { return mutate(data, staged); },
+        },
+      };
+      const result = await work(tx);
+      if (simulatedElapsedMs > (options?.timeout || 5_000)) throw new Error('SIMULATED_PRISMA_TRANSACTION_TIMEOUT');
+      committed.push(...staged);
+      committedLeaseExtensionMs = stagedLeaseExtensionMs;
+      return result;
+    },
+  };
+  return {
+    prisma,
+    committed,
+    calls,
+    get transactionCount() { return transactionCount; },
+    get transactionOptions() { return transactionOptions; },
+    get leaseExtensionMs() { return leaseExtensionMs; },
+    get committedLeaseExtensionMs() { return committedLeaseExtensionMs; },
+    get simulatedElapsedMs() { return simulatedElapsedMs; },
+  };
+}
+
+test('generation rejects more than 5000 candidates before opening a transaction', async () => {
+  const database = transactionalPrisma();
+  const repository = createPrismaEnterpriseTaskRepository(database.prisma);
+
+  await assert.rejects(
+    () => repository.createGeneratedTasks(Array.from({ length: 5_001 }, (_, index) => generated(index))),
+    /GENERATED_TASK_CANDIDATE_LIMIT_EXCEEDED/,
+  );
+
+  assert.equal(database.transactionCount, 0);
+  assert.equal(database.committed.length, 0);
+});
+
+test('delayed multi-chunk generation exceeds Prisma default 5s but commits within its explicit deadline', async () => {
+  const database = transactionalPrisma({ simulatedBatchDurationMs: 3_100 });
+  const repository = createPrismaEnterpriseTaskRepository(database.prisma);
+
+  const created = await repository.createGeneratedTasks(
+    Array.from({ length: 251 }, (_, index) => generated(index)),
+  );
+
+  assert.equal(created, 251);
+  assert.ok(database.transactionOptions.maxWait > 0);
+  assert.ok(database.simulatedElapsedMs > 5_000);
+  assert.ok(database.transactionOptions.timeout > database.simulatedElapsedMs);
+  assert.equal(database.calls.some((call) => call.startsWith('extend:')), false, 'manual generation must not mutate the scheduler lease');
+  assert.equal(database.committed.length, 251);
+});
+
+test('leased generation extends DB-time expiry beyond the transaction timeout before task mutation', async () => {
+  const database = transactionalPrisma();
+  const repository = createPrismaEnterpriseTaskRepository(database.prisma);
+
+  await repository.createGeneratedTasks([generated(1)], {
+    lease: { leaseKey: 'workbench:scheduler', ownerToken: 'owner', leaseEpoch: 7 },
+  });
+
+  assert.match(database.calls[0]!, /lease:.*CURRENT_TIMESTAMP\(3\).*FOR UPDATE/);
+  assert.match(database.calls[1]!, /extend:.*SET `expiresAt` = DATE_ADD\(CURRENT_TIMESTAMP\(3\), INTERVAL \? MICROSECOND\)/);
+  assert.equal(database.calls[2], 'tasks:1');
+  assert.ok(database.leaseExtensionMs! >= database.transactionOptions.timeout + 10_000);
+});
+
+test('leased generated-task chunks roll back together when a later chunk fails', async () => {
+  const database = transactionalPrisma({ failAt: 2 });
+  const repository = createPrismaEnterpriseTaskRepository(database.prisma);
+
+  await assert.rejects(
+    () => repository.createGeneratedTasks(Array.from({ length: 251 }, (_, index) => generated(index)), {
+      lease: { leaseKey: 'workbench:scheduler', ownerToken: 'owner', leaseEpoch: 7 },
+    }),
+    /SIMULATED_CHUNK_FAILURE/,
+  );
+
+  assert.equal(database.transactionCount, 1);
+  assert.equal(database.committed.length, 0, 'a failed later chunk must roll back the earlier chunk');
+  assert.equal(database.committedLeaseExtensionMs, undefined, 'the generation lease extension must roll back with task writes');
+  assert.match(database.calls[0]!, /lease:.*`ownerToken` = \?.*`leaseEpoch` = \?.*CURRENT_TIMESTAMP\(3\).*FOR UPDATE/);
+});
+
+test('manual generated-task chunks are also all-or-nothing', async () => {
+  const database = transactionalPrisma({ failAt: 2 });
+  const repository = createPrismaEnterpriseTaskRepository(database.prisma);
+
+  await assert.rejects(
+    () => repository.createGeneratedTasks(Array.from({ length: 251 }, (_, index) => generated(index))),
+    /SIMULATED_CHUNK_FAILURE/,
+  );
+
+  assert.equal(database.transactionCount, 1);
+  assert.equal(database.committed.length, 0, 'manual generation must not expose a partially generated day');
+});
+
+test('atomic generated-task chunks return the exact aggregate created count', async () => {
+  const database = transactionalPrisma({ counts: [240, 1] });
+  const repository = createPrismaEnterpriseTaskRepository(database.prisma);
+
+  const created = await repository.createGeneratedTasks(
+    Array.from({ length: 251 }, (_, index) => generated(index)),
+  );
+
+  assert.equal(created, 241);
+  assert.equal(database.transactionCount, 1);
+  assert.equal(database.committed.length, 251);
+});
+
+test('an abort observed inside generation rolls back the whole transaction', async () => {
+  const controller = new AbortController();
+  const database = transactionalPrisma({
+    afterMutation: () => controller.abort(new Error('SCHEDULER_SHUTDOWN')),
+  });
+  const repository = createPrismaEnterpriseTaskRepository(database.prisma);
+
+  await assert.rejects(
+    () => repository.createGeneratedTasks([generated(1)], { signal: controller.signal }),
+    /SCHEDULER_SHUTDOWN/,
+  );
+
+  assert.equal(database.transactionCount, 1);
+  assert.equal(database.committed.length, 0);
+});

@@ -86,4 +86,63 @@ const review = await service.submitReview({ workDate: '2026-07-29', completedSum
 assert.equal(review.code, 0);
 assert.match(review.data?.aiSummary || '', /负责人验证后再更新/, '复盘应生成建议但不得直接修改岗位标准');
 
+const abortController = new AbortController();
+let abortedMutationCalls = 0;
+const abortRepository = {
+  ...createMemoryEnterpriseTaskRepository({
+    departments: [{ id: 'dept-sales', parentId: null, name: '销售部' }],
+    employees: [employee],
+    positions: [{ id: 'pos-sales-consultant', departmentId: 'dept-sales', isActive: true }],
+    templates: [{
+      id: 'template-abort', positionId: 'pos-sales-consultant', standardVersionId: null,
+      name: '终止测试', description: null, targetValue: null, unit: null,
+      scheduleType: 'DAILY', weekdays: [2], dueTime: null, evidenceRequired: false,
+      isActive: true, effectiveAt: null, expiresAt: null,
+    }],
+  }),
+};
+const originalListActiveTemplates = abortRepository.listActiveTemplates.bind(abortRepository);
+abortRepository.listActiveTemplates = async (date) => {
+  const rows = await originalListActiveTemplates(date);
+  abortController.abort(new Error('SCHEDULER_LEASE_LOST'));
+  return rows;
+};
+abortRepository.createGeneratedTasks = async () => { abortedMutationCalls += 1; return 1; };
+const abortService = createEnterpriseTaskService({ repository: abortRepository });
+await assert.rejects(
+  () => abortService.generateDailyTasks('2026-07-28', manager, {
+    signal: abortController.signal,
+    lease: { leaseKey: 'workbench:scheduler', ownerToken: 'worker', leaseEpoch: 1 },
+  }),
+  /SCHEDULER_LEASE_LOST/,
+);
+assert.equal(abortedMutationCalls, 0, 'abort must be checked before the next generation mutation');
+
+let overLimitMutationCalls = 0;
+const overLimitRepository = {
+  ...createMemoryEnterpriseTaskRepository(),
+  async listActiveTemplates() {
+    return [{
+      id: 'template-limit', positionId: 'pos-sales-consultant', standardVersionId: null,
+      name: '容量上限', description: null, targetValue: null, unit: null,
+      scheduleType: 'DAILY', weekdays: [2], dueTime: null, evidenceRequired: false,
+      isActive: true, effectiveAt: null, expiresAt: null,
+    }];
+  },
+  async listDepartmentTree() { return ['dept-sales']; },
+  async listActiveEmployees() {
+    return Array.from({ length: 5_001 }, (_, index) => ({
+      id: `limit-${index}`, name: `员工${index}`, departmentId: 'dept-sales',
+      positionId: 'pos-sales-consultant', isActive: true, employmentStatus: 'active',
+    }));
+  },
+  async createGeneratedTasks() { overLimitMutationCalls += 1; return 5_001; },
+};
+const overLimitService = createEnterpriseTaskService({ repository: overLimitRepository });
+await assert.rejects(
+  () => overLimitService.generateDailyTasks('2026-07-28', manager),
+  /GENERATED_TASK_CANDIDATE_LIMIT_EXCEEDED/,
+);
+assert.equal(overLimitMutationCalls, 0, 'candidate overflow must fail before repository mutation');
+
 console.log('enterprise task generation tests passed');

@@ -1055,6 +1055,41 @@ model TaskActivity {
   @@map("task_activities")
 }
 
+model WorkbenchSchedulerLease {
+  leaseKey   String   @id @db.VarChar(80)
+  leaseEpoch Int      @default(0)
+  ownerToken String?  @db.VarChar(160)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@map("workbench_scheduler_leases")
+}
+
+model WorkbenchSchedulerRun {
+  id             String    @id @db.VarChar(64)
+  leaseKey       String    @db.VarChar(80)
+  ownerToken     String    @db.VarChar(160)
+  leaseEpoch     Int
+  jobType        String    @db.VarChar(40)
+  businessDate   String?   @db.VarChar(10)
+  status         String    @default("RUNNING") @db.VarChar(24)
+  startedAt      DateTime
+  finishedAt     DateTime?
+  successCount   Int       @default(0)
+  skippedCount   Int       @default(0)
+  failedCount    Int       @default(0)
+  failureSummary Json?
+  cursors        Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([jobType, startedAt])
+  @@index([leaseKey, status, leaseEpoch])
+  @@map("workbench_scheduler_runs")
+}
+
 model TaskEvidence {
   id          String   @id @db.VarChar(64)
   taskId      String   @db.VarChar(64)

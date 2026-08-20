@@ -55,6 +55,13 @@ export type EmployeeTaskRecord = {
 
 export type GeneratedTaskInput = Omit<EmployeeTaskRecord, 'id' | 'actualValue' | 'status' | 'result' | 'returnedReason' | 'evidence'>;
 
+export const MAX_GENERATED_TASK_CANDIDATES = 5_000;
+
+export type GeneratedTaskWriteOptions = {
+  signal?: AbortSignal;
+  lease?: { leaseKey: string; ownerToken: string; leaseEpoch: number };
+};
+
 export type DailyReviewRecord = {
   id: string;
   employeeId: string;
@@ -78,7 +85,7 @@ export interface EnterpriseTaskRepository extends WorkbenchRepository {
   findPosition(id: string): Promise<TaskPositionRecord | null>;
   listActiveTemplates(date: Date): Promise<TaskTemplateRecord[]>;
   listActiveEmployees(positionIds: string[], departmentIds?: string[]): Promise<EmployeeDirectoryRecord[]>;
-  createGeneratedTasks(inputs: GeneratedTaskInput[]): Promise<number>;
+  createGeneratedTasks(inputs: GeneratedTaskInput[], options?: GeneratedTaskWriteOptions): Promise<number>;
   listTasks(filter: { employeeId?: string; departmentIds?: string[]; date?: string; status?: string; page: number; pageSize: number }): Promise<{ items: EmployeeTaskRecord[]; total: number }>;
   listDepartmentTree(rootId: string): Promise<string[]>;
   findEmployee(id: string): Promise<EmployeeDirectoryRecord | null>;
@@ -133,10 +140,13 @@ export function createMemoryEnterpriseTaskRepository(input: MemoryInput = {}): E
     async listActiveEmployees(positionIds, departmentIds) {
       return [...employees.values()].filter((item) => item.isActive && item.employmentStatus !== 'left' && !!item.positionId && positionIds.includes(item.positionId) && (!departmentIds || departmentIds.includes(item.departmentId || '')));
     },
-    async createGeneratedTasks(rows) {
+    async createGeneratedTasks(rows, options) {
+      if (rows.length > MAX_GENERATED_TASK_CANDIDATES) throw new Error('GENERATED_TASK_CANDIDATE_LIMIT_EXCEEDED');
       let created = 0;
       for (const row of rows) {
+        if (options?.signal?.aborted) throw options.signal.reason;
         if (tasks.some((item) => item.templateId === row.templateId && item.employeeId === row.employeeId && item.workDate === row.workDate)) continue;
+        if (options?.signal?.aborted) throw options.signal.reason;
         tasks.push({ ...row, id: `task-${++sequence}`, actualValue: null, status: 'PENDING', result: null, returnedReason: null, evidence: [] });
         created += 1;
       }

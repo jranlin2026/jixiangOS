@@ -397,10 +397,15 @@ git commit -m "feat(workbench): synchronize source tasks idempotently"
 
 **Files:**
 - Modify: `prisma/schema.prisma`
-- Modify: `prisma/migrations/20260820133000_unified_employee_workbench_phase3/migration.sql`
+- Create: `prisma/migrations/20260820210000_workbench_scheduler/migration.sql`
 - Create: `server/services/workbench/workbenchScheduler.ts`
 - Create: `server/services/workbench/workbenchScheduler.test.ts`
 - Create: `server/services/workbench/prismaSchedulerStore.ts`
+- Modify: `server/services/enterpriseBrain/taskRepository.ts`
+- Modify: `server/services/enterpriseBrain/taskService.ts`
+- Modify: `server/services/enterpriseBrain/taskService.test.ts`
+- Modify: `server/services/enterpriseBrain/prismaTaskRepository.ts`
+- Create: `server/services/enterpriseBrain/prismaTaskRepository.test.ts`
 - Modify: `server/index.ts`
 
 **Interfaces:**

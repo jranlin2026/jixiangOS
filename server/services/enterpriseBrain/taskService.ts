@@ -2,7 +2,12 @@ import { failure, success } from '../../api/response';
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../../src/shared/utils/permissions';
-import type { EnterpriseTaskRepository, GeneratedTaskInput } from './taskRepository';
+import {
+  MAX_GENERATED_TASK_CANDIDATES,
+  type EnterpriseTaskRepository,
+  type GeneratedTaskInput,
+  type GeneratedTaskWriteOptions,
+} from './taskRepository';
 import { createWorkbenchCommandService, type WorkbenchCommandService } from '../workbench/workbenchCommandService';
 
 type Dependencies = {
@@ -32,6 +37,10 @@ function pageInput(raw: any) {
 
 function dateAt(date: string, time = '00:00'): Date {
   return new Date(`${date}T${/^\d{2}:\d{2}$/.test(time) ? time : '00:00'}:00+08:00`);
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('OPERATION_ABORTED');
 }
 
 const validTime = (value: unknown): string | null => {
@@ -114,38 +123,50 @@ export function createEnterpriseTaskService(deps: Dependencies) {
       });
       return success(task);
     },
-    async generateDailyTasks(rawDate: string, actor: AuthenticatedUser) {
+    async generateDailyTasks(rawDate: string, actor: AuthenticatedUser, options: GeneratedTaskWriteOptions = {}) {
+      throwIfAborted(options.signal);
       if (!hasPermission(actor, PERMISSION_KEYS.TASK_ASSIGN, 'write')) return failure<never>('无权生成员工任务', 403);
       const date = validDate(rawDate);
       if (!date) return failure<never>('工作日期格式不正确', 400);
       const instant = dateAt(date);
       const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+      throwIfAborted(options.signal);
       const templates = (await deps.repository.listActiveTemplates(instant)).filter((item) => (
         item.scheduleType === 'DAILY' && item.weekdays.includes(weekday)
       ));
+      throwIfAborted(options.signal);
       const departmentIds = isSuperAdmin(actor) ? undefined : actor.departmentId ? await deps.repository.listDepartmentTree(actor.departmentId) : [];
+      throwIfAborted(options.signal);
       if (departmentIds && !departmentIds.length) return failure<never>('当前账号未绑定可管理部门', 409);
       const employees = await deps.repository.listActiveEmployees(Array.from(new Set(templates.map((item) => item.positionId))), departmentIds);
-      const rows: GeneratedTaskInput[] = templates.flatMap((template) => employees
-        .filter((employee) => employee.positionId === template.positionId)
-        .map((employee) => ({
-          templateId: template.id,
-          employeeId: employee.id,
-          employeeName: employee.name,
-          departmentIdSnapshot: employee.departmentId || null,
-          departmentNameSnapshot: employee.departmentName || null,
-          positionIdSnapshot: employee.positionId || null,
-          positionNameSnapshot: employee.positionName || null,
-          standardVersionIdSnapshot: template.standardVersionId,
-          workDate: date,
-          title: template.name,
-          description: template.description,
-          targetValue: template.targetValue,
-          unit: template.unit,
-          evidenceRequired: template.evidenceRequired,
-          dueAt: template.dueTime ? dateAt(date, template.dueTime).toISOString() : null,
-        })));
-      const createdCount = await deps.repository.createGeneratedTasks(rows);
+      throwIfAborted(options.signal);
+      const rows: GeneratedTaskInput[] = [];
+      for (const template of templates) {
+        for (const employee of employees) {
+          if (employee.positionId !== template.positionId) continue;
+          if (rows.length >= MAX_GENERATED_TASK_CANDIDATES) throw new Error('GENERATED_TASK_CANDIDATE_LIMIT_EXCEEDED');
+          if (rows.length % 250 === 0) throwIfAborted(options.signal);
+          rows.push({
+            templateId: template.id,
+            employeeId: employee.id,
+            employeeName: employee.name,
+            departmentIdSnapshot: employee.departmentId || null,
+            departmentNameSnapshot: employee.departmentName || null,
+            positionIdSnapshot: employee.positionId || null,
+            positionNameSnapshot: employee.positionName || null,
+            standardVersionIdSnapshot: template.standardVersionId,
+            workDate: date,
+            title: template.name,
+            description: template.description,
+            targetValue: template.targetValue,
+            unit: template.unit,
+            evidenceRequired: template.evidenceRequired,
+            dueAt: template.dueTime ? dateAt(date, template.dueTime).toISOString() : null,
+          });
+        }
+      }
+      throwIfAborted(options.signal);
+      const createdCount = await deps.repository.createGeneratedTasks(rows, options);
       return success({ date, candidateCount: rows.length, createdCount, skippedCount: rows.length - createdCount });
     },
 

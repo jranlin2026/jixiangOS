@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createPrismaWorkbenchRepository } from '../workbench/prismaWorkbenchRepository';
+import { MAX_GENERATED_TASK_CANDIDATES } from './taskRepository';
 import type {
   DailyReviewRecord,
   EmployeeTaskRecord,
@@ -9,7 +10,9 @@ import type {
 } from './taskRepository';
 
 type Client = {
-  $transaction<T>(callback: (tx: any) => Promise<T>, options?: { isolationLevel: 'Serializable' }): Promise<T>;
+  $transaction<T>(callback: (tx: any) => Promise<T>, options?: {
+    isolationLevel: 'Serializable'; maxWait?: number; timeout?: number;
+  }): Promise<T>;
   $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
   taskTemplate: any;
   position: any;
@@ -23,6 +26,13 @@ type Client = {
   leadRecord: any;
   businessRecord: any;
 };
+
+const GENERATION_TRANSACTION_MAX_WAIT_MS = 10_000;
+const GENERATION_TRANSACTION_TIMEOUT_MS = 30_000;
+// A crashed generation can block this lease only for the fixed safety margin
+// beyond Prisma's hard transaction timeout; successful runs release it sooner.
+const GENERATION_LEASE_SAFETY_MARGIN_MS = 15_000;
+const GENERATION_LEASE_DEADLINE_MS = GENERATION_TRANSACTION_TIMEOUT_MS + GENERATION_LEASE_SAFETY_MARGIN_MS;
 
 const dateText = (value: unknown): string => new Date(value as string).toISOString().slice(0, 10);
 const iso = (value: unknown): string | null => value ? new Date(value as string).toISOString() : null;
@@ -124,10 +134,45 @@ export function createPrismaEnterpriseTaskRepository(prisma: Client): Enterprise
         departmentName: departmentNames.get(user.departmentId) || undefined,
       }));
     },
-    async createGeneratedTasks(inputs) {
+    async createGeneratedTasks(inputs, options) {
       if (!inputs.length) return 0;
-      const result = await prisma.employeeTask.createMany({ data: inputs.map(generatedData), skipDuplicates: true });
-      return result.count;
+      if (inputs.length > MAX_GENERATED_TASK_CANDIDATES) throw new Error('GENERATED_TASK_CANDIDATE_LIMIT_EXCEEDED');
+      const batches: ReturnType<typeof generatedData>[][] = [];
+      for (let index = 0; index < inputs.length; index += 250) {
+        if (options?.signal?.aborted) throw options.signal.reason;
+        batches.push(inputs.slice(index, index + 250).map(generatedData));
+      }
+      if (options?.signal?.aborted) throw options.signal.reason;
+      return prisma.$transaction(async (tx: any) => {
+        if (options?.lease) {
+          if (typeof tx.$queryRawUnsafe !== 'function') throw new Error('SCHEDULER_LEASE_GUARD_UNAVAILABLE');
+          const rows = await tx.$queryRawUnsafe(
+            'SELECT `leaseKey` FROM `workbench_scheduler_leases` WHERE `leaseKey` = ? AND `ownerToken` = ? AND `leaseEpoch` = ? AND `expiresAt` > CURRENT_TIMESTAMP(3) FOR UPDATE',
+            options.lease.leaseKey, options.lease.ownerToken, options.lease.leaseEpoch,
+          );
+          if (!Array.isArray(rows) || !rows.length) throw new Error('SCHEDULER_LEASE_LOST');
+          const extended = await tx.$executeRawUnsafe(
+            'UPDATE `workbench_scheduler_leases` SET `expiresAt` = DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL ? MICROSECOND), `updatedAt` = CURRENT_TIMESTAMP(3) WHERE `leaseKey` = ? AND `ownerToken` = ? AND `leaseEpoch` = ? AND `expiresAt` > CURRENT_TIMESTAMP(3)',
+            GENERATION_LEASE_DEADLINE_MS * 1_000,
+            options.lease.leaseKey,
+            options.lease.ownerToken,
+            options.lease.leaseEpoch,
+          );
+          if (Number(extended) !== 1) throw new Error('SCHEDULER_LEASE_LOST');
+        }
+        let created = 0;
+        for (const batch of batches) {
+          if (options?.signal?.aborted) throw options.signal.reason;
+          const result = await tx.employeeTask.createMany({ data: batch, skipDuplicates: true });
+          created += result.count;
+          if (options?.signal?.aborted) throw options.signal.reason;
+        }
+        return created;
+      }, {
+        isolationLevel: 'Serializable',
+        maxWait: GENERATION_TRANSACTION_MAX_WAIT_MS,
+        timeout: GENERATION_TRANSACTION_TIMEOUT_MS,
+      });
     },
     async listTasks(filter) {
       const where: any = {};
