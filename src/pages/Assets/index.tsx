@@ -2565,13 +2565,40 @@ const AssetManagement: React.FC = () => {
                 <Stack spacing={0.7}>
                   {group.tasks.map((task) => {
                     const detailType: AssetType = task.assetType === '设备资产' ? 'device' : task.assetType === '手机号资产' ? 'phone' : 'account';
+                    const assetLabel = `${task.assetType.replace('资产', '')} · ${task.assetName}`;
                     return (
-                      <Stack key={task.id} direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-                        <Button size="small" onClick={() => openDetail(detailType, task.assetId)} sx={{ justifyContent: 'flex-start', minWidth: 0, fontWeight: 800 }}>
-                          {task.assetType.replace('资产', '')} · {task.assetName}
-                        </Button>
-                        <Chip size="small" label={task.status === '已回收' ? '已完成' : '待处理'} sx={chipSx(statusTone(task.status))} />
-                      </Stack>
+                      <Box
+                        key={task.id}
+                        sx={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(0, 1fr) auto',
+                          alignItems: 'center',
+                          columnGap: 1,
+                          minWidth: 0,
+                          width: '100%',
+                        }}
+                      >
+                        <Tooltip title={assetLabel} placement="top-start">
+                          <Button
+                            size="small"
+                            onClick={() => openDetail(detailType, task.assetId)}
+                            sx={{ justifyContent: 'flex-start', minWidth: 0, width: '100%', overflow: 'hidden', fontWeight: 800 }}
+                          >
+                            <Typography
+                              component="span"
+                              noWrap
+                              sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 'inherit' }}
+                            >
+                              {assetLabel}
+                            </Typography>
+                          </Button>
+                        </Tooltip>
+                        <Chip
+                          size="small"
+                          label={task.status === '已回收' ? '已完成' : '待处理'}
+                          sx={{ ...chipSx(statusTone(task.status)), flexShrink: 0 }}
+                        />
+                      </Box>
                     );
                   })}
                 </Stack>
