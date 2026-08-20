@@ -11,15 +11,15 @@ export type CarrierBrand = {
 const CARRIER_BRANDS: Array<{ aliases: string[]; brand: CarrierBrand }> = [
   {
     aliases: ['中国移动', '移动', 'cmcc'],
-    brand: { title: '中国移动', variant: 'mobile', hex: '0085D0', secondaryHex: '8DC21F', fallbackLabel: '移' },
+    brand: { title: '中国移动', variant: 'mobile', hex: '0085CC', secondaryHex: '95C11F', fallbackLabel: '移' },
   },
   {
     aliases: ['中国联通', '联通', 'unicom'],
-    brand: { title: '中国联通', variant: 'unicom', hex: 'E60012', fallbackLabel: '联' },
+    brand: { title: '中国联通', variant: 'unicom', hex: 'DB2C1C', fallbackLabel: '联' },
   },
   {
     aliases: ['中国电信', '电信', 'telecom'],
-    brand: { title: '中国电信', variant: 'telecom', hex: '1479D7', fallbackLabel: '电' },
+    brand: { title: '中国电信', variant: 'telecom', hex: '02489D', fallbackLabel: '电' },
   },
   {
     aliases: ['中国广电', '广电', 'cbn'],

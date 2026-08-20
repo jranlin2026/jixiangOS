@@ -15,3 +15,11 @@ for (const [input, title, variant] of [
 const fallback = resolveCarrierBrand('海外运营商');
 assert.equal(fallback.variant, 'fallback');
 assert.equal(fallback.fallbackLabel, '海');
+
+assert.deepEqual(
+  { hex: resolveCarrierBrand('移动').hex, secondaryHex: resolveCarrierBrand('移动').secondaryHex },
+  { hex: '0085CC', secondaryHex: '95C11F' },
+  '中国移动应使用标准蓝绿配色',
+);
+assert.equal(resolveCarrierBrand('电信').hex, '02489D', '中国电信应使用标准蓝色');
+assert.equal(resolveCarrierBrand('联通').hex, 'DB2C1C', '中国联通应使用标准红色');
