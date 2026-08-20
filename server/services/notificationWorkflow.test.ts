@@ -31,6 +31,22 @@ assert.deepEqual(scheduled.map((item) => item.scheduledAt.toISOString()), [
 assert.equal(scheduled[0].title, '新线索待处理');
 assert.equal(scheduled[1].title, '新线索待处理');
 assert.equal(scheduled[2].eventType, 'LEAD_FIRST_FOLLOW_UP_ESCALATION');
+assert.ok(
+  scheduled.every((item) => item.dedupeKey.length <= 191),
+  '线索提醒去重键不得超过数据库 VARCHAR(191) 上限',
+);
+
+published.length = 0;
+scheduled.length = 0;
+await workflow.assignLead(tx as any, {
+  leadId: 'l'.repeat(64), leadName: '最大长度线索', assignedAt,
+  assignee: { id: 'u'.repeat(64), name: '销售甲' },
+  manager: { id: 'm'.repeat(64), name: '销售经理' },
+});
+assert.ok(
+  [...published, ...scheduled].every((item) => item.dedupeKey.length <= 191),
+  '最大长度线索和用户 ID 也必须可生成合法去重键',
+);
 
 published.length = 0;
 scheduled.length = 0;

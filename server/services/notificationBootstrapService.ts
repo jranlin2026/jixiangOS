@@ -1,6 +1,10 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Lead } from '../../src/types/lead';
-import { leadAssignmentNotificationKey, type NotificationWorkflow } from './notificationWorkflow';
+import {
+  leadAckReminderNotificationKey,
+  leadAssignmentNotificationKey,
+  type NotificationWorkflow,
+} from './notificationWorkflow';
 
 type BootstrapPrisma = Pick<PrismaClient, '$transaction' | 'customerTodo' | 'leadRecord' | 'user' | 'department' | 'notificationRule' | 'notification' | 'notificationDelivery' | 'reminderSchedule'>;
 
@@ -52,15 +56,26 @@ export function createNotificationBootstrapService(
         if (!recipients.assignee) continue;
         const assignedAt = new Date(lead.assignedAt);
         if (Number.isNaN(assignedAt.getTime())) continue;
-        const assignmentNotification = await prisma.notification.findUnique({
-          where: { dedupeKey: leadAssignmentNotificationKey(lead.id, recipients.assignee.id, assignedAt) },
-        }) || await prisma.notification.findUnique({
-          where: { dedupeKey: `lead.assigned:${lead.id}:${recipients.assignee.id}:${assignedAt.toISOString()}` },
+        const version = assignedAt.toISOString();
+        const acknowledgedNotification = await prisma.notification.findFirst({
+          where: {
+            dedupeKey: {
+              in: [
+                leadAssignmentNotificationKey(lead.id, recipients.assignee.id, assignedAt),
+                leadAckReminderNotificationKey(lead.id, recipients.assignee.id, assignedAt),
+                `lead.assigned:${lead.id}:${recipients.assignee.id}:${version}`,
+                `lead.ack-reminder:${lead.id}:${recipients.assignee.id}:${version}`,
+                `lead.assigned:${lead.id}:${recipients.assignee.id}:${version}:noise-v2`,
+                `lead.ack-reminder:${lead.id}:${recipients.assignee.id}:${version}:noise-v2`,
+              ],
+            },
+            ackAt: { not: null },
+          },
         });
         await prisma.$transaction(async (tx) => {
           await workflow.bootstrapLead(tx as any, {
             leadId: lead.id, leadName: lead.name, assignedAt,
-            bootstrapAt, acknowledged: Boolean(assignmentNotification?.ackAt),
+            bootstrapAt, acknowledged: Boolean(acknowledgedNotification),
             assignee: recipients.assignee!, manager: recipients.manager,
           });
         });

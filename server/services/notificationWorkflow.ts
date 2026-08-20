@@ -30,10 +30,14 @@ const DEFAULT_OKR_RULE = {
   riskEscalationMinutes: 24 * 60,
 };
 
-const LEAD_POLICY_VERSION = 'noise-v2';
+const LEAD_POLICY_VERSION = 'v2';
 
 export function leadAssignmentNotificationKey(leadId: string, assigneeId: string, assignedAt: Date) {
   return `lead.assigned:${leadId}:${assigneeId}:${assignedAt.toISOString()}:${LEAD_POLICY_VERSION}`;
+}
+
+export function leadAckReminderNotificationKey(leadId: string, assigneeId: string, assignedAt: Date) {
+  return `lead.ack-reminder:${leadId}:${assigneeId}:${assignedAt.toISOString()}:${LEAD_POLICY_VERSION}`;
 }
 
 function minutesAfter(value: Date, minutes: number) {
@@ -112,7 +116,7 @@ export function createNotificationWorkflow(publisher: NotificationPublisher) {
         recipientId: input.assignee.id, recipientName: input.assignee.name,
         title: '新线索待处理', content: `${input.leadName || '新线索'} · 尚未确认且无跟进记录，请尽快处理。`,
         severity: 'S1', actionUrl, requiresAck: true,
-        dedupeKey: `lead.ack-reminder:${input.leadId}:${input.assignee.id}:${version}:${LEAD_POLICY_VERSION}`,
+        dedupeKey: leadAckReminderNotificationKey(input.leadId, input.assignee.id, input.assignedAt),
         channels: rule.channels,
         scheduledAt: minutesAfter(input.assignedAt, rule.config.ackReminderMinutes),
       });
@@ -162,7 +166,7 @@ export function createNotificationWorkflow(publisher: NotificationPublisher) {
         recipientId: input.assignee.id, recipientName: input.assignee.name,
         title: '新线索待处理', content: `${input.leadName || '新线索'} · 尚未确认且无跟进记录，请尽快处理。`,
         severity: 'S1' as const, actionUrl, requiresAck: true,
-        dedupeKey: `lead.ack-reminder:${input.leadId}:${input.assignee.id}:${version}:${LEAD_POLICY_VERSION}`, channels: rule.channels,
+        dedupeKey: leadAckReminderNotificationKey(input.leadId, input.assignee.id, input.assignedAt), channels: rule.channels,
       };
       if (!input.acknowledged && input.bootstrapAt < ackReminderAt) {
         await publisher.publish(client as any, {
