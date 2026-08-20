@@ -988,6 +988,9 @@ model EmployeeTask {
   confirmedById             String?   @db.VarChar(64)
   confirmedByName           String?   @db.VarChar(100)
   returnedReason            String?   @db.VarChar(500)
+  sourceType                String?   @db.VarChar(64)
+  sourceId                  String?   @db.VarChar(80)
+  sourceItemId              String?   @db.VarChar(80)
   createdAt                 DateTime  @default(now())
   updatedAt                 DateTime  @updatedAt
 
@@ -999,6 +1002,7 @@ model EmployeeTask {
   @@index([employeeId, workDate, status], map: "employee_tasks_employee_workDate_status_idx")
   @@index([departmentIdSnapshot, workDate, status], map: "employee_tasks_department_workDate_status_idx")
   @@index([dueAt, status])
+  @@index([sourceType, sourceId, sourceItemId], map: "employee_tasks_source_idx")
   @@map("employee_tasks")
 }
 

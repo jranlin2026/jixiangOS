@@ -116,6 +116,7 @@ import {
   type AssetIdentityAccountPlatform,
 } from '../../domain/assets/accountIdentityBindings';
 import { normalizeAccountLoginDeviceIds } from '../../domain/assets/accountDeviceBindings';
+import { groupAssetHandoverTasks } from '../../domain/assets/assetGovernance';
 
 type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'matrix' | 'logs' | 'offboarding';
 
@@ -180,9 +181,9 @@ const ASSET_TABS: Array<{ value: AssetTab; label: string; permissionKey: string 
   { value: 'devices', label: '设备资产', permissionKey: PERMISSION_KEYS.ASSETS_DEVICES },
   { value: 'phones', label: '手机号资产', permissionKey: PERMISSION_KEYS.ASSETS_PHONES },
   { value: 'accounts', label: '互联网账号', permissionKey: PERMISSION_KEYS.ASSETS_ACCOUNTS },
-  { value: 'matrix', label: '矩阵发布', permissionKey: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH },
+  { value: 'matrix', label: '发布批次', permissionKey: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH },
   { value: 'logs', label: '操作日志', permissionKey: PERMISSION_KEYS.ASSETS_LOGS },
-  { value: 'offboarding', label: '离职回收', permissionKey: PERMISSION_KEYS.ASSETS_OFFBOARDING },
+  { value: 'offboarding', label: '资产交接', permissionKey: PERMISSION_KEYS.ASSETS_OFFBOARDING },
 ];
 
 const CONFIGURABLE_ASSET_TABS = new Set<AssetTab>(['devices', 'phones', 'accounts']);
@@ -231,7 +232,7 @@ const DEVICE_COLUMNS: AssetColumnConfig[] = [
   { id: 'simType', label: '对应手机号', width: 210 },
   { id: 'accountCount', label: '互联网账号', width: 120 },
   { id: 'department', label: '所属部门', width: 130 },
-  { id: 'owner', label: '负责人', width: 120 },
+  { id: 'owner', label: '管理责任人', width: 130 },
   { id: 'currentUser', label: '当前使用人', width: 130 },
   { id: 'status', label: '状态', width: 100 },
 ];
@@ -248,7 +249,7 @@ const PHONE_COLUMNS: AssetColumnConfig[] = [
   { id: 'packageName', label: '套餐', width: 140 },
   { id: 'monthlyFee', label: '月费用', width: 110 },
   { id: 'department', label: '所属部门', width: 130 },
-  { id: 'owner', label: '负责人', width: 120 },
+  { id: 'owner', label: '管理责任人', width: 130 },
   { id: 'currentUser', label: '当前使用人', width: 130 },
   { id: 'status', label: '状态', width: 110 },
 ];
@@ -263,7 +264,7 @@ const ACCOUNT_COLUMNS: AssetColumnConfig[] = [
   { id: 'phone', label: '绑定手机号', width: 150 },
   { id: 'identityBindings', label: '身份账号绑定', width: 220 },
   { id: 'device', label: '登录设备', width: 240 },
-  { id: 'owner', label: '负责人', width: 120 },
+  { id: 'owner', label: '账号负责人', width: 130 },
   { id: 'permissionStatus', label: '控制权状态', width: 140 },
 ];
 const DEFAULT_ACCOUNT_VISIBLE_COLUMN_IDS = ACCOUNT_COLUMNS.map((column) => column.id);
@@ -571,7 +572,6 @@ const AssetManagement: React.FC = () => {
     updateAccount,
     deleteAccount,
     createMatrixPublishTask,
-    completeMatrixPublishTarget,
     completeOffboardingTask,
     revealSensitiveField,
     importAssetsFromCsv,
@@ -601,6 +601,7 @@ const AssetManagement: React.FC = () => {
     )
   );
   const canHandleOffboarding = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'write');
+  const handoverGroups = useMemo(() => groupAssetHandoverTasks(offboardingTasks), [offboardingTasks]);
   const canManageMatrixPublish = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
   const visibleTabs = useMemo(
     () => ASSET_TABS.filter((tab) => hasPermission(currentUser, tab.permissionKey)),
@@ -946,7 +947,7 @@ const AssetManagement: React.FC = () => {
 
   const openMatrixPublishDialog = () => {
     if (!canManageMatrixPublish) {
-      showFeedback('当前账号没有矩阵发布权限');
+      showFeedback('当前账号没有发布批次权限');
       return;
     }
     setMatrixForm({
@@ -975,7 +976,7 @@ const AssetManagement: React.FC = () => {
 
   const submitMatrixPublishTask = async () => {
     if (!canManageMatrixPublish) {
-      showFeedback('当前账号没有矩阵发布权限');
+      showFeedback('当前账号没有发布批次权限');
       return;
     }
     const result = await createMatrixPublishTask({
@@ -983,25 +984,11 @@ const AssetManagement: React.FC = () => {
       dueAt: matrixForm.values.dueAt ? new Date(matrixForm.values.dueAt).toISOString() : '',
     });
     if (!result) {
-      showFeedback(useAssetStore.getState().error || '创建矩阵发布任务失败');
+      showFeedback(useAssetStore.getState().error || '创建发布批次失败');
       return;
     }
     closeMatrixPublishDialog();
-    showFeedback('矩阵发布任务已创建');
-    await refreshActiveTab();
-  };
-
-  const handleCompleteMatrixTarget = async (taskId: string, accountId: string) => {
-    if (!canManageMatrixPublish) {
-      showFeedback('当前账号没有矩阵发布权限');
-      return;
-    }
-    const result = await completeMatrixPublishTarget(taskId, accountId);
-    if (!result) {
-      showFeedback(useAssetStore.getState().error || '标记完成失败');
-      return;
-    }
-    showFeedback('账号发布任务已完成');
+    showFeedback('发布批次已创建，执行任务已进入员工任务中心');
     await refreshActiveTab();
   };
 
@@ -1410,12 +1397,13 @@ const AssetManagement: React.FC = () => {
     showFeedback('已显示明文');
   };
 
-  const handleCompleteOffboarding = async (taskId: string) => {
+  const handleCompleteHandoverGroup = async (taskIds: string[]) => {
     if (!canHandleOffboarding) {
-      showFeedback('当前账号没有处理离职回收权限');
+      showFeedback('当前账号没有处理资产交接权限');
       return;
     }
-    await completeOffboardingTask(taskId);
+    for (const taskId of taskIds) await completeOffboardingTask(taskId);
+    showFeedback(`已完成 ${taskIds.length} 个交接项`);
     await refreshActiveTab();
   };
 
@@ -1439,7 +1427,7 @@ const AssetManagement: React.FC = () => {
         手机号: (phonesByDeviceId.get(device.id) || []).map((phone) => `${phone.slotType}:${displayPhoneNumber(phone)}`).join(' / '),
         互联网账号: device.internetAccountCount ?? (accountsByDeviceId.get(device.id) || []).length,
         所属部门: device.department,
-        负责人: device.owner,
+        管理责任人: device.owner,
         当前使用人: device.currentUser,
         状态: device.status,
       })),
@@ -1460,7 +1448,7 @@ const AssetManagement: React.FC = () => {
           套餐: phone.packageName,
           月费用: phone.monthlyFee,
           所属部门: phone.department || '',
-          负责人: phone.owner,
+          管理责任人: phone.owner,
           当前使用人: phone.currentUser || '',
           状态: phone.status,
         };
@@ -1486,7 +1474,8 @@ const AssetManagement: React.FC = () => {
           绑定Google账号: identityAccounts.find((item) => item.platform === 'Google账号')?.loginAccount || '',
           绑定邮箱: displayAccountEmail(account),
           登录设备: loginDevices.map((device) => device.deviceCode).join(' / ') || '-',
-          负责人: account.owner,
+          账号负责人: account.owner,
+          主要使用人: account.currentUser || '',
           控制权状态: readAccountControlStatus(account),
           账号状态: account.accountStatus,
         };
@@ -1510,7 +1499,7 @@ const AssetManagement: React.FC = () => {
         详情: log.detail,
       })),
       offboarding: offboardingTasks.map((task) => ({
-        员工: task.employeeName,
+        交接员工: task.employeeName,
         部门: task.department,
         资产类型: task.assetType,
         资产名称: task.assetName,
@@ -1640,7 +1629,7 @@ const AssetManagement: React.FC = () => {
               <Typography variant="body2" sx={{ color: shell.muted }}>点击关联问题直接进入对应台账，并自动带上筛选条件。</Typography>
             </Box>
             {hasPermission(currentUser, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'read') ? (
-              <Chip size="small" label={`离职待回收 ${dashboard?.relationshipHealth.offboarding || 0}`} onClick={() => setSearchParams({ tab: 'offboarding' })} sx={{ ...chipSx((dashboard?.relationshipHealth.offboarding || 0) ? toneSx('medium') : toneSx('low')), cursor: 'pointer' }} />
+              <Chip size="small" label={`待交接 ${dashboard?.relationshipHealth.offboarding || 0}`} onClick={() => setSearchParams({ tab: 'offboarding' })} sx={{ ...chipSx((dashboard?.relationshipHealth.offboarding || 0) ? toneSx('medium') : toneSx('low')), cursor: 'pointer' }} />
             ) : null}
           </Stack>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(5, 1fr)' }, gap: 1 }}>
@@ -1682,7 +1671,7 @@ const AssetManagement: React.FC = () => {
                         </Stack>
                       </Box>
                       <Box><Typography variant="caption" sx={{ color: shell.muted }}>所属部门</Typography><Typography variant="body2">{row.device.department || '未填部门'}</Typography></Box>
-                      <Box><Typography variant="caption" sx={{ color: shell.muted }}>负责人</Typography><Typography variant="body2">{row.device.owner || '未分配'}</Typography></Box>
+                      <Box><Typography variant="caption" sx={{ color: shell.muted }}>管理责任人</Typography><Typography variant="body2">{row.device.owner || '未分配'}</Typography></Box>
                       <Box><Typography variant="caption" sx={{ color: shell.muted }}>当前使用人</Typography><Typography variant="body2">{row.device.currentUser || '未分配'}</Typography></Box>
                     </Box>
                     {renderPhoneBadges(row)}
@@ -1694,7 +1683,7 @@ const AssetManagement: React.FC = () => {
           ) : (
             <TableContainer>
               <Table sx={{ ...moduleTableSx, minWidth: 1680 }}>
-                <TableHead><TableRow><TableCell>设备编号</TableCell><TableCell>设备名称</TableCell><TableCell>品牌 / 型号</TableCell><TableCell>卡槽 / IMEI</TableCell><TableCell>对应手机号</TableCell><TableCell>登录互联网账号</TableCell><TableCell>所属部门</TableCell><TableCell>负责人</TableCell><TableCell>当前使用人</TableCell><TableCell>状态</TableCell></TableRow></TableHead>
+                <TableHead><TableRow><TableCell>设备编号</TableCell><TableCell>设备名称</TableCell><TableCell>品牌 / 型号</TableCell><TableCell>卡槽 / IMEI</TableCell><TableCell>对应手机号</TableCell><TableCell>登录互联网账号</TableCell><TableCell>所属部门</TableCell><TableCell>管理责任人</TableCell><TableCell>当前使用人</TableCell><TableCell>状态</TableCell></TableRow></TableHead>
                 <TableBody>
                   {overviewRelationships.map((row) => (
                     <TableRow key={row.device.id} hover>
@@ -1749,7 +1738,7 @@ const AssetManagement: React.FC = () => {
       accounts: '搜索平台、账号名称、绑定手机号、登录设备',
       matrix: '搜索任务、账号、执行人',
       logs: '搜索操作、对象、操作人',
-      offboarding: '搜索员工、资产名称',
+      offboarding: '搜索员工、资产名称或交接原因',
     };
     const statusOptionsMap: Partial<Record<AssetTab, string[]>> = {
       devices: ['库存中', '使用中', '维修中', '闲置', '已停用', '已报废'],
@@ -1856,8 +1845,8 @@ const AssetManagement: React.FC = () => {
         </> : null}
         {isAssetLedger ? <>
           {renderSelect('所属部门', String(advancedFilters.departmentId || ''), filterOptions.departments, (value) => setAdvancedFilter('departmentId', value))}
-          {renderSelect('资产负责人', String(advancedFilters.ownerId || ''), filterOptions.owners, (value) => setAdvancedFilter('ownerId', value))}
-          {renderSelect('当前使用人', String(advancedFilters.currentUserId || ''), filterOptions.currentUsers, (value) => setAdvancedFilter('currentUserId', value))}
+          {renderSelect(activeTab === 'accounts' ? '账号负责人' : '管理责任人', String(advancedFilters.ownerId || ''), filterOptions.owners, (value) => setAdvancedFilter('ownerId', value))}
+          {renderSelect(activeTab === 'accounts' ? '主要使用人' : '当前使用人', String(advancedFilters.currentUserId || ''), filterOptions.currentUsers, (value) => setAdvancedFilter('currentUserId', value))}
         </> : null}
       </Box>
     );
@@ -2464,9 +2453,11 @@ const AssetManagement: React.FC = () => {
     const rows = matrixPublishTasks.flatMap((task) => task.targets.map((target) => ({
       task,
       target,
-      overdue: target.status !== 'completed' && new Date(task.dueAt).getTime() < Date.now(),
+      overdue: !['completed', 'confirmed'].includes(target.status) && new Date(task.dueAt).getTime() < Date.now(),
     })));
-    const statusLabel = (value: string) => (value === 'completed' ? '已完成' : '待发布');
+    const statusLabel = (value: string) => ({
+      pending: '待执行', completed: '待确认', confirmed: '已确认', returned: '已退回',
+    }[value] || '待执行');
     return (
       <>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1.25 }}>
@@ -2497,7 +2488,7 @@ const AssetManagement: React.FC = () => {
           <Table size="small" sx={{ ...assetTableSx, minWidth: 1120 }}>
             <TableHead>
               <TableRow>
-                {['任务', '平台', '账号', '执行人', '部门', '设备', '截止时间', '状态', '素材/文案', '操作'].map((column) => <TableCell key={column}>{column}</TableCell>)}
+                {['发布批次', '平台', '账号', '执行人', '部门', '设备', '截止时间', '员工任务状态', '素材/文案', '执行入口'].map((column) => <TableCell key={column}>{column}</TableCell>)}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -2525,7 +2516,7 @@ const AssetManagement: React.FC = () => {
                     <Chip
                       size="small"
                       label={overdue ? '已逾期' : statusLabel(target.status)}
-                      sx={chipSx(overdue ? toneSx('high') : toneSx(target.status === 'completed' ? 'low' : 'medium'))}
+                      sx={chipSx(overdue ? toneSx('high') : toneSx(target.status === 'confirmed' ? 'low' : 'medium'))}
                     />
                   </TableCell>
                   <TableCell>
@@ -2536,20 +2527,13 @@ const AssetManagement: React.FC = () => {
                     </Stack>
                   </TableCell>
                   <TableCell align="center" sx={{ minWidth: 120 }}>
-                    {canManageMatrixPublish ? (
-                      <Button
-                        size="small"
-                        variant="contained"
-                        disabled={target.status === 'completed'}
-                        onClick={() => handleCompleteMatrixTarget(task.id, target.accountId)}
-                      >
-                        点完成
-                      </Button>
-                    ) : null}
+                    <Button size="small" variant="outlined" href="/tasks">
+                      员工任务中心
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
-              {rows.length === 0 && renderAssetEmptyRow(10, '暂无矩阵发布任务')}
+              {rows.length === 0 && renderAssetEmptyRow(10, '暂无发布批次')}
             </TableBody>
           </Table>
         </TableContainer>
@@ -2564,37 +2548,50 @@ const AssetManagement: React.FC = () => {
       <Table size="small" sx={assetTableSx}>
         <TableHead>
           <TableRow>
-            {['员工', '部门', '资产类型', '资产名称', '权限状态', '回收状态', '截止时间', '操作'].map((column) => <TableCell key={column}>{column}</TableCell>)}
+            {['交接员工', '交接原因', '交接资产', '交接进度', '截止时间', '操作'].map((column) => <TableCell key={column}>{column}</TableCell>)}
           </TableRow>
         </TableHead>
         <TableBody>
-          {offboardingTasks.map((task) => (
-            <TableRow hover key={task.id} onClick={() => openDetail('account', task.assetId)} sx={{ cursor: 'pointer' }}>
-              <TableCell>{task.employeeName}</TableCell>
-              <TableCell>{task.department}</TableCell>
-              <TableCell>{task.assetType}</TableCell>
-              <TableCell sx={{ color: shell.tableLink, fontWeight: 800 }}>{task.assetName}</TableCell>
-              <TableCell><Chip size="small" label={task.permissionStatus} sx={chipSx(statusTone(task.permissionStatus))} /></TableCell>
-              <TableCell>{task.status}</TableCell>
-              <TableCell>{task.dueAt}</TableCell>
-              <TableCell align="center" sx={{ minWidth: 140 }}>
-                {canHandleOffboarding ? (
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    disabled={task.status === '已回收'}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      handleCompleteOffboarding(task.id);
-                    }}
-                  >
-                    标记已回收
+          {handoverGroups.map((group) => {
+            const pendingIds = group.tasks.filter((task) => task.status !== '已回收').map((task) => task.id);
+            return (
+            <TableRow hover key={group.id}>
+              <TableCell sx={{ minWidth: 150 }}>
+                <Typography sx={{ color: shell.ink, fontWeight: 900 }}>{group.employeeName}</Typography>
+                <Typography variant="caption" sx={{ color: shell.muted }}>{group.department || '未归属部门'}</Typography>
+              </TableCell>
+              <TableCell><Chip size="small" label={group.reason} variant="outlined" /></TableCell>
+              <TableCell sx={{ minWidth: 360 }}>
+                <Stack spacing={0.7}>
+                  {group.tasks.map((task) => {
+                    const detailType: AssetType = task.assetType === '设备资产' ? 'device' : task.assetType === '手机号资产' ? 'phone' : 'account';
+                    return (
+                      <Stack key={task.id} direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                        <Button size="small" onClick={() => openDetail(detailType, task.assetId)} sx={{ justifyContent: 'flex-start', minWidth: 0, fontWeight: 800 }}>
+                          {task.assetType.replace('资产', '')} · {task.assetName}
+                        </Button>
+                        <Chip size="small" label={task.status === '已回收' ? '已完成' : '待处理'} sx={chipSx(statusTone(task.status))} />
+                      </Stack>
+                    );
+                  })}
+                </Stack>
+              </TableCell>
+              <TableCell sx={{ minWidth: 150 }}>
+                <Typography sx={{ color: shell.ink, fontWeight: 900 }}>{group.completed} / {group.total}</Typography>
+                <Chip size="small" label={group.status} sx={chipSx(statusTone(group.status))} />
+              </TableCell>
+              <TableCell>{group.dueAt || '-'}</TableCell>
+              <TableCell align="center" sx={{ minWidth: 170 }}>
+                {canHandleOffboarding && pendingIds.length ? (
+                  <Button size="small" variant="outlined" onClick={() => void handleCompleteHandoverGroup(pendingIds)}>
+                    完成全部待交接项
                   </Button>
-                ) : null}
+                ) : <Typography variant="caption" sx={{ color: shell.muted }}>交接已闭环</Typography>}
               </TableCell>
             </TableRow>
-          ))}
-          {offboardingTasks.length === 0 && renderAssetEmptyRow(8, '暂无离职回收数据')}
+            );
+          })}
+          {handoverGroups.length === 0 && renderAssetEmptyRow(6, '暂无资产交接数据')}
         </TableBody>
       </Table>
     </TableContainer>
@@ -2913,7 +2910,7 @@ const AssetManagement: React.FC = () => {
         {renderDetailCard('归属与使用', renderInfoRows([
           { label: '所属主体', value: device.ownerSubject },
           ...(device.department ? [{ label: '所属部门', value: device.department }] : []),
-          ...(device.owner ? [{ label: '资产负责人', value: device.owner }] : []),
+          ...(device.owner ? [{ label: '管理责任人', value: device.owner }] : []),
           ...(device.currentUser ? [{ label: '当前使用人', value: device.currentUser }] : []),
         ], 1))}
         {renderDetailCard('取得与状态', renderInfoRows([
@@ -3057,7 +3054,7 @@ const AssetManagement: React.FC = () => {
     { label: '实名主体', value: phone.realNameSubject || '未录入' },
     { label: '实名信息', value: renderOperationalValue(displayPhoneRealName(phone), '实名信息') },
     { label: '所属部门', value: phone.department || primaryDevice?.department || '未录入' },
-    { label: '资产负责人', value: phone.owner || '未分配' },
+    { label: '管理责任人', value: phone.owner || '未分配' },
     { label: '当前使用人', value: phone.currentUser || primaryDevice?.currentUser || '未分配' },
   ], 2));
 
@@ -3114,7 +3111,7 @@ const AssetManagement: React.FC = () => {
             {renderCopyButton(account.accountNo, '账号编号')}
           </Stack>
           <Typography variant="caption" sx={{ color: shell.muted }}>
-            {account.currentUser ? `当前使用人：${account.currentUser}` : '当前使用人：未分配'}
+            {account.currentUser ? `主要使用人：${account.currentUser}` : '主要使用人：未分配'}
           </Typography>
         </Box>
       </Stack>
@@ -3226,8 +3223,8 @@ const AssetManagement: React.FC = () => {
   const renderAccountOwnershipSection = (account: AssetInternetAccount) => renderDetailCard('归属与使用', renderInfoRows([
     { label: '所属主体', value: account.ownerSubject || '公司' },
     { label: '所属部门', value: account.department || accountEmptyValue() },
-    { label: '资产负责人', value: account.owner || accountEmptyValue('未分配') },
-    { label: '当前使用人', value: account.currentUser || accountEmptyValue('未分配') },
+    { label: '账号负责人', value: account.owner || accountEmptyValue('未分配') },
+    { label: '主要使用人', value: account.currentUser || accountEmptyValue('未分配') },
   ], 2));
 
   const renderAccountBusinessSection = (account: AssetInternetAccount) => renderDetailCard('经营与状态', (
@@ -3651,7 +3648,7 @@ const AssetManagement: React.FC = () => {
       <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.device[2].title} summary={sectionSummary(['ownerSubject', 'department', 'owner', 'currentUser'], ASSET_FORM_SECTIONS.device[2].summary)} errorCount={sectionErrorCount(['ownerSubject'])}>
         {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
         {renderDepartmentSelectField()}
-        {renderUserSelectField('owner', '资产负责人')}
+        {renderUserSelectField('owner', '管理责任人')}
         {renderUserSelectField('currentUser', '当前使用人')}
       </BusinessFormSection>
       <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.device[3].title} summary={sectionSummary(['acquisitionType', 'purchaseAmount', 'monthlyRent', 'status'], ASSET_FORM_SECTIONS.device[3].summary)} errorCount={sectionErrorCount(['acquisitionType', 'status'])}>
@@ -3761,7 +3758,7 @@ const AssetManagement: React.FC = () => {
         {renderTextField('realName', '实名信息')}
         {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
         {renderDepartmentSelectField()}
-        {renderUserSelectField('owner', '资产负责人')}
+        {renderUserSelectField('owner', '管理责任人')}
         {renderUserSelectField('currentUser', '当前使用人')}
       </BusinessFormSection>
       <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.phone[3].title} summary={sectionSummary(['operator', 'attributionLocation', 'servicePassword', 'packageName', 'monthlyFee', 'status'], ASSET_FORM_SECTIONS.phone[3].summary)} errorCount={sectionErrorCount(['status'])}>
@@ -3950,8 +3947,8 @@ const AssetManagement: React.FC = () => {
       <BusinessFormSection step={3} solidStep title={ASSET_FORM_SECTIONS.account[2].title} summary={sectionSummary(['ownerSubject', 'department', 'owner', 'currentUser'], ASSET_FORM_SECTIONS.account[2].summary)} errorCount={sectionErrorCount(['ownerSubject'])}>
         {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
         {renderDepartmentSelectField()}
-        {renderUserSelectField('owner', '资产负责人')}
-        {renderUserSelectField('currentUser', '当前使用人')}
+        {renderUserSelectField('owner', '账号负责人')}
+        {renderUserSelectField('currentUser', '主要使用人')}
         {renderTextField('serviceProvider', '外部服务商')}
       </BusinessFormSection>
       <BusinessFormSection step={4} solidStep title={ASSET_FORM_SECTIONS.account[3].title} summary={sectionSummary(['businessScene', 'controlStatus', 'monthlyFee', 'accountStatus'], ASSET_FORM_SECTIONS.account[3].summary)} errorCount={sectionErrorCount(['controlStatus', 'accountStatus'])}>
@@ -4080,7 +4077,7 @@ const AssetManagement: React.FC = () => {
   const renderMatrixPublishDialog = () => (
     <Dialog open={matrixForm.open && canManageMatrixPublish} onClose={closeMatrixPublishDialog} maxWidth="md" fullWidth>
       <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>
-        创建矩阵发布任务
+        创建发布批次
       </DialogTitle>
       <DialogContent dividers sx={{ bgcolor: '#FBFCFE' }}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5, pt: 0.5 }}>
@@ -4117,7 +4114,7 @@ const AssetManagement: React.FC = () => {
               accept="video/*"
               onChange={async (event) => {
                 if (!canManageMatrixPublish) {
-                  showFeedback('当前账号没有矩阵发布权限');
+                  showFeedback('当前账号没有发布批次权限');
                   return;
                 }
                 const file = event.target.files?.[0];
@@ -4180,7 +4177,7 @@ const AssetManagement: React.FC = () => {
                     <Checkbox checked={matrixForm.values.accountIds.includes(account.id)} />
                     <ListItemText
                       primary={`${account.platform} / ${account.accountName}`}
-                      secondary={disabled ? '缺少当前使用人，不能派发' : `${account.currentUser} / ${account.department || '-'}`}
+                      secondary={disabled ? '缺少主要使用人，不能派发' : `${account.currentUser} / ${account.department || '-'}`}
                     />
                   </MenuItem>
                 );
@@ -4196,7 +4193,7 @@ const AssetManagement: React.FC = () => {
           disabled={loading || !matrixForm.values.title || !matrixForm.values.dueAt || !matrixForm.values.accountIds.length}
           onClick={submitMatrixPublishTask}
         >
-          创建任务
+          创建批次并派发员工任务
         </Button>
       </DialogActions>
     </Dialog>
@@ -4403,7 +4400,7 @@ const AssetManagement: React.FC = () => {
     <ModulePage>
       <ModuleHeader
         title="资产管理"
-        description="管理设备、手机号与互联网账号，追溯归属与离职回收。"
+        description="管理设备、手机号与互联网账号，明确管理责任、实际使用与资产交接。"
         actions={(
           <>
             {canImportExport && isConfigurableAssetTab(activeTab) ? (

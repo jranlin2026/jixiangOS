@@ -51,6 +51,7 @@ import {
   normalizeAccountLoginDeviceIds,
   validateAccountLoginDeviceIds,
 } from '../domain/assets/accountDeviceBindings';
+import { isMatrixTargetDone } from '../domain/assets/assetGovernance';
 
 const delay = (ms?: number) => baseDelay(ms, 'assets');
 
@@ -532,9 +533,9 @@ const ASSET_IMPORT_LABELS: Record<AssetImportType, string> = {
 };
 
 export const ASSET_IMPORT_TEMPLATES: Record<AssetImportType, string[]> = {
-  devices: ['设备类型*', '设备名称*', '品牌*', '型号*', '序列号', '通信方式*', 'IMEI 1', 'IMEI 2', '取得方式', '购买金额', '月租金', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
-  phones: ['手机号*', 'SIM形态*', 'ICCID', 'IMSI', '服务密码', '实名主体', '实名信息', '运营商', '归属地', '所属设备编号', 'SIM卡槽', '套餐', '月费用', '所属主体', '所属部门', '资产负责人', '当前使用人', '状态', '备注'],
-  accounts: ['平台*', '账号类型*', '账号名称*', '登录账号*', '实名主体', '实名信息', '绑定手机号', '登录设备编号（多个用/分隔）', '绑定邮箱', '二次验证', '账号控制权*', '所属主体', '所属部门', '资产负责人', '当前使用人', '账号状态', '业务场景', '服务商', '月费用', '用途', '备注'],
+  devices: ['设备类型*', '设备名称*', '品牌*', '型号*', '序列号', '通信方式*', 'IMEI 1', 'IMEI 2', '取得方式', '购买金额', '月租金', '所属主体', '所属部门', '管理责任人', '当前使用人', '状态', '备注'],
+  phones: ['手机号*', 'SIM形态*', 'ICCID', 'IMSI', '服务密码', '实名主体', '实名信息', '运营商', '归属地', '所属设备编号', 'SIM卡槽', '套餐', '月费用', '所属主体', '所属部门', '管理责任人', '当前使用人', '状态', '备注'],
+  accounts: ['平台*', '账号类型*', '账号名称*', '登录账号*', '实名主体', '实名信息', '绑定手机号', '登录设备编号（多个用/分隔）', '绑定邮箱', '二次验证', '账号控制权*', '所属主体', '所属部门', '账号负责人', '主要使用人', '账号状态', '业务场景', '服务商', '月费用', '用途', '备注'],
 };
 
 const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> = {
@@ -549,7 +550,7 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
     SIM类型: '双卡',
     所属主体: '公司',
     所属部门: '运营管理部',
-    负责人: '张三',
+    管理责任人: '张三',
     当前使用人: '李四',
     状态: '使用中',
     月费用: '0',
@@ -568,7 +569,7 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
     套餐: '商务套餐',
     月费用: '59',
     所属部门: '运营管理部',
-    负责人: '张三',
+    管理责任人: '张三',
     当前使用人: '李四',
     状态: '使用中',
   },
@@ -584,8 +585,8 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
     绑定邮箱: 'ops@example.com',
     所属主体: '公司',
     所属部门: '运营管理部',
-    负责人: '张三',
-    当前使用人: '李四',
+    账号负责人: '张三',
+    主要使用人: '李四',
     '账号控制权*': '已掌控',
     账号状态: '使用中',
     用途: '示例行，导入前可删除',
@@ -725,7 +726,7 @@ function deviceInputFromCsv(raw: Record<string, string>): Partial<AssetDeviceInp
     monthlyRent: importNumber(csvCell(raw, '月租金', '月费用')),
     ownerSubject: (csvCell(raw, '所属主体') || '公司') as AssetDeviceInput['ownerSubject'],
     department: csvCell(raw, '所属部门'),
-    owner: csvCell(raw, '资产负责人', '负责人'),
+    owner: csvCell(raw, '管理责任人', '资产负责人', '负责人'),
     currentUser: csvCell(raw, '当前使用人'),
     status: (csvCell(raw, '状态') || '库存中') as AssetDeviceInput['status'],
     monthlyCost: importNumber(csvCell(raw, '月费用')),
@@ -753,7 +754,7 @@ function phoneInputFromCsv(raw: Record<string, string>): Partial<AssetPhoneNumbe
     monthlyFee: importNumber(csvCell(raw, '月费用')),
     department: csvCell(raw, '所属部门'),
     ownerSubject: (csvCell(raw, '所属主体') || '公司') as AssetPhoneNumberInput['ownerSubject'],
-    owner: csvCell(raw, '资产负责人', '负责人'),
+    owner: csvCell(raw, '管理责任人', '资产负责人', '负责人'),
     currentUser: csvCell(raw, '当前使用人'),
     status: (csvCell(raw, '状态') || '待启用') as AssetPhoneNumberInput['status'],
     remark: csvCell(raw, '备注'),
@@ -785,8 +786,8 @@ function accountInputFromCsv(raw: Record<string, string>): Partial<AssetInternet
     boundEmail: csvCell(raw, '绑定邮箱'),
     ownerSubject: (csvCell(raw, '所属主体') || '公司') as AssetInternetAccountInput['ownerSubject'],
     department: csvCell(raw, '所属部门'),
-    owner: csvCell(raw, '资产负责人', '负责人'),
-    currentUser: csvCell(raw, '当前使用人'),
+    owner: csvCell(raw, '账号负责人', '资产负责人', '负责人'),
+    currentUser: csvCell(raw, '主要使用人', '当前使用人'),
     permissionStatus: (csvCell(raw, '权限状态') || '正常') as AssetInternetAccountInput['permissionStatus'],
     controlStatus: (csvCell(raw, '账号控制权*', '账号控制权') || '已掌控') as AssetInternetAccountInput['controlStatus'],
     accountStatus: (csvCell(raw, '账号状态') || '使用中') as AssetInternetAccountInput['accountStatus'],
@@ -1183,7 +1184,7 @@ function filterMatrixPublishTasks(rows: AssetMatrixPublishTask[], filters?: Asse
 }
 
 function isMatrixTargetOverdue(target: AssetMatrixPublishTarget, dueAt: string, nowIso: string): boolean {
-  return target.status !== 'completed' && new Date(dueAt).getTime() < new Date(nowIso).getTime();
+  return !isMatrixTargetDone(target.status) && new Date(dueAt).getTime() < new Date(nowIso).getTime();
 }
 
 function summarizeMatrixTargets(
@@ -1197,7 +1198,7 @@ function summarizeMatrixTargets(
     const key = String(target[groupKey] || '未分组');
     const current = groups.get(key) || { total: 0, completed: 0, overdue: 0 };
     current.total += 1;
-    if (target.status === 'completed') current.completed += 1;
+    if (isMatrixTargetDone(target.status)) current.completed += 1;
     if (isMatrixTargetOverdue(target, dueAtByTargetId.get(target.id) || '', nowIso)) current.overdue += 1;
     groups.set(key, current);
   });
@@ -2048,7 +2049,7 @@ async function createOffboardingTasksForEmployee(employeeName: string, departmen
     }
     if (touchedTasks.length) {
       setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, nextTasks);
-      logAssetOperation('生成离职回收', '离职回收', name, name, `为${name}生成${touchedTasks.length}条资产回收任务`);
+      logAssetOperation('发起资产交接', '资产交接', name, name, `为${name}生成${touchedTasks.length}个资产交接项`);
     }
     rebuildRisksAndOffboarding();
     return touchedTasks;
@@ -2195,6 +2196,11 @@ async function updateRiskStatus(riskId: string, status: AssetRiskStatus): Promis
 }
 
 async function completeOffboardingTask(taskId: string): Promise<ApiResponse<AssetOffboardingTask | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<AssetOffboardingTask | null>(`/assets/offboarding/${encodeURIComponent(taskId)}/complete`, {
+      method: 'POST',
+    });
+  }
   ensureInit();
   await delay(120);
   const targetTask = visibleOffboardingTasks().find((task) => task.id === taskId);
@@ -2212,39 +2218,29 @@ async function completeOffboardingTask(taskId: string): Promise<ApiResponse<Asse
     return updated;
   });
   if (targetTask?.assetType === '互联网账号') {
-    const account = accounts().find((item) => item.id === targetTask.assetId);
-    if (shouldUseBackendApi()) {
-      const result = await updateInternetAccount(targetTask.assetId, {
-        controlStatus: '已回收',
-        permissionStatus: '已回收',
-        accountStatus: account?.accountStatus === '已注销' ? '已注销' : '闲置',
-      });
-      if (result.code !== 0) return createErrorResponse(result.message);
-    } else {
-      setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((item) => (
-        item.id === targetTask.assetId
-          ? { ...item, controlStatus: '已回收', permissionStatus: '已回收', accountStatus: item.accountStatus === '已注销' ? item.accountStatus : '闲置', updatedAt: now() }
-          : item
-      )));
-    }
+    setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((item) => (
+      item.id === targetTask.assetId
+        ? { ...item, controlStatus: '已回收', permissionStatus: '已回收', accountStatus: item.accountStatus === '已注销' ? item.accountStatus : '闲置', currentUserId: '', currentUser: '', updatedAt: now() }
+        : item
+    )));
   }
   if (targetTask?.assetType === '设备资产') {
     setStorageData(STORAGE_KEYS.ASSET_DEVICES, devices().map((device) => (
       device.id === targetTask.assetId
-        ? { ...device, status: '闲置', currentUser: '', updatedAt: now() }
+        ? { ...device, status: '闲置', currentUserId: '', currentUser: '', updatedAt: now() }
         : device
     )));
   }
   if (targetTask?.assetType === '手机号资产') {
     setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, phones().map((phone) => (
       phone.id === targetTask.assetId
-        ? { ...phone, status: '闲置', updatedAt: now() }
+        ? { ...phone, status: '闲置', currentUserId: '', currentUser: '', updatedAt: now() }
         : phone
     )));
   }
   setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, nextTasks);
   if (targetTask) {
-    logAssetOperation('完成离职回收', targetTask.assetType, targetTask.assetId, targetTask.assetName, `${targetTask.employeeName}的${targetTask.assetType}已标记回收`);
+    logAssetOperation('完成资产交接', targetTask.assetType, targetTask.assetId, targetTask.assetName, `${targetTask.employeeName}的${targetTask.assetType}已完成交接`);
     rebuildRisksAndOffboarding();
   }
   return createSuccessResponse(updated);
@@ -2258,6 +2254,12 @@ async function fetchMatrixPublishTasks(filters?: AssetFilters): Promise<ApiRespo
 }
 
 async function createMatrixPublishTask(input: Partial<AssetMatrixPublishTaskInput>): Promise<ApiResponse<AssetMatrixPublishTask>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<AssetMatrixPublishTask>('/assets/matrix-publish', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
   return guarded(() => {
     const title = requiredText(input.title, '任务标题不能为空');
     const dueAt = requiredText(input.dueAt, '截止时间不能为空');
@@ -2268,7 +2270,7 @@ async function createMatrixPublishTask(input: Partial<AssetMatrixPublishTaskInpu
     const selectedAccounts = accountIds.map((accountId) => {
       const account = availableAccounts.find((item) => item.id === accountId);
       if (!account) throw new Error('发布账号不存在或无权查看');
-      if (!String(account.currentUser || '').trim()) throw new Error(`${account.platform} / ${account.accountName} 缺少当前使用人，不能派发`);
+      if (!String(account.currentUser || '').trim()) throw new Error(`${account.platform} / ${account.accountName} 缺少主要使用人，不能派发`);
       return account;
     });
     const createdAt = now();
@@ -2280,13 +2282,16 @@ async function createMatrixPublishTask(input: Partial<AssetMatrixPublishTaskInpu
       copywriting: input.copywriting || '',
       remark: input.remark || '',
       dueAt,
-      targets: selectedAccounts.map(matrixTargetFromAccount),
+      targets: selectedAccounts.map((account) => ({
+        ...matrixTargetFromAccount(account),
+        employeeTaskId: `local-employee-task-${Date.now()}-${account.id}`,
+      })),
       createdBy: '当前用户',
       createdAt,
       updatedAt: createdAt,
     };
     setStorageData(STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS, [task, ...matrixPublishTasks()]);
-    logAssetOperation('创建矩阵发布', '矩阵发布', task.id, task.title, `创建发布任务，目标账号${task.targets.length}个`);
+    logAssetOperation('创建发布批次', '发布批次', task.id, task.title, `创建发布批次，派发员工任务${task.targets.length}条`);
     return task;
   });
 }
@@ -2338,12 +2343,13 @@ async function completeMatrixPublishTarget(taskId: string, accountId: string): P
     if (!completedTarget) throw new Error('发布任务不存在');
     setStorageData(STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS, nextTasks);
     const target = completedTarget as AssetMatrixPublishTarget;
-    logAssetOperation('完成矩阵发布', '矩阵发布', taskId, target.accountName, `${target.platform} / ${target.accountName} 已完成发布`);
+    logAssetOperation('完成发布任务', '发布批次', taskId, target.accountName, `${target.platform} / ${target.accountName} 员工任务已完成`);
     return target;
   });
 }
 
 async function fetchMatrixPublishStats(nowIso = now()): Promise<ApiResponse<AssetMatrixPublishStats>> {
+  if (shouldUseBackendApi()) return backendRequest<AssetMatrixPublishStats>('/assets/matrix-publish/stats');
   ensureInit();
   await delay(120);
   const visibleTasks = visibleMatrixPublishTasks();
@@ -2353,7 +2359,7 @@ async function fetchMatrixPublishStats(nowIso = now()): Promise<ApiResponse<Asse
     return task.targets;
   });
   const overdueAccounts = targets.filter((target) => isMatrixTargetOverdue(target, dueAtByTargetId.get(target.id) || '', nowIso));
-  const completedTargets = targets.filter((target) => target.status === 'completed').length;
+  const completedTargets = targets.filter((target) => isMatrixTargetDone(target.status)).length;
   const stats: AssetMatrixPublishStats = {
     totalTargets: targets.length,
     completedTargets,

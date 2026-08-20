@@ -60,6 +60,9 @@ export type EmployeeTask = {
   result: string | null;
   dueAt: string | null;
   returnedReason: string | null;
+  sourceType?: string | null;
+  sourceId?: string | null;
+  sourceItemId?: string | null;
   evidence: Array<{ id: string; type: string; referenceId: string | null; content: string | null }>;
 };
 

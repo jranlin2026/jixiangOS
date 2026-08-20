@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
-import type { AssetInternetAccount, AssetPhoneNumber } from '../../src/types/asset';
+import type { AssetInternetAccount, AssetMatrixPublishTask, AssetPhoneNumber } from '../../src/types/asset';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { createAssetListService } from './assetListService';
@@ -85,6 +85,30 @@ const service = createAssetListService(
   },
   async () => ({ roles: [adminRole, deviceOnlyRole], users: [adminUser, deviceOnlyUser] }),
 );
+
+const matrixService = createAssetListService(
+  {
+    get: async (key) => ({
+      code: 0,
+      data: key === STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS ? [{
+        id: 'batch-1', title: '发布批次', dueAt: '2026-08-31T18:00:00.000Z', createdBy: '管理员',
+        createdAt: now, updatedAt: now, copywriting: '', targets: [{
+          id: 'target-1', accountId: 'account-business', accountNo: 'A-0001', platform: 'TikTok',
+          accountName: '品牌业务号', assignee: '管理员', department: '运营部', employeeTaskId: 'employee-task-1', status: 'pending',
+        }],
+      }] : data[key] ?? [],
+    }),
+  },
+  async () => ({ roles: [adminRole], users: [adminUser] }),
+  async () => [{ id: 'employee-task-1', status: 'CONFIRMED', completedAt: now }],
+);
+const confirmedBatches = await matrixService.list('matrix-publish', { status: 'confirmed', page: 1, pageSize: 10 }, authenticatedAdmin);
+assert.equal(confirmedBatches.data.pagination.total, 1, '发布批次状态必须由员工任务中心实时汇总');
+assert.equal((confirmedBatches.data.items[0] as AssetMatrixPublishTask).targets[0]?.status, 'confirmed');
+const confirmedStats = await matrixService.matrixStats(authenticatedAdmin, '2099-01-01T00:00:00.000Z');
+assert.equal(confirmedStats.data.totalTargets, 1);
+assert.equal(confirmedStats.data.completedTargets, 1, '已确认员工任务应计入发布批次完成数');
+assert.equal(confirmedStats.data.overdueTargets, 0, '已确认员工任务不得计入逾期');
 
 const first = await service.list('phones', { page: 1, pageSize: 20 }, authenticatedAdmin);
 assert.equal((first.data.items[0] as AssetPhoneNumber | undefined)?.deviceId, 'device-a');

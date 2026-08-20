@@ -337,7 +337,7 @@ assert.match(
   );
 });
 
-['submitMatrixPublishTask', 'handleCompleteMatrixTarget'].forEach((handlerName) => {
+['submitMatrixPublishTask'].forEach((handlerName) => {
   assert.match(
     assetsSource,
     new RegExp(`const ${handlerName}[\\s\\S]{0,260}if \\(!canManageMatrixPublish\\)`),
@@ -345,8 +345,4 @@ assert.match(
   );
 });
 
-assert.match(
-  assetsSource,
-  /\{canManageMatrixPublish \? \([\s\S]{0,320}handleCompleteMatrixTarget/,
-  'Read-only matrix-publish users must not see completion controls.',
-);
+assert.doesNotMatch(assetsSource, /handleCompleteMatrixTarget/, '发布批次不得绕过员工任务中心手动点完成');

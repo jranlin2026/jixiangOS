@@ -5,6 +5,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   AssetDevice,
   AssetInternetAccount,
+  AssetMatrixPublishTask,
   AssetOffboardingTask,
   AssetOperationLog,
   AssetPhoneNumber,
@@ -50,6 +51,7 @@ const assetAdmin: AuthenticatedUser = {
     { module: PERMISSION_KEYS.ASSETS_ACCOUNTS, actions: ['read', 'write', 'delete'] },
     { module: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.ASSETS_OFFBOARDING, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.TASK_ASSIGN, actions: ['read', 'write'] },
   ],
 };
 
@@ -122,6 +124,7 @@ const ASSET_KEYS = [
 
 class FakePrisma {
   values = new Map<string, unknown>(ASSET_KEYS.map((key) => [key, []]));
+  employeeTasks: Array<Record<string, unknown>> = [];
 
   constructor() {
     this.values.set(STORAGE_KEYS.ASSET_DEVICES, [clone(oldDevice)]);
@@ -178,6 +181,13 @@ class FakePrisma {
           const next = staged.has(key) ? (update.value ?? staged.get(key)) : create.value;
           staged.set(key, clone(next));
           return { key, value: clone(next) };
+        },
+      },
+      employeeTask: {
+        create: async ({ data }: any) => {
+          const task = { ...clone(data), status: data.status || 'PENDING' };
+          this.employeeTasks.push(task);
+          return clone(task);
         },
       },
       $queryRaw: async () => Array.from(staged.entries()).map(([key, value]) => ({ key, value: clone(value) })),
@@ -452,6 +462,26 @@ const rejectedPasswordlessAccount = await riskService.createInternetAccount({
   loginAccount: 'no-password@example.com',
 }, assetAdmin);
 assert.equal(rejectedPasswordlessAccount.code, 400);
+const publishBatch = await riskService.createMatrixPublishTask({
+  title: '八月矩阵发布',
+  dueAt: '2026-08-31T18:00:00.000Z',
+  videoUrl: 'https://example.com/video',
+  copywriting: '统一发布文案',
+  accountIds: [createdAccount.data!.id],
+}, assetAdmin);
+assert.equal(publishBatch.code, 0);
+assert.equal(publishBatch.data?.targets.length, 1);
+assert.equal(riskPrisma.employeeTasks.length, 1, '每个发布账号必须创建一条员工执行任务');
+assert.equal(riskPrisma.employeeTasks[0]?.employeeId, assetAdmin.id);
+assert.equal(riskPrisma.employeeTasks[0]?.sourceType, 'ASSET_MATRIX_PUBLISH');
+assert.equal(riskPrisma.employeeTasks[0]?.sourceId, publishBatch.data?.id);
+assert.equal(riskPrisma.employeeTasks[0]?.sourceItemId, createdAccount.data!.id);
+assert.equal(publishBatch.data?.targets[0]?.employeeTaskId, riskPrisma.employeeTasks[0]?.id);
+assert.equal(
+  riskPrisma.read<AssetMatrixPublishTask[]>(STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS)[0]?.targets[0]?.status,
+  'pending',
+  '发布批次只能汇总员工任务状态，创建时不得直接完成',
+);
 const deniedOffboarding = await riskService.markInternetAccountsForOffboarding([createdAccount.data!.id], deviceWriter);
 assert.equal(deniedOffboarding.code, 403);
 const markedOffboarding = await riskService.markInternetAccountsForOffboarding([createdAccount.data!.id], assetAdmin);
@@ -462,6 +492,17 @@ assert.ok(
   riskPrisma.read<AssetOffboardingTask[]>(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS)
     .some((task) => task.assetId === createdAccount.data!.id),
   '批量标记离职账号必须在同一事务中同步回收任务',
+);
+const createdHandoverTask = riskPrisma.read<AssetOffboardingTask[]>(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS)
+  .find((task) => task.assetId === createdAccount.data!.id)!;
+const completedHandover = await riskService.completeOffboardingTask(createdHandoverTask.id, assetAdmin);
+assert.equal(completedHandover.code, 0);
+assert.equal(completedHandover.data?.status, '已回收');
+assert.equal(
+  riskPrisma.read<AssetInternetAccount[]>(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS)
+    .find((account) => account.id === createdAccount.data!.id)?.controlStatus,
+  '已回收',
+  '生产环境完成资产交接必须在同一事务中回收账号',
 );
 
 const noSimDevice = await riskService.createDevice({

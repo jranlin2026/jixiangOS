@@ -8,6 +8,7 @@ import type {
   AssetFilterOptions,
   AssetInternetAccount,
   AssetOverviewRelationshipRow,
+  AssetMatrixPublishStats,
   AssetMatrixPublishTask,
   AssetOffboardingTask,
   AssetOperationLog,
@@ -22,6 +23,7 @@ import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissio
 import { readAccountControlStatus, readDeviceCommunicationType } from '../../src/domain/assets/assetFields';
 import { normalizeAccountLoginDeviceIds } from '../../src/domain/assets/accountDeviceBindings';
 import { normalizeIdentityAccountIds } from '../../src/domain/assets/accountIdentityBindings';
+import { isMatrixTargetDone } from '../../src/domain/assets/assetGovernance';
 import { success } from '../api/response';
 import { filterAssetStorageData } from './assetStorageAccess';
 
@@ -255,6 +257,7 @@ function matchesFilters(
 export function createAssetListService(
   storage: AssetStorageReader,
   readContext: () => Promise<AssetContext>,
+  readEmployeeTaskStatuses?: (taskIds: string[]) => Promise<Array<{ id: string; status: string; completedAt?: string | Date | null }>>,
 ) {
   let bundlePromise: Promise<Record<string, unknown>> | null = null;
   let bundleLoadedAt = 0;
@@ -279,6 +282,29 @@ export function createAssetListService(
   const loadVisible = async (user: AuthenticatedUser) => filterAssetStorageData(
     await loadBundle(), user, await loadContext(),
   );
+  const overlayMatrixTaskStatuses = async (batches: AssetMatrixPublishTask[]): Promise<AssetMatrixPublishTask[]> => {
+    if (!readEmployeeTaskStatuses) return batches;
+    const taskIds = batches.flatMap((batch) => batch.targets
+      .map((target) => target.employeeTaskId)
+      .filter((id): id is string => Boolean(id)));
+    const statuses = new Map((await readEmployeeTaskStatuses(taskIds)).map((task) => [task.id, task]));
+    return batches.map((batch) => ({
+      ...batch,
+      targets: batch.targets.map((target) => {
+        const employeeTask = target.employeeTaskId ? statuses.get(target.employeeTaskId) : undefined;
+        if (!employeeTask) return target;
+        const status: AssetMatrixPublishTask['targets'][number]['status'] = employeeTask.status === 'CONFIRMED' ? 'confirmed'
+          : employeeTask.status === 'COMPLETED' ? 'completed'
+            : employeeTask.status === 'RETURNED' ? 'returned'
+              : 'pending';
+        return {
+          ...target,
+          status,
+          completedAt: employeeTask.completedAt ? new Date(employeeTask.completedAt).toISOString() : target.completedAt,
+        };
+      }),
+    }));
+  };
 
   return {
     invalidate() {
@@ -287,7 +313,8 @@ export function createAssetListService(
     },
     async list(kind: AssetListKind, filters: AssetFilters, user: AuthenticatedUser) {
       const visible = await loadVisible(user);
-      const rows = (Array.isArray(visible[KEY_BY_KIND[kind]]) ? visible[KEY_BY_KIND[kind]] : []) as AssetRow[];
+      let rows = (Array.isArray(visible[KEY_BY_KIND[kind]]) ? visible[KEY_BY_KIND[kind]] : []) as AssetRow[];
+      if (kind === 'matrix-publish') rows = await overlayMatrixTaskStatuses(rows as AssetMatrixPublishTask[]);
       const canReadDevices = hasPermission(user, PERMISSION_KEYS.ASSETS_DEVICES, 'read');
       const canReadPhones = hasPermission(user, PERMISSION_KEYS.ASSETS_PHONES, 'read');
       const canReadAccounts = hasPermission(user, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'read');
@@ -372,6 +399,48 @@ export function createAssetListService(
           total: filtered.length,
           totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)),
         },
+      });
+    },
+    async matrixStats(user: AuthenticatedUser, nowIso = new Date().toISOString()) {
+      const visible = await loadVisible(user);
+      const batches = await overlayMatrixTaskStatuses(
+        (visible[STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS] || []) as AssetMatrixPublishTask[],
+      );
+      const dueAtByTargetId = new Map<string, string>();
+      const targets = batches.flatMap((batch) => {
+        batch.targets.forEach((target) => dueAtByTargetId.set(target.id, batch.dueAt));
+        return batch.targets;
+      });
+      const isOverdue = (target: AssetMatrixPublishTask['targets'][number]) => {
+        const dueAt = dueAtByTargetId.get(target.id);
+        return !isMatrixTargetDone(target.status)
+          && Boolean(dueAt)
+          && new Date(dueAt!).getTime() < new Date(nowIso).getTime();
+      };
+      const summarize = <K extends 'platform' | 'department' | 'assignee'>(groupKey: K) => {
+        const groups = new Map<string, { total: number; completed: number; overdue: number }>();
+        targets.forEach((target) => {
+          const key = String(target[groupKey] || '未分组');
+          const current = groups.get(key) || { total: 0, completed: 0, overdue: 0 };
+          current.total += 1;
+          if (isMatrixTargetDone(target.status)) current.completed += 1;
+          if (isOverdue(target)) current.overdue += 1;
+          groups.set(key, current);
+        });
+        return Array.from(groups.entries()).map(([key, value]) => ({ [groupKey]: key, ...value }));
+      };
+      const completedTargets = targets.filter((target) => isMatrixTargetDone(target.status)).length;
+      const overdueAccounts = targets.filter(isOverdue);
+      return success<AssetMatrixPublishStats>({
+        totalTargets: targets.length,
+        completedTargets,
+        pendingTargets: targets.length - completedTargets,
+        overdueTargets: overdueAccounts.length,
+        completionRate: targets.length ? Math.round((completedTargets / targets.length) * 100) : 0,
+        overdueAccounts,
+        byPlatform: summarize('platform') as AssetMatrixPublishStats['byPlatform'],
+        byDepartment: summarize('department') as AssetMatrixPublishStats['byDepartment'],
+        byAssignee: summarize('assignee') as AssetMatrixPublishStats['byAssignee'],
       });
     },
     async filterOptions(kind: 'devices' | 'phones' | 'accounts', user: AuthenticatedUser) {
