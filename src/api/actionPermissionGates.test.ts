@@ -10,6 +10,7 @@ const commissionPayoutSource = readFileSync(join(projectRoot, 'src/pages/Finance
 const commissionRuleSource = readFileSync(join(projectRoot, 'src/pages/Commission/CommissionRuleConfig.tsx'), 'utf8');
 const recoverySettlementSource = readFileSync(join(projectRoot, 'src/pages/Finance/RecoverySettlement.tsx'), 'utf8');
 const assetsSource = readFileSync(join(projectRoot, 'src/pages/Assets/index.tsx'), 'utf8');
+const marketingSource = readFileSync(join(projectRoot, 'src/pages/Marketing/index.tsx'), 'utf8');
 const leadFlowConfigSource = readFileSync(join(projectRoot, 'src/pages/Leads/LeadFlowConfigTab.tsx'), 'utf8');
 const customerFormSource = readFileSync(join(projectRoot, 'src/pages/Customers/CustomerForm.tsx'), 'utf8');
 
@@ -302,9 +303,9 @@ assert.match(
 );
 
 assert.match(
-  assetsSource,
-  /const canManageMatrixPublish\s*=\s*hasPermission\(currentUser,\s*PERMISSION_KEYS\.ASSETS_MATRIX_PUBLISH,\s*'write'\)/,
-  'Matrix-publish mutations must require explicit write permission.',
+  marketingSource,
+  /const canPublish\s*=\s*hasPermission\([\s\S]{0,100}PERMISSION_KEYS\.MARKETING_PUBLISH,[\s\S]{0,50}"write"/,
+  'Publish-plan mutations must require explicit content-operations write permission.',
 );
 
 assert.match(
@@ -337,12 +338,4 @@ assert.match(
   );
 });
 
-['submitMatrixPublishTask'].forEach((handlerName) => {
-  assert.match(
-    assetsSource,
-    new RegExp(`const ${handlerName}[\\s\\S]{0,260}if \\(!canManageMatrixPublish\\)`),
-    `${handlerName} must fail closed without matrix-publish write permission.`,
-  );
-});
-
-assert.doesNotMatch(assetsSource, /handleCompleteMatrixTarget/, '发布批次不得绕过员工任务中心手动点完成');
+assert.doesNotMatch(assetsSource, /createMatrixPublishTask|handleCompleteMatrixTarget/, '资产管理不得承载发布计划写操作');

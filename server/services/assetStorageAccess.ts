@@ -86,6 +86,7 @@ export function canReadStorageKey(user: AuthenticatedUser, key: string): boolean
     return hasAnyExactPermission(user, [
       PERMISSION_KEYS.ASSETS,
       PERMISSION_KEYS.ASSETS_ACCOUNTS,
+      PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH,
       PERMISSION_KEYS.MARKETING_PUBLISH,
       PERMISSION_KEYS.MARKETING_GROUPS,
     ], 'read');
@@ -182,8 +183,28 @@ export function filterAssetStorageData(
   user: AuthenticatedUser,
   context: AssetStorageContext,
 ): Record<string, unknown> {
-  if (!hasPermission(user, PERMISSION_KEYS.ASSETS, 'read')) {
-    return Object.fromEntries(Object.entries(data).filter(([key]) => !isAssetStorageKey(key)));
+  const hasAssetLedgerAccess = hasAnyExactPermission(user, [
+    PERMISSION_KEYS.ASSETS,
+    PERMISSION_KEYS.ASSETS_OVERVIEW,
+    PERMISSION_KEYS.ASSETS_DEVICES,
+    PERMISSION_KEYS.ASSETS_PHONES,
+    PERMISSION_KEYS.ASSETS_ACCOUNTS,
+    PERMISSION_KEYS.ASSETS_RISKS,
+    PERMISSION_KEYS.ASSETS_LOGS,
+    PERMISSION_KEYS.ASSETS_OFFBOARDING,
+    PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW,
+    PERMISSION_KEYS.ASSETS_IMPORT_EXPORT,
+  ]);
+  if (!hasAssetLedgerAccess) {
+    const safeData = Object.fromEntries(Object.entries(data).filter(([key]) => !isAssetStorageKey(key)));
+    if (canReadStorageKey(user, STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS)) {
+      safeData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] = asArray<AssetInternetAccount>(data[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS])
+        .map((account) => sanitizeAccount(normalizeAssetAccount({ ...account }), false));
+    }
+    if (canReadStorageKey(user, STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS)) {
+      safeData[STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS] = asArray<AssetMatrixPublishTask>(data[STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS]);
+    }
+    return safeData;
   }
 
   const scope = assetScopeForUser(user, context);

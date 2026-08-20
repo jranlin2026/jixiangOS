@@ -36,14 +36,14 @@ import { useSearchParams } from "react-router-dom";
 import { assetApi, marketingApi } from "../../api";
 import type {
   AssetInternetAccount,
-  AssetMatrixPublishStats,
-  AssetMatrixPublishTask,
 } from "../../types/asset";
 import type {
   MarketingAccountGroup,
   MarketingContent,
   MarketingContentInput,
   MarketingContentType,
+  MarketingPublishPlan,
+  MarketingPublishPlanStats,
 } from "../../types/marketing";
 import useAuthStore from "../../store/useAuthStore";
 import { hasPermission, PERMISSION_KEYS } from "../../shared/utils/permissions";
@@ -58,7 +58,7 @@ import ProtectedFormDialog from "../../shared/components/ProtectedFormDialog";
 import useAppFeedback from "../../shared/hooks/useAppFeedback";
 import { expandMarketingAccountSelection } from "../../domain/marketing/marketingContent";
 
-type MarketingTab = "contents" | "calendar" | "groups" | "tasks";
+type MarketingTab = "contents" | "calendar" | "groups" | "plans";
 type PageState = { page: number; pageSize: number; total: number };
 
 const contentTypeMeta: Record<
@@ -129,12 +129,13 @@ const MarketingCenter: React.FC = () => {
     PERMISSION_KEYS.MARKETING_GROUPS,
     "write",
   );
-  const requestedTab = searchParams.get("tab") as MarketingTab | null;
+  const rawRequestedTab = searchParams.get("tab");
+  const requestedTab = (rawRequestedTab === "tasks" ? "plans" : rawRequestedTab) as MarketingTab | null;
   const activeTab: MarketingTab = [
     "contents",
     "calendar",
     "groups",
-    "tasks",
+    "plans",
   ].includes(requestedTab || "")
     ? requestedTab!
     : "contents";
@@ -145,8 +146,8 @@ const MarketingCenter: React.FC = () => {
   );
   const [groups, setGroups] = useState<MarketingAccountGroup[]>([]);
   const [accounts, setAccounts] = useState<AssetInternetAccount[]>([]);
-  const [tasks, setTasks] = useState<AssetMatrixPublishTask[]>([]);
-  const [stats, setStats] = useState<AssetMatrixPublishStats | null>(null);
+  const [tasks, setTasks] = useState<MarketingPublishPlan[]>([]);
+  const [stats, setStats] = useState<MarketingPublishPlanStats | null>(null);
   const [pagination, setPagination] = useState<PageState>(emptyPage);
   const [groupPagination, setGroupPagination] = useState<PageState>(emptyPage);
   const [loading, setLoading] = useState(false);
@@ -257,13 +258,13 @@ const MarketingCenter: React.FC = () => {
     setLoading(true);
     setLoadError("");
     const [taskResult, statsResult] = await Promise.all([
-      assetApi.fetchMatrixPublishTasks({
+      marketingApi.listPublishPlans({
         search,
         platform,
         page: pagination.page,
         pageSize: pagination.pageSize,
       }),
-      assetApi.fetchMatrixPublishStats(),
+      marketingApi.fetchPublishPlanStats(),
     ]);
     if (taskResult.code === 0) {
       setTasks(taskResult.data.items);
@@ -280,14 +281,14 @@ const MarketingCenter: React.FC = () => {
     if (activeTab === "contents" || activeTab === "calendar")
       void loadContents();
     if (activeTab === "groups") void loadReferenceData();
-    if (activeTab === "tasks")
+    if (activeTab === "plans")
       void Promise.all([loadReferenceData(), loadTasks()]);
   }, [activeTab, loadContents, loadReferenceData, loadTasks]);
 
   useEffect(() => {
     if (
       searchParams.get("create") === "1" &&
-      activeTab === "tasks" &&
+      activeTab === "plans" &&
       canPublish
     ) {
       setPublishDialog((current) => ({ ...current, open: true }));
@@ -296,6 +297,13 @@ const MarketingCenter: React.FC = () => {
       setSearchParams(next, { replace: true });
     }
   }, [activeTab, canPublish, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (rawRequestedTab !== "tasks") return;
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", "plans");
+    setSearchParams(next, { replace: true });
+  }, [rawRequestedTab, searchParams, setSearchParams]);
 
   const selectTab = (tab: MarketingTab) => {
     setPagination(emptyPage);
@@ -415,7 +423,7 @@ const MarketingCenter: React.FC = () => {
     groups,
   );
 
-  const createPublishTask = async () => {
+  const createPublishPlan = async () => {
     if (!selectedContent) {
       await showFeedback("请选择审核通过的内容", "创建失败");
       return;
@@ -428,7 +436,7 @@ const MarketingCenter: React.FC = () => {
       publishDialog.groupIds.includes(group.id),
     );
     setSubmitting("publish");
-    const result = await assetApi.createMatrixPublishTask({
+    const result = await marketingApi.createPublishPlan({
       title: publishDialog.title || selectedContent.title,
       dueAt: new Date(publishDialog.dueAt).toISOString(),
       plannedAt: publishDialog.plannedAt
@@ -462,8 +470,8 @@ const MarketingCenter: React.FC = () => {
       remark: "",
     });
     await showFeedback(
-      `发布任务已派发到 ${result.data.targets.length} 个账号的主要使用人`,
-      "派发成功",
+      `发布计划已生成 ${result.data.targets.length} 个账号的执行任务`,
+      "计划创建成功",
     );
     await loadTasks();
   };
@@ -827,6 +835,16 @@ const MarketingCenter: React.FC = () => {
       await showFeedback("浏览器未允许访问剪贴板，请手动复制文案", "复制失败");
     }
   };
+  const planWorkDate = (plannedAt?: string) => (
+    plannedAt
+      ? new Date(plannedAt).toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" })
+      : today()
+  );
+  const executionLedgerLink = (task: MarketingPublishPlan, employeeTaskId?: string) => {
+    const params = new URLSearchParams({ tab: "team", date: planWorkDate(task.plannedAt) });
+    if (employeeTaskId) params.set("taskId", employeeTaskId);
+    return `/tasks?${params.toString()}`;
+  };
   const renderTasks = () => (
     <>
       <Stack
@@ -915,6 +933,9 @@ const MarketingCenter: React.FC = () => {
                     图片
                   </Button>
                 ) : null}
+                <Button size="small" href={executionLedgerLink(task, task.targets[0]?.employeeTaskId)}>
+                  查看执行台账
+                </Button>
               </Stack>
             </Paper>
           ))}
@@ -925,13 +946,14 @@ const MarketingCenter: React.FC = () => {
             <TableHead>
               <TableRow>
                 {[
-                  "发布任务",
+                  "发布计划",
                   "内容版本",
                   "账号组",
                   "目标账号",
                   "执行状态",
                   "计划/截止",
                   "素材",
+                  "执行入口",
                 ].map((label) => (
                   <TableCell key={label}>{label}</TableCell>
                 ))}
@@ -1018,16 +1040,25 @@ const MarketingCenter: React.FC = () => {
                       ) : null}
                     </Stack>
                   </TableCell>
+                  <TableCell>
+                    <Stack spacing={0.5} alignItems="flex-start">
+                      {task.targets.map((target) => (
+                        <Button key={target.id} size="small" href={executionLedgerLink(task, target.employeeTaskId)}>
+                          {target.accountName}
+                        </Button>
+                      ))}
+                    </Stack>
+                  </TableCell>
                 </TableRow>
               ))}
               {!tasks.length ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={8}
                     align="center"
                     sx={{ py: 8, color: "text.secondary" }}
                   >
-                    暂无发布任务
+                    暂无发布计划
                   </TableCell>
                 </TableRow>
               ) : null}
@@ -1040,7 +1071,7 @@ const MarketingCenter: React.FC = () => {
           variant="outlined"
           sx={{ p: 5, textAlign: "center", color: "text.secondary" }}
         >
-          暂无发布任务
+          暂无发布计划
         </Paper>
       ) : null}
       <TablePagination
@@ -1064,8 +1095,8 @@ const MarketingCenter: React.FC = () => {
   return (
     <ModulePage sx={{ p: { xs: 2, md: 3 } }}>
       <ModuleHeader
-        title="营销内容中心"
-        description="统一沉淀、审核和分发朋友圈、短视频与图文内容，让销售每天明确知道发什么、在哪里取、何时完成。"
+        title="内容运营"
+        description="统一管理内容、排期、账号分组与发布计划；执行任务按计划日期进入员工工作台。"
         actions={
           activeTab === "contents" && canWriteContent ? (
             <Button
@@ -1094,7 +1125,7 @@ const MarketingCenter: React.FC = () => {
             >
               新建账号组
             </Button>
-          ) : activeTab === "tasks" && canPublish ? (
+          ) : activeTab === "plans" && canPublish ? (
             <Button
               variant="contained"
               startIcon={<SendOutlinedIcon />}
@@ -1102,7 +1133,7 @@ const MarketingCenter: React.FC = () => {
                 setPublishDialog((current) => ({ ...current, open: true }))
               }
             >
-              创建发布任务
+              创建发布计划
             </Button>
           ) : undefined
         }
@@ -1116,7 +1147,7 @@ const MarketingCenter: React.FC = () => {
               color="inherit"
               size="small"
               onClick={() =>
-                void (activeTab === "tasks"
+                void (activeTab === "plans"
                   ? Promise.all([loadReferenceData(), loadTasks()])
                   : activeTab === "groups"
                     ? loadReferenceData()
@@ -1154,21 +1185,21 @@ const MarketingCenter: React.FC = () => {
           label="账号分组"
         />
         <Tab
-          value="tasks"
+          value="plans"
           icon={<SendOutlinedIcon />}
           iconPosition="start"
-          label="发布任务"
+          label="发布计划"
         />
       </ModuleTabs>
       {activeTab === "contents" ||
       activeTab === "calendar" ||
-      activeTab === "tasks" ? (
+      activeTab === "plans" ? (
         <ModuleToolbar sx={{ mb: 1.5 }}>
           <TextField
             size="small"
             placeholder={
-              activeTab === "tasks"
-                ? "搜索任务、账号、执行人"
+              activeTab === "plans"
+                ? "搜索计划、账号、执行人"
                 : "搜索标题、主题、文案或负责人"
             }
             value={search}
@@ -1178,7 +1209,7 @@ const MarketingCenter: React.FC = () => {
             }}
             sx={{ width: { xs: "100%", md: 330 } }}
           />
-          {activeTab !== "tasks" ? (
+          {activeTab !== "plans" ? (
             <>
               <TextField
                 select
@@ -1629,10 +1660,10 @@ const MarketingCenter: React.FC = () => {
       >
         {({ requestClose }) => (
           <>
-            <DialogTitle>创建发布任务</DialogTitle>
+            <DialogTitle>创建发布计划</DialogTitle>
             <DialogContent dividers>
               <Alert severity="info" sx={{ mb: 1.5 }}>
-                发布任务只能选择审核通过的内容；系统会按计划发布日期出现在销售的今日任务，并要求提交发布链接或截图链接。
+                发布计划只能选择审核通过的内容；系统会按计划发布日期生成执行任务，并进入账号主要使用人的工作台。
               </Alert>
               <Box
                 sx={{
@@ -1820,7 +1851,7 @@ const MarketingCenter: React.FC = () => {
                   !publishDialog.dueAt ||
                   !selectedAccountIds.length
                 }
-                onClick={() => void createPublishTask()}
+                onClick={() => void createPublishPlan()}
               >
                 创建并派发员工任务
               </Button>

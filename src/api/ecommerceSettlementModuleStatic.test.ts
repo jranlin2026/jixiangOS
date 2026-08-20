@@ -5,12 +5,12 @@ import { DEFAULT_ROLES } from '../shared/utils/organizationConfig';
 import { PERMISSION_KEYS, roleHasPermission } from '../shared/utils/permissions';
 
 const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
-const sidebarSource = readFileSync(join(process.cwd(), 'src', 'layouts', 'Sidebar.tsx'), 'utf8');
+const sidebarSource = readFileSync(join(process.cwd(), 'src', 'layouts', 'sidebarNavigation.ts'), 'utf8');
 const rolePermissionSource = readFileSync(join(process.cwd(), 'src', 'pages', 'Settings', 'RolePermission.tsx'), 'utf8');
 const pageSource = readFileSync(join(process.cwd(), 'src', 'pages', 'EcommerceSettlement', 'index.tsx'), 'utf8');
 
 assert.match(appSource, /ROUTES\.ECOMMERCE_SETTLEMENT/);
-assert.match(sidebarSource, /电商结算中心/);
+assert.match(sidebarSource, /label: '电商结算'/);
 assert.match(rolePermissionSource, /PERMISSION_KEYS\.ECOMMERCE_SETTLEMENT_WORKBENCH/);
 assert.match(pageSource, /店铺对账/);
 assert.match(pageSource, /生成当前店铺/);

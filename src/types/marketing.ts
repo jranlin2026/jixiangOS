@@ -88,3 +88,13 @@ export interface MarketingPublishInput {
   accountIds: string[];
   remark?: string;
 }
+
+// Canonical content-operations names. The aliases keep historical persisted
+// plans readable while the legacy storage key is migrated independently.
+export type {
+  AssetMatrixPublishStats as MarketingPublishPlanStats,
+  AssetMatrixPublishTarget as MarketingPublishTarget,
+  AssetMatrixPublishTargetStatus as MarketingPublishTargetStatus,
+  AssetMatrixPublishTask as MarketingPublishPlan,
+  AssetMatrixPublishTaskInput as MarketingPublishPlanInput,
+} from './asset';

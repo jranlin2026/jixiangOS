@@ -3,11 +3,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
-const sidebarSource = readFileSync(join(process.cwd(), 'src', 'layouts', 'Sidebar.tsx'), 'utf8');
+const sidebarSource = readFileSync(join(process.cwd(), 'src', 'layouts', 'sidebarNavigation.ts'), 'utf8');
 const geoSource = readFileSync(join(process.cwd(), 'src', 'pages', 'GEO', 'index.tsx'), 'utf8');
 
 assert.match(appSource, /ROUTES\.GEO/);
-assert.match(sidebarSource, /GEO增长中心/);
+assert.match(sidebarSource, /label: 'GEO增长'/);
 
 [
   'GEO驾驶舱',

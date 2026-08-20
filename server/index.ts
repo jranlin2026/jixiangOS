@@ -77,6 +77,7 @@ import { createBusinessAttachmentService, createPrismaBusinessAttachmentReposito
 import { createAssetListService, isAssetListKind } from './services/assetListService';
 import { createAssetCommandService } from './services/assetCommandService';
 import { createMarketingContentService } from './services/marketingContentService';
+import { createMarketingPublishService } from './services/marketingPublishService';
 import type { AssetFilters } from '../src/types/asset';
 import { createOrderApplicationService } from './services/orderApplicationService';
 import {
@@ -304,6 +305,7 @@ const assetListService = createAssetListService(storageService, assetStorageCont
 });
 const assetCommandService = createAssetCommandService(prisma);
 const marketingContentService = createMarketingContentService(prisma);
+const marketingPublishService = createMarketingPublishService(assetCommandService, assetListService);
 const deliveryAssignmentService = createDeliveryAssignmentService(prisma);
 const financeTransactionService = createFinanceTransactionService(prisma);
 const orderApprovalEffects = createOrderApprovalDownstreamEffects(deliveryAssignmentService);
@@ -2150,6 +2152,33 @@ app.put('/api/marketing/account-groups/:id', requireMarketingAccess, async (req:
 app.delete('/api/marketing/account-groups/:id', requireMarketingAccess, async (req: AuthenticatedRequest, res) => {
   const result = await marketingContentService.deleteGroup(routeParam(req.params.id), req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.get('/api/marketing/publish-plans', requireMarketingAccess, async (req: AuthenticatedRequest, res) => {
+  if (!hasPermission(req.currentUser!, PERMISSION_KEYS.MARKETING_PUBLISH, 'read')) {
+    res.status(403).json(failure('无权查看发布计划', 403));
+    return;
+  }
+  res.json(await marketingPublishService.listPlans({
+    search: queryParam(req.query.search),
+    platform: queryParam(req.query.platform),
+    page: Number(queryParam(req.query.page) || 1),
+    pageSize: Number(queryParam(req.query.pageSize) || 10),
+  }, req.currentUser!));
+});
+
+app.post('/api/marketing/publish-plans', requireMarketingAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await marketingPublishService.createPlan(req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.get('/api/marketing/publish-plans/stats', requireAuthenticated, async (req: AuthenticatedRequest, res) => {
+  if (![PERMISSION_KEYS.MARKETING_PUBLISH, PERMISSION_KEYS.DASHBOARD, PERMISSION_KEYS.BRAIN_DASHBOARD]
+    .some((permissionKey) => hasPermission(req.currentUser!, permissionKey, 'read'))) {
+    res.status(403).json(failure('无权查看发布计划统计', 403));
+    return;
+  }
+  res.json(await marketingPublishService.planStats(req.currentUser!));
 });
 
 app.post('/api/assets/phones/:id/reveal/service-password', requireAssetSensitiveViewAccess, async (req: AuthenticatedRequest, res) => {

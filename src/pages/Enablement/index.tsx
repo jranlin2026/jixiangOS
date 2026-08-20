@@ -10,8 +10,9 @@ import EnablementHome from './EnablementHome';
 import MyStandard from './MyStandard';
 import PositionStandards from './PositionStandards';
 import { setEnablementSearchParam } from './todayActionData';
+import TaskTemplates from './TaskTemplates';
 
-type EnablementTab = 'my-standard' | 'standards' | 'knowledge' | 'publishing' | 'home';
+type EnablementTab = 'my-standard' | 'standards' | 'task-templates' | 'knowledge' | 'publishing' | 'home';
 
 const Enablement: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -24,6 +25,7 @@ const Enablement: React.FC = () => {
   const tabs = useMemo<Array<{ value: EnablementTab; label: string }>>(() => [
     ...(canReadStandard ? [{ value: 'my-standard' as const, label: '我的岗位标准' }] : []),
     ...(hasPermission(currentUser, PERMISSION_KEYS.STANDARD_MAINTAIN) ? [{ value: 'standards' as const, label: '标准管理' }] : []),
+    ...(hasPermission(currentUser, PERMISSION_KEYS.TASK_ASSIGN, 'write') ? [{ value: 'task-templates' as const, label: '执行模板' }] : []),
     ...(canReadKnowledge ? [{ value: 'knowledge' as const, label: '企业知识' }] : []),
     ...(canManage ? [{ value: 'publishing' as const, label: '发布管理' }] : []),
     { value: 'home', label: '旧版行动台' },
@@ -48,7 +50,7 @@ const Enablement: React.FC = () => {
       >
         {tabs.map((tab) => <Tab key={tab.value} value={tab.value} label={tab.label} />)}
       </ModuleTabs>
-      {activeTab === 'my-standard' ? <MyStandard /> : activeTab === 'standards' ? <PositionStandards /> : activeTab === 'home' ? (
+      {activeTab === 'my-standard' ? <MyStandard /> : activeTab === 'standards' ? <PositionStandards /> : activeTab === 'task-templates' ? <TaskTemplates /> : activeTab === 'home' ? (
         <EnablementHome
           canManage={canManage}
           canOpenKnowledge={canReadKnowledge}

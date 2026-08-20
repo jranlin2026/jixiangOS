@@ -5,12 +5,12 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const app = readFileSync(resolve(root, 'src/App.tsx'), 'utf8');
-const sidebar = readFileSync(resolve(root, 'src/layouts/Sidebar.tsx'), 'utf8');
+const sidebarNavigation = readFileSync(resolve(root, 'src/layouts/sidebarNavigation.ts'), 'utf8');
 const page = readFileSync(resolve(root, 'src/pages/CoCreation/index.tsx'), 'utf8');
 
 assert.match(app, /ROUTES\.CO_CREATION/);
 assert.match(app, /PERMISSION_KEYS\.CO_CREATION_SUBMIT/);
-assert.match(sidebar, /label:\s*'AI共创中心'/);
+assert.match(sidebarNavigation, /label:\s*'改善共创'/);
 assert.match(page, /我的需求/);
 assert.match(page, /主管确认/);
 assert.match(page, /管理决策/);

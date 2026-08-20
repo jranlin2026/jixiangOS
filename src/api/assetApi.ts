@@ -2288,7 +2288,7 @@ async function createMatrixPublishTask(input: Partial<AssetMatrixPublishTaskInpu
       updatedAt: createdAt,
     };
     setStorageData(STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS, [task, ...matrixPublishTasks()]);
-    logAssetOperation('创建发布批次', '发布批次', task.id, task.title, `创建发布批次，派发员工任务${task.targets.length}条`);
+    logAssetOperation('创建发布计划', '发布计划', task.id, task.title, `创建发布计划，派发员工任务${task.targets.length}条`);
     return task;
   });
 }

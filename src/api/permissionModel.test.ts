@@ -9,7 +9,7 @@ import { CAPABILITY_KEYS, canReceiveLead, canReviewRecoveryOrders, getPermission
 import type { Role } from '../types/role';
 
 const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
-const sidebarSource = readFileSync(join(process.cwd(), 'src', 'layouts', 'Sidebar.tsx'), 'utf8');
+const sidebarSource = readFileSync(join(process.cwd(), 'src', 'layouts', 'sidebarNavigation.ts'), 'utf8');
 const settingsSource = readFileSync(join(process.cwd(), 'src', 'pages', 'Settings', 'index.tsx'), 'utf8');
 const rolePermissionSource = [
   readFileSync(join(process.cwd(), 'src', 'pages', 'Settings', 'RolePermission.tsx'), 'utf8'),

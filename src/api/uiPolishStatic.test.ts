@@ -52,7 +52,7 @@ const orderDetailSource = readFileSync(join(projectRoot, 'src/pages/Orders/Order
 const orderHistorySource = readFileSync(join(projectRoot, 'src/pages/Orders/OrderHistoryDialog.tsx'), 'utf8');
 const orderReviewSource = readFileSync(join(projectRoot, 'src/pages/OrderReview/index.tsx'), 'utf8');
 const appSource = readFileSync(join(projectRoot, 'src/App.tsx'), 'utf8');
-const sidebarSource = readFileSync(join(projectRoot, 'src/layouts/Sidebar.tsx'), 'utf8');
+const sidebarSource = readFileSync(join(projectRoot, 'src/layouts/sidebarNavigation.ts'), 'utf8');
 const deliverySource = readFileSync(join(projectRoot, 'src/pages/Delivery/index.tsx'), 'utf8');
 const rolePermissionSource = readFileSync(join(projectRoot, 'src/pages/Settings/RolePermission.tsx'), 'utf8');
 const settingsSource = readFileSync(join(projectRoot, 'src/pages/Settings/index.tsx'), 'utf8');
@@ -612,12 +612,12 @@ assert.match(
 );
 assert.match(
   sidebarSource,
-  /label:\s*'交付中心'[\s\S]*label:\s*'售后服务'[\s\S]*label:\s*'财务中心'/,
-  'Sidebar should place 售后服务 between 交付中心 and 财务中心.',
+  /label:\s*'交付'[\s\S]*label:\s*'售后与退款'[\s\S]*label:\s*'财务结算'/,
+  'Sidebar should place 售后与退款 after 交付 and before 财务结算.',
 );
 assert.match(
   sidebarSource,
-  /label:\s*'客户管理'[\s\S]*label:\s*'客户列表'[\s\S]*label:\s*'公海池'/,
+  /label:\s*'客户经营'[\s\S]*label:\s*'客户列表'[\s\S]*label:\s*'公海池'/,
   'Sidebar customer module should expose 客户列表 and 公海池 as folded child entries.',
 );
 assert.match(

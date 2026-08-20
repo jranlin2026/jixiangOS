@@ -237,6 +237,7 @@ const App: React.FC = () => {
             PERMISSION_KEYS.ASSETS_RISKS,
             PERMISSION_KEYS.ASSETS_LOGS,
             PERMISSION_KEYS.ASSETS_OFFBOARDING,
+            PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH,
           ]} />}>
             <Route path={ROUTES.ASSETS} element={<Suspense fallback={<PageLoader />}><Assets /></Suspense>} />
           </Route>
@@ -245,6 +246,7 @@ const App: React.FC = () => {
             PERMISSION_KEYS.MARKETING_REVIEW,
             PERMISSION_KEYS.MARKETING_PUBLISH,
             PERMISSION_KEYS.MARKETING_GROUPS,
+            PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH,
           ]} />}>
             <Route path={ROUTES.MARKETING} element={<Suspense fallback={<PageLoader />}><Marketing /></Suspense>} />
           </Route>
@@ -269,10 +271,11 @@ const App: React.FC = () => {
             PERMISSION_KEYS.STANDARD_READ,
             PERMISSION_KEYS.STANDARD_MAINTAIN,
             PERMISSION_KEYS.STANDARD_PUBLISH,
+            PERMISSION_KEYS.TASK_ASSIGN,
           ]} />}>
             <Route path={ROUTES.ENABLEMENT} element={<Suspense fallback={<PageLoader />}><Enablement /></Suspense>} />
           </Route>
-          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.TASK_SELF, PERMISSION_KEYS.TASK_TEAM]} />}>
+          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.TASK_SELF, PERMISSION_KEYS.TASK_TEAM, PERMISSION_KEYS.TASK_ASSIGN]} />}>
             <Route path={ROUTES.TASKS} element={<Suspense fallback={<PageLoader />}><Tasks /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[...OKR_ACCESS_PERMISSION_KEYS]} />}>

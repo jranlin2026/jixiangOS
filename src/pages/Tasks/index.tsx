@@ -35,7 +35,7 @@ import {
   ModuleTabs,
 } from "../../shared/components/ModuleShell";
 import TablePagination from "../../shared/components/TablePagination";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 const today = () =>
   new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
@@ -49,19 +49,22 @@ const statusMap: Record<
   RETURNED: { label: "已退回", color: "default" },
 };
 
+const isMarketingPublishTask = (task: Pick<EmployeeTask, "sourceType"> | null | undefined) =>
+  task?.sourceType === "MARKETING_PUBLISH" || task?.sourceType === "ASSET_MATRIX_PUBLISH";
+
 const taskSource = (task: EmployeeTask) =>
-  task.sourceType === "ASSET_MATRIX_PUBLISH" ? (
+  isMarketingPublishTask(task) ? (
     <Button
       size="small"
-      href="/marketing?tab=tasks"
+      href="/marketing?tab=plans"
       sx={{ px: 0, minWidth: 0, fontSize: 12, fontWeight: 800 }}
     >
-      来自营销发布任务
+      来自内容发布计划
     </Button>
   ) : null;
 
 const taskResourceActions = (task: EmployeeTask) => {
-  if (task.sourceType !== "ASSET_MATRIX_PUBLISH") return null;
+  if (!isMarketingPublishTask(task)) return null;
   const lines = (task.description || "").split("\n");
   const copywriting = lines
     .find((line) => line.startsWith("发布文案："))
@@ -119,15 +122,19 @@ const TaskCenter: React.FC = () => {
     "write",
   );
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const requestedTab = searchParams.get("tab");
   const selectedTaskId = searchParams.get("taskId") || "";
+
+  useEffect(() => {
+    if (requestedTab !== "templates") return;
+    navigate("/enablement?tab=task-templates", { replace: true });
+  }, [navigate, requestedTab]);
   const initialTab = requestedTab === "team" && canTeam
     ? "team"
     : requestedTab === "review"
       ? "review"
-      : requestedTab === "templates" && canAssign
-        ? "templates"
-        : "mine";
+      : "mine";
   const [tab, setTab] = useState<"mine" | "team" | "review" | "templates">(
     initialTab,
   );
@@ -182,9 +189,7 @@ const TaskCenter: React.FC = () => {
       ? "team"
       : nextRequestedTab === "review"
         ? "review"
-        : nextRequestedTab === "templates" && canAssign
-          ? "templates"
-          : "mine";
+        : "mine";
     const nextRequestedDate = searchParams.get("date") || "";
     const nextDate = /^\d{4}-\d{2}-\d{2}$/.test(nextRequestedDate) ? nextRequestedDate : today();
     const nextRequestedPage = Number(searchParams.get("page"));
@@ -234,7 +239,7 @@ const TaskCenter: React.FC = () => {
   const submitComplete = async () => {
     if (!complete) return;
     if (
-      complete.sourceType === "ASSET_MATRIX_PUBLISH" &&
+      isMarketingPublishTask(complete) &&
       !completeForm.publishUrl.trim() &&
       !completeForm.screenshotUrl.trim()
     ) {
@@ -410,7 +415,6 @@ const TaskCenter: React.FC = () => {
         <Tab value="mine" label="我的任务" />
         {canTeam && <Tab value="team" label="团队执行" />}
         <Tab value="review" label="每日复盘" />
-        {canAssign && <Tab value="templates" label="任务模板" />}
       </ModuleTabs>
       {(tab === "mine" || tab === "team") && (
         <>
@@ -461,7 +465,7 @@ const TaskCenter: React.FC = () => {
                     >
                       {task.description}
                     </Typography>
-                    {task.sourceType === "ASSET_MATRIX_PUBLISH" ? (
+                    {isMarketingPublishTask(task) ? (
                       <Stack
                         direction="row"
                         spacing={0.5}
@@ -723,7 +727,7 @@ const TaskCenter: React.FC = () => {
                 setCompleteForm({ ...completeForm, result: e.target.value })
               }
             />
-            {complete?.sourceType === "ASSET_MATRIX_PUBLISH" ? (
+            {isMarketingPublishTask(complete) ? (
               <>
                 <TextField
                   type="url"

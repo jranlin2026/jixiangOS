@@ -4,7 +4,7 @@ import { failure, success, type ApiResponse } from '../api/response';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { buildDataVisibilityScopeForUser, type DataVisibilityScope } from '../../src/shared/utils/dataVisibility';
-import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
+import { hasExplicitPermission, hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import {
   DeviceImeiValidationError,
   validateDeviceImeis,
@@ -1627,12 +1627,12 @@ export function createAssetCommandService(
     ): Promise<ApiResponse<AssetMatrixPublishTask | null>> {
       if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write')
         && !hasPermission(actor, PERMISSION_KEYS.MARKETING_PUBLISH, 'write')) {
-        return failure('无权创建发布批次', 403);
+        return failure('无权创建发布计划', 403);
       }
       const marketingPublisher = Boolean(cleanText(input.contentId))
-        && hasPermission(actor, PERMISSION_KEYS.MARKETING_PUBLISH, 'write');
+        && (hasExplicitPermission(actor, PERMISSION_KEYS.MARKETING_PUBLISH, 'write') || isSuperAdmin(actor));
       if (!hasPermission(actor, PERMISSION_KEYS.TASK_ASSIGN, 'write') && !marketingPublisher) {
-        return failure('无权向员工任务中心派发任务', 403);
+        return failure('无权向员工工作台派发任务', 403);
       }
       const title = cleanText(input.title);
       const dueAt = cleanText(input.dueAt);
@@ -1641,7 +1641,7 @@ export function createAssetCommandService(
         .filter(Boolean)));
       const dueDate = new Date(dueAt);
       if (!title || !accountIds.length || !dueAt || Number.isNaN(dueDate.getTime())) {
-        return failure('批次标题、截止时间和发布账号不能为空', 400);
+        return failure('计划标题、截止时间和发布账号不能为空', 400);
       }
       try {
         const directory = await loadDirectory(prisma);
@@ -1668,7 +1668,9 @@ export function createAssetCommandService(
             if (content && !content.platforms.includes(account.platform)) {
               throw new AssetCommandError(400, `${account.platform} / ${account.accountName} 与内容适用平台不一致`);
             }
-            if (!visibleToScope(account, scope, directory)) throw new AssetCommandError(403, '无权派发该互联网账号');
+            if (!marketingPublisher && !visibleToScope(account, scope, directory)) {
+              throw new AssetCommandError(403, '无权派发该互联网账号');
+            }
             const employeeId = cleanText(account.currentUserId);
             const employeeById = employeeId ? directory.users.find((item) => item.id === employeeId) : undefined;
             const employeesByLegacyName = employeeById ? [] : directory.users.filter((item) => (
@@ -1713,7 +1715,7 @@ export function createAssetCommandService(
                 dueAt: dueDate,
                 assignedById: actor.id,
                 assignedByName: actor.name,
-                sourceType: 'ASSET_MATRIX_PUBLISH',
+                sourceType: 'MARKETING_PUBLISH',
                 sourceId: batchId,
                 sourceItemId: account.id,
               },
@@ -1759,7 +1761,7 @@ export function createAssetCommandService(
             updatedAt: createdAt,
           };
           state.matrixTasks = [batch, ...state.matrixTasks];
-          addLog(state, makeId('asset-log'), createdAt, actor, '创建发布批次', '发布批次', batch.id, batch.title, `向员工任务中心派发${targets.length}条执行任务`);
+          addLog(state, makeId('asset-log'), createdAt, actor, '创建发布计划', '发布计划', batch.id, batch.title, `向员工工作台派发${targets.length}条执行任务`);
           await persistState(transaction, state);
           return batch;
         });

@@ -474,7 +474,7 @@ assert.equal(publishBatch.code, 0);
 assert.equal(publishBatch.data?.targets.length, 1);
 assert.equal(riskPrisma.employeeTasks.length, 1, '每个发布账号必须创建一条员工执行任务');
 assert.equal(riskPrisma.employeeTasks[0]?.employeeId, assetAdmin.id);
-assert.equal(riskPrisma.employeeTasks[0]?.sourceType, 'ASSET_MATRIX_PUBLISH');
+assert.equal(riskPrisma.employeeTasks[0]?.sourceType, 'MARKETING_PUBLISH');
 assert.equal(riskPrisma.employeeTasks[0]?.sourceId, publishBatch.data?.id);
 assert.equal(riskPrisma.employeeTasks[0]?.sourceItemId, createdAccount.data!.id);
 assert.equal(new Date(String(riskPrisma.employeeTasks[0]?.workDate)).toISOString().slice(0, 10), '2026-08-28', '员工任务工作日必须跟随计划发布时间');
@@ -493,11 +493,32 @@ const marketingPublisherOnly: AuthenticatedUser = {
   ...assetAdmin,
   permissions: [{ module: PERMISSION_KEYS.MARKETING_PUBLISH, actions: ['read', 'write'] }],
 };
+const otherPublishAccount = await riskService.createInternetAccount({
+  platform: '抖音', accountName: '其他员工业务号', loginAccount: 'other_publish_account',
+  loginMethod: '密码登录', loginPassword: 'other-password', ownerSubject: '公司',
+  departmentId: 'dept-assets', ownerId: otherUser.id, currentUserId: otherUser.id,
+  permissionStatus: '正常', accountStatus: '正常', riskLevel: '低', serviceProvider: '自营', monthlyFee: 0,
+}, assetAdmin);
+assert.equal(otherPublishAccount.code, 0);
 const publisherBatch = await riskService.createMatrixPublishTask({
   title: '营销发布权限独立派发', contentId: 'marketing-approved', dueAt: '2026-08-31T18:00:00.000Z',
-  plannedAt: '2026-08-28T01:00:00+08:00', copywriting: '不得绕过已审核快照', accountIds: [createdAccount.data!.id],
+  plannedAt: '2026-08-28T01:00:00+08:00', copywriting: '不得绕过已审核快照', accountIds: [otherPublishAccount.data!.id],
 }, marketingPublisherOnly);
-assert.equal(publisherBatch.code, 0, '营销发布角色不应再额外依赖通用任务派发权限');
+assert.equal(publisherBatch.code, 0, '营销发布角色应能派发页面可见的公司发布账号，不额外依赖资产范围或通用任务权限');
+assert.equal(riskPrisma.employeeTasks[riskPrisma.employeeTasks.length - 1]?.employeeId, otherUser.id, '营销发布计划必须给目标账号的主要使用人生成真实任务');
+const legacyMatrixPublisher: AuthenticatedUser = {
+  ...deviceWriter,
+  permissions: [
+    { module: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.TASK_ASSIGN, actions: ['read', 'write'] },
+  ],
+};
+const legacyCrossScopeBatch = await riskService.createMatrixPublishTask({
+  title: '旧矩阵权限不得跨范围', contentId: 'marketing-approved', dueAt: '2026-08-31T18:00:00.000Z',
+  plannedAt: '2026-08-28T01:00:00+08:00', accountIds: [otherPublishAccount.data!.id],
+}, legacyMatrixPublisher);
+assert.equal(legacyCrossScopeBatch.code, 403, '旧矩阵发布权限只能兼容入口，不得获得新营销发布的跨资产范围能力');
+assert.match(legacyCrossScopeBatch.message, /无权派发/);
 const deniedOffboarding = await riskService.markInternetAccountsForOffboarding([createdAccount.data!.id], deviceWriter);
 assert.equal(deniedOffboarding.code, 403);
 const markedOffboarding = await riskService.markInternetAccountsForOffboarding([createdAccount.data!.id], assetAdmin);

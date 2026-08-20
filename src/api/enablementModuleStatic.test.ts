@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const app = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8');
-const sidebar = readFileSync(join(process.cwd(), 'src/layouts/Sidebar.tsx'), 'utf8');
+const sidebarNavigation = readFileSync(join(process.cwd(), 'src/layouts/sidebarNavigation.ts'), 'utf8');
 const page = readFileSync(join(process.cwd(), 'src/pages/Enablement/index.tsx'), 'utf8');
 const home = readFileSync(join(process.cwd(), 'src/pages/Enablement/EnablementHome.tsx'), 'utf8');
 const todayActionData = readFileSync(join(process.cwd(), 'src/pages/Enablement/todayActionData.ts'), 'utf8');
@@ -13,7 +13,7 @@ const store = readFileSync(join(process.cwd(), 'src/store/useEnablementStore.ts'
 
 assert.match(app, /ROUTES\.ENABLEMENT/);
 assert.match(app, /PERMISSION_KEYS\.ENABLEMENT/);
-assert.match(sidebar, /label:\s*'企业标准中心'/);
+assert.match(sidebarNavigation, /label:\s*'企业标准'/);
 assert.match(page, /企业知识/);
 assert.match(page, /发布管理/);
 assert.match(page, /value:\s*'home',\s*label:\s*'旧版行动台'/);

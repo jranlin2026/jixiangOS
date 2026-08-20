@@ -16,6 +16,6 @@ assert.match(source, /前往互联网账号管理/);
 assert.match(source, /<TablePagination[\s\S]*count=\{deviceAccountDrawer\.total\}/);
 assert.match(source, /互联网账号: device\.internetAccountCount/);
 assert.match(source, /catch \(error: any\)[\s\S]*网络异常，加载互联网账号失败/);
-assert.match(source, /loginDeviceFilterContext\?\.id === loginDeviceIdFilter/);
+assert.match(source, /renderSelect\('指定登录设备', loginDeviceIdFilter/);
 
 console.log('deviceAccountDrawerStatic tests passed');

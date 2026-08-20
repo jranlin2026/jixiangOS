@@ -11,6 +11,13 @@ import type {
   MarketingContentInput,
 } from '../types/marketing';
 import { assertMarketingContentReadyForPublish, nextMarketingContentStatus } from '../domain/marketing/marketingContent';
+import { assetApi } from './assetApi';
+import type {
+  AssetFilters,
+  AssetMatrixPublishStats,
+  AssetMatrixPublishTask,
+  AssetMatrixPublishTaskInput,
+} from '../types/asset';
 
 const now = () => new Date().toISOString();
 const localContents = () => getStorageData<MarketingContent[]>(STORAGE_KEYS.MARKETING_CONTENTS) || [];
@@ -101,4 +108,35 @@ async function deleteGroup(id: string): Promise<ApiResponse<boolean>> {
   return createSuccessResponse(true);
 }
 
-export const marketingApi = { listContents, createContent, updateContent, transitionContent, listGroups, saveGroup, deleteGroup };
+/**
+ * Publishing belongs to content operations. The local adapter still reads the
+ * legacy asset storage key so existing plans remain visible during migration.
+ */
+async function listPublishPlans(filters: AssetFilters = {}): Promise<ApiResponse<PaginatedResponse<AssetMatrixPublishTask>>> {
+  if (shouldUseBackendApi()) return backendRequest(`/marketing/publish-plans?${queryString(filters)}`);
+  return assetApi.fetchMatrixPublishTasks(filters);
+}
+
+async function createPublishPlan(input: Partial<AssetMatrixPublishTaskInput>): Promise<ApiResponse<AssetMatrixPublishTask>> {
+  // Publish plans must be created by the command service so their employee tasks
+  // are persisted atomically. A local-only success would create phantom task IDs.
+  return backendRequest('/marketing/publish-plans', { method: 'POST', body: JSON.stringify(input) });
+}
+
+async function fetchPublishPlanStats(): Promise<ApiResponse<AssetMatrixPublishStats>> {
+  if (shouldUseBackendApi()) return backendRequest('/marketing/publish-plans/stats');
+  return assetApi.fetchMatrixPublishStats();
+}
+
+export const marketingApi = {
+  listContents,
+  createContent,
+  updateContent,
+  transitionContent,
+  listGroups,
+  saveGroup,
+  deleteGroup,
+  listPublishPlans,
+  createPublishPlan,
+  fetchPublishPlanStats,
+};

@@ -84,6 +84,49 @@ function matchesOrganizationFilter(value: Record<string, unknown>, idKey: string
     : String(value[idKey] || '') === filterValue;
 }
 
+function summarizeMatrixStats(batches: AssetMatrixPublishTask[], nowIso: string) {
+  const dueAtByTargetId = new Map<string, string>();
+  const targets = batches.flatMap((batch) => {
+    batch.targets.forEach((target) => dueAtByTargetId.set(target.id, batch.dueAt));
+    return batch.targets;
+  });
+  const isOverdue = (target: AssetMatrixPublishTask['targets'][number]) => {
+    const dueAt = dueAtByTargetId.get(target.id);
+    return !isMatrixTargetDone(target.status)
+      && Boolean(dueAt)
+      && new Date(dueAt!).getTime() < new Date(nowIso).getTime();
+  };
+  const summarize = <K extends 'platform' | 'department' | 'assignee'>(groupKey: K) => {
+    const groups = new Map<string, { total: number; completed: number; overdue: number }>();
+    targets.forEach((target) => {
+      const key = String(target[groupKey] || '未分组');
+      const current = groups.get(key) || { total: 0, completed: 0, overdue: 0 };
+      current.total += 1;
+      if (isMatrixTargetDone(target.status)) current.completed += 1;
+      if (isOverdue(target)) current.overdue += 1;
+      groups.set(key, current);
+    });
+    return Array.from(groups.entries()).map(([key, value]) => ({ [groupKey]: key, ...value }));
+  };
+  const completedTargets = targets.filter((target) => isMatrixTargetDone(target.status)).length;
+  const confirmedTargets = targets.filter((target) => target.status === 'confirmed').length;
+  const awaitingConfirmationTargets = targets.filter((target) => target.status === 'completed').length;
+  const overdueAccounts = targets.filter(isOverdue);
+  return success<AssetMatrixPublishStats>({
+    totalTargets: targets.length,
+    completedTargets,
+    confirmedTargets,
+    awaitingConfirmationTargets,
+    pendingTargets: targets.length - completedTargets,
+    overdueTargets: overdueAccounts.length,
+    completionRate: targets.length ? Math.round((completedTargets / targets.length) * 100) : 0,
+    overdueAccounts,
+    byPlatform: summarize('platform') as AssetMatrixPublishStats['byPlatform'],
+    byDepartment: summarize('department') as AssetMatrixPublishStats['byDepartment'],
+    byAssignee: summarize('assignee') as AssetMatrixPublishStats['byAssignee'],
+  });
+}
+
 function uniqueOptions(values: Array<AssetFilterOption | undefined>): AssetFilterOption[] {
   return [...new Map(values.filter((item): item is AssetFilterOption => Boolean(item?.value)).map((item) => [item.value, item])).values()]
     .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
@@ -407,46 +450,14 @@ export function createAssetListService(
       const batches = await overlayMatrixTaskStatuses(
         (visible[STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS] || []) as AssetMatrixPublishTask[],
       );
-      const dueAtByTargetId = new Map<string, string>();
-      const targets = batches.flatMap((batch) => {
-        batch.targets.forEach((target) => dueAtByTargetId.set(target.id, batch.dueAt));
-        return batch.targets;
-      });
-      const isOverdue = (target: AssetMatrixPublishTask['targets'][number]) => {
-        const dueAt = dueAtByTargetId.get(target.id);
-        return !isMatrixTargetDone(target.status)
-          && Boolean(dueAt)
-          && new Date(dueAt!).getTime() < new Date(nowIso).getTime();
-      };
-      const summarize = <K extends 'platform' | 'department' | 'assignee'>(groupKey: K) => {
-        const groups = new Map<string, { total: number; completed: number; overdue: number }>();
-        targets.forEach((target) => {
-          const key = String(target[groupKey] || '未分组');
-          const current = groups.get(key) || { total: 0, completed: 0, overdue: 0 };
-          current.total += 1;
-          if (isMatrixTargetDone(target.status)) current.completed += 1;
-          if (isOverdue(target)) current.overdue += 1;
-          groups.set(key, current);
-        });
-        return Array.from(groups.entries()).map(([key, value]) => ({ [groupKey]: key, ...value }));
-      };
-      const completedTargets = targets.filter((target) => isMatrixTargetDone(target.status)).length;
-      const confirmedTargets = targets.filter((target) => target.status === 'confirmed').length;
-      const awaitingConfirmationTargets = targets.filter((target) => target.status === 'completed').length;
-      const overdueAccounts = targets.filter(isOverdue);
-      return success<AssetMatrixPublishStats>({
-        totalTargets: targets.length,
-        completedTargets,
-        confirmedTargets,
-        awaitingConfirmationTargets,
-        pendingTargets: targets.length - completedTargets,
-        overdueTargets: overdueAccounts.length,
-        completionRate: targets.length ? Math.round((completedTargets / targets.length) * 100) : 0,
-        overdueAccounts,
-        byPlatform: summarize('platform') as AssetMatrixPublishStats['byPlatform'],
-        byDepartment: summarize('department') as AssetMatrixPublishStats['byDepartment'],
-        byAssignee: summarize('assignee') as AssetMatrixPublishStats['byAssignee'],
-      });
+      return summarizeMatrixStats(batches, nowIso);
+    },
+    async matrixStatsCompanyWide(nowIso = new Date().toISOString()) {
+      const bundle = await loadBundle();
+      const batches = await overlayMatrixTaskStatuses(
+        (bundle[STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS] || []) as AssetMatrixPublishTask[],
+      );
+      return summarizeMatrixStats(batches, nowIso);
     },
     async filterOptions(kind: 'devices' | 'phones' | 'accounts', user: AuthenticatedUser) {
       const visible = await loadVisible(user);

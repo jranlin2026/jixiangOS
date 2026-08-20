@@ -3,15 +3,15 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const settings = readFileSync(join(process.cwd(), 'src/pages/Settings/index.tsx'), 'utf8');
-const sidebar = readFileSync(join(process.cwd(), 'src/layouts/Sidebar.tsx'), 'utf8');
+const sidebarNavigation = readFileSync(join(process.cwd(), 'src/layouts/sidebarNavigation.ts'), 'utf8');
 const delivery = readFileSync(join(process.cwd(), 'src/pages/Delivery/index.tsx'), 'utf8');
 const rolePermission = readFileSync(join(process.cwd(), 'src/pages/Settings/RolePermission.tsx'), 'utf8');
 const permissionCatalog = readFileSync(join(process.cwd(), 'src/pages/Settings/corePermissionCatalog.ts'), 'utf8');
 const componentPath = join(process.cwd(), 'src/pages/Settings/DeliveryAssignmentConfig.tsx');
 
 assert.match(settings, /DeliveryAssignmentConfig/);
-assert.match(sidebar, /group=delivery/);
-assert.match(sidebar, /SETTINGS_DELIVERY_ASSIGNMENT/);
+assert.match(sidebarNavigation, /id: 'settings'[\s\S]*ROUTES\.SETTINGS/);
+assert.match(sidebarNavigation, /SETTINGS_DELIVERY_ASSIGNMENT/);
 assert.match(rolePermission, /getCoreRolePermissionTree/);
 const deliveryPermissionGroup = permissionCatalog.match(/label: '交付',[\s\S]*?label: '售后服务'/)?.[0] || '';
 const settingsPermissionGroup = permissionCatalog.match(/label: '系统设置',[\s\S]*?\n\];/)?.[0] || '';

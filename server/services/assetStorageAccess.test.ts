@@ -207,7 +207,17 @@ const storageData = {
     { id: 'task-self', employeeName: '童双全', assetId: 'account-self' },
     { id: 'task-other', employeeName: '其他员工', assetId: 'account-other' },
   ],
+  [STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS]: [{
+    id: 'publish-plan-1',
+    title: '公司发布计划',
+    targets: [{ id: 'target-1', accountId: 'account-other', assignee: '其他员工' }],
+  }],
 };
+
+const publisherData = filterAssetStorageData(storageData, matrixPublisherAuth, { roles: [salesRole, opsRole], users });
+assert.equal((publisherData[STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS] as any[]).length, 1, '旧发布权限必须能读取迁移后的发布计划');
+assert.equal((publisherData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[]).length, 3, '发布人员必须能读取用于账号分组的脱敏账号');
+assert.equal((publisherData[STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS] as any[])[0].loginPassword, undefined);
 
 const salesData = filterAssetStorageData(storageData, salesAuth, { roles: [salesRole, opsRole], users });
 assert.deepEqual((salesData[STORAGE_KEYS.ASSET_DEVICES] as any[]).map((item) => item.id), ['device-self']);

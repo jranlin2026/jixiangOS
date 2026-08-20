@@ -72,7 +72,7 @@ function createWriteGate(): WriteGate {
   return { wait, release, started, signalStarted, completed: false };
 }
 
-let activeStorageWrite: { key: string; gate: WriteGate } | null = null;
+let activeRequest: { match: string; gate: WriteGate } | null = null;
 
 const okResponse = () => new Response(JSON.stringify({ code: 0, data: null, message: 'success' }), {
   status: 200,
@@ -81,8 +81,8 @@ const okResponse = () => new Response(JSON.stringify({ code: 0, data: null, mess
 
 globalThis.fetch = (async (input) => {
   const url = String(input);
-  if (activeStorageWrite && url.includes(`/storage/${encodeURIComponent(activeStorageWrite.key)}`)) {
-    const gate = activeStorageWrite.gate;
+  if (activeRequest && url.includes(activeRequest.match)) {
+    const gate = activeRequest.gate;
     gate.signalStarted();
     await gate.wait;
     gate.completed = true;
@@ -92,7 +92,7 @@ globalThis.fetch = (async (input) => {
 
 async function assertWaitsForPersistence(key: string, run: () => Promise<unknown>, message: string): Promise<void> {
   const gate = createWriteGate();
-  activeStorageWrite = { key, gate };
+  activeRequest = { match: `/storage/${encodeURIComponent(key)}`, gate };
   let settled = false;
   const operation = run().finally(() => {
     settled = true;
@@ -108,8 +108,24 @@ async function assertWaitsForPersistence(key: string, run: () => Promise<unknown
   gate.release();
   await operation;
   assert.equal(gate.completed, true);
-  activeStorageWrite = null;
+  activeRequest = null;
   if (earlyAssertion) throw earlyAssertion;
+}
+
+async function assertWaitsForBackendCommand(match: string, run: () => Promise<unknown>, message: string): Promise<void> {
+  const gate = createWriteGate();
+  activeRequest = { match, gate };
+  let settled = false;
+  const operation = run().finally(() => {
+    settled = true;
+  });
+  await gate.started;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(settled, false, message);
+  gate.release();
+  await operation;
+  assert.equal(gate.completed, true);
+  activeRequest = null;
 }
 
 try {
@@ -135,13 +151,13 @@ try {
   storage.setItem(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, JSON.stringify([
     { id: 'task-1', assetType: '手机号资产', assetId: 'phone-1' },
   ]));
-  await assertWaitsForPersistence(
-    STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS,
+  await assertWaitsForBackendCommand(
+    '/assets/phones/phone-1',
     () => assetApi.deletePhoneNumber('phone-1'),
-    '删除手机号不应在关联账号解绑持久化完成前返回',
+    '删除手机号不应在后端记录级删除完成前返回',
   );
 } finally {
-  (activeStorageWrite as { gate: WriteGate } | null)?.gate.release();
+  (activeRequest as { gate: WriteGate } | null)?.gate.release();
   globalThis.fetch = previousFetch;
   if (previousBackendFlag === undefined) delete process.env.VITE_USE_BACKEND_API;
   else process.env.VITE_USE_BACKEND_API = previousBackendFlag;

@@ -6,12 +6,12 @@ import type { BrowserScriptTemplate } from '../../types/browserAgent';
 
 const root = process.cwd();
 const settings = readFileSync(resolve(root, 'src/pages/Settings/index.tsx'), 'utf8');
-const sidebar = readFileSync(resolve(root, 'src/layouts/Sidebar.tsx'), 'utf8');
+const sidebarNavigation = readFileSync(resolve(root, 'src/layouts/sidebarNavigation.ts'), 'utf8');
 const api = readFileSync(resolve(root, 'src/api/browserAgentConfigApi.ts'), 'utf8');
 const page = readFileSync(resolve(root, 'src/pages/Settings/BrowserScriptLibraryConfig.tsx'), 'utf8');
 
 assert.match(settings, /key: 'aiEmployee'[\s\S]*key: 'scriptLibrary'/);
-assert.match(sidebar, /label: 'AI员工设置'[\s\S]*group=aiEmployee/);
+assert.match(sidebarNavigation, /id: 'settings'[\s\S]*label: '系统设置'[\s\S]*ROUTES\.SETTINGS/);
 assert.match(api, /getScriptLibrary:[\s\S]*saveScriptLibrary:/);
 assert.match(page, /浏览器客服话术/);
 assert.match(page, /设为推荐/);

@@ -6,7 +6,7 @@ const dialog = readFileSync(new URL('../pages/Customers/batch/CustomerBatchActio
 const drawer = readFileSync(new URL('../pages/Customers/batch/CustomerBatchTaskDrawer.tsx', import.meta.url), 'utf8');
 const toolbar = readFileSync(new URL('../pages/Customers/batch/CustomerBatchToolbar.tsx', import.meta.url), 'utf8');
 const mergeDialog = readFileSync(new URL('../pages/Customers/CustomerMergeDialog.tsx', import.meta.url), 'utf8');
-const sidebar = readFileSync(new URL('../layouts/Sidebar.tsx', import.meta.url), 'utf8');
+const sidebar = readFileSync(new URL('../layouts/sidebarNavigation.ts', import.meta.url), 'utf8');
 
 assert.match(page, /<Checkbox[\s\S]*选择当前页客户/);
 assert.match(page, /selectCurrentFilterResult\(scopedFilters\(\)\)/);

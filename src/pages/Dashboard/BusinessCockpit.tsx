@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   Button,
@@ -28,13 +28,14 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { dashboardApi } from '../../api';
+import { dashboardApi, marketingApi } from '../../api';
 import { ROUTES } from '../../shared/utils/constants';
 import { formatCurrency } from '../../shared/utils/formatters';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
 import type { AuthenticatedUser } from '../../types/auth';
 import type { EnterpriseCockpit } from '../../types/enterpriseBrain';
+import type { MarketingPublishPlanStats } from '../../types/marketing';
 import type {
   BusinessCockpitData,
   CockpitPerformanceRankingItem,
@@ -208,6 +209,59 @@ const SectionPanel: React.FC<{
     {children}
   </Paper>
 );
+
+const MarketingPublishPanel: React.FC = () => {
+  const navigate = useNavigate();
+  const currentUser = useAuthStore((state) => state.currentUser);
+  const canRead = [PERMISSION_KEYS.DASHBOARD, PERMISSION_KEYS.BRAIN_DASHBOARD, PERMISSION_KEYS.MARKETING_PUBLISH]
+    .some((permissionKey) => hasPermission(currentUser, permissionKey));
+  const canOpenPlans = hasPermission(currentUser, PERMISSION_KEYS.MARKETING_PUBLISH);
+  const [stats, setStats] = useState<MarketingPublishPlanStats | null>(null);
+  const [error, setError] = useState('');
+
+  const loadStats = useCallback(async () => {
+    if (!canRead) return;
+    setError('');
+    const result = await marketingApi.fetchPublishPlanStats();
+    if (result.code === 0) setStats(result.data);
+    else setError(result.message);
+  }, [canRead]);
+
+  useEffect(() => {
+    void loadStats();
+  }, [loadStats]);
+
+  if (!canRead) return null;
+  return (
+    <SectionPanel
+      title="内容发布执行"
+      eyebrow="当前发布计划"
+      action={canOpenPlans ? <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate('/marketing?tab=plans')}>查看计划</Button> : undefined}
+    >
+      {error ? (
+        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ p: 2 }}>
+          <Typography variant="body2" sx={{ color: palette.red }}>{error}</Typography>
+          <Button size="small" color="error" onClick={() => void loadStats()}>重试</Button>
+        </Stack>
+      ) : (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(5, 1fr)' }, gap: 1, p: 1.5 }}>
+          {[
+            ['目标账号', stats?.totalTargets || 0],
+            ['待确认', stats?.awaitingConfirmationTargets || 0],
+            ['已确认', stats?.confirmedTargets || 0],
+            ['已逾期', stats?.overdueTargets || 0],
+            ['提交率', `${stats?.completionRate || 0}%`],
+          ].map(([label, value]) => (
+            <Paper key={label} variant="outlined" sx={{ p: 1.25 }}>
+              <Typography variant="caption" sx={{ color: palette.muted }}>{label}</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 900, color: label === '已逾期' && Number(value) > 0 ? palette.red : palette.ink }}>{value}</Typography>
+            </Paper>
+          ))}
+        </Box>
+      )}
+    </SectionPanel>
+  );
+};
 
 const ExecutiveOverview: React.FC<{
   data: BusinessCockpitData;
@@ -807,6 +861,7 @@ const LegacyBusinessCockpit: React.FC = () => {
           <Typography variant="body2" sx={{ color: palette.muted, mt: 0.5 }}>{loadError || '请稍后重试'}</Typography>
           <Button variant="contained" onClick={() => fetchData()} sx={{ mt: 2 }}>重新加载</Button>
         </Paper>
+        <Box sx={{ mt: 2 }}><MarketingPublishPanel /></Box>
       </Box>
     );
   }
@@ -936,6 +991,8 @@ const LegacyBusinessCockpit: React.FC = () => {
           </Box>
         </Box>
 
+        <MarketingPublishPanel />
+
         <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} onData={setOrganizationData} />
 
         <Stack direction="row" spacing={1} alignItems="center" sx={{ color: palette.muted, px: 0.5 }}>
@@ -959,6 +1016,7 @@ const EnterpriseOnlyCockpit: React.FC = () => {
         <Box><Typography variant="h5" sx={{ fontWeight: 900 }}>老板驾驶舱</Typography><Typography variant="body2" color="text.secondary">查看销售体系标准、任务、复盘和经营结果</Typography></Box>
         <Stack direction="row" spacing={1}><TextField type="date" size="small" label="开始" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField type="date" size="small" label="结束" value={dateTo} onChange={(event) => setDateTo(event.target.value)} InputLabelProps={{ shrink: true }} /><Button variant="contained" onClick={() => setRefreshKey(`${dateFrom}-${dateTo}-${Date.now()}`)}>应用</Button></Stack>
       </Stack>
+      <Box sx={{ mt: 2 }}><MarketingPublishPanel /></Box>
       <EnterpriseBrainPanel dateFrom={dateFrom} dateTo={dateTo} refreshKey={refreshKey} />
     </Box>
   );

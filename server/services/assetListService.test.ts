@@ -109,6 +109,8 @@ const confirmedStats = await matrixService.matrixStats(authenticatedAdmin, '2099
 assert.equal(confirmedStats.data.totalTargets, 1);
 assert.equal(confirmedStats.data.completedTargets, 1, '已确认员工任务应计入发布批次完成数');
 assert.equal(confirmedStats.data.overdueTargets, 0, '已确认员工任务不得计入逾期');
+const companyStats = await matrixService.matrixStatsCompanyWide('2099-01-01T00:00:00.000Z');
+assert.equal(companyStats.data.totalTargets, 1, '经营驾驶舱必须汇总公司级发布执行数据，不依赖资产权限范围');
 
 const first = await service.list('phones', { page: 1, pageSize: 20 }, authenticatedAdmin);
 assert.equal((first.data.items[0] as AssetPhoneNumber | undefined)?.deviceId, 'device-a');
