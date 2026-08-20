@@ -294,7 +294,13 @@ const businessAttachmentService = createBusinessAttachmentService({
   isAcademyTaskEvidenceLinked: (taskId, attachmentId) => academyService.isTaskAttachmentLinked(taskId, attachmentId),
   listLinkedAcademyTaskEvidenceIds: (taskIds) => academyService.listLinkedTaskAttachmentIds(taskIds),
 });
-const assetListService = createAssetListService(storageService, assetStorageContext);
+const assetListService = createAssetListService(storageService, assetStorageContext, async (taskIds) => {
+  if (!taskIds.length) return [];
+  return prisma.employeeTask.findMany({
+    where: { id: { in: taskIds } },
+    select: { id: true, status: true, completedAt: true },
+  });
+});
 const assetCommandService = createAssetCommandService(prisma);
 const deliveryAssignmentService = createDeliveryAssignmentService(prisma);
 const financeTransactionService = createFinanceTransactionService(prisma);
@@ -2113,6 +2119,24 @@ app.post('/api/assets/accounts/import-row', requireAssetImportExportAccess, asyn
 app.post('/api/assets/accounts/mark-offboarding', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
   const result = await assetCommandService.markInternetAccountsForOffboarding(req.body?.accountIds, req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.post('/api/assets/matrix-publish', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await assetCommandService.createMatrixPublishTask(req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.post('/api/assets/offboarding/:id/complete', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await assetCommandService.completeOffboardingTask(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.get('/api/assets/matrix-publish/stats', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  if (!hasPermission(req.currentUser!, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'read')) {
+    res.status(403).json(failure('无权查看发布批次统计', 403));
+    return;
+  }
+  res.json(await assetListService.matrixStats(req.currentUser!));
 });
 
 app.put('/api/assets/accounts/:id', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {

@@ -11,7 +11,7 @@ assert.match(pageSource, /互联网账号/);
 assert.match(pageSource, /待关联与待处理/);
 assert.match(pageSource, /资产关系明细/);
 assert.match(pageSource, /<TableCell>设备编号<\/TableCell><TableCell>设备名称<\/TableCell><TableCell>品牌 \/ 型号<\/TableCell>/, '设备信息应拆分为独立列');
-assert.match(pageSource, /<TableCell>所属部门<\/TableCell><TableCell>负责人<\/TableCell><TableCell>当前使用人<\/TableCell>/, '归属与使用应拆分为独立列');
+assert.match(pageSource, /<TableCell>所属部门<\/TableCell><TableCell>管理责任人<\/TableCell><TableCell>当前使用人<\/TableCell>/, '归属、管理责任与使用应拆分为独立列');
 assert.doesNotMatch(pageSource, /<TableCell>归属与使用<\/TableCell>/, '总览关系表不得继续合并归属与使用字段');
 assert.match(pageSource, /<DeviceBrandMark brand=\{row\.device\.brand\}/, '资产总览品牌型号应显示设备品牌图标');
 assert.match(pageSource, /<CarrierBrandMark operator=\{phone\.operator\}/, '手机号运营商应显示品牌图标');

@@ -41,6 +41,7 @@ function mapTask(row: any): EmployeeTaskRecord {
     title: row.title, description: row.description || null, targetValue: number(row.targetValue), actualValue: number(row.actualValue),
     unit: row.unit || null, evidenceRequired: Boolean(row.evidenceRequired), status: row.status, result: row.result || null,
     dueAt: iso(row.dueAt), returnedReason: row.returnedReason || null,
+    sourceType: row.sourceType || null, sourceId: row.sourceId || null, sourceItemId: row.sourceItemId || null,
     evidence: (row.evidence || []).map((item: any) => ({ id: item.id, type: item.type, referenceId: item.referenceId || null, content: item.content || null })),
   };
 }
@@ -63,6 +64,7 @@ function generatedData(row: GeneratedTaskInput) {
     standardVersionIdSnapshot: row.standardVersionIdSnapshot, workDate: new Date(`${row.workDate}T00:00:00Z`),
     title: row.title, description: row.description, targetValue: row.targetValue, unit: row.unit,
     evidenceRequired: row.evidenceRequired, dueAt: row.dueAt ? new Date(row.dueAt) : null,
+    sourceType: row.sourceType, sourceId: row.sourceId, sourceItemId: row.sourceItemId,
   };
 }
 

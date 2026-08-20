@@ -220,7 +220,43 @@ export interface AssetOffboardingTask {
   handler?: string;
 }
 
-export type AssetMatrixPublishTargetStatus = 'pending' | 'completed';
+export type AssetHandoverReason = '离职' | '调岗' | '换机' | '账号交接' | '其他';
+export type AssetHandoverRelationship = 'managed' | 'used';
+export type AssetHandoverItemStatus = '待处理' | '处理中' | '已完成' | '无需处理';
+export type AssetHandoverCaseStatus = '待确认' | '处理中' | '待验收' | '已完成' | '已取消';
+
+export interface AssetHandoverItem {
+  id: string;
+  assetType: 'device' | 'phone' | 'account';
+  assetId: string;
+  assetName: string;
+  relationships: AssetHandoverRelationship[];
+  action: string;
+  status: AssetHandoverItemStatus;
+  employeeTaskId?: string;
+  nextManagerId?: string;
+  nextManager?: string;
+  nextUserId?: string;
+  nextUser?: string;
+  completedAt?: string;
+}
+
+export interface AssetHandoverCase {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  departmentId?: string;
+  department: string;
+  reason: AssetHandoverReason;
+  status: AssetHandoverCaseStatus;
+  dueAt: string;
+  items: AssetHandoverItem[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export type AssetMatrixPublishTargetStatus = 'pending' | 'completed' | 'confirmed' | 'returned';
 
 export interface AssetMatrixPublishTarget {
   id: string;
@@ -235,6 +271,7 @@ export interface AssetMatrixPublishTarget {
   deviceId?: string;
   deviceCode?: string;
   deviceName?: string;
+  employeeTaskId?: string;
   status: AssetMatrixPublishTargetStatus;
   completedAt?: string;
 }

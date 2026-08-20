@@ -32,6 +32,7 @@ import type {
   AssetInternetAccount,
   AssetInternetAccountInput,
   AssetMatrixPublishTask,
+  AssetMatrixPublishTaskInput,
   AssetOffboardingTask,
   AssetOperationLog,
   AssetPhoneNumber,
@@ -44,7 +45,7 @@ import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { createAssetCredentialCrypto, type AssetCredentialCrypto, type AssetEncryptedCredential } from './assetCredentialCrypto';
 
-type AssetCommandPrisma = Pick<PrismaClient, 'appStorage' | 'user' | 'role' | 'department' | '$transaction'>;
+type AssetCommandPrisma = Pick<PrismaClient, 'appStorage' | 'user' | 'role' | 'department' | 'employeeTask' | '$transaction'>;
 type LockedStorageRow = { key: string; value: unknown };
 type Directory = { users: User[]; roles: Role[]; departments: Department[] };
 type AssetOrgInput = {
@@ -1470,7 +1471,7 @@ export function createAssetCommandService(
       actor: AuthenticatedUser,
     ): Promise<ApiResponse<AssetInternetAccount[] | null>> {
       if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'write')) {
-        return failure('无权执行离职回收', 403);
+        return failure('无权发起资产交接', 403);
       }
       if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_ACCOUNTS, 'write')) {
         return failure('无权编辑互联网账号', 403);
@@ -1488,7 +1489,7 @@ export function createAssetCommandService(
           const selected = ids.map((id) => {
             const account = state.accounts.find((item) => item.id === id);
             if (!account) throw new AssetCommandError(404, '互联网账号不存在');
-            if (!visibleToScope(account, scope, directory)) throw new AssetCommandError(403, '无权处理该互联网账号的离职回收');
+            if (!visibleToScope(account, scope, directory)) throw new AssetCommandError(403, '无权处理该互联网账号的资产交接');
             return account;
           });
           const idSet = new Set(ids);
@@ -1506,7 +1507,7 @@ export function createAssetCommandService(
             makeId('asset-log'),
             changedAt,
             actor,
-            '生成离职回收',
+            '发起资产交接',
             '互联网账号',
             ids.join(','),
             `${selected.length}个互联网账号`,
@@ -1516,6 +1517,210 @@ export function createAssetCommandService(
           return state.accounts.filter((account) => idSet.has(account.id));
         });
         return success(updated);
+      } catch (error) {
+        if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
+        throw error;
+      }
+    },
+
+    async completeOffboardingTask(
+      taskId: string,
+      actor: AuthenticatedUser,
+    ): Promise<ApiResponse<AssetOffboardingTask | null>> {
+      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'write')) {
+        return failure('无权完成资产交接', 403);
+      }
+      try {
+        const directory = await loadDirectory(prisma);
+        const scope = buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'assets');
+        const changedAt = now().toISOString();
+        const completed = await prisma.$transaction(async (transaction) => {
+          const state = await lockState(transaction);
+          const task = state.offboardingTasks.find((item) => item.id === cleanText(taskId));
+          if (!task) throw new AssetCommandError(404, '资产交接任务不存在');
+          const permissionKey = task.assetType === '设备资产' ? PERMISSION_KEYS.ASSETS_DEVICES
+            : task.assetType === '手机号资产' ? PERMISSION_KEYS.ASSETS_PHONES
+              : PERMISSION_KEYS.ASSETS_ACCOUNTS;
+          if (!hasPermission(actor, permissionKey, 'write')) {
+            throw new AssetCommandError(403, `无权处理该${task.assetType}`);
+          }
+
+          if (task.assetType === '设备资产') {
+            const device = state.devices.find((item) => item.id === task.assetId);
+            if (!device) throw new AssetCommandError(404, '交接设备不存在');
+            if (!visibleToScope(device, scope, directory)) throw new AssetCommandError(403, '无权处理该设备的资产交接');
+            state.devices = state.devices.map((item) => item.id === device.id ? normalizeAssetDevice({
+              ...item,
+              status: '闲置',
+              currentUserId: '',
+              currentUser: '',
+              updatedAt: changedAt,
+            }) : item);
+          } else if (task.assetType === '手机号资产') {
+            const phone = state.phones.find((item) => item.id === task.assetId);
+            if (!phone) throw new AssetCommandError(404, '交接手机号不存在');
+            if (!visibleToScope(phone, scope, directory)) throw new AssetCommandError(403, '无权处理该手机号的资产交接');
+            state.phones = state.phones.map((item) => item.id === phone.id ? normalizeAssetPhone({
+              ...item,
+              status: '闲置',
+              currentUserId: '',
+              currentUser: '',
+              updatedAt: changedAt,
+            }) : item);
+          } else {
+            const account = state.accounts.find((item) => item.id === task.assetId);
+            if (!account) throw new AssetCommandError(404, '交接账号不存在');
+            if (!visibleToScope(account, scope, directory)) throw new AssetCommandError(403, '无权处理该账号的资产交接');
+            state.accounts = state.accounts.map((item) => item.id === account.id ? normalizeAssetAccount({
+              ...item,
+              controlStatus: '已回收',
+              permissionStatus: '已回收',
+              accountStatus: item.accountStatus === '已注销' ? '已注销' : '闲置',
+              currentUserId: '',
+              currentUser: '',
+              updatedAt: changedAt,
+            }) : item);
+          }
+
+          const nextTask: AssetOffboardingTask = {
+            ...task,
+            status: '已回收',
+            permissionStatus: '已回收',
+            handledAt: changedAt,
+            handler: actor.name,
+          };
+          state.offboardingTasks = state.offboardingTasks.map((item) => item.id === task.id ? nextTask : item);
+          syncDeviceRisks(state, changedAt);
+          syncPhoneRisks(state, changedAt);
+          syncAccountRisks(state, changedAt);
+          syncAccountOffboardingTasks(state, changedAt);
+          addLog(state, makeId('asset-log'), changedAt, actor, '完成资产交接', task.assetType, task.assetId, task.assetName, `${task.employeeName}的${task.assetType}已完成交接`);
+          await persistState(transaction, state);
+          return nextTask;
+        });
+        return success(completed);
+      } catch (error) {
+        if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
+        throw error;
+      }
+    },
+
+    async createMatrixPublishTask(
+      input: Partial<AssetMatrixPublishTaskInput>,
+      actor: AuthenticatedUser,
+    ): Promise<ApiResponse<AssetMatrixPublishTask | null>> {
+      if (!hasPermission(actor, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write')) {
+        return failure('无权创建发布批次', 403);
+      }
+      if (!hasPermission(actor, PERMISSION_KEYS.TASK_ASSIGN, 'write')) {
+        return failure('无权向员工任务中心派发任务', 403);
+      }
+      const title = cleanText(input.title);
+      const dueAt = cleanText(input.dueAt);
+      const accountIds = Array.from(new Set((Array.isArray(input.accountIds) ? input.accountIds : [])
+        .map((id) => cleanText(id))
+        .filter(Boolean)));
+      const dueDate = new Date(dueAt);
+      if (!title || !accountIds.length || !dueAt || Number.isNaN(dueDate.getTime())) {
+        return failure('批次标题、截止时间和发布账号不能为空', 400);
+      }
+      try {
+        const directory = await loadDirectory(prisma);
+        const scope = buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'assets');
+        const createdAt = now().toISOString();
+        const batchId = makeId('matrix-task');
+        const created = await prisma.$transaction(async (transaction) => {
+          const state = await lockState(transaction);
+          const selected = accountIds.map((accountId) => {
+            const account = state.accounts.find((item) => item.id === accountId);
+            if (!account) throw new AssetCommandError(404, '发布账号不存在');
+            if (!visibleToScope(account, scope, directory)) throw new AssetCommandError(403, '无权派发该互联网账号');
+            const employeeId = cleanText(account.currentUserId);
+            const employeeById = employeeId ? directory.users.find((item) => item.id === employeeId) : undefined;
+            const employeesByLegacyName = employeeById ? [] : directory.users.filter((item) => (
+              cleanText(item.name) === cleanText(account.currentUser)
+              && (!account.departmentId || item.departmentId === account.departmentId)
+            ));
+            const employee = employeeById || (employeesByLegacyName.length === 1 ? employeesByLegacyName[0] : undefined);
+            if (!employee || !employee.isActive || employee.employmentStatus === 'left') {
+              throw new AssetCommandError(400, `${account.platform} / ${account.accountName} 缺少有效的主要使用人，不能派发`);
+            }
+            return { account, employee };
+          });
+          const targets = [] as AssetMatrixPublishTask['targets'];
+          for (const { account, employee } of selected) {
+            const employeeTaskId = makeId('task');
+            await transaction.employeeTask.create({
+              data: {
+                id: employeeTaskId,
+                templateId: null,
+                employeeId: employee.id,
+                employeeName: employee.name,
+                departmentIdSnapshot: employee.departmentId || null,
+                departmentNameSnapshot: account.department || null,
+                positionIdSnapshot: employee.positionId || null,
+                positionNameSnapshot: employee.positionName || null,
+                standardVersionIdSnapshot: null,
+                workDate: new Date(`${createdAt.slice(0, 10)}T00:00:00Z`),
+                title: `发布执行：${title}`,
+                description: [
+                  `平台账号：${account.platform} / ${account.accountName}`,
+                  cleanText(input.videoUrl) ? `素材链接：${cleanText(input.videoUrl)}` : '',
+                  cleanText(input.copywriting) ? `发布文案：${cleanText(input.copywriting)}` : '',
+                  cleanText(input.remark) ? `备注：${cleanText(input.remark)}` : '',
+                ].filter(Boolean).join('\n'),
+                targetValue: 1,
+                actualValue: null,
+                unit: '条',
+                evidenceRequired: true,
+                status: 'PENDING',
+                result: null,
+                dueAt: dueDate,
+                assignedById: actor.id,
+                assignedByName: actor.name,
+                sourceType: 'ASSET_MATRIX_PUBLISH',
+                sourceId: batchId,
+                sourceItemId: account.id,
+              },
+            });
+            const phone = state.phones.find((item) => item.id === account.phoneId);
+            const device = state.devices.find((item) => normalizeAccountLoginDeviceIds(account.loginDeviceIds)[0] === item.id);
+            targets.push({
+              id: makeId('matrix-target'),
+              accountId: account.id,
+              accountNo: account.accountNo,
+              platform: account.platform,
+              accountName: account.accountName,
+              assignee: employee.name,
+              department: account.department || '',
+              phoneId: phone?.id,
+              phoneNumberMasked: phone?.phoneNumberMasked,
+              deviceId: device?.id,
+              deviceCode: device?.deviceCode,
+              deviceName: device?.deviceName,
+              employeeTaskId,
+              status: 'pending',
+            });
+          }
+          const batch: AssetMatrixPublishTask = {
+            id: batchId,
+            title,
+            videoUrl: cleanText(input.videoUrl),
+            videoFileName: cleanText(input.videoFileName),
+            copywriting: cleanText(input.copywriting),
+            remark: cleanText(input.remark),
+            dueAt: dueDate.toISOString(),
+            targets,
+            createdBy: actor.name,
+            createdAt,
+            updatedAt: createdAt,
+          };
+          state.matrixTasks = [batch, ...state.matrixTasks];
+          addLog(state, makeId('asset-log'), createdAt, actor, '创建发布批次', '发布批次', batch.id, batch.title, `向员工任务中心派发${targets.length}条执行任务`);
+          await persistState(transaction, state);
+          return batch;
+        });
+        return success(created);
       } catch (error) {
         if (error instanceof AssetCommandError) return failure(error.message, error.responseCode);
         throw error;

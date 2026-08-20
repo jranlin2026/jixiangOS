@@ -85,10 +85,10 @@ const PERMISSION_TREE: RolePermissionNode[] = [
       { label: '设备资产', key: PERMISSION_KEYS.ASSETS_DEVICES },
       { label: '手机号资产', key: PERMISSION_KEYS.ASSETS_PHONES },
       { label: '互联网账号', key: PERMISSION_KEYS.ASSETS_ACCOUNTS },
-      { label: '矩阵发布', key: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH },
+      { label: '发布批次（仅编排，执行进入员工任务）', key: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH },
       { label: '风险提醒', key: PERMISSION_KEYS.ASSETS_RISKS },
       { label: '操作日志', key: PERMISSION_KEYS.ASSETS_LOGS },
-      { label: '离职回收', key: PERMISSION_KEYS.ASSETS_OFFBOARDING },
+      { label: '资产交接', key: PERMISSION_KEYS.ASSETS_OFFBOARDING },
       { label: '查看敏感字段', key: PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW },
       { label: '导入导出', key: PERMISSION_KEYS.ASSETS_IMPORT_EXPORT },
     ],
@@ -170,7 +170,7 @@ const CUSTOMER_SCOPE_OPTIONS = [
 
 const dataScopeRows: Array<{ domain: DataScopeDomain; label: string; description: string; permissionKeys: string[] }> = [
   ...getCoreDataScopeRows(),
-  { domain: 'assets', label: '资产数据', description: '控制设备资产、手机号资产、互联网账号、矩阵发布、风险提醒和离职回收的数据范围', permissionKeys: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_OVERVIEW, PERMISSION_KEYS.ASSETS_DEVICES, PERMISSION_KEYS.ASSETS_PHONES, PERMISSION_KEYS.ASSETS_ACCOUNTS, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, PERMISSION_KEYS.ASSETS_RISKS, PERMISSION_KEYS.ASSETS_LOGS, PERMISSION_KEYS.ASSETS_OFFBOARDING] },
+  { domain: 'assets', label: '资产数据', description: '控制设备资产、手机号资产、互联网账号、发布批次、风险提醒和资产交接的数据范围', permissionKeys: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_OVERVIEW, PERMISSION_KEYS.ASSETS_DEVICES, PERMISSION_KEYS.ASSETS_PHONES, PERMISSION_KEYS.ASSETS_ACCOUNTS, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, PERMISSION_KEYS.ASSETS_RISKS, PERMISSION_KEYS.ASSETS_LOGS, PERMISSION_KEYS.ASSETS_OFFBOARDING] },
 ];
 
 const getNodeKey = (path: string[]) => path.join('/');
