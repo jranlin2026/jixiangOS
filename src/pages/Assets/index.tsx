@@ -49,6 +49,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import TuneIcon from '@mui/icons-material/Tune';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { assetApi } from '../../api';
 import { settingsApi } from '../../api';
 import useAssetStore from '../../store/useAssetStore';
@@ -527,7 +528,6 @@ const AssetManagement: React.FC = () => {
   const [detailSaveNotice, setDetailSaveNotice] = useState('');
   const [showAllPhoneRelatedAccounts, setShowAllPhoneRelatedAccounts] = useState(false);
   const [deviceAccountDrawer, setDeviceAccountDrawer] = useState<DeviceAccountDrawerState>(emptyDeviceAccountDrawer);
-  const [loginDeviceFilterContext, setLoginDeviceFilterContext] = useState<AssetDevice>();
   const [returnToDeviceAccountDrawer, setReturnToDeviceAccountDrawer] = useState(false);
   const deviceAccountDrawerRequestId = useRef(0);
   const [viewSettingsOpen, setViewSettingsOpen] = useState<ConfigurableAssetTab | null>(null);
@@ -852,19 +852,8 @@ const AssetManagement: React.FC = () => {
     setDeviceCategory('');
     setProfileStatus('');
     setAdvancedFilters({});
-    setLoginDeviceFilterContext(undefined);
     setPage(0);
     setSearchParams({ tab: activeTab });
-  };
-
-  const clearLoginDeviceFilter = () => {
-    setPage(0);
-    setLoginDeviceFilterContext(undefined);
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-      next.delete('loginDeviceId');
-      return next;
-    });
   };
 
   const openOverviewTarget = (tab: Extract<AssetTab, 'devices' | 'phones' | 'accounts'>, next: {
@@ -1374,7 +1363,6 @@ const AssetManagement: React.FC = () => {
     if (!deviceId) return;
     closeDeviceAccountDrawer();
     setPage(0);
-    setLoginDeviceFilterContext(deviceAccountDrawer.device);
     setSearchParams({ tab: 'accounts', loginDeviceId: deviceId });
   };
 
@@ -1747,16 +1735,6 @@ const AssetManagement: React.FC = () => {
       matrix: ['pending', 'completed'],
       offboarding: ['待回收', '已回收'],
     };
-    const bindingStatusLabels: Partial<Record<NonNullable<AssetFilters['bindingStatus']>, string>> = {
-      'unassigned-user': '未分配使用人',
-      'bound-device': '已绑定设备',
-      'unbound-device': '未绑定设备',
-      'bound-phone': '已绑定手机号',
-      'unbound-phone': '未绑定手机号',
-      'with-login-device': '有登录设备',
-      'without-login-device': '无登录设备',
-      'credential-pending': '密码待补齐',
-    };
     const isAssetLedger = activeTab === 'devices' || activeTab === 'phones' || activeTab === 'accounts';
     const option = (value: string, label = value) => ({ value, label });
     const renderSelect = (
@@ -1787,26 +1765,6 @@ const AssetManagement: React.FC = () => {
     const moreFilterKeys = moreFieldsByTab[activeTab] || [];
     const moreFilterCount = moreFilterKeys.filter((key) => Boolean(advancedFilters[key])).length
       + (activeTab === 'accounts' && loginDeviceIdFilter ? 1 : 0);
-    const filterLabels: Partial<Record<keyof AssetFilters, string>> = {
-      brand: '品牌', communicationType: '通信方式', acquisitionType: '取得方式', userAssignment: '使用人',
-      operator: '运营商', deviceBinding: '设备绑定',
-      loginDeviceBinding: activeTab === 'devices' ? '登录账号' : '登录设备', departmentId: '部门', ownerId: '负责人',
-      currentUserId: '当前使用人', riskLevel: '风险等级', attributionLocation: '归属地', simForm: 'SIM形态',
-      accountBinding: '关联账号', servicePasswordStatus: '服务密码', accountCategory: '账号类型', phoneBinding: '绑定手机号',
-      identityBinding: '身份账号', credentialStatus: '密码凭证', twoFactorStatus: '二次验证',
-      packageName: '套餐', contractStatus: '合约到期', monthlyFeeMin: '最低月费', monthlyFeeMax: '最高月费',
-    };
-    const valueLabel = (key: keyof AssetFilters, value: string) => {
-      if (key === 'departmentId') return filterOptions.departments.find((item) => item.value === value)?.label || value.replace(/^name:/, '');
-      if (key === 'ownerId') return filterOptions.owners.find((item) => item.value === value)?.label || value.replace(/^name:/, '');
-      if (key === 'currentUserId') return filterOptions.currentUsers.find((item) => item.value === value)?.label || value.replace(/^name:/, '');
-      const labels: Record<string, string> = {
-        assigned: '已分配', unassigned: '未分配', with: '有', without: '无', bound: '已绑定', unbound: '未绑定',
-        configured: '已配置', unconfigured: '未配置', complete: '完整', incomplete: '待完善', pending: '待补齐',
-        apple: 'Apple ID', google: 'Google账号', any: '任一身份账号', none: '未绑定',
-      };
-      return labels[value] || value;
-    };
     const advancedContent = (
       <Box sx={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, minmax(150px, 1fr))', gap: 1.5 }}>
         {activeTab === 'devices' ? <>
@@ -1850,34 +1808,9 @@ const AssetManagement: React.FC = () => {
         </> : null}
       </Box>
     );
-    const activeChips: Array<{ key: string; label: string; clear: () => void }> = [];
-    if (search.trim()) activeChips.push({ key: 'search', label: `关键词：${search.trim()}`, clear: () => setSearch('') });
-    if (deviceCategory) activeChips.push({ key: 'deviceCategory', label: `设备类型：${deviceCategory}`, clear: () => setDeviceCategory('') });
-    if (profileStatus) activeChips.push({ key: 'profileStatus', label: `完善情况：${profileStatus === 'complete' ? '资料完整' : '待完善'}`, clear: () => setProfileStatus('') });
-    if (platform) activeChips.push({ key: 'platform', label: `平台：${platform}`, clear: () => setPlatform('') });
-    if (permissionStatus) activeChips.push({ key: 'permissionStatus', label: `控制权：${permissionStatus}`, clear: () => setPermissionStatus('') });
-    if (status) activeChips.push({ key: 'status', label: `状态：${status}`, clear: () => setStatus('') });
-    ADVANCED_ASSET_FILTER_KEYS.forEach((key) => {
-      const value = advancedFilters[key];
-      if (value) activeChips.push({ key, label: `${filterLabels[key] || key}：${valueLabel(key, String(value))}`, clear: () => setAdvancedFilter(key, '') });
-    });
-    if (loginDeviceIdFilter) activeChips.push({
-      key: 'loginDeviceId',
-      label: `登录设备：${filterOptions.loginDevices.find((item) => item.value === loginDeviceIdFilter)?.label || loginDeviceFilterContext?.deviceCode || loginDeviceIdFilter}`,
-      clear: clearLoginDeviceFilter,
-    });
-    if (bindingStatusFilter) activeChips.push({
-      key: 'bindingStatus',
-      label: `总览筛选：${bindingStatusLabels[bindingStatusFilter] || bindingStatusFilter}`,
-      clear: () => {
-        const nextParams = new URLSearchParams(searchParams);
-        nextParams.delete('bindingStatus');
-        setSearchParams(nextParams, { replace: true });
-      },
-    });
     return (
       <Box sx={{ mb: 2 }}>
-        <ModuleToolbar sx={{ mb: activeChips.length || moreFiltersOpen ? 1.25 : 0 }}>
+        <ModuleToolbar sx={{ mb: moreFiltersOpen ? 1.25 : 0 }}>
           <TextField size="small" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={searchPlaceholderMap[activeTab] || '搜索资产'} sx={{ width: isMobile ? '100%' : 320 }} />
           {activeTab === 'devices' ? <>
             {renderSelect('设备类型', deviceCategory, filterOptions.deviceCategories, setDeviceCategory)}
@@ -1896,11 +1829,8 @@ const AssetManagement: React.FC = () => {
           {activeTab === 'accounts' ? renderSelect('账号状态', status, filterOptions.statuses, setStatus) : null}
           {!isAssetLedger && activeTab !== 'matrix' && statusOptionsMap[activeTab] ? renderSelect(activeTab === 'offboarding' ? '处理状态' : '状态', status, (statusOptionsMap[activeTab] || []).map((item) => option(item)), setStatus) : null}
           {isAssetLedger ? <Button variant="outlined" startIcon={<TuneIcon />} onClick={() => setMoreFiltersOpen((open) => !open)}>{moreFilterCount ? `更多筛选 (${moreFilterCount})` : '更多筛选'}</Button> : null}
+          {isAssetLedger ? <Button aria-label="重置筛选条件" variant="outlined" startIcon={<RestartAltIcon />} onClick={clearAllAssetFilters} sx={{ ml: 'auto', height: 40, px: 1.75, fontWeight: 700 }}>重置</Button> : null}
         </ModuleToolbar>
-        {activeChips.length ? <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: moreFiltersOpen ? 1.25 : 0 }}>
-          {activeChips.map((chip) => <Chip key={chip.key} size="small" color="primary" variant="outlined" label={chip.label} onDelete={chip.clear} />)}
-          <Button size="small" onClick={clearAllAssetFilters}>清空全部</Button>
-        </Stack> : null}
         {!isMobile && isAssetLedger && moreFiltersOpen ? <Paper variant="outlined" sx={{ mt: 1.25, p: 2, borderRadius: 2, bgcolor: '#F8FAFC' }}>{advancedContent}</Paper> : null}
         <Drawer anchor="bottom" open={isMobile && isAssetLedger && moreFiltersOpen} onClose={() => setMoreFiltersOpen(false)} PaperProps={{ sx: { borderRadius: '20px 20px 0 0', p: 2.5, maxHeight: '78vh' } }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}><Typography variant="h6" sx={{ fontWeight: 900 }}>更多筛选</Typography><IconButton onClick={() => setMoreFiltersOpen(false)}><CloseIcon /></IconButton></Stack>

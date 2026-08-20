@@ -4,9 +4,15 @@ import fs from 'node:fs';
 const pageSource = fs.readFileSync(new URL('../pages/Assets/index.tsx', import.meta.url), 'utf8');
 const apiSource = fs.readFileSync(new URL('./assetApi.ts', import.meta.url), 'utf8');
 
-for (const label of ['设备类型', '完善情况', '运营商', '设备绑定', '账号控制权', '更多筛选', '清空全部', '合约到期', '最低月费', '指定登录设备']) {
+for (const label of ['设备类型', '完善情况', '运营商', '设备绑定', '账号控制权', '更多筛选', '重置', '合约到期', '最低月费', '指定登录设备']) {
   assert.match(pageSource, new RegExp(label), `资产台账筛选栏应包含“${label}”`);
 }
+assert.doesNotMatch(pageSource, /activeChips|清空全部/, '三个资产台账不应再渲染已选条件标签行');
+assert.match(
+  pageSource,
+  /isAssetLedger \? <Button aria-label="重置筛选条件"[\s\S]{0,300}?onClick=\{clearAllAssetFilters\}[\s\S]{0,300}?>重置<\/Button>/,
+  '设备、手机号和互联网账号台账应在筛选栏最右侧提供统一重置按钮',
+);
 for (const key of ['deviceCategory', 'profileStatus', 'accountBinding', 'identityBinding', 'credentialStatus', 'twoFactorStatus']) {
   assert.match(apiSource, new RegExp(`'${key}'`), `后端请求应序列化筛选字段 ${key}`);
 }
