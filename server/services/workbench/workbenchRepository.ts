@@ -2,6 +2,9 @@ import type { EmployeeTask, TaskActivity } from '../../../src/types/enterpriseBr
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import type { WorkbenchTaskListItem } from '../../../src/types/workbench';
 import { compareWorkbenchTasks } from '../../../src/domain/workbench/taskPriority';
+import { transitionTaskStatus } from '../../../src/domain/workbench/taskLifecycle';
+import type { DesiredEmployeeTask } from './sourceAdapter';
+import { TaskSyncInvariantError } from './sourceAdapter';
 
 export type WorkbenchQueryScope =
   | { kind: 'mine'; actorId: string }
@@ -92,6 +95,10 @@ export interface WorkbenchTransactionRepository {
 
 export interface WorkbenchRepository extends WorkbenchTransactionRepository {
   transaction<T>(work: (repository: WorkbenchTransactionRepository) => Promise<T>): Promise<T>;
+  findBySourceKey(sourceKey: string): Promise<EmployeeTask | null>;
+  createFromDesired(desired: DesiredEmployeeTask): Promise<EmployeeTask>;
+  updateSourceOwnedFields(taskId: string, desired: DesiredEmployeeTask): Promise<EmployeeTask | null>;
+  cancelFromSource(taskId: string): Promise<EmployeeTask | null>;
   listWorkbenchTasks(query: WorkbenchTaskPageQuery): Promise<{ items: WorkbenchTaskListItem[]; total: number }>;
   summarizeWorkbenchTasks(query: WorkbenchTaskQuery): Promise<WorkbenchTaskMetrics>;
 }
@@ -104,12 +111,90 @@ type MemoryWorkbenchInput = {
   authorizeEvidenceReferences?: (input: EvidenceReferencesAuthorizationInput) => Promise<boolean>;
 };
 
+export const SOURCE_OWNED_FIELDS = [
+  'title', 'description', 'employeeId', 'employeeNameSnapshot', 'departmentId',
+  'departmentNameSnapshot', 'workDate', 'dueAt', 'priority', 'sourceRoute',
+  'sourceLabel', 'collaboratorIds', 'estimatedMinutes', 'sourceVersion',
+] as const;
+
+export function sourceOwnedTaskUpdate(desired: DesiredEmployeeTask) {
+  return {
+    title: desired.title,
+    description: desired.description ?? null,
+    employeeId: desired.employeeId,
+    employeeName: desired.employeeNameSnapshot,
+    departmentIdSnapshot: desired.departmentId ?? null,
+    departmentNameSnapshot: desired.departmentNameSnapshot ?? null,
+    workDate: desired.workDate,
+    dueAt: desired.dueAt ?? null,
+    priority: desired.priority,
+    sourceRoute: desired.sourceRoute ?? null,
+    sourceLabel: desired.sourceLabel ?? null,
+    collaboratorIds: desired.collaboratorIds ? [...desired.collaboratorIds] : null,
+    estimatedMinutes: desired.estimatedMinutes ?? null,
+    sourceVersion: desired.sourceVersion ?? null,
+  };
+}
+
+const comparableDate = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : value;
+};
+
+export function changedSourceOwnedFields(
+  task: EmployeeTask,
+  desired: DesiredEmployeeTask,
+): Array<(typeof SOURCE_OWNED_FIELDS)[number]> {
+  const update = sourceOwnedTaskUpdate(desired);
+  const changed = new Set<string>();
+  if (task.title !== update.title) changed.add('title');
+  if ((task.description ?? null) !== update.description) changed.add('description');
+  if (task.employeeId !== update.employeeId) changed.add('employeeId');
+  if (task.employeeName !== update.employeeName) changed.add('employeeNameSnapshot');
+  if ((task.departmentIdSnapshot ?? null) !== update.departmentIdSnapshot) changed.add('departmentId');
+  if ((task.departmentNameSnapshot ?? null) !== update.departmentNameSnapshot) changed.add('departmentNameSnapshot');
+  if (task.workDate !== update.workDate) changed.add('workDate');
+  if (comparableDate(task.dueAt) !== comparableDate(update.dueAt)) changed.add('dueAt');
+  if ((task.priority ?? null) !== update.priority) changed.add('priority');
+  if ((task.sourceRoute ?? null) !== update.sourceRoute) changed.add('sourceRoute');
+  if ((task.sourceLabel ?? null) !== update.sourceLabel) changed.add('sourceLabel');
+  if (JSON.stringify(task.collaboratorIds ?? null) !== JSON.stringify(update.collaboratorIds)) changed.add('collaboratorIds');
+  if ((task.estimatedMinutes ?? null) !== update.estimatedMinutes) changed.add('estimatedMinutes');
+  if ((task.sourceVersion ?? null) !== update.sourceVersion) changed.add('sourceVersion');
+  return SOURCE_OWNED_FIELDS.filter((field) => changed.has(field));
+}
+
 export function createMemoryWorkbenchRepository(input: MemoryWorkbenchInput = {}) {
   const tasks = input.tasks || [];
   const activities = input.activities || [];
   const employees = input.employees || [];
   const departments = input.departments || [];
   let activitySequence = activities.length;
+  let taskSequence = tasks.length;
+
+  const updateFromDesired = (task: EmployeeTask, desired: DesiredEmployeeTask): EmployeeTask => {
+    Object.assign(task, sourceOwnedTaskUpdate(desired));
+    return task;
+  };
+
+  const createFromDesired = (desired: DesiredEmployeeTask): EmployeeTask => ({
+    id: `workbench-task-${++taskSequence}`,
+    sourceKey: desired.sourceKey,
+    taskType: desired.taskType,
+    businessModule: desired.businessModule,
+    ...sourceOwnedTaskUpdate(desired),
+    positionIdSnapshot: null,
+    positionNameSnapshot: null,
+    targetValue: null,
+    actualValue: null,
+    unit: null,
+    evidenceRequired: false,
+    status: 'PENDING',
+    result: null,
+    returnedReason: null,
+    evidence: [],
+  });
 
   const makeTransactionRepository = (
     transactionTasks: EmployeeTask[],
@@ -230,6 +315,78 @@ export function createMemoryWorkbenchRepository(input: MemoryWorkbenchInput = {}
       tasks.splice(0, tasks.length, ...transactionTasks);
       activities.splice(0, activities.length, ...transactionActivities);
       return result;
+    },
+    async findBySourceKey(sourceKey) {
+      return tasks.find((item) => item.sourceKey === sourceKey) || null;
+    },
+    async createFromDesired(desired) {
+      const existing = tasks.find((item) => item.sourceKey === desired.sourceKey);
+      if (existing) {
+        if (existing.businessModule !== desired.businessModule) throw new TaskSyncInvariantError('businessModule 与已有任务身份不一致');
+        if (existing.taskType !== desired.taskType) throw new TaskSyncInvariantError('taskType 与已有任务身份不一致');
+        const changedFields = changedSourceOwnedFields(existing, desired);
+        if (!changedFields.length) return existing;
+        updateFromDesired(existing, desired);
+        activities.push({
+          id: `task-activity-${++activitySequence}`, taskId: existing.id, action: 'SOURCE_SYNC',
+          actorId: null, actorName: null, fromStatus: existing.status, toStatus: existing.status,
+          comment: null, metadata: { source: 'RECONCILIATION', changedFields }, createdAt: new Date().toISOString(),
+        });
+        return existing;
+      }
+      const created = createFromDesired(desired);
+      tasks.push(created);
+      activities.push({
+        id: `task-activity-${++activitySequence}`, taskId: created.id, action: 'CREATE',
+        actorId: null, actorName: null, fromStatus: null, toStatus: 'PENDING', comment: null,
+        metadata: { source: 'RECONCILIATION', sourceKey: desired.sourceKey, businessModule: desired.businessModule },
+        createdAt: new Date().toISOString(),
+      });
+      return created;
+    },
+    async updateSourceOwnedFields(taskId, desired) {
+      const task = tasks.find((item) => item.id === taskId);
+      if (!task) return null;
+      if (task.sourceKey !== desired.sourceKey) throw new TaskSyncInvariantError('sourceKey 与已有任务身份不一致');
+      if (task.businessModule !== desired.businessModule) throw new TaskSyncInvariantError('businessModule 与已有任务身份不一致');
+      if (task.taskType !== desired.taskType) throw new TaskSyncInvariantError('taskType 与已有任务身份不一致');
+      const changedFields = changedSourceOwnedFields(task, desired);
+      if (!changedFields.length) return task;
+      updateFromDesired(task, desired);
+      activities.push({
+        id: `task-activity-${++activitySequence}`, taskId: task.id, action: 'SOURCE_SYNC',
+        actorId: null, actorName: null, fromStatus: task.status, toStatus: task.status,
+        comment: null, metadata: { source: 'RECONCILIATION', changedFields }, createdAt: new Date().toISOString(),
+      });
+      return task;
+    },
+    async cancelFromSource(taskId) {
+      const task = tasks.find((item) => item.id === taskId);
+      if (!task) return null;
+      try {
+        transitionTaskStatus(task.status, 'CANCEL');
+      } catch {
+        return task;
+      }
+      const fromStatus = task.status;
+      const canceledAt = new Date();
+      task.status = 'CANCELED';
+      task.canceledAt = canceledAt.toISOString();
+      task.canceledById = null;
+      task.canceledReason = '来源业务不再需要此任务';
+      activities.push({
+        id: `task-activity-${++activitySequence}`,
+        taskId: task.id,
+        action: 'CANCEL',
+        actorId: null,
+        actorName: null,
+        fromStatus,
+        toStatus: 'CANCELED',
+        comment: task.canceledReason,
+        metadata: { sourceKey: task.sourceKey, source: 'RECONCILIATION' },
+        createdAt: canceledAt.toISOString(),
+      });
+      return task;
     },
     async listWorkbenchTasks(query) {
       const filtered = matchingTasks(query)

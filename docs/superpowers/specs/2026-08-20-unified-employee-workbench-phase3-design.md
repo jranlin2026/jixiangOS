@@ -190,6 +190,74 @@
 每个来源实现统一接口：
 
 ```ts
+type WorkbenchBusinessModule =
+  | 'GENERAL'
+  | 'CRM'
+  | 'ORDER'
+  | 'DELIVERY'
+  | 'AFTER_SALES'
+  | 'FINANCE'
+  | 'MARKETING'
+  | 'ACADEMY'
+  | 'OKR';
+
+type DesiredEmployeeTask = {
+  sourceKey: string;
+  taskType: NonNullable<EmployeeTask['taskType']>;
+  priority: NonNullable<EmployeeTask['priority']>;
+  businessModule: WorkbenchBusinessModule;
+  title: string;
+  employeeId: string;
+  employeeNameSnapshot: string;
+  workDate: string;
+  sourceVersion?: string | null;
+  description?: string | null;
+  departmentId?: string | null;
+  departmentNameSnapshot?: string | null;
+  dueAt?: string | null;
+  sourceRoute?: string | null;
+  sourceLabel?: string | null;
+  collaboratorIds?: string[] | null;
+  estimatedMinutes?: number | null;
+};
+
+type ReconcileContext = Readonly<{
+  now: Date;
+  sourceKeys?: string[];
+  cursor?: string;
+  cursors?: Partial<Record<WorkbenchBusinessModule, string>>;
+  limit?: number;
+  signal?: AbortSignal;
+}>;
+
+type ReconcileError = {
+  module: WorkbenchBusinessModule;
+  sourceKey?: string;
+  message: string;
+};
+
+type ReconcileResult = {
+  scanned: number;
+  created: number;
+  updated: number;
+  canceled: number;
+  unchanged: number;
+  failed: number;
+  errors: ReconcileError[];
+  nextCursors?: Partial<Record<WorkbenchBusinessModule, string>>;
+};
+
+type TaskTransitionEvent = {
+  taskId: string;
+  sourceKey: string;
+  businessModule: WorkbenchBusinessModule;
+  action: string;
+  fromStatus: EmployeeTask['status'];
+  toStatus: EmployeeTask['status'];
+  actorId: string;
+  occurredAt: Date;
+};
+
 type WorkbenchSourceAdapter = {
   module: WorkbenchBusinessModule;
   reconcile(input: ReconcileContext): Promise<ReconcileResult>;
@@ -198,7 +266,13 @@ type WorkbenchSourceAdapter = {
 };
 ```
 
+对账的 `limit` 统一收敛到 1–1000 的正安全整数；适配器必须遵守 `signal` 中止。只有传入的 `signal` 已中止时才停止整体对账；单个适配器自身的 `AbortError` 按普通隔离失败处理。对账对外错误统一转换为稳定的模块级安全摘要，不回显适配器错误原文、凭据、连接串或堆栈。聚合结果按适配器输入顺序稳定累加，每个模块的续页位置独立保存在 `nextCursors`，下一轮通过 `cursors` 原样传回；适配器收到 `cursors[adapter.module] ?? cursor`。标量 `cursor` 只用于单适配器及向后兼容，多适配器分页必须使用 `cursors`。同一批次不允许重复模块适配器。单个适配器失败不丢失其他成功结果，但中止信号会立即停止后续适配器。持久化边界可读取历史模块字符串，新适配器只能写入上述标准模块代码。
+
 适配器负责把业务状态转换成“期望任务”，统一同步服务负责创建、更新或关闭任务。
+
+期望任务的 `sourceKey`、`businessModule` 和 `taskType` 仅在创建时确定身份。`syncDesiredTask` 的载荷 `sourceKey` 必须与显式参数完全一致，已存在任务的模块或任务类型也不得被其他来源载荷复用。后续对账只能更新标题、描述、负责人及部门快照、工作日、截止时间、优先级、来源路由与标签、协作人、预计分钟和来源版本；不得覆盖员工结果、证据、生命周期时间或质量字段。
+
+首次同步必须在任务创建的同一事务内写入 `CREATE` 活动；已有任务的来源字段真正变化时，在同一事务内写入一条 `SOURCE_SYNC`，元数据只列变更字段名，不保存字段值。串行化事务保证并发相同更新只写一条 `SOURCE_SYNC`。无变化的重复同步不写活动。原子同步对唯一键冲突 `P2002`、写冲突/死锁 `P2034` 和事务内消失行使用同一套最多三次的有界重试。期望任务消失时仅对 `PENDING`、`IN_PROGRESS`、`RETURNED` 执行既有生命周期的取消迁移；`COMPLETED`、`CONFIRMED`、`CANCELED` 保持不变。
 
 ### 8.2 第一批来源映射
 

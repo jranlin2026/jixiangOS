@@ -9,6 +9,7 @@ import type { Order } from '../../../src/types/order';
 import type { Delivery } from '../../../src/types/delivery';
 import type { RecoveryOrder } from '../../../src/types/recoveryOrder';
 import type { DataScopeDomain } from '../../../src/types/role';
+import { transitionTaskStatus } from '../../../src/domain/workbench/taskLifecycle';
 import { STORAGE_KEYS } from '../../../src/shared/utils/constants';
 import {
   buildDataVisibilityScopeForUser,
@@ -30,6 +31,9 @@ import type {
   WorkbenchTaskUpdate,
   WorkbenchTransactionRepository,
 } from './workbenchRepository';
+import { changedSourceOwnedFields } from './workbenchRepository';
+import type { DesiredEmployeeTask } from './sourceAdapter';
+import { TaskSyncInvariantError } from './sourceAdapter';
 
 type Client = {
   $transaction<T>(callback: (tx: any) => Promise<T>, options?: { isolationLevel: 'Serializable' | 'RepeatableRead' }): Promise<T>;
@@ -318,6 +322,7 @@ function mapTask(row: any): EmployeeTask {
     businessModule: row.businessModule, sourceRoute: row.sourceRoute || null, sourceLabel: row.sourceLabel || null,
     employeeId: row.employeeId, employeeName: row.employeeName,
     departmentIdSnapshot: row.departmentIdSnapshot || null,
+    departmentNameSnapshot: row.departmentNameSnapshot || null,
     positionIdSnapshot: row.positionIdSnapshot || null, positionNameSnapshot: row.positionNameSnapshot || null,
     workDate: dateText(row.workDate), title: row.title, description: row.description || null,
     targetValue: number(row.targetValue), actualValue: number(row.actualValue), unit: row.unit || null,
@@ -335,6 +340,133 @@ function mapTask(row: any): EmployeeTask {
       id: item.id, type: item.type, referenceId: item.referenceId || null, content: item.content || null,
     })),
   };
+}
+
+function desiredSourceOwnedData(desired: DesiredEmployeeTask) {
+  return {
+    title: desired.title,
+    description: desired.description ?? null,
+    employeeId: desired.employeeId,
+    employeeName: desired.employeeNameSnapshot,
+    departmentIdSnapshot: desired.departmentId ?? null,
+    departmentNameSnapshot: desired.departmentNameSnapshot ?? null,
+    workDate: new Date(`${desired.workDate}T00:00:00.000Z`),
+    dueAt: desired.dueAt ? new Date(desired.dueAt) : null,
+    priority: desired.priority,
+    sourceRoute: desired.sourceRoute ?? null,
+    sourceLabel: desired.sourceLabel ?? null,
+    collaboratorIds: desired.collaboratorIds === undefined || desired.collaboratorIds === null
+      ? Prisma.JsonNull
+      : [...desired.collaboratorIds],
+    estimatedMinutes: desired.estimatedMinutes ?? null,
+    sourceVersion: desired.sourceVersion ?? null,
+  };
+}
+
+function desiredCreateData(desired: DesiredEmployeeTask, id = `workbench-task-${randomUUID()}`) {
+  return {
+    id,
+    sourceKey: desired.sourceKey,
+    taskType: desired.taskType,
+    businessModule: desired.businessModule,
+    ...desiredSourceOwnedData(desired),
+    positionIdSnapshot: null,
+    positionNameSnapshot: null,
+    targetValue: null,
+    actualValue: null,
+    unit: null,
+    evidenceRequired: false,
+    status: 'PENDING',
+    result: null,
+    returnedReason: null,
+  };
+}
+
+function isRetryablePrismaWriteError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && 'code' in error
+    && (error.code === 'P2002' || error.code === 'P2034'),
+  );
+}
+
+async function findTaskBySourceKey(client: Client, sourceKey: string): Promise<EmployeeTask | null> {
+  const row = await client.employeeTask.findUnique({
+    where: { sourceKey },
+    include: { evidence: { orderBy: { createdAt: 'asc' } } },
+  });
+  return row ? mapTask(row) : null;
+}
+
+function assertDesiredIdentity(existing: EmployeeTask, desired: DesiredEmployeeTask): void {
+  if (existing.sourceKey !== desired.sourceKey) {
+    throw new TaskSyncInvariantError('sourceKey 与已有任务身份不一致');
+  }
+  if (existing.businessModule !== desired.businessModule) {
+    throw new TaskSyncInvariantError('businessModule 与已有任务身份不一致');
+  }
+  if (existing.taskType !== desired.taskType) {
+    throw new TaskSyncInvariantError('taskType 与已有任务身份不一致');
+  }
+}
+
+class DesiredSyncRetryError extends Error {}
+
+async function synchronizeDesiredOnce(client: Client, desired: DesiredEmployeeTask): Promise<EmployeeTask> {
+  const createId = `workbench-task-${randomUUID()}`;
+  const row = await client.employeeTask.upsert({
+    where: { sourceKey: desired.sourceKey },
+    create: desiredCreateData(desired, createId),
+    update: {},
+    include: { evidence: { orderBy: { createdAt: 'asc' } } },
+  });
+  const task = mapTask(row);
+  if (row.id === createId) {
+    await client.taskActivity.create({
+      data: {
+        id: `task-activity-${randomUUID()}`, taskId: task.id, action: 'CREATE', actorId: null,
+        actorName: null, fromStatus: null, toStatus: 'PENDING', comment: null,
+        metadata: { source: 'RECONCILIATION', sourceKey: desired.sourceKey, businessModule: desired.businessModule },
+      },
+    });
+    return task;
+  }
+  assertDesiredIdentity(task, desired);
+  const changedFields = changedSourceOwnedFields(task, desired);
+  if (!changedFields.length) return task;
+  const changed = await client.employeeTask.updateMany({
+    where: { id: task.id, sourceKey: desired.sourceKey },
+    data: desiredSourceOwnedData(desired),
+  });
+  if (changed.count !== 1) throw new DesiredSyncRetryError('source task changed during synchronization');
+  await client.taskActivity.create({
+    data: {
+      id: `task-activity-${randomUUID()}`, taskId: task.id, action: 'SOURCE_SYNC', actorId: null,
+      actorName: null, fromStatus: task.status, toStatus: task.status, comment: null,
+      metadata: { source: 'RECONCILIATION', changedFields },
+    },
+  });
+  const updated = await findTaskBySourceKey(client, desired.sourceKey);
+  if (!updated) throw new DesiredSyncRetryError('source task disappeared during synchronization');
+  return updated;
+}
+
+async function upsertDesiredTask(client: Client, desired: DesiredEmployeeTask): Promise<EmployeeTask> {
+  const maxAttempts = 3;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await client.$transaction(
+        (transaction) => synchronizeDesiredOnce(transaction, desired),
+        { isolationLevel: 'Serializable' },
+      );
+    } catch (error) {
+      if (!isRetryablePrismaWriteError(error) && !(error instanceof DesiredSyncRetryError)) throw error;
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 function mapActivity(row: any): TaskActivity {
@@ -641,6 +773,52 @@ export function createPrismaWorkbenchRepository(prisma: Client): WorkbenchReposi
         (transaction) => work(createTransactionRepository(transaction)),
         { isolationLevel: 'Serializable' },
       );
+    },
+    findBySourceKey(sourceKey) {
+      return findTaskBySourceKey(prisma, sourceKey);
+    },
+    createFromDesired(desired) {
+      return upsertDesiredTask(prisma, desired);
+    },
+    async updateSourceOwnedFields(taskId, desired) {
+      const row = await prisma.employeeTask.findUnique({
+        where: { id: taskId },
+        include: { evidence: { orderBy: { createdAt: 'asc' } } },
+      });
+      if (!row) return null;
+      const existing = mapTask(row);
+      assertDesiredIdentity(existing, desired);
+      return upsertDesiredTask(prisma, desired);
+    },
+    cancelFromSource(taskId) {
+      return prisma.$transaction(async (transaction) => {
+        const repository = createTransactionRepository(transaction);
+        const existing = await repository.findTaskForUpdate(taskId);
+        if (!existing) return null;
+        try {
+          transitionTaskStatus(existing.status, 'CANCEL');
+        } catch {
+          return existing;
+        }
+        const canceledAt = new Date();
+        const canceledReason = '来源业务不再需要此任务';
+        const updated = await repository.updateTask(taskId, {
+          status: 'CANCELED', canceledAt: canceledAt.toISOString(), canceledById: null, canceledReason,
+        });
+        if (!updated) return null;
+        await repository.appendActivity({
+          taskId,
+          action: 'CANCEL',
+          actorId: null,
+          actorName: null,
+          fromStatus: existing.status,
+          toStatus: 'CANCELED',
+          comment: canceledReason,
+          metadata: { sourceKey: existing.sourceKey, source: 'RECONCILIATION' },
+          createdAt: canceledAt,
+        });
+        return updated;
+      }, { isolationLevel: 'Serializable' });
     },
     listWorkbenchTasks(query) {
       return prisma.$transaction(

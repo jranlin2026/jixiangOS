@@ -276,7 +276,72 @@ git commit -m "feat(workbench): add scoped task queries and metrics"
 
 **Interfaces:**
 - Defines `WorkbenchSourceAdapter`, `DesiredEmployeeTask`, `ReconcileContext`, and `ReconcileResult` exactly as in the spec.
-- Produces `syncDesiredTask(desired)` and `reconcileAdapters(adapters, context)`.
+- Produces `syncDesiredTask(desired, sourceKey)` and `reconcileAdapters(adapters, context)`.
+
+```ts
+export type WorkbenchBusinessModule =
+  | 'GENERAL' | 'CRM' | 'ORDER' | 'DELIVERY' | 'AFTER_SALES'
+  | 'FINANCE' | 'MARKETING' | 'ACADEMY' | 'OKR';
+
+export type DesiredEmployeeTask = {
+  sourceKey: string;
+  taskType: NonNullable<EmployeeTask['taskType']>;
+  priority: NonNullable<EmployeeTask['priority']>;
+  businessModule: WorkbenchBusinessModule;
+  title: string;
+  employeeId: string;
+  employeeNameSnapshot: string;
+  workDate: string;
+  sourceVersion?: string | null;
+  description?: string | null;
+  departmentId?: string | null;
+  departmentNameSnapshot?: string | null;
+  dueAt?: string | null;
+  sourceRoute?: string | null;
+  sourceLabel?: string | null;
+  collaboratorIds?: string[] | null;
+  estimatedMinutes?: number | null;
+};
+
+export type ReconcileContext = Readonly<{
+  now: Date;
+  sourceKeys?: string[];
+  cursor?: string;
+  cursors?: Partial<Record<WorkbenchBusinessModule, string>>;
+  limit?: number;
+  signal?: AbortSignal;
+}>;
+
+export type ReconcileError = {
+  module: WorkbenchBusinessModule;
+  sourceKey?: string;
+  message: string;
+};
+
+export type ReconcileResult = {
+  scanned: number;
+  created: number;
+  updated: number;
+  canceled: number;
+  unchanged: number;
+  failed: number;
+  errors: ReconcileError[];
+  nextCursors?: Partial<Record<WorkbenchBusinessModule, string>>;
+};
+
+export type TaskTransitionEvent = {
+  taskId: string;
+  sourceKey: string;
+  businessModule: WorkbenchBusinessModule;
+  action: string;
+  fromStatus: EmployeeTask['status'];
+  toStatus: EmployeeTask['status'];
+  actorId: string;
+  occurredAt: Date;
+};
+```
+
+`sourceKey`/module/task type are create-time identity fields. Reject a desired payload whose source key differs from the explicit argument or whose module/task type conflicts with the persisted identity. Reconciliation may update only title, description, owner/department snapshots, work date, due time, priority, route, label, collaborators, estimated minutes, and source version. It must preserve employee result, evidence, lifecycle timestamps, confirmed state, and quality fields. Create and changed-source writes append `CREATE`/`SOURCE_SYNC` activities atomically; concurrent identical updates append one `SOURCE_SYNC`; no-op synchronization appends nothing, and `SOURCE_SYNC` metadata contains field names only. Retry `P2002`, `P2034`, and disappeared-row conflicts at most three times. Null desired tasks use the lifecycle cancel transition only for `PENDING`, `IN_PROGRESS`, and `RETURNED`. Normalize `limit` to a positive safe integer capped at 1000, honor only the supplied signal as a batch abort, isolate adapter-local aborts, keep aggregate counts/errors in adapter input order, expose per-module `nextCursors`, feed the next round through `cursors`, reject duplicate modules, and replace all adapter error text with stable safe summaries. Each adapter receives `cursors[adapter.module] ?? cursor`; scalar `cursor` is only for single-adapter/backward-compatible calls.
 
 ```ts
 export type TaskSyncService = {
@@ -288,8 +353,8 @@ export type TaskSyncService = {
 - [ ] **Step 1: Write failing idempotency tests**
 
 ```ts
-await service.syncDesiredTask(desired);
-await service.syncDesiredTask(desired);
+await service.syncDesiredTask(desired, desired.sourceKey);
+await service.syncDesiredTask(desired, desired.sourceKey);
 assert.equal(tasks.filter((item) => item.sourceKey === desired.sourceKey).length, 1);
 assert.equal(tasks[0].sourceVersion, desired.sourceVersion);
 ```
@@ -303,15 +368,16 @@ Expected: FAIL because the sync service is absent.
 
 - [ ] **Step 3: Implement source-owned field updates**
 
-Allow synchronization to change title, description, owner, due time, priority, route, label, and source version. Do not change result, evidence, completion timestamps, quality, or confirmed status.
+Allow synchronization to change only the approved source-owned fields and append activity in the same transaction. Do not change result, evidence, lifecycle timestamps, quality, or confirmed status.
 
 ```ts
 export async function syncDesiredTask(desired: DesiredEmployeeTask | null, sourceKey: string) {
+  if (desired && desired.sourceKey !== sourceKey) throw new TaskSyncInvariantError('sourceKey mismatch');
+  if (desired) return repository.createFromDesired(desired); // atomic create/update/no-op + activity
   const existing = await repository.findBySourceKey(sourceKey);
-  if (!desired) return existing && !isTerminal(existing.status) ? repository.cancelFromSource(existing.id) : existing;
-  return existing
-    ? repository.updateSourceOwnedFields(existing.id, desired)
-    : repository.createFromDesired(desired);
+  return existing && canTransition(existing.status, 'CANCEL')
+    ? repository.cancelFromSource(existing.id)
+    : existing;
 }
 ```
 

@@ -54,6 +54,7 @@ export type EmployeeTask = {
   employeeId: string;
   employeeName: string;
   departmentIdSnapshot: string | null;
+  departmentNameSnapshot?: string | null;
   positionIdSnapshot: string | null;
   positionNameSnapshot: string | null;
   workDate: string;

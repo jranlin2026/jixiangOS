@@ -139,11 +139,7 @@ const last = <T>(items: T[]): T | undefined => items[items.length - 1];
   assert.equal(reassigned.code, 0);
   assert.equal(reassigned.data?.employeeId, 'employee-2');
   assert.equal(reassigned.data?.departmentIdSnapshot, 'dept-sales-child');
-  assert.equal(
-    (memory.tasks[0] as EmployeeTask & { departmentNameSnapshot?: string | null })?.departmentNameSnapshot,
-    '销售一部',
-    '内存仓储必须与 Prisma 一样保留转派部门名称快照',
-  );
+  assert.equal(memory.tasks[0]?.departmentNameSnapshot, '销售一部', '内存仓储必须与 Prisma 一样保留转派部门名称快照');
   assert.equal(last(memory.activities)?.action, 'REASSIGN');
   assert.deepEqual(last(memory.activities)?.metadata, {
     previousEmployeeId: 'employee-1',
