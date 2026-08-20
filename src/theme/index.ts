@@ -75,11 +75,12 @@ const theme = createTheme({
           borderBottom: '1px solid #ECEEF1',
           padding: '11px 14px',
           color: '#1F2937',
+          fontSize: '0.875rem',
         },
         head: {
           fontWeight: 900,
           color: '#5F6674',
-          fontSize: '0.75rem',
+          fontSize: '0.8125rem',
           textTransform: 'none',
           letterSpacing: 0,
           backgroundColor: '#F9F9FC',
@@ -113,7 +114,7 @@ const theme = createTheme({
                 '& .MuiMenuItem-root': {
                   minHeight: 30,
                   px: 1.25,
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: 700,
                 },
               },
@@ -125,6 +126,7 @@ const theme = createTheme({
         root: {
           borderTop: '1px solid #EEEAF5',
           backgroundColor: '#FFFFFF',
+          fontSize: '0.8125rem',
         },
         toolbar: {
           minHeight: 48,
@@ -227,7 +229,7 @@ const theme = createTheme({
       styleOverrides: {
         tooltip: {
           borderRadius: 6,
-          fontSize: '0.75rem',
+          fontSize: '0.8125rem',
         },
       },
     },

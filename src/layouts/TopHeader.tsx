@@ -1,22 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import KeyboardCommandKeyIcon from '@mui/icons-material/KeyboardCommandKey';
+import React, { useState } from 'react';
 import LockResetOutlinedIcon from '@mui/icons-material/LockResetOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
-import SearchIcon from '@mui/icons-material/Search';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useNavigate } from 'react-router-dom';
 import {
   Avatar,
   Box,
-  Button,
   ButtonBase,
-  InputAdornment,
   ListItemIcon,
   Menu,
   MenuItem,
   Stack,
-  TextField,
   Typography,
 } from '@mui/material';
 import useAuthStore from '../store/useAuthStore';
@@ -27,7 +21,6 @@ import { shellSurfaceShadow, shellVisualTokens as shell } from './shellVisualTok
 const TopHeader: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser, logout } = useAuthStore();
-  const searchRef = useRef<HTMLInputElement>(null);
   const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null);
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
 
@@ -37,24 +30,13 @@ const TopHeader: React.FC = () => {
     navigate('/login', { replace: true });
   };
 
-  useEffect(() => {
-    const handleShortcut = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', handleShortcut);
-    return () => window.removeEventListener('keydown', handleShortcut);
-  }, []);
-
   return (
     <Box
       component="header"
       sx={{
         display: { xs: 'none', md: 'flex' },
         alignItems: 'center',
-        minHeight: 72,
+        minHeight: 64,
         px: { md: 2.5, xl: 3.5 },
         gap: 2,
         bgcolor: shell.header,
@@ -64,37 +46,9 @@ const TopHeader: React.FC = () => {
         zIndex: 1050,
       }}
     >
-      <TextField
-        inputRef={searchRef}
-        placeholder="搜索客户 / 线索 / 订单…"
-        aria-label="全局搜索"
-        size="small"
-        sx={{
-          width: { md: 280, xl: 360 },
-          ml: 'auto',
-          '& .MuiOutlinedInput-root': {
-            bgcolor: shell.surface,
-            minHeight: 44,
-            borderRadius: 3,
-            boxShadow: '0 2px 12px rgba(31, 41, 55, 0.04)',
-          },
-        }}
-        InputProps={{
-          startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 20, color: '#9B95AA' }} /></InputAdornment>,
-          endAdornment: (
-            <InputAdornment position="end">
-              <Stack direction="row" spacing={0.25} alignItems="center" sx={{ color: '#AAA5BA' }}>
-                <KeyboardCommandKeyIcon sx={{ fontSize: 14 }} />
-                <Typography variant="caption" sx={{ fontWeight: 800 }}>K</Typography>
-              </Stack>
-            </InputAdornment>
-          ),
-        }}
-      />
-      <Button startIcon={<HelpOutlineIcon />} sx={{ color: shell.mutedStrong, whiteSpace: 'nowrap', boxShadow: 'none', fontWeight: 800 }}>
-        帮助中心
-      </Button>
-      <NotificationBell />
+      <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center' }}>
+        <NotificationBell />
+      </Box>
       <Box sx={{ height: 32, width: '1px', bgcolor: shell.line }} />
       <ButtonBase
         aria-label="打开账号菜单"

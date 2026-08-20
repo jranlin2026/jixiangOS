@@ -31,7 +31,7 @@ const typography: TypographyOptions = {
     lineHeight: 1.5,
   },
   h6: {
-    fontSize: '0.875rem',
+    fontSize: '1rem',
     fontWeight: 800,
     lineHeight: 1.5,
   },
@@ -41,31 +41,32 @@ const typography: TypographyOptions = {
     lineHeight: 1.5,
   },
   subtitle2: {
-    fontSize: '0.875rem',
+    fontSize: '0.9375rem',
     fontWeight: 700,
     lineHeight: 1.5,
   },
   body1: {
-    fontSize: '0.875rem',
+    fontSize: '0.9375rem',
     fontWeight: 400,
     lineHeight: 1.6,
   },
   body2: {
-    fontSize: '0.75rem',
+    fontSize: '0.875rem',
     fontWeight: 400,
     lineHeight: 1.5,
   },
   button: {
+    fontSize: '0.875rem',
     textTransform: 'none',
-    fontWeight: 800,
+    fontWeight: 700,
   },
   caption: {
-    fontSize: '0.75rem',
+    fontSize: '0.8125rem',
     fontWeight: 400,
     lineHeight: 1.5,
   },
   overline: {
-    fontSize: '0.625rem',
+    fontSize: '0.75rem',
     fontWeight: 800,
     letterSpacing: 0,
     textTransform: 'uppercase',

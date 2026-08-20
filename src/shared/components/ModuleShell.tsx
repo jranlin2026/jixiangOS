@@ -74,7 +74,7 @@ export const ModuleHeader: React.FC<ModuleHeaderProps> = ({ title, description, 
     sx={{ mb: 2.5, ...sx }}
   >
     <Box sx={{ minWidth: 0 }}>
-      <Typography variant="h5" sx={{ fontWeight: 900, color: moduleTokens.ink, lineHeight: 1.25, letterSpacing: '-0.015em' }}>
+      <Typography variant="h5" sx={{ fontSize: { xs: '1.25rem', md: '1.5rem' }, fontWeight: 900, color: moduleTokens.ink, lineHeight: 1.25, letterSpacing: '-0.015em' }}>
         {title}
       </Typography>
       {description ? (

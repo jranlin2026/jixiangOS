@@ -77,11 +77,11 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
   return (
     <Drawer variant={variant} open={open} onClose={onClose} ModalProps={{ keepMounted: true }} sx={{ width: layoutWidth, flexShrink: 0, '& .MuiDrawer-paper': { width, boxSizing: 'border-box', bgcolor: shell.sidebar, borderRight: `1px solid ${shell.line}`, boxShadow: shellSurfaceShadow } }}>
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Box sx={{ px: 2.25, display: 'flex', alignItems: 'center', gap: 1.25, height: 82, bgcolor: shell.header, borderBottom: `1px solid ${shell.softLine}` }}>
+        <Box sx={{ px: 2.25, display: 'flex', alignItems: 'center', gap: 1.25, height: 64, bgcolor: shell.header, borderBottom: `1px solid ${shell.softLine}` }}>
           <Box component="img" src="/jixiang-os-logo.png" alt="极享OS" sx={{ width: 42, height: 42, borderRadius: 2, objectFit: 'contain', flexShrink: 0 }} />
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 900, color: shell.ink, fontSize: '1.05rem', lineHeight: 1.15 }}>极享OS 2.0</Typography>
-            <Typography variant="caption" sx={{ color: '#8A849A', fontSize: '0.75rem', lineHeight: 1.3 }}>员工工作台</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 900, color: shell.ink, fontSize: '1.125rem', lineHeight: 1.15 }}>极享OS 2.0</Typography>
+            <Typography variant="caption" sx={{ color: '#8A849A', fontSize: '0.8125rem', lineHeight: 1.3 }}>员工工作台</Typography>
           </Box>
           {canUseAiAssistant && (
             <Tooltip title="AI岗位助手 · 试运行">
@@ -99,7 +99,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
               <ListItem key={item.id} disablePadding sx={{ mb: 0.25 }}>
                 <ListItemButton onClick={() => navigateTo(item.path)} sx={{ position: 'relative', overflow: 'hidden', borderRadius: 2.5, py: 1, px: 1.35, minHeight: 48, bgcolor: isActive ? shell.violetSoft : 'transparent', color: isActive ? shell.violet : shell.mutedStrong, '&::before': isActive ? { content: '""', position: 'absolute', left: 0, top: 10, bottom: 10, width: 4, borderRadius: '0 4px 4px 0', bgcolor: shell.violet } : undefined, '&:hover': { bgcolor: isActive ? shell.violetSoft : shell.violetHover } }}>
                   <ListItemIcon sx={{ minWidth: 36, color: isActive ? shell.violet : shell.icon }}>{fixedIcons[item.id]}</ListItemIcon>
-                  <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: '0.8125rem', fontWeight: isActive ? 900 : 700 }} />
+                  <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: '0.9375rem', fontWeight: isActive ? 900 : 700 }} />
                 </ListItemButton>
               </ListItem>
             );
@@ -115,7 +115,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
                 <ListItem disablePadding sx={{ mb: 0.25 }}>
                   <ListItemButton onClick={() => setExpandedGroupId((current) => current === group.id ? null : group.id)} aria-expanded={isExpanded} sx={{ borderRadius: 2.5, py: 0.9, px: 1.35, minHeight: 46, bgcolor: isActive ? '#F7F5FF' : 'transparent', color: isActive ? shell.violet : shell.ink, '&:hover': { bgcolor: shell.violetHover } }}>
                     <ListItemIcon sx={{ minWidth: 36, color: isActive ? shell.violet : shell.icon }}>{groupIcons[group.id]}</ListItemIcon>
-                    <ListItemText primary={group.label} primaryTypographyProps={{ fontSize: '0.8125rem', fontWeight: 900 }} />
+                    <ListItemText primary={group.label} primaryTypographyProps={{ fontSize: '0.9375rem', fontWeight: 900 }} />
                     {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                   </ListItemButton>
                 </ListItem>
@@ -126,7 +126,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
                       return (
                         <ListItem key={item.id} disablePadding sx={{ mb: 0.25 }}>
                           <ListItemButton onClick={() => navigateTo(item.path)} sx={{ position: 'relative', overflow: 'hidden', borderRadius: 2.5, py: 0.75, px: 1.25, minHeight: 38, bgcolor: childActive ? shell.violetSoft : 'transparent', color: childActive ? shell.violet : shell.mutedStrong, '&::before': childActive ? { content: '""', position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, borderRadius: '0 3px 3px 0', bgcolor: shell.violet } : undefined, '&:hover': { bgcolor: childActive ? shell.violetSoft : shell.violetHover } }}>
-                            <ListItemText primary={<Box sx={{ display: 'flex', alignItems: 'center' }}>{item.label}{renderBadge(item.badge)}</Box>} primaryTypographyProps={{ fontSize: '0.765rem', fontWeight: childActive ? 900 : 700 }} />
+                            <ListItemText primary={<Box sx={{ display: 'flex', alignItems: 'center' }}>{item.label}{renderBadge(item.badge)}</Box>} primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: childActive ? 900 : 700 }} />
                           </ListItemButton>
                         </ListItem>
                       );
