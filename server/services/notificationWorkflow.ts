@@ -14,10 +14,9 @@ type Rule<T> = {
 };
 
 const DEFAULT_LEAD_RULE = {
-  ackReminderMinutes: 5,
-  ackEscalationMinutes: 15,
-  firstFollowUpReminderMinutes: 30,
-  firstFollowUpEscalationMinutes: 60,
+  ackReminderMinutes: 20,
+  firstFollowUpReminderMinutes: 60,
+  firstFollowUpEscalationMinutes: 120,
 };
 
 const DEFAULT_TODO_RULE = {
@@ -30,6 +29,12 @@ const DEFAULT_OKR_RULE = {
   checkInReminderMinutes: 24 * 60,
   riskEscalationMinutes: 24 * 60,
 };
+
+const LEAD_POLICY_VERSION = 'noise-v2';
+
+export function leadAssignmentNotificationKey(leadId: string, assigneeId: string, assignedAt: Date) {
+  return `lead.assigned:${leadId}:${assigneeId}:${assignedAt.toISOString()}:${LEAD_POLICY_VERSION}`;
+}
 
 function minutesAfter(value: Date, minutes: number) {
   return new Date(value.getTime() + minutes * 60_000);
@@ -96,38 +101,27 @@ export function createNotificationWorkflow(publisher: NotificationPublisher) {
       await publisher.publish(client as any, {
         eventType: 'LEAD_ASSIGNED', businessType: 'lead', businessId: input.leadId,
         recipientId: input.assignee.id, recipientName: input.assignee.name,
-        title: '你收到一条新线索', content: `${input.leadName || '新线索'}已分配给你，请及时确认并跟进。`,
+        title: '新线索待处理', content: `${input.leadName || '新线索'} · 已分配给你，请在${rule.config.firstFollowUpReminderMinutes}分钟内完成首次跟进。`,
         severity: 'S1', actionUrl, requiresAck: true,
-        dedupeKey: `lead.assigned:${input.leadId}:${input.assignee.id}:${version}`,
+        dedupeKey: leadAssignmentNotificationKey(input.leadId, input.assignee.id, input.assignedAt),
         channels: rule.channels,
         metadata: { assignmentVersion: version, ackBusinessType: 'lead_ack' },
       });
       await publisher.schedule(client as any, {
         eventType: 'LEAD_ACK_REMINDER', businessType: 'lead_ack', businessId: input.leadId,
         recipientId: input.assignee.id, recipientName: input.assignee.name,
-        title: '新线索尚未确认接收', content: `${input.leadName || '新线索'}仍未确认，请尽快处理。`,
+        title: '新线索待处理', content: `${input.leadName || '新线索'} · 尚未确认且无跟进记录，请尽快处理。`,
         severity: 'S1', actionUrl, requiresAck: true,
-        dedupeKey: `lead.ack-reminder:${input.leadId}:${input.assignee.id}:${version}`,
+        dedupeKey: `lead.ack-reminder:${input.leadId}:${input.assignee.id}:${version}:${LEAD_POLICY_VERSION}`,
         channels: rule.channels,
         scheduledAt: minutesAfter(input.assignedAt, rule.config.ackReminderMinutes),
       });
-      if (input.manager && input.manager.id !== input.assignee.id) {
-        await publisher.schedule(client as any, {
-          eventType: 'LEAD_ACK_ESCALATION', businessType: 'lead_ack', businessId: input.leadId,
-          recipientId: input.manager.id, recipientName: input.manager.name,
-          title: '成员尚未确认新线索', content: `${input.assignee.name}尚未确认线索“${input.leadName || input.leadId}”。`,
-          severity: 'S1', actionUrl, requiresAck: false,
-          dedupeKey: `lead.ack-escalation:${input.leadId}:${input.manager.id}:${version}`,
-          channels: rule.channels, escalationLevel: 1,
-          scheduledAt: minutesAfter(input.assignedAt, rule.config.ackEscalationMinutes),
-        });
-      }
       await publisher.schedule(client as any, {
         eventType: 'LEAD_FIRST_FOLLOW_UP_DUE', businessType: 'lead_follow_up', businessId: input.leadId,
         recipientId: input.assignee.id, recipientName: input.assignee.name,
-        title: '新线索尚未首次跟进', content: `${input.leadName || '新线索'}尚无跟进记录，请及时联系。`,
+        title: '新线索待处理', content: `${input.leadName || '新线索'} · 尚无跟进记录，已达到首次跟进时限，请立即联系。`,
         severity: 'S1', actionUrl, requiresAck: false,
-        dedupeKey: `lead.first-follow-up:${input.leadId}:${input.assignee.id}:${version}:reminder`,
+        dedupeKey: `lead.first-follow-up:${input.leadId}:${input.assignee.id}:${version}:reminder:${LEAD_POLICY_VERSION}`,
         channels: rule.channels,
         scheduledAt: minutesAfter(input.assignedAt, rule.config.firstFollowUpReminderMinutes),
       });
@@ -135,9 +129,9 @@ export function createNotificationWorkflow(publisher: NotificationPublisher) {
         await publisher.schedule(client as any, {
           eventType: 'LEAD_FIRST_FOLLOW_UP_ESCALATION', businessType: 'lead_follow_up', businessId: input.leadId,
           recipientId: input.manager.id, recipientName: input.manager.name,
-          title: '成员的新线索尚未跟进', content: `${input.assignee.name}尚未首次跟进“${input.leadName || input.leadId}”。`,
+          title: '成员线索跟进超时', content: `${input.assignee.name}超过${rule.config.firstFollowUpEscalationMinutes}分钟仍未跟进“${input.leadName || input.leadId}”。`,
           severity: 'S1', actionUrl, requiresAck: false,
-          dedupeKey: `lead.first-follow-up:${input.leadId}:${input.manager.id}:${version}:escalation`,
+          dedupeKey: `lead.first-follow-up:${input.leadId}:${input.manager.id}:${version}:escalation:${LEAD_POLICY_VERSION}`,
           channels: rule.channels, escalationLevel: 1,
           scheduledAt: minutesAfter(input.assignedAt, rule.config.firstFollowUpEscalationMinutes),
         });
@@ -161,45 +155,33 @@ export function createNotificationWorkflow(publisher: NotificationPublisher) {
       const version = input.assignedAt.toISOString();
       const actionUrl = `/leads?leadId=${encodeURIComponent(input.leadId)}`;
       const ackReminderAt = minutesAfter(input.assignedAt, rule.config.ackReminderMinutes);
-      const ackEscalationAt = minutesAfter(input.assignedAt, rule.config.ackEscalationMinutes);
       const followUpAt = minutesAfter(input.assignedAt, rule.config.firstFollowUpReminderMinutes);
       const followUpEscalationAt = minutesAfter(input.assignedAt, rule.config.firstFollowUpEscalationMinutes);
       const ackReminder = {
         eventType: 'LEAD_ACK_REMINDER', businessType: 'lead_ack', businessId: input.leadId,
         recipientId: input.assignee.id, recipientName: input.assignee.name,
-        title: '新线索尚未确认接收', content: `${input.leadName || '新线索'}仍未确认，请尽快处理。`,
+        title: '新线索待处理', content: `${input.leadName || '新线索'} · 尚未确认且无跟进记录，请尽快处理。`,
         severity: 'S1' as const, actionUrl, requiresAck: true,
-        dedupeKey: `lead.ack-reminder:${input.leadId}:${input.assignee.id}:${version}`, channels: rule.channels,
+        dedupeKey: `lead.ack-reminder:${input.leadId}:${input.assignee.id}:${version}:${LEAD_POLICY_VERSION}`, channels: rule.channels,
       };
       if (!input.acknowledged && input.bootstrapAt < ackReminderAt) {
         await publisher.publish(client as any, {
           eventType: 'LEAD_ASSIGNED', businessType: 'lead', businessId: input.leadId,
           recipientId: input.assignee.id, recipientName: input.assignee.name,
-          title: '你收到一条新线索', content: `${input.leadName || '新线索'}已分配给你，请及时确认并跟进。`,
+          title: '新线索待处理', content: `${input.leadName || '新线索'} · 已分配给你，请在${rule.config.firstFollowUpReminderMinutes}分钟内完成首次跟进。`,
           severity: 'S1', actionUrl, requiresAck: true,
-          dedupeKey: `lead.assigned:${input.leadId}:${input.assignee.id}:${version}`, channels: rule.channels,
+          dedupeKey: leadAssignmentNotificationKey(input.leadId, input.assignee.id, input.assignedAt), channels: rule.channels,
         });
         await publisher.schedule(client as any, { ...ackReminder, scheduledAt: ackReminderAt });
       } else if (!input.acknowledged && input.bootstrapAt < followUpAt) {
         await publisher.publish(client as any, ackReminder);
       }
-      if (!input.acknowledged && input.manager && input.manager.id !== input.assignee.id && input.bootstrapAt < followUpAt) {
-        const escalation = {
-          eventType: 'LEAD_ACK_ESCALATION', businessType: 'lead_ack', businessId: input.leadId,
-          recipientId: input.manager.id, recipientName: input.manager.name,
-          title: '成员尚未确认新线索', content: `${input.assignee.name}尚未确认线索“${input.leadName || input.leadId}”。`,
-          severity: 'S1' as const, actionUrl, requiresAck: false,
-          dedupeKey: `lead.ack-escalation:${input.leadId}:${input.manager.id}:${version}`, channels: rule.channels,
-        };
-        if (input.bootstrapAt < ackEscalationAt) await publisher.schedule(client as any, { ...escalation, scheduledAt: ackEscalationAt, escalationLevel: 1 });
-        else await publisher.publish(client as any, escalation);
-      }
       const followUp = {
         eventType: 'LEAD_FIRST_FOLLOW_UP_DUE', businessType: 'lead_follow_up', businessId: input.leadId,
         recipientId: input.assignee.id, recipientName: input.assignee.name,
-        title: '新线索尚未首次跟进', content: `${input.leadName || '新线索'}尚无跟进记录，请及时联系。`,
+        title: '新线索待处理', content: `${input.leadName || '新线索'} · 尚无跟进记录，已达到首次跟进时限，请立即联系。`,
         severity: 'S1' as const, actionUrl, requiresAck: false,
-        dedupeKey: `lead.first-follow-up:${input.leadId}:${input.assignee.id}:${version}:reminder`, channels: rule.channels,
+        dedupeKey: `lead.first-follow-up:${input.leadId}:${input.assignee.id}:${version}:reminder:${LEAD_POLICY_VERSION}`, channels: rule.channels,
       };
       if (input.bootstrapAt < followUpAt) await publisher.schedule(client as any, { ...followUp, scheduledAt: followUpAt });
       else await publisher.publish(client as any, followUp);
@@ -207,9 +189,9 @@ export function createNotificationWorkflow(publisher: NotificationPublisher) {
         const escalation = {
           eventType: 'LEAD_FIRST_FOLLOW_UP_ESCALATION', businessType: 'lead_follow_up', businessId: input.leadId,
           recipientId: input.manager.id, recipientName: input.manager.name,
-          title: '成员的新线索尚未跟进', content: `${input.assignee.name}尚未首次跟进“${input.leadName || input.leadId}”。`,
+          title: '成员线索跟进超时', content: `${input.assignee.name}超过${rule.config.firstFollowUpEscalationMinutes}分钟仍未跟进“${input.leadName || input.leadId}”。`,
           severity: 'S1' as const, actionUrl, requiresAck: false,
-          dedupeKey: `lead.first-follow-up:${input.leadId}:${input.manager.id}:${version}:escalation`, channels: rule.channels,
+          dedupeKey: `lead.first-follow-up:${input.leadId}:${input.manager.id}:${version}:escalation:${LEAD_POLICY_VERSION}`, channels: rule.channels,
         };
         if (input.bootstrapAt < followUpEscalationAt) await publisher.schedule(client as any, { ...escalation, scheduledAt: followUpEscalationAt, escalationLevel: 1 });
         else await publisher.publish(client as any, escalation);

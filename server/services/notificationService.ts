@@ -25,9 +25,15 @@ export type ScheduledNotificationInput = NotificationEventInput & {
 };
 
 type NotificationClient = {
+  notificationActivityProjection: {
+    create(args: { data: Record<string, unknown> }): Promise<any>;
+    findUnique(args: { where: { activityKey: string } }): Promise<any>;
+    updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
+  };
   notification: {
     create(args: { data: Record<string, unknown> }): Promise<any>;
     findUnique(args: { where: { dedupeKey: string } }): Promise<any>;
+    findMany(args: { where: Record<string, unknown> }): Promise<any[]>;
     updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
   };
   notificationDelivery: {
@@ -60,6 +66,46 @@ function json(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value));
 }
 
+const ACTIVITY_FAMILIES = [
+  { name: 'lead-owner', stages: ['LEAD_ASSIGNED', 'LEAD_ACK_REMINDER', 'LEAD_FIRST_FOLLOW_UP_DUE'] },
+  { name: 'lead-manager', stages: ['LEAD_ACK_ESCALATION', 'LEAD_FIRST_FOLLOW_UP_ESCALATION'] },
+  { name: 'todo-owner', stages: ['TODO_ASSIGNED', 'TODO_DUE_SOON', 'TODO_DUE', 'TODO_OVERDUE'] },
+] as const;
+
+type NormalizedActivityInput = {
+  eventType: string;
+  businessId: string;
+  recipientId: string;
+  dedupeKey: string;
+  metadata?: unknown;
+};
+
+function activityDescriptor(input: NormalizedActivityInput) {
+  const family = ACTIVITY_FAMILIES.find((candidate) => candidate.stages.includes(input.eventType as never));
+  if (!family) return null;
+  const metadata = input.metadata && typeof input.metadata === 'object' ? input.metadata as Record<string, unknown> : {};
+  const embeddedVersion = String(metadata.activityVersion || input.dedupeKey).match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z/)?.[0];
+  const versionAt = new Date(embeddedVersion || 0);
+  return {
+    activityKey: `${family.name}:${input.businessId}:${input.recipientId}`,
+    family: [...family.stages],
+    stage: family.stages.indexOf(input.eventType as never) + 1,
+    versionAt: Number.isNaN(versionAt.getTime()) ? new Date(0) : versionAt,
+  };
+}
+
+function compareActivity(left: any, right: any) {
+  const leftDescriptor = activityDescriptor(left);
+  const rightDescriptor = activityDescriptor(right);
+  if (!leftDescriptor) return -1;
+  if (!rightDescriptor) return 1;
+  const version = leftDescriptor.versionAt.getTime() - rightDescriptor.versionAt.getTime();
+  if (version) return version;
+  const stage = leftDescriptor.stage - rightDescriptor.stage;
+  if (stage) return stage;
+  return new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime();
+}
+
 export function createNotificationPublisher(options: PublisherOptions = {}) {
   const now = () => options.now?.() || new Date();
   const createId = (prefix: string) => options.createId?.(prefix) || `${prefix}-${randomUUID()}`;
@@ -79,6 +125,81 @@ export function createNotificationPublisher(options: PublisherOptions = {}) {
     metadata: json(input.metadata),
   });
 
+  const resolveNotification = (client: NotificationClient, id: string, reason: string) => client.notification.updateMany({
+    where: { id, resolvedAt: null },
+    data: { resolvedAt: now(), resolvedReason: reason, readAt: now() },
+  });
+
+  const projectActivity = async (client: NotificationClient, data: ReturnType<typeof normalized>, notification: any) => {
+    const descriptor = activityDescriptor(data);
+    if (!descriptor) return true;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const current = await client.notificationActivityProjection.findUnique({ where: { activityKey: descriptor.activityKey } });
+      if (!current) {
+        try {
+          const activeFamily = await client.notification.findMany({
+            where: {
+              businessId: data.businessId,
+              recipientId: data.recipientId,
+              eventType: { in: descriptor.family },
+              resolvedAt: null,
+            },
+          });
+          const sortedFamily = activeFamily.sort(compareActivity);
+          const projected = sortedFamily[sortedFamily.length - 1] || notification;
+          const projectedDescriptor = activityDescriptor(projected) || descriptor;
+          await client.notificationActivityProjection.create({
+            data: {
+              activityKey: descriptor.activityKey,
+              currentNotificationId: projected.id,
+              versionAt: projectedDescriptor.versionAt,
+              stage: projectedDescriptor.stage,
+            },
+          });
+          await client.notification.updateMany({
+            where: {
+              businessId: data.businessId,
+              recipientId: data.recipientId,
+              eventType: { in: descriptor.family },
+              dedupeKey: { not: projected.dedupeKey },
+              resolvedAt: null,
+            },
+            data: { resolvedAt: now(), resolvedReason: '已更新为最新业务提醒', readAt: now() },
+          });
+          return projected.id === notification.id;
+        } catch (error) {
+          if (!uniqueConflict(error)) throw error;
+          continue;
+        }
+      }
+      const currentVersion = new Date(current.versionAt).getTime();
+      const nextVersion = descriptor.versionAt.getTime();
+      const canReplace = nextVersion > currentVersion
+        || (nextVersion === currentVersion && descriptor.stage >= Number(current.stage));
+      if (!canReplace) {
+        await resolveNotification(client, notification.id, '已有更新阶段的业务提醒');
+        return false;
+      }
+      const claimed = await client.notificationActivityProjection.updateMany({
+        where: { activityKey: descriptor.activityKey, currentNotificationId: current.currentNotificationId },
+        data: { currentNotificationId: notification.id, versionAt: descriptor.versionAt, stage: descriptor.stage },
+      });
+      if (claimed.count !== 1) continue;
+      await client.notification.updateMany({
+        where: {
+          businessId: data.businessId,
+          recipientId: data.recipientId,
+          eventType: { in: descriptor.family },
+          dedupeKey: { not: data.dedupeKey },
+          resolvedAt: null,
+        },
+        data: { resolvedAt: now(), resolvedReason: '已更新为最新业务提醒', readAt: now() },
+      });
+      return true;
+    }
+    throw new Error('NOTIFICATION_ACTIVITY_PROJECTION_CONFLICT');
+  };
+
   return {
     async publish(client: NotificationClient, input: NotificationEventInput) {
       const data = normalized(input);
@@ -96,6 +217,8 @@ export function createNotificationPublisher(options: PublisherOptions = {}) {
       }
 
       if (created) {
+        const current = await projectActivity(client, data, notification);
+        if (!current) return { created, notification };
         const channels = [...new Set(input.channels || [])];
         for (const channel of channels) {
           await client.notificationDelivery.create({

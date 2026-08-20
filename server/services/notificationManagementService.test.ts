@@ -40,12 +40,13 @@ assert.deepEqual(okrRule, {
 const updated = await service.updateRule('LEAD_WORKFLOW', {
   enabled: true,
   channels: ['FEISHU', 'INVALID'],
-  config: { ackReminderMinutes: 8, ackEscalationMinutes: -1 },
+  config: { ackReminderMinutes: 25, firstFollowUpReminderMinutes: 70 },
 }, admin);
 assert.equal(updated.code, 0);
 assert.deepEqual((updated.data as any)?.channels, ['FEISHU']);
-assert.equal((updated.data as any)?.config.ackReminderMinutes, 8);
-assert.equal((updated.data as any)?.config.ackEscalationMinutes, 15);
+assert.equal((updated.data as any)?.config.ackReminderMinutes, 25);
+assert.equal((updated.data as any)?.config.firstFollowUpReminderMinutes, 70);
+assert.equal((updated.data as any)?.config.firstFollowUpEscalationMinutes, 120);
 
 const updatedOkr = await service.updateRule('OKR_WORKFLOW', {
   enabled: false,

@@ -49,7 +49,7 @@ export function createNotificationInboxService(prisma: NotificationPrisma, optio
       const status = query.status || 'all';
       const where: any = {
         recipientId: user.id,
-        ...(status === 'unread' ? { readAt: null } : {}),
+        ...(status === 'unread' ? { readAt: null, resolvedAt: null } : {}),
         ...(status === 'pending' ? { resolvedAt: null } : {}),
         ...(status === 'resolved' ? { resolvedAt: { not: null } } : {}),
         ...(query.eventType ? { eventType: String(query.eventType) } : {}),
@@ -72,7 +72,7 @@ export function createNotificationInboxService(prisma: NotificationPrisma, optio
 
     async unreadCount(user: AuthenticatedUser) {
       const count = await prisma.notification.count({
-        where: { recipientId: user.id, readAt: null },
+        where: { recipientId: user.id, readAt: null, resolvedAt: null },
       });
       return success({ count });
     },

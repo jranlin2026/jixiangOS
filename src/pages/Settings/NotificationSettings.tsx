@@ -10,7 +10,6 @@ import type { NotificationDeliveryLog } from '../../types/notification';
 
 const configLabels: Record<string, { label: string; suffix?: string }> = {
   ackReminderMinutes: { label: '未确认再次提醒', suffix: '分钟' },
-  ackEscalationMinutes: { label: '未确认升级主管', suffix: '分钟' },
   firstFollowUpReminderMinutes: { label: '未首次跟进提醒', suffix: '分钟' },
   firstFollowUpEscalationMinutes: { label: '未首次跟进升级主管', suffix: '分钟' },
   dueSoonMinutes: { label: '到期前提醒', suffix: '分钟' },

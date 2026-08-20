@@ -36,7 +36,7 @@ function ruleView(eventType: string, stored?: any) {
     description: meta.description,
     enabled: stored?.enabled !== false,
     channels: stored ? channels(stored.channels) : ['FEISHU'],
-    config: { ...notificationRuleDefaults[eventType as keyof typeof notificationRuleDefaults], ...(stored?.config || {}) },
+    config: configFor(eventType, stored?.config) || {},
     updatedAt: stored?.updatedAt?.toISOString(),
     updatedByName: stored?.updatedByName || undefined,
   };

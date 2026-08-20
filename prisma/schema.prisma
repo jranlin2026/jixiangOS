@@ -670,6 +670,18 @@ model Notification {
   @@map("notifications")
 }
 
+model NotificationActivityProjection {
+  activityKey          String   @id @db.VarChar(191)
+  currentNotificationId String  @db.VarChar(64)
+  versionAt            DateTime
+  stage                Int
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([currentNotificationId])
+  @@map("notification_activity_projections")
+}
+
 model NotificationDelivery {
   id             String                     @id @db.VarChar(64)
   notificationId String                     @db.VarChar(64)

@@ -17,6 +17,7 @@ const rows = [
 ];
 
 let lastListWhere: any;
+let lastCountWhere: any;
 const prisma = {
   notification: {
     findMany: async ({ where, skip, take }: any) => {
@@ -24,7 +25,10 @@ const prisma = {
       return rows.filter((row) => row.recipientId === where.recipientId).slice(skip, skip + take);
     },
     count: async ({ where }: any) => rows.filter((row) => (
-      row.recipientId === where.recipientId && (!where.readAt || row.readAt === null)
+      (lastCountWhere = where)
+      && row.recipientId === where.recipientId
+      && (where.readAt !== null || row.readAt === null)
+      && (where.resolvedAt !== null || row.resolvedAt === null)
     )).length,
     findFirst: async ({ where }: any) => rows.find((row) => row.id === where.id && row.recipientId === where.recipientId) || null,
     update: async ({ where, data }: any) => {
@@ -62,6 +66,9 @@ assert.equal(listed.code, 0);
 assert.equal(listed.data?.items.length, 1);
 assert.equal(listed.data?.items[0].id, 'notification-1');
 assert.equal(lastListWhere.recipientId, 'user-1', '通知列表必须始终限定当前用户');
+
+await service.unreadCount(user);
+assert.equal(lastCountWhere.resolvedAt, null, '未读角标只统计仍需处理的当前提醒');
 
 const forbidden = await service.acknowledge('notification-2', user);
 assert.equal(forbidden.code, 404, '不得通过猜测ID确认他人的消息');

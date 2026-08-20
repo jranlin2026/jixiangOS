@@ -18,6 +18,7 @@ const eventLabels: Record<string, string> = {
   TODO_OVERDUE: '待办逾期', TODO_MANAGER_ESCALATION: '待办升级',
 };
 const severityColors: Record<string, 'error' | 'warning' | 'info' | 'default'> = { S0: 'error', S1: 'warning', S2: 'info', S3: 'default' };
+const severityLabels: Record<string, string> = { S0: '紧急', S1: '重要', S2: '提醒', S3: '信息' };
 
 function formatTime(value: string) {
   return new Date(value).toLocaleString('zh-CN', { hour12: false });
@@ -83,7 +84,7 @@ export default function NotificationsPage() {
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     {loading ? <Box sx={{ py: 10, textAlign: 'center' }}><CircularProgress /></Box> : mobile ? (
       <Stack spacing={1.25}>{items.map((item) => <Paper key={item.id} variant="outlined" sx={{ p: 2, borderLeft: `4px solid ${item.readAt ? '#DDE4EC' : '#1E6BFF'}` }}>
-        <Stack direction="row" justifyContent="space-between" gap={1}><Typography fontWeight={800}>{item.title}</Typography><Chip size="small" color={severityColors[item.severity]} label={item.severity} /></Stack>
+        <Stack direction="row" justifyContent="space-between" gap={1}><Typography fontWeight={800}>{item.title}</Typography><Chip size="small" color={severityColors[item.severity]} label={severityLabels[item.severity]} /></Stack>
         {item.content && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{item.content}</Typography>}
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>{eventLabels[item.eventType] || item.eventType} · {formatTime(item.createdAt)}</Typography>
         <Box sx={{ mt: 1 }}>{actions(item)}</Box>
@@ -93,7 +94,7 @@ export default function NotificationsPage() {
         <TableHead><TableRow><TableCell>消息</TableCell><TableCell>业务类型</TableCell><TableCell>等级</TableCell><TableCell>时间</TableCell><TableCell>状态</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
         <TableBody>{items.map((item) => <TableRow key={item.id} sx={{ bgcolor: item.readAt ? 'inherit' : '#F5F9FF' }}>
           <TableCell><Typography fontWeight={item.readAt ? 600 : 900}>{item.title}</Typography>{item.content && <Typography variant="body2" color="text.secondary">{item.content}</Typography>}</TableCell>
-          <TableCell>{eventLabels[item.eventType] || item.eventType}</TableCell><TableCell><Chip size="small" color={severityColors[item.severity]} label={item.severity} /></TableCell>
+          <TableCell>{eventLabels[item.eventType] || item.eventType}</TableCell><TableCell><Chip size="small" color={severityColors[item.severity]} label={severityLabels[item.severity]} /></TableCell>
           <TableCell>{formatTime(item.createdAt)}</TableCell><TableCell>{item.resolvedAt ? '已结束' : item.ackAt ? '已确认待处理' : item.readAt ? '已读' : '未读'}</TableCell><TableCell align="right">{actions(item)}</TableCell>
         </TableRow>)}</TableBody>
       </Table></TableContainer>

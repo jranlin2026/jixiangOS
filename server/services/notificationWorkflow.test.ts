@@ -21,13 +21,16 @@ await workflow.assignLead(tx as any, {
 
 assert.equal(published.length, 1);
 assert.equal(published[0].eventType, 'LEAD_ASSIGNED');
-assert.equal(scheduled.length, 4);
+assert.equal(published[0].title, '新线索待处理');
+assert.equal(scheduled.length, 3);
 assert.deepEqual(scheduled.map((item) => item.scheduledAt.toISOString()), [
-  '2026-08-08T02:05:00.000Z',
-  '2026-08-08T02:15:00.000Z',
-  '2026-08-08T02:30:00.000Z',
+  '2026-08-08T02:20:00.000Z',
   '2026-08-08T03:00:00.000Z',
+  '2026-08-08T04:00:00.000Z',
 ]);
+assert.equal(scheduled[0].title, '新线索待处理');
+assert.equal(scheduled[1].title, '新线索待处理');
+assert.equal(scheduled[2].eventType, 'LEAD_FIRST_FOLLOW_UP_ESCALATION');
 
 published.length = 0;
 scheduled.length = 0;

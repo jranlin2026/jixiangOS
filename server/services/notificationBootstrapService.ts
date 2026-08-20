@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Lead } from '../../src/types/lead';
-import type { NotificationWorkflow } from './notificationWorkflow';
+import { leadAssignmentNotificationKey, type NotificationWorkflow } from './notificationWorkflow';
 
 type BootstrapPrisma = Pick<PrismaClient, '$transaction' | 'customerTodo' | 'leadRecord' | 'user' | 'department' | 'notificationRule' | 'notification' | 'notificationDelivery' | 'reminderSchedule'>;
 
@@ -53,6 +53,8 @@ export function createNotificationBootstrapService(
         const assignedAt = new Date(lead.assignedAt);
         if (Number.isNaN(assignedAt.getTime())) continue;
         const assignmentNotification = await prisma.notification.findUnique({
+          where: { dedupeKey: leadAssignmentNotificationKey(lead.id, recipients.assignee.id, assignedAt) },
+        }) || await prisma.notification.findUnique({
           where: { dedupeKey: `lead.assigned:${lead.id}:${recipients.assignee.id}:${assignedAt.toISOString()}` },
         });
         await prisma.$transaction(async (tx) => {
