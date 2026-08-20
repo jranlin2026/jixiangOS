@@ -708,3 +708,46 @@ final result: passed
 No P0, P1, P2, or P3 findings remain.
 
 final result: passed
+
+---
+
+# 订单与线索列表统一 Design QA（2026-08-21）
+
+## Comparison target
+
+- Source visual truth：`/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-10955cbe-8e1c-4388-99ff-be7dcd9afcd7.png`，用户指定的图二订单审核台标准。
+- Live canonical state：`/tmp/jixiangos-list-standard-review.png`，1410 × 918 pixels，CSS viewport 1410 × 918，device scale factor 1。
+- Order implementation：`/tmp/jixiangos-list-standard-orders.png`，1410 × 918 pixels，同视口、同登录状态。
+- Lead implementation：`/tmp/jixiangos-list-standard-leads.png`，1410 × 918 pixels，同视口、同登录状态。
+- Mobile states：`/tmp/jixiangos-list-standard-orders-mobile.png`、`/tmp/jixiangos-list-standard-leads-mobile.png`，390 × 844 pixels。
+- Full comparison：`/tmp/jixiangos-list-standard-review-vs-orders.png`。
+- Focused comparison：`/tmp/jixiangos-list-standard-focus.png`，依次为订单审核台、订单列表、线索列表的筛选和表格区域。
+
+## Required fidelity surfaces
+
+- Fonts and typography：标题、页签、筛选控件、表头和数据行继续使用系统字体与现有字重；没有新增字号或换行规则。
+- Spacing and layout rhythm：删除订单列表和线索列表额外的内层卡片、阴影、边框和内边距，统一为“筛选区 → 表格 → 分页”的连续结构；订单日期浮动标签保留 12px 顶部安全间距。
+- Colors and visual tokens：表格边线、圆角、表头底色、分页底色和工作台背景复用 `ModuleShell` 令牌；没有引入新的颜色体系。
+- Image quality and asset fidelity：本次不涉及图片资产；按钮继续使用现有 MUI 图标，没有替换品牌资源。
+- Copy and content：订单和线索的字段、筛选项、操作、状态标签、移动端卡片、总数及分页语义均保持原样。
+
+## Findings and comparison history
+
+1. Earlier P2：订单列表和线索列表额外包裹一层带圆角、阴影和边框的白色卡片，与订单审核台的直接列表结构形成两套 UI。
+   - Fix：新增共享 `ModuleListSurface`、`moduleListTablePaperSx` 和 `moduleListPaginationSx`，两个列表统一接入图二结构。
+   - Post-fix evidence：全景与聚焦对照中，三个页面均直接排列筛选区、表格和分页；不再出现重复白色内卡片。
+2. Earlier P2：订单列表原内卡片裁切环境依赖顶部间距，初次移除卡片时回归测试指出日期浮动标签可能贴边。
+   - Fix：保留订单筛选区 `pt: 1.5`，只移除重复卡片视觉，不移除日期标签安全间距。
+   - Post-fix evidence：1410 × 918 桌面截图中“付款开始/付款结束”标签完整显示。
+
+## Interaction, responsive, and console checks
+
+- 订单列表 → 订单审核台 → 订单列表页签切换：URL 与选中态同步，passed。
+- 390 × 844：订单和线索均使用移动卡片，`scrollWidth = clientWidth = 390`，无整页横向溢出，passed。
+- 桌面表格、冻结操作列、状态标签和统一分页保持可见，passed。
+- Browser console：0 error。
+- `moduleListVisualStandard.test.ts`、`moduleNavigationVisualContract.test.ts`、`orderFilterToolbarLayout.test.ts` 和 `npm run build` 均通过。
+
+No remaining P0, P1, or P2 visual findings.
+
+final result: passed

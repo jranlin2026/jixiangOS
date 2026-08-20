@@ -193,6 +193,24 @@ export const ModuleToolbar: React.FC<ModuleToolbarProps> = ({ children, sx, ...p
   </Box>
 );
 
+type ModuleListSurfaceProps = BoxProps;
+
+export const ModuleListSurface: React.FC<ModuleListSurfaceProps> = ({ children, sx, ...props }) => (
+  <Box
+    data-module-list-surface="standard"
+    sx={{
+      minWidth: 0,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      ...sx,
+    }}
+    {...props}
+  >
+    {children}
+  </Box>
+);
+
 type StatusTone = 'blue' | 'green' | 'amber' | 'red' | 'gray';
 
 const toneMap: Record<StatusTone, { color: string; bg: string }> = {
@@ -281,6 +299,20 @@ export const moduleTablePaperSx = {
   borderRadius: moduleRadius,
   boxShadow: 'none',
   overflow: 'hidden',
+} as const;
+
+export const moduleListTablePaperSx = {
+  ...moduleTablePaperSx,
+  borderRadius: `${moduleRadius} ${moduleRadius} 0 0`,
+} as const;
+
+export const moduleListPaginationSx = {
+  border: `1px solid ${moduleTokens.line}`,
+  borderTop: 0,
+  borderRadius: `0 0 ${moduleRadius} ${moduleRadius}`,
+  bgcolor: moduleTokens.surface,
+  flexShrink: 0,
+  '& .MuiTablePagination-toolbar': { minHeight: 48 },
 } as const;
 
 export const moduleTableSx = {

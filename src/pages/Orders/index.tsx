@@ -63,7 +63,15 @@ import ResizableHeaderCell, {
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import useResetListFiltersOnPageExit from '../../shared/hooks/useResetListFiltersOnPageExit';
-import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
+import {
+  ModuleHeader,
+  ModuleListSurface,
+  ModulePage,
+  ModuleTabs,
+  ModuleToolbar,
+  moduleListPaginationSx,
+  moduleListTablePaperSx,
+} from '../../shared/components/ModuleShell';
 import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
 import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
 import BusinessImportDialog from '../../shared/components/BusinessImportDialog';
@@ -823,13 +831,14 @@ const Orders: React.FC = () => {
               订单数据加载失败：{error}。当前列表未更新，请重试。
             </Alert>
           )}
-          <ModuleToolbar>
+          <ModuleListSurface>
+          <ModuleToolbar sx={{ pt: 1.5 }}>
             <TextField
               placeholder="搜索订单号/客户/第三方订单/付款单号"
               value={filters.search || ''}
               onChange={(e) => handleFilterChange('search', e.target.value)}
               size="small"
-              sx={{ minWidth: 240 }}
+              sx={{ minWidth: { xs: '100%', sm: 240 } }}
             />
             <FormControl size="small" sx={{ minWidth: 130 }}>
               <InputLabel>分账状态</InputLabel>
@@ -903,7 +912,7 @@ const Orders: React.FC = () => {
             </Button>
           </ModuleToolbar>
 
-          <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
+          <TableContainer component={Paper} elevation={0} sx={[moduleListTablePaperSx, { overflowX: 'auto' }]}>
             <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
@@ -996,13 +1005,9 @@ const Orders: React.FC = () => {
             onRowsPerPageChange={handleRowsPerPageChange}
             labelRowsPerPage="每页条数"
             labelDisplayedRows={formatPaginationRows}
-            sx={{
-              border: '1px solid #f0f0f0',
-              borderTop: 0,
-              bgcolor: '#fff',
-              '& .MuiTablePagination-toolbar': { minHeight: 48 },
-            }}
+            sx={moduleListPaginationSx}
           />
+          </ModuleListSurface>
         </>
       ) : activeTab === 'review' ? (
         <OrderReview

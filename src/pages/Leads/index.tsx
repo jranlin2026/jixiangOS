@@ -63,7 +63,15 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import useResetListFiltersOnPageExit from '../../shared/hooks/useResetListFiltersOnPageExit';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
-import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
+import {
+  ModuleHeader,
+  ModuleListSurface,
+  ModulePage,
+  ModuleTabs,
+  ModuleToolbar,
+  moduleListPaginationSx,
+  moduleListTablePaperSx,
+} from '../../shared/components/ModuleShell';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 type LeadColumn = {
@@ -598,21 +606,12 @@ const Leads: React.FC = () => {
       </ModuleTabs>
 
       {activeTab === 0 && canViewLeadList && (
-        <Paper
-          elevation={0}
+        <ModuleListSurface
           sx={{
             flex: 1,
-            minHeight: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            border: '1px solid #E8E4F1',
-            borderRadius: 2,
-            overflow: 'hidden',
-            bgcolor: '#FFFFFF',
-            boxShadow: '0 14px 40px rgba(73, 50, 120, 0.05)',
           }}
         >
-          <ModuleToolbar sx={{ mb: 0, p: 2, borderBottom: '1px solid #EEEAF5', flexShrink: 0 }}>
+          <ModuleToolbar sx={{ flexShrink: 0 }}>
             <TextField
               placeholder="搜索姓名/公司/手机号/微信"
               value={filters.search || ''}
@@ -655,7 +654,7 @@ const Leads: React.FC = () => {
           </ModuleToolbar>
 
           <Box sx={{ display: { xs: 'none', md: 'flex' }, flex: 1, minHeight: 0, flexDirection: 'column' }}>
-          <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { flex: 1, minHeight: 0, overflow: 'auto', border: 0, borderRadius: 0 }]}>
+          <TableContainer component={Paper} elevation={0} sx={[moduleListTablePaperSx, { flex: 1, minHeight: 0, overflow: 'auto' }]}>
             <Table stickyHeader sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
@@ -818,14 +817,9 @@ const Leads: React.FC = () => {
             onRowsPerPageChange={handleRowsPerPageChange}
             labelRowsPerPage="每页条数"
             labelDisplayedRows={formatPaginationRows}
-            sx={{
-              borderTop: '1px solid #EEEAF5',
-              bgcolor: '#fff',
-              flexShrink: 0,
-              '& .MuiTablePagination-toolbar': { minHeight: 48 },
-            }}
+            sx={moduleListPaginationSx}
           />
-        </Paper>
+        </ModuleListSurface>
       )}
 
       {activeTab === 1 && canViewLeadIntake && <LeadIntakeTab viewSettingsSignal={intakeViewSettingsSignal} />}
