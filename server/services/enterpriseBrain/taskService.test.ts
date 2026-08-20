@@ -76,6 +76,28 @@ const confirmed = await service.confirmTask(mine.data!.items[0]!.id, { action: '
 assert.equal(confirmed.code, 0, '旧确认任务API应继续可用');
 assert.equal(confirmed.data?.status, 'CONFIRMED');
 
+const returnedTask = await service.assignOneOff({
+  employeeId: employee.id,
+  workDate: '2026-07-29',
+  title: '需要修订的任务',
+}, manager);
+assert.equal(returnedTask.code, 0);
+assert.equal((await service.completeTask(returnedTask.data!.id, { result: '已提交', evidence: [] }, employee)).code, 0);
+assert.equal((await service.confirmTask(returnedTask.data!.id, { action: 'RETURN', reason: '请补充说明' }, manager)).code, 0);
+const pendingTask = await service.assignOneOff({
+  employeeId: employee.id,
+  workDate: '2026-07-29',
+  title: '尚待处理的任务',
+}, manager);
+assert.equal(pendingTask.code, 0);
+const pendingOrReturned = await service.listMyTasks({ date: '2026-07-29', status: 'PENDING,RETURNED' }, employee);
+assert.equal(pendingOrReturned.code, 0);
+assert.deepEqual(
+  pendingOrReturned.data?.items.map((item) => item.status).sort(),
+  ['PENDING', 'RETURNED'],
+  '工作台的待处理筛选必须由 API 同时返回待处理和已退回任务',
+);
+
 const invalidTime = await service.saveTemplate({ positionId: 'pos-sales-consultant', name: '非法时间模板', weekdays: [1], dueTime: '99:99' }, manager);
 assert.equal(invalidTime.code, 400, '模板截止时间必须是合法24小时制时间');
 const childManager = { ...manager, id: 'manager-child', departmentId: 'dept-sales-one' };

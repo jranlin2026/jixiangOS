@@ -50,7 +50,9 @@ function mapTemplate(row: any): TaskTemplateRecord {
 
 function mapTask(row: any): EmployeeTaskRecord {
   return {
-    id: row.id, templateId: row.templateId || null, sourceKey: row.sourceKey || null, employeeId: row.employeeId, employeeName: row.employeeName,
+    id: row.id, templateId: row.templateId || null, sourceKey: row.sourceKey || null,
+    taskType: row.taskType || 'ACTION', priority: row.priority || 'NORMAL', businessModule: row.businessModule || 'GENERAL',
+    sourceRoute: row.sourceRoute || null, sourceLabel: row.sourceLabel || null, employeeId: row.employeeId, employeeName: row.employeeName,
     departmentIdSnapshot: row.departmentIdSnapshot || null, departmentNameSnapshot: row.departmentNameSnapshot || null,
     positionIdSnapshot: row.positionIdSnapshot || null, positionNameSnapshot: row.positionNameSnapshot || null,
     standardVersionIdSnapshot: row.standardVersionIdSnapshot || null, workDate: dateText(row.workDate),
@@ -197,10 +199,12 @@ export function createPrismaEnterpriseTaskRepository(prisma: Client): Enterprise
     },
     async listTasks(filter) {
       const where: any = {};
+      const statuses = filter.status?.split(',').map((item) => item.trim()).filter(Boolean);
       if (filter.employeeId) where.employeeId = filter.employeeId;
       if (filter.departmentIds) where.departmentIdSnapshot = { in: filter.departmentIds };
       if (filter.date) where.workDate = new Date(`${filter.date}T00:00:00Z`);
-      if (filter.status) where.status = filter.status;
+      if (statuses?.length === 1) where.status = statuses[0];
+      if (statuses && statuses.length > 1) where.status = { in: statuses };
       const [rows, total] = await Promise.all([
         prisma.employeeTask.findMany({ where, include: { evidence: { orderBy: { createdAt: 'asc' } } }, orderBy: [{ workDate: 'desc' }, { dueAt: 'asc' }, { createdAt: 'asc' }], skip: (filter.page - 1) * filter.pageSize, take: filter.pageSize }),
         prisma.employeeTask.count({ where }),

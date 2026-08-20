@@ -227,3 +227,29 @@ test('manual one-off creation commits exactly one CREATE activity with the task'
     [created.id, 'CREATE', 'manager-1'],
   ]);
 });
+
+test('task list returns source, module, priority and multi-status filtering for the employee workbench', async () => {
+  const queries: any[] = [];
+  const row = {
+    id: 'task-workbench-meta', templateId: null, sourceKey: 'crm:lead:1', taskType: 'FOLLOW_UP', priority: 'HIGH',
+    businessModule: 'CRM', sourceRoute: '/customers/lead-1', sourceLabel: '客户跟进', employeeId: 'employee-1', employeeName: '员工甲',
+    departmentIdSnapshot: 'department-1', departmentNameSnapshot: '销售部', positionIdSnapshot: 'position-1', positionNameSnapshot: '销售',
+    standardVersionIdSnapshot: null, workDate: new Date('2026-08-20T00:00:00.000Z'), title: '回访客户', description: null,
+    targetValue: null, actualValue: null, unit: null, evidenceRequired: false, status: 'RETURNED', result: null,
+    dueAt: new Date('2026-08-20T10:00:00.000Z'), returnedReason: null, sourceType: 'CRM_FOLLOW_UP', sourceId: 'lead-1', sourceItemId: null, evidence: [],
+  };
+  const prisma: any = {
+    employeeTask: {
+      async findMany({ where }: any) { queries.push(where); return [row]; },
+      async count({ where }: any) { queries.push(where); return 1; },
+    },
+  };
+  const repository = createPrismaEnterpriseTaskRepository(prisma);
+  const result = await repository.listTasks({ employeeId: 'employee-1', status: 'PENDING,RETURNED', page: 1, pageSize: 10 });
+
+  assert.deepEqual(queries[0].status, { in: ['PENDING', 'RETURNED'] });
+  assert.deepEqual(
+    result.items.map((item) => ({ sourceLabel: item.sourceLabel, businessModule: item.businessModule, priority: item.priority })),
+    [{ sourceLabel: '客户跟进', businessModule: 'CRM', priority: 'HIGH' }],
+  );
+});

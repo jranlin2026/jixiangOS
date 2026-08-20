@@ -35,6 +35,12 @@ import {
   ModuleTabs,
 } from "../../shared/components/ModuleShell";
 import TablePagination from "../../shared/components/TablePagination";
+import {
+  getWorkbenchTaskMeta,
+  summarizeWorkbenchTasks,
+  type WorkbenchStatusFilter,
+  workbenchStatusFilterQuery,
+} from "../../shared/utils/workbenchTasks";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 const today = () =>
@@ -43,12 +49,31 @@ const statusMap: Record<
   EmployeeTask["status"],
   { label: string; color: "default" | "info" | "warning" | "success" }
 > = {
-  PENDING: { label: "待完成", color: "warning" },
+  PENDING: { label: "待处理", color: "warning" },
   IN_PROGRESS: { label: "处理中", color: "info" },
   COMPLETED: { label: "待确认", color: "info" },
   CONFIRMED: { label: "已确认", color: "success" },
   RETURNED: { label: "已退回", color: "default" },
   CANCELED: { label: "已取消", color: "default" },
+};
+
+const statusFilterOptions: Array<{ value: WorkbenchStatusFilter; label: string }> = [
+  { value: "ALL", label: "全部" },
+  { value: "PENDING_OR_RETURNED", label: "待处理" },
+  { value: "IN_PROGRESS", label: "处理中" },
+  { value: "COMPLETED", label: "待确认" },
+  { value: "CONFIRMED", label: "已确认" },
+  { value: "RETURNED", label: "已退回" },
+];
+
+const workbenchStatusFilterFromQuery = (
+  status: string | null,
+): WorkbenchStatusFilter => {
+  if (status === "PENDING,RETURNED") return "PENDING_OR_RETURNED";
+  if (["IN_PROGRESS", "COMPLETED", "CONFIRMED", "RETURNED"].includes(status || "")) {
+    return status as WorkbenchStatusFilter;
+  }
+  return "ALL";
 };
 
 const isMarketingPublishTask = (task: Pick<EmployeeTask, "sourceType"> | null | undefined) =>
@@ -151,6 +176,9 @@ const TaskCenter: React.FC = () => {
     return Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage - 1 : 0;
   });
   const [pageSize, setPageSize] = useState(10);
+  const [statusFilter, setStatusFilter] = useState<WorkbenchStatusFilter>(() =>
+    workbenchStatusFilterFromQuery(searchParams.get("status")),
+  );
   const [message, setMessage] = useState<{
     tone: "success" | "error" | "info";
     text: string;
@@ -199,27 +227,31 @@ const TaskCenter: React.FC = () => {
     setTab(nextTab);
     setDate(nextDate);
     setPage(nextPage);
+    setStatusFilter(workbenchStatusFilterFromQuery(searchParams.get("status")));
   }, [canAssign, canTeam, searchParams]);
 
   const loadTasks = useCallback(async () => {
     if (tab !== "mine" && tab !== "team") return;
+    const status = workbenchStatusFilterQuery(statusFilter);
     const response =
       tab === "team"
         ? await enterpriseBrainApi.listTeamTasks({
             date,
             page: page + 1,
             pageSize,
+            status,
           })
         : await enterpriseBrainApi.listMyTasks({
             date,
             page: page + 1,
             pageSize,
+            status,
           });
     if (response.code === 0) {
       setTasks(response.data.items);
       setTotal(response.data.total);
     } else setMessage({ tone: "error", text: response.message });
-  }, [date, page, pageSize, tab]);
+  }, [date, page, pageSize, statusFilter, tab]);
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
@@ -374,26 +406,52 @@ const TaskCenter: React.FC = () => {
       )}
     </Stack>
   );
+  const loadedSummary = summarizeWorkbenchTasks(tasks);
 
   return (
     <ModulePage sx={{ p: { xs: 2, md: 3 } }}>
       <ModuleHeader
-        title="工作任务台账"
-        description="从我的工作台进入具体事项，完成提交、确认和复盘；这里保留完整执行记录。"
+        title="我的工作台"
+        description="员工在这里执行任务、提交结果、等待确认并完成每日复盘。"
         actions={
-          <TextField
-            size="small"
-            type="date"
-            label="工作日期"
-            value={date}
-            onChange={(e) => {
-              const nextDate = e.target.value;
-              setDate(nextDate);
-              setPage(0);
-              setSearchParams({ tab, date: nextDate });
-            }}
-            InputLabelProps={{ shrink: true }}
-          />
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+            <TextField
+              size="small"
+              type="date"
+              label="工作日期"
+              value={date}
+              onChange={(e) => {
+                const nextDate = e.target.value;
+                const status = workbenchStatusFilterQuery(statusFilter);
+                setDate(nextDate);
+                setPage(0);
+                setSearchParams({ tab, date: nextDate, ...(status ? { status } : {}) });
+              }}
+              InputLabelProps={{ shrink: true }}
+            />
+            {(tab === "mine" || tab === "team") && (
+              <TextField
+                select
+                size="small"
+                label="状态"
+                value={statusFilter}
+                onChange={(e) => {
+                  const nextStatusFilter = e.target.value as WorkbenchStatusFilter;
+                  const status = workbenchStatusFilterQuery(nextStatusFilter);
+                  setStatusFilter(nextStatusFilter);
+                  setPage(0);
+                  setSearchParams({ tab, date, page: "1", ...(status ? { status } : {}) });
+                }}
+                sx={{ minWidth: 132 }}
+              >
+                {statusFilterOptions.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
+          </Stack>
         }
       />
       {message && (
@@ -410,16 +468,50 @@ const TaskCenter: React.FC = () => {
         onChange={(_, value) => {
           setTab(value);
           setPage(0);
-          setSearchParams({ tab: value, date });
+          const status = workbenchStatusFilterQuery(statusFilter);
+          setSearchParams({ tab: value, date, ...(status ? { status } : {}) });
         }}
         variant="scrollable"
       >
         <Tab value="mine" label="我的任务" />
-        {canTeam && <Tab value="team" label="团队执行" />}
+        {canTeam && <Tab value="team" label="团队任务" />}
         <Tab value="review" label="每日复盘" />
       </ModuleTabs>
       {(tab === "mine" || tab === "team") && (
         <>
+          <Paper
+            variant="outlined"
+            sx={{ p: 1.5, mb: 1.5, bgcolor: "#F8FAFC" }}
+          >
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+              当前加载范围
+            </Typography>
+            <Box
+              sx={{
+                mt: 1,
+                display: "grid",
+                gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(5, minmax(0, 1fr))" },
+                gap: 1,
+              }}
+            >
+              {[
+                ["总任务", loadedSummary.total, "text.primary"],
+                ["待处理", loadedSummary.pending, "warning.main"],
+                ["处理中", loadedSummary.inProgress, "info.main"],
+                ["待确认", loadedSummary.awaitingConfirmation, "info.main"],
+                ["已逾期", loadedSummary.overdue, "error.main"],
+              ].map(([label, value, color]) => (
+                <Box key={String(label)} sx={{ minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    {label}
+                  </Typography>
+                  <Typography sx={{ fontWeight: 900, color, fontSize: 20, lineHeight: 1.25 }}>
+                    {value}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+          </Paper>
           {!tasks.length ? (
             <Alert severity="info">当天暂无任务。</Alert>
           ) : mobile ? (
@@ -436,6 +528,7 @@ const TaskCenter: React.FC = () => {
                       line.startsWith("图片链接："),
                   )
                   .flatMap((line) => line.slice(5).split("、"));
+                const meta = getWorkbenchTaskMeta(task);
                 return (
                   <Paper id={`task-${task.id}`} key={task.id} variant="outlined" sx={{ p: 2, bgcolor: selectedTaskId === task.id ? '#F0F6FF' : undefined, borderColor: selectedTaskId === task.id ? 'primary.main' : undefined }}>
                     <Stack direction="row" justifyContent="space-between">
@@ -467,6 +560,24 @@ const TaskCenter: React.FC = () => {
                     >
                       {task.description}
                     </Typography>
+                    <Stack
+                      direction="row"
+                      spacing={0.5}
+                      useFlexGap
+                      flexWrap="wrap"
+                      sx={{ mt: 1 }}
+                    >
+                      <Chip size="small" variant="outlined" label={`来源：${meta.source}`} />
+                      <Chip size="small" variant="outlined" label={`模块：${meta.module}`} />
+                      <Chip size="small" variant="outlined" label={`优先级：${meta.priority}`} />
+                      <Chip
+                        size="small"
+                        color={meta.overdue ? "error" : "default"}
+                        variant={meta.overdue ? "filled" : "outlined"}
+                        label={`截止时间：${meta.deadline}`}
+                      />
+                      {meta.overdue && <Chip size="small" color="error" label="已逾期" />}
+                    </Stack>
                     {isMarketingPublishTask(task) ? (
                       <Stack
                         direction="row"
@@ -519,6 +630,9 @@ const TaskCenter: React.FC = () => {
                   <TableRow>
                     <TableCell>任务</TableCell>
                     {tab === "team" && <TableCell>员工</TableCell>}
+                    <TableCell>来源 / 模块</TableCell>
+                    <TableCell>优先级</TableCell>
+                    <TableCell>截止时间</TableCell>
                     <TableCell>目标</TableCell>
                     <TableCell>实际</TableCell>
                     <TableCell>状态</TableCell>
@@ -526,7 +640,9 @@ const TaskCenter: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {tasks.map((task) => (
+                  {tasks.map((task) => {
+                    const meta = getWorkbenchTaskMeta(task);
+                    return (
                     <TableRow id={`task-${task.id}`} key={task.id} selected={selectedTaskId === task.id}>
                       <TableCell>
                         <Typography variant="body2" sx={{ fontWeight: 800 }}>
@@ -553,6 +669,21 @@ const TaskCenter: React.FC = () => {
                         </TableCell>
                       )}
                       <TableCell>
+                        <Typography variant="body2">{meta.source}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {meta.module}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip size="small" variant="outlined" label={meta.priority} />
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color={meta.overdue ? "error.main" : "text.primary"}>
+                          {meta.deadline}
+                        </Typography>
+                        {meta.overdue && <Chip size="small" color="error" label="已逾期" sx={{ mt: 0.5 }} />}
+                      </TableCell>
+                      <TableCell>
                         {task.targetValue ?? "—"} {task.unit}
                       </TableCell>
                       <TableCell>
@@ -567,7 +698,8 @@ const TaskCenter: React.FC = () => {
                       </TableCell>
                       <TableCell align="right">{actions(task)}</TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -578,12 +710,14 @@ const TaskCenter: React.FC = () => {
             rowsPerPage={pageSize}
             onPageChange={(_, next) => {
               setPage(next);
-              setSearchParams({ tab, date, page: String(next + 1) });
+              const status = workbenchStatusFilterQuery(statusFilter);
+              setSearchParams({ tab, date, page: String(next + 1), ...(status ? { status } : {}) });
             }}
             onRowsPerPageChange={(e) => {
               setPageSize(Number(e.target.value));
               setPage(0);
-              setSearchParams({ tab, date, page: "1" });
+              const status = workbenchStatusFilterQuery(statusFilter);
+              setSearchParams({ tab, date, page: "1", ...(status ? { status } : {}) });
             }}
             sx={{ mt: 1 }}
           />

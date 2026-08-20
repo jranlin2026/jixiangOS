@@ -29,6 +29,11 @@ export type EmployeeTaskRecord = {
   id: string;
   templateId: string | null;
   sourceKey?: string | null;
+  taskType?: EmployeeTask['taskType'];
+  priority?: EmployeeTask['priority'];
+  businessModule?: string;
+  sourceRoute?: string | null;
+  sourceLabel?: string | null;
   employeeId: string;
   employeeName: string;
   departmentIdSnapshot: string | null;
@@ -115,11 +120,12 @@ export function createMemoryEnterpriseTaskRepository(input: MemoryInput = {}): E
   const workbench = createMemoryWorkbenchRepository({ tasks, employees: input.employees, departments });
 
   const taskPage = (filter: { employeeId?: string; departmentIds?: string[]; date?: string; status?: string; page: number; pageSize: number }) => {
+    const statuses = filter.status?.split(',').map((item) => item.trim()).filter(Boolean);
     const rows = tasks.filter((task) => (
       (!filter.employeeId || task.employeeId === filter.employeeId)
       && (!filter.departmentIds || filter.departmentIds.includes(task.departmentIdSnapshot || ''))
       && (!filter.date || task.workDate === filter.date)
-      && (!filter.status || task.status === filter.status)
+      && (!statuses?.length || statuses.includes(task.status))
     ));
     return { items: rows.slice((filter.page - 1) * filter.pageSize, filter.page * filter.pageSize), total: rows.length };
   };
