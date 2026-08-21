@@ -151,6 +151,7 @@ export interface CockpitSalesBattleProfile {
   todayFollowUpCount: number;
   overdueCustomerCount: number;
   riskCustomerCount: number;
+  needsManagerInterventionCount?: number;
   missingNextActionCount: number;
   wonCount: number;
   lostCount: number;
@@ -158,6 +159,7 @@ export interface CockpitSalesBattleProfile {
   monthlyTargetAmount: number | null;
   targetGapAmount: number | null;
   targetCompletionRate: number | null;
+  weeklyRevenueAmounts?: number[];
   stageDistribution?: CockpitCustomerBattleStage[];
   priorityCustomers: CockpitCustomerBattleItem[];
 }

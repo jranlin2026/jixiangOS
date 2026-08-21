@@ -91,7 +91,8 @@ export interface EnterpriseTaskRepository extends WorkbenchRepository {
   listActiveTemplates(date: Date): Promise<TaskTemplateRecord[]>;
   listActiveEmployees(positionIds: string[], departmentIds?: string[]): Promise<EmployeeDirectoryRecord[]>;
   createGeneratedTasks(inputs: GeneratedTaskInput[], options?: GeneratedTaskWriteOptions): Promise<number>;
-  listTasks(filter: { employeeId?: string; departmentIds?: string[]; date?: string; status?: string; page: number; pageSize: number }): Promise<{ items: EmployeeTaskRecord[]; total: number }>;
+  listTasks(filter: { employeeId?: string; departmentIds?: string[]; date?: string; status?: string; sourceType?: string; sourceId?: string; page: number; pageSize: number }): Promise<{ items: EmployeeTaskRecord[]; total: number }>;
+  findCustomerInterventionTarget(customerId: string): Promise<{ id: string; name: string; ownerId: string | null } | null>;
   listDepartmentTree(rootId: string): Promise<string[]>;
   findEmployee(id: string): Promise<EmployeeDirectoryRecord | null>;
   findTask(id: string): Promise<EmployeeTaskRecord | null>;
@@ -107,6 +108,7 @@ type MemoryInput = {
   employees?: EmployeeDirectoryRecord[];
   positions?: TaskPositionRecord[];
   templates?: TaskTemplateRecord[];
+  customers?: Array<{ id: string; name: string; ownerId: string | null }>;
 };
 
 export function createMemoryEnterpriseTaskRepository(input: MemoryInput = {}): EnterpriseTaskRepository {
@@ -116,16 +118,19 @@ export function createMemoryEnterpriseTaskRepository(input: MemoryInput = {}): E
   const templates = input.templates || [];
   const tasks: EmployeeTaskRecord[] = [];
   const reviews: DailyReviewRecord[] = [];
+  const customers = new Map((input.customers || []).map((item) => [item.id, item]));
   let sequence = 0;
   const workbench = createMemoryWorkbenchRepository({ tasks, employees: input.employees, departments });
 
-  const taskPage = (filter: { employeeId?: string; departmentIds?: string[]; date?: string; status?: string; page: number; pageSize: number }) => {
+  const taskPage = (filter: { employeeId?: string; departmentIds?: string[]; date?: string; status?: string; sourceType?: string; sourceId?: string; page: number; pageSize: number }) => {
     const statuses = filter.status?.split(',').map((item) => item.trim()).filter(Boolean);
     const rows = tasks.filter((task) => (
       (!filter.employeeId || task.employeeId === filter.employeeId)
       && (!filter.departmentIds || filter.departmentIds.includes(task.departmentIdSnapshot || ''))
       && (!filter.date || task.workDate === filter.date)
       && (!statuses?.length || statuses.includes(task.status))
+      && (!filter.sourceType || task.sourceType === filter.sourceType)
+      && (!filter.sourceId || task.sourceId === filter.sourceId)
     ));
     return { items: rows.slice((filter.page - 1) * filter.pageSize, filter.page * filter.pageSize), total: rows.length };
   };
@@ -170,6 +175,7 @@ export function createMemoryEnterpriseTaskRepository(input: MemoryInput = {}): E
     },
     async findEmployee(id) { return employees.get(id) || null; },
     async findTask(id) { return tasks.find((item) => item.id === id) || null; },
+    async findCustomerInterventionTarget(customerId) { return customers.get(customerId) || null; },
     async completeTaskAtomic(payload) {
       const task = tasks.find((item) => item.id === payload.taskId && item.employeeId === payload.employeeId && ['PENDING', 'RETURNED'].includes(item.status));
       if (!task) return null;

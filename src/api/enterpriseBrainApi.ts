@@ -28,6 +28,7 @@ export const enterpriseBrainApi = {
   generateTasks: (date: string): Promise<ApiResponse<{ date: string; candidateCount: number; createdCount: number; skippedCount: number }>> => backendRequest(`${base}/tasks/generate`, { method: 'POST', body: JSON.stringify({ date }) }),
   listMyTasks: (input: Record<string, unknown>): Promise<ApiResponse<Paginated<EmployeeTask>>> => backendRequest(`${base}/tasks/mine?${query(input)}`),
   listTeamTasks: (input: Record<string, unknown>): Promise<ApiResponse<Paginated<EmployeeTask>>> => backendRequest(`${base}/tasks/team?${query(input)}`),
+  listLinkedTasks: (input: Record<string, unknown>): Promise<ApiResponse<Paginated<EmployeeTask>>> => backendRequest(`${base}/tasks/linked?${query(input)}`),
   assignTask: (input: Record<string, unknown>): Promise<ApiResponse<EmployeeTask>> => backendRequest(`${base}/tasks/assign`, { method: 'POST', body: JSON.stringify(input) }),
   completeTask: (id: string, input: Record<string, unknown>): Promise<ApiResponse<EmployeeTask>> => backendRequest(`${base}/tasks/${encodeURIComponent(id)}/complete`, { method: 'POST', body: JSON.stringify(input) }),
   confirmTask: (id: string, input: Record<string, unknown>): Promise<ApiResponse<EmployeeTask>> => backendRequest(`${base}/tasks/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: JSON.stringify(input) }),

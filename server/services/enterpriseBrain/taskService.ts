@@ -101,10 +101,32 @@ export function createEnterpriseTaskService(deps: Dependencies) {
       if (!hasPermission(actor, PERMISSION_KEYS.TASK_ASSIGN, 'write')) return failure<never>('无权指派任务', 403);
       const employee = await deps.repository.findEmployee(String(raw?.employeeId || ''));
       if (!employee?.isActive || employee.employmentStatus === 'left') return failure<never>('员工不存在或已离职', 404);
+      const sourceType = String(raw?.sourceType || '').trim().slice(0, 100) || null;
+      const sourceId = String(raw?.sourceId || '').trim().slice(0, 100) || null;
+      const sourceItemId = String(raw?.sourceItemId || '').trim().slice(0, 100) || null;
       if (!isSuperAdmin(actor)) {
         if (!actor.departmentId) return failure<never>('当前账号未绑定部门', 409);
         const allowed = await deps.repository.listDepartmentTree(actor.departmentId);
         if (!allowed.includes(employee.departmentId || '')) return failure<never>('员工不在授权团队范围内', 403);
+      }
+      if (sourceType === 'COCKPIT_INTERVENTION') {
+        if (!sourceId || !['REMIND_SALES', 'SUPERVISOR_ASSIST', 'BOSS_FOLLOW_UP'].includes(sourceItemId || '')) {
+          return failure<never>('管理介入缺少客户或介入方式', 400);
+        }
+        const customer = await deps.repository.findCustomerInterventionTarget(sourceId);
+        if (!customer?.ownerId) return failure<never>('客户不存在或未绑定负责人', 404);
+        const owner = await deps.repository.findEmployee(customer.ownerId);
+        if (!owner?.isActive || owner.employmentStatus === 'left') return failure<never>('客户负责人不存在或已离职', 409);
+        if (sourceItemId === 'REMIND_SALES' && employee.id !== customer.ownerId) {
+          return failure<never>('提醒销售必须指派给客户负责人', 400);
+        }
+        if (sourceItemId === 'BOSS_FOLLOW_UP' && employee.id !== actor.id) {
+          return failure<never>('老板亲跟必须由当前管理者本人执行', 400);
+        }
+        if (!isSuperAdmin(actor)) {
+          const allowed = await deps.repository.listDepartmentTree(actor.departmentId!);
+          if (!allowed.includes(owner.departmentId || '')) return failure<never>('客户不在授权团队范围内', 403);
+        }
       }
       const workDate = validDate(raw?.workDate);
       const title = String(raw?.title || '').trim().slice(0, 200);
@@ -126,9 +148,7 @@ export function createEnterpriseTaskService(deps: Dependencies) {
         businessModule: String(raw?.businessModule || 'GENERAL').trim().slice(0, 100),
         sourceRoute: String(raw?.sourceRoute || '').trim().slice(0, 500) || null,
         sourceLabel: String(raw?.sourceLabel || '').trim().slice(0, 200) || null,
-        sourceType: String(raw?.sourceType || '').trim().slice(0, 100) || null,
-        sourceId: String(raw?.sourceId || '').trim().slice(0, 100) || null,
-        sourceItemId: String(raw?.sourceItemId || '').trim().slice(0, 100) || null,
+        sourceType, sourceId, sourceItemId,
         assignedById: actor.id, assignedByName: actor.name,
       });
       return success(task);
@@ -197,6 +217,22 @@ export function createEnterpriseTaskService(deps: Dependencies) {
       if (!isSuperAdmin(actor) && !actor.departmentId) return failure<never>('当前账号未绑定部门', 409);
       const departmentIds = isSuperAdmin(actor) ? undefined : await deps.repository.listDepartmentTree(actor.departmentId!);
       const data = await deps.repository.listTasks({ ...(departmentIds ? { departmentIds } : {}), ...(date ? { date } : {}), status: raw?.status, ...pagination });
+      return success({ ...data, ...pagination });
+    },
+
+    async listLinkedTasks(raw: any, actor: AuthenticatedUser) {
+      const sourceType = String(raw?.sourceType || '').trim();
+      const sourceId = String(raw?.sourceId || '').trim();
+      if (sourceType !== 'COCKPIT_INTERVENTION' || !sourceId) return failure<never>('介入任务来源参数不正确', 400);
+      const pagination = pageInput(raw);
+      if (hasPermission(actor, PERMISSION_KEYS.TASK_TEAM)) {
+        if (!isSuperAdmin(actor) && !actor.departmentId) return failure<never>('当前账号未绑定部门', 409);
+        const departmentIds = isSuperAdmin(actor) ? undefined : await deps.repository.listDepartmentTree(actor.departmentId!);
+        const data = await deps.repository.listTasks({ ...(departmentIds ? { departmentIds } : {}), sourceType, sourceId, ...pagination });
+        return success({ ...data, ...pagination });
+      }
+      if (!hasPermission(actor, PERMISSION_KEYS.TASK_SELF)) return failure<never>('无权读取介入任务', 403);
+      const data = await deps.repository.listTasks({ employeeId: actor.id, sourceType, sourceId, ...pagination });
       return success({ ...data, ...pagination });
     },
 

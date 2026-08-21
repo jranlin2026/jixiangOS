@@ -7,7 +7,7 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import RefreshOutlinedIcon from '@mui/icons-material/RefreshOutlined';
 import { useNavigate, useParams } from 'react-router-dom';
 import { customerApi, dashboardApi } from '../../api';
-import type { Customer } from '../../types/customer';
+import type { Customer, CustomerManagementFilter } from '../../types/customer';
 import type { CockpitSalesBattleProfile } from '../../types/dashboard';
 import { ROUTES } from '../../shared/utils/constants';
 import { formatCurrency } from '../../shared/utils/formatters';
@@ -32,6 +32,7 @@ const SalespersonDetail: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
+  const [managementFilter, setManagementFilter] = useState<CustomerManagementFilter | ''>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -41,7 +42,7 @@ const SalespersonDetail: React.FC = () => {
     try {
       const [cockpit, customerPage] = await Promise.all([
         dashboardApi.fetchBusinessCockpit({ preset: 'month' }),
-        customerApi.fetchCustomers({ ownerId: salespersonId, page: page + 1, pageSize }),
+        customerApi.fetchCustomers({ ownerId: salespersonId, managementFilter: managementFilter || undefined, page: page + 1, pageSize }),
       ]);
       const found = cockpit.data?.salesBattleProfiles?.find((item) => item.userId === salespersonId && item.identityStatus === 'resolved') || null;
       if (cockpit.code !== 0 || !found) throw new Error(cockpit.message || '无权查看该销售的经营档案');
@@ -54,7 +55,7 @@ const SalespersonDetail: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, salespersonId]);
+  }, [managementFilter, page, pageSize, salespersonId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -65,7 +66,8 @@ const SalespersonDetail: React.FC = () => {
   if (loading && !profile) return <Box sx={{ minHeight: 460, display: 'grid', placeItems: 'center' }}><CircularProgress /></Box>;
   if (!profile) return <Alert severity="error" action={<Button onClick={() => navigate(ROUTES.SALES_MANAGEMENT)}>返回销售战情</Button>}>{error || '销售档案不存在'}</Alert>;
 
-  const summary = `今日跟进 ${profile.todayFollowUpCount} 个客户，名下 ${profile.customerCount} 个客户，风险 ${profile.riskCustomerCount} 个，需要介入 ${profile.overdueCustomerCount} 个。`;
+  const interventionCount = profile.needsManagerInterventionCount ?? profile.overdueCustomerCount;
+  const summary = `今日跟进 ${profile.todayFollowUpCount} 个客户，名下 ${profile.customerCount} 个客户，风险 ${profile.riskCustomerCount} 个，需要介入 ${interventionCount} 个。`;
   const targetProgress = Math.max(0, Math.min(100, profile.targetCompletionRate || 0));
 
   return (
@@ -95,7 +97,7 @@ const SalespersonDetail: React.FC = () => {
             ['名下客户', profile.customerCount, '#6D28D9'],
             ['今日跟进客户', profile.todayFollowUpCount, '#2563EB'],
             ['风险客户', profile.riskCustomerCount, '#A35F00'],
-            ['需要介入', profile.overdueCustomerCount, '#C4322B'],
+            ['需要介入', interventionCount, '#C4322B'],
           ].map(([label, value, color]) => (
             <Paper key={String(label)} elevation={0} sx={{ p: 2.25, border: '1px solid #E7E1F1', borderRadius: 2.5 }}>
               <Typography variant="body2" sx={{ color: '#777184', fontWeight: 700 }}>{label}</Typography>
@@ -116,6 +118,9 @@ const SalespersonDetail: React.FC = () => {
               ].map(([label, value]) => <Box key={label}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography sx={{ mt: 0.5, fontWeight: 900 }}>{value}</Typography></Box>)}
             </Box>
             <LinearProgress variant="determinate" value={targetProgress} sx={{ mt: 2.25, height: 8, borderRadius: 99, bgcolor: '#EEEAF7', '& .MuiLinearProgress-bar': { bgcolor: '#7C3AED', borderRadius: 99 } }} />
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', mt: 2, border: '1px solid #EEEAF4', borderRadius: 1.5, overflow: 'hidden' }}>
+              {(profile.weeklyRevenueAmounts || [0, 0, 0, 0]).map((amount, index) => <Box key={index} sx={{ p: 1.25, borderLeft: index ? '1px solid #EEEAF4' : 0 }}><Typography variant="caption" color="text.secondary">第{index + 1}周</Typography><Typography variant="body2" sx={{ mt: 0.25, fontWeight: 850 }}>{formatCurrency(amount)}</Typography></Box>)}
+            </Box>
           </Paper>
 
           <Paper elevation={0} sx={{ p: 2.5, border: '1px solid #E7E1F1', borderRadius: 2.5 }}>
@@ -132,19 +137,29 @@ const SalespersonDetail: React.FC = () => {
         </Box>
 
         <DataTableWorkspace>
-          <Box sx={{ p: 2.25, borderBottom: '1px solid #EEEAF4' }}><Typography variant="subtitle1" sx={{ fontWeight: 900 }}>当前名下客户</Typography></Box>
+          <Box sx={{ p: 2.25, borderBottom: '1px solid #EEEAF4' }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>当前名下客户</Typography>
+            <Stack direction="row" spacing={0.75} sx={{ mt: 1.5, overflowX: 'auto', pb: 0.25 }}>
+              {[
+                ['', '全部'], ['key_customer', '重点客户'], ['risk', '风险客户'], ['stale_24h', '超24小时未跟进'], ['intervention', '需要介入'], ['payment_pending', '待付款'],
+              ].map(([value, label]) => <Chip key={value || 'all'} clickable label={label} color={managementFilter === value ? 'primary' : 'default'} variant={managementFilter === value ? 'filled' : 'outlined'} onClick={() => { setManagementFilter(value as CustomerManagementFilter | ''); setPage(0); }} />)}
+            </Stack>
+          </Box>
           {!customers.length ? <DataTableEmptyState label="当前页暂无客户" /> : <>
             <DataTableDesktopScroller>
-              <Table size="small" sx={{ minWidth: 960 }}>
-                <TableHead><TableRow><TableCell>客户</TableCell><TableCell>销售阶段</TableCell><TableCell>下一步动作</TableCell><TableCell>风险</TableCell><TableCell>最近更新</TableCell><TableCell align="center">操作</TableCell></TableRow></TableHead>
+              <Table size="small" sx={{ minWidth: 1320 }}>
+                <TableHead><TableRow><TableCell>客户</TableCell><TableCell>等级 / 意向产品</TableCell><TableCell>销售阶段</TableCell><TableCell align="right">预计金额</TableCell><TableCell>最后跟进</TableCell><TableCell>距今</TableCell><TableCell>下一步动作</TableCell><TableCell>风险</TableCell><TableCell align="center">操作</TableCell></TableRow></TableHead>
                 <TableBody>{customers.map((customer) => {
                   const snapshot = buildCustomerBattleSnapshot(customer, []);
                   return <TableRow hover key={customer.id}>
                     <TableCell><Typography variant="body2" fontWeight={850}>{customer.name}</Typography><Typography variant="caption" color="text.secondary">{customer.company}</Typography></TableCell>
+                    <TableCell><Typography variant="body2">{customer.customerLevel}</Typography><Typography variant="caption" color="text.secondary">{customer.productLevel || '待确认'}</Typography></TableCell>
                     <TableCell>{getOpportunityStage(customer.opportunityStageCode).label}</TableCell>
+                    <TableCell align="right">{customer.opportunityAmount == null ? '-' : formatCurrency(customer.opportunityAmount)}</TableCell>
+                    <TableCell>{snapshot.lastEffectiveContact ? new Date(snapshot.lastEffectiveContact.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '暂无'}</TableCell>
+                    <TableCell>{snapshot.contactGapDays === null ? '-' : `${snapshot.contactGapDays} 天`}</TableCell>
                     <TableCell>{customer.nextActionTitle || '未设置'}</TableCell>
                     <TableCell><Chip size="small" label={snapshot.risk.reason} color={snapshot.risk.level === 'high' ? 'error' : snapshot.risk.level === 'medium' ? 'warning' : 'success'} /></TableCell>
-                    <TableCell>{new Date(customer.updatedAt).toLocaleDateString('zh-CN')}</TableCell>
                     <TableCell align="center"><Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate(`${ROUTES.CUSTOMERS}?customerId=${encodeURIComponent(customer.id)}`)}>查看客户</Button></TableCell>
                   </TableRow>;
                 })}</TableBody>

@@ -76,6 +76,7 @@ export interface BusinessCockpitRankingItem {
   orderCount: number;
   paymentCount: number;
   assistCount?: number;
+  weeklyAmounts?: number[];
 }
 
 export interface BusinessCockpitSnapshot {
@@ -588,6 +589,7 @@ export function createBusinessCockpitService(
           amount: 0,
           orderCount: 0,
           paymentCount: 0,
+          weeklyAmounts: [0, 0, 0, 0],
           orderIds: new Set<string>(),
         };
         current.name = salesName || current.name;
@@ -604,6 +606,8 @@ export function createBusinessCockpitService(
           if (!clean(order.salesId)) missingSalesIdentityPaymentCount += 1;
           const date = shanghaiDateKey(payment.paidAt);
           if (date) {
+            const weekIndex = Math.min(3, Math.max(0, Math.floor((Number(date.slice(8, 10)) - 1) / 7)));
+            current.weeklyAmounts![weekIndex] = roundMoney((current.weeklyAmounts![weekIndex] || 0) + amount);
             const point = trendByDate.get(date) || {
               date,
               label: date.slice(5).replace('-', '/'),
@@ -1181,6 +1185,10 @@ export function createBusinessCockpitService(
       };
     };
     const mappedSalesRanking = snapshot.salesRanking.map(mapRanking);
+    const salesWeeklyAmountsByUserId = new Map(snapshot.salesRanking.map((item) => {
+      const mapped = mapRanking(item);
+      return [mapped.userId, item.weeklyAmounts || [0, 0, 0, 0]] as const;
+    }));
     let companyTargetAmount: number | null = null;
     const salesTargetByUserId = new Map<string, number>();
     (managementTargetRows as any[]).forEach((row) => {
@@ -1242,6 +1250,7 @@ export function createBusinessCockpitService(
         todayFollowUpCount: (existing?.todayFollowUpCount || 0) + profile.todayFollowUpCount,
         overdueCustomerCount: (existing?.overdueCustomerCount || 0) + profile.overdueCustomerCount,
         riskCustomerCount: (existing?.riskCustomerCount || 0) + profile.riskCustomerCount,
+        needsManagerInterventionCount: (existing?.needsManagerInterventionCount || 0) + profile.overdueCustomerCount,
         missingNextActionCount: (existing?.missingNextActionCount || 0) + profile.missingNextActionCount,
         wonCount,
         lostCount,
@@ -1251,6 +1260,7 @@ export function createBusinessCockpitService(
           ? null : Math.max(0, roundMoney(monthlyTargetAmount - revenueAmount)),
         targetCompletionRate: monthlyTargetAmount === null
           ? null : roundMoney(revenueAmount / monthlyTargetAmount * 100),
+        weeklyRevenueAmounts: (ranking ? salesWeeklyAmountsByUserId.get(ranking.userId) : undefined) || existing?.weeklyRevenueAmounts || [0, 0, 0, 0],
         stageDistribution: [...stageDistributionMap.values()].sort((left, right) => right.customerCount - left.customerCount),
         priorityCustomers,
       });
@@ -1285,6 +1295,7 @@ export function createBusinessCockpitService(
         todayFollowUpCount: 0,
         overdueCustomerCount: 0,
         riskCustomerCount: 0,
+        needsManagerInterventionCount: 0,
         missingNextActionCount: 0,
         wonCount: 0,
         lostCount: 0,
@@ -1294,6 +1305,7 @@ export function createBusinessCockpitService(
           ? null : Math.max(0, roundMoney(monthlyTargetAmount - ranking.amount)),
         targetCompletionRate: monthlyTargetAmount === null
           ? null : roundMoney(ranking.amount / monthlyTargetAmount * 100),
+        weeklyRevenueAmounts: salesWeeklyAmountsByUserId.get(ranking.userId) || [0, 0, 0, 0],
         stageDistribution: [],
         priorityCustomers: [],
       });

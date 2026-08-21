@@ -103,14 +103,16 @@ async function appendManagerInterventionActivity(tx: any, input: GeneratedTaskIn
 }, taskId: string): Promise<void> {
   if (input.sourceType !== 'COCKPIT_INTERVENTION' || !input.sourceId) return;
   const selector = { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: input.sourceId } };
+  if (typeof tx.$queryRawUnsafe === 'function') {
+    await tx.$queryRawUnsafe(
+      'SELECT `id` FROM `business_records` WHERE `domain` = ? AND `recordId` = ? FOR UPDATE',
+      STORAGE_KEYS.CUSTOMERS,
+      input.sourceId,
+    );
+  }
   const row = await tx.businessRecord.findUnique({ where: selector });
   if (!row) throw new Error('客户不存在，无法发起管理介入');
   const customer = row.data && typeof row.data === 'object' ? row.data : {};
-  const mode = String(input.sourceItemId || 'REMIND_SALES');
-  const canAssign = mode === 'REMIND_SALES'
-    ? String(customer.ownerId || '') === input.employeeId
-    : input.employeeId === input.assignedById;
-  if (!canAssign) throw new Error('管理介入执行人与客户负责范围不匹配');
   const now = new Date().toISOString();
   const activityRecords = Array.isArray(customer.activityRecords) ? customer.activityRecords : [];
   await tx.businessRecord.update({
@@ -129,6 +131,7 @@ async function appendManagerInterventionActivity(tx: any, input: GeneratedTaskIn
           relatedType: 'task',
         }],
         updatedAt: now,
+        recordRevision: Number(customer.recordRevision || 0) + 1,
       },
     },
   });
@@ -246,8 +249,13 @@ export function createPrismaEnterpriseTaskRepository(prisma: Client): Enterprise
       if (filter.date) where.workDate = new Date(`${filter.date}T00:00:00Z`);
       if (statuses?.length === 1) where.status = statuses[0];
       if (statuses && statuses.length > 1) where.status = { in: statuses };
+      if (filter.sourceType) where.sourceType = filter.sourceType;
+      if (filter.sourceId) where.sourceId = filter.sourceId;
+      const orderBy = filter.sourceType && filter.sourceId
+        ? [{ createdAt: 'desc' }]
+        : [{ workDate: 'desc' }, { dueAt: 'asc' }, { createdAt: 'asc' }];
       const [rows, total] = await Promise.all([
-        prisma.employeeTask.findMany({ where, include: { evidence: { orderBy: { createdAt: 'asc' } } }, orderBy: [{ workDate: 'desc' }, { dueAt: 'asc' }, { createdAt: 'asc' }], skip: (filter.page - 1) * filter.pageSize, take: filter.pageSize }),
+        prisma.employeeTask.findMany({ where, include: { evidence: { orderBy: { createdAt: 'asc' } } }, orderBy, skip: (filter.page - 1) * filter.pageSize, take: filter.pageSize }),
         prisma.employeeTask.count({ where }),
       ]);
       return { items: rows.map(mapTask), total };
@@ -267,6 +275,16 @@ export function createPrismaEnterpriseTaskRepository(prisma: Client): Enterprise
       if (!user) return null;
       const department = user.departmentId ? await prisma.department.findUnique({ where: { id: user.departmentId }, select: { name: true } }) : null;
       return { id: user.id, name: user.name, departmentId: user.departmentId || undefined, departmentName: department?.name || undefined, positionId: user.positionId || undefined, positionName: user.positionName || undefined, isActive: user.isActive, employmentStatus: user.employmentStatus };
+    },
+    async findCustomerInterventionTarget(customerId) {
+      const row = await prisma.businessRecord.findUnique({
+        where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
+        select: { data: true },
+      });
+      const customer = row?.data && typeof row.data === 'object' ? row.data as any : null;
+      return customer && !customer.deletedAt && !customer.mergedIntoId
+        ? { id: customerId, name: String(customer.name || customer.company || customerId), ownerId: customer.ownerId ? String(customer.ownerId) : null }
+        : null;
     },
     async findTask(id) {
       const row = await prisma.employeeTask.findUnique({ where: { id }, include: { evidence: { orderBy: { createdAt: 'asc' } } } });

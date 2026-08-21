@@ -214,6 +214,7 @@ export interface CustomerLifecycleConfig {
 
 /** 客户列表排序 */
 export type CustomerListSort = 'created_at' | 'recent_activity' | 'platform_payment';
+export type CustomerManagementFilter = 'key_customer' | 'risk' | 'stale_24h' | 'intervention' | 'payment_pending';
 
 /** 客户筛选参数 */
 export interface CustomerFilters {
@@ -235,6 +236,7 @@ export interface CustomerFilters {
   missingTagGroupId?: ID;
   tag?: string; // one-release compatibility for the old free-text URL
   sortBy?: CustomerListSort;
+  managementFilter?: CustomerManagementFilter;
   page?: number;
   pageSize?: number;
 }

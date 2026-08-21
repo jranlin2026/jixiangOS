@@ -964,9 +964,14 @@ app.get('/api/customers', requireCustomerReadAccess, async (req: AuthenticatedRe
   const rawTagMatch = queryParam(req.query.tagMatch) || 'grouped';
   const tagMatch = rawTagMatch === 'any' || rawTagMatch === 'all' || rawTagMatch === 'grouped' ? rawTagMatch : null;
   const withoutTagsRaw = queryParam(req.query.withoutTags);
+  const managementFilterRaw = queryParam(req.query.managementFilter);
+  const managementFilter = !managementFilterRaw || ['key_customer', 'risk', 'stale_24h', 'intervention', 'payment_pending'].includes(managementFilterRaw)
+    ? managementFilterRaw || undefined
+    : null;
   if (tagIds.length > 20) return res.status(400).json({ code: 400, message: '客户标签最多选择 20 个', data: null });
   if (!tagMatch) return res.status(400).json({ code: 400, message: '不支持的标签匹配方式', data: null });
   if (withoutTagsRaw && !['true', 'false'].includes(withoutTagsRaw)) return res.status(400).json({ code: 400, message: 'withoutTags 必须为布尔值', data: null });
+  if (managementFilter === null) return res.status(400).json({ code: 400, message: '不支持的销售管理筛选', data: null });
   const result = await customerListService.list({
     search: queryParam(req.query.search),
     productLevel: queryParam(req.query.productLevel) as any,
@@ -986,6 +991,7 @@ app.get('/api/customers', requireCustomerReadAccess, async (req: AuthenticatedRe
     withoutTags: withoutTagsRaw === 'true',
     missingTagGroupId: queryParam(req.query.missingTagGroupId) || undefined,
     sortBy: queryParam(req.query.sortBy) as any,
+    managementFilter: managementFilter as any,
     page: Number(queryParam(req.query.page)),
     pageSize: Number(queryParam(req.query.pageSize)),
   }, req.currentUser);

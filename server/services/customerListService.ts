@@ -263,6 +263,36 @@ export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerT
       ? hasFollowActivity
       : Prisma.sql`NOT (${hasFollowActivity})`);
   }
+  if (filters.managementFilter) {
+    const nextActionTitle = jsonText('$.nextActionTitle');
+    const nextActionDueAt = jsonText('$.nextActionDueAt');
+    const hasRecentFollow = (hours: number) => Prisma.sql`EXISTS (
+      SELECT 1 FROM JSON_TABLE(
+        COALESCE(JSON_EXTRACT(data, '$.activityRecords'), JSON_ARRAY()),
+        '$[*]' COLUMNS (
+          activity_type VARCHAR(40) PATH '$.type',
+          activity_title VARCHAR(200) PATH '$.title',
+          activity_at VARCHAR(40) PATH '$.createdAt'
+        )
+      ) AS activity
+      WHERE activity.activity_type = 'follow'
+        AND activity.activity_title <> '历史最后跟进记录'
+        AND STR_TO_DATE(REPLACE(SUBSTRING(activity.activity_at, 1, 19), 'T', ' '), '%Y-%m-%d %H:%i:%s') >= UTC_TIMESTAMP() - INTERVAL ${Prisma.raw(String(hours))} HOUR
+    )`;
+    const actionOverdue = Prisma.sql`NULLIF(${nextActionDueAt}, '') IS NOT NULL
+      AND STR_TO_DATE(REPLACE(SUBSTRING(${nextActionDueAt}, 1, 19), 'T', ' '), '%Y-%m-%d %H:%i:%s') < UTC_TIMESTAMP()`;
+    if (filters.managementFilter === 'key_customer') {
+      conditions.push(Prisma.sql`${jsonText('$.customerLevel')} IN ('L4', 'L5')`);
+    } else if (filters.managementFilter === 'payment_pending') {
+      conditions.push(Prisma.sql`${jsonText('$.opportunityStageCode')} = 'payment_pending'`);
+    } else if (filters.managementFilter === 'stale_24h') {
+      conditions.push(Prisma.sql`NOT (${hasRecentFollow(24)})`);
+    } else if (filters.managementFilter === 'intervention') {
+      conditions.push(actionOverdue);
+    } else if (filters.managementFilter === 'risk') {
+      conditions.push(Prisma.sql`(NULLIF(${nextActionTitle}, '') IS NULL OR ${actionOverdue} OR NOT (${hasRecentFollow(48)}))`);
+    }
+  }
   if (filters.sourceType) {
     conditions.push(Prisma.sql`${jsonText('$.sourceType')} = ${filters.sourceType}`);
   }

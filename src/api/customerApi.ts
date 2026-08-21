@@ -563,6 +563,21 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
         : !hasFollowActivity(c)
     ));
   }
+  if (filters?.managementFilter) {
+    const now = Date.now();
+    const lastFollowAt = (customer: Customer) => (customer.activityRecords || [])
+      .filter((record) => record.type === 'follow' && record.title !== '历史最后跟进记录')
+      .reduce((latest, record) => Math.max(latest, new Date(record.createdAt).getTime() || 0), 0);
+    filtered = filtered.filter((customer) => {
+      if (filters.managementFilter === 'key_customer') return ['L4', 'L5'].includes(customer.customerLevel);
+      if (filters.managementFilter === 'payment_pending') return customer.opportunityStageCode === 'payment_pending';
+      const lastFollow = lastFollowAt(customer);
+      const overdue = Boolean(customer.nextActionDueAt && new Date(customer.nextActionDueAt).getTime() < now);
+      if (filters.managementFilter === 'stale_24h') return !lastFollow || now - lastFollow > 24 * 60 * 60 * 1000;
+      if (filters.managementFilter === 'intervention') return overdue;
+      return !customer.nextActionTitle || overdue || !lastFollow || now - lastFollow > 48 * 60 * 60 * 1000;
+    });
+  }
   if (filters?.sourceType) {
     filtered = filtered.filter((c) => normalizeResourceOwnership(c.sourceType) === normalizeResourceOwnership(filters.sourceType));
   }

@@ -285,6 +285,7 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
   assert.equal(result.data?.managementPerformance.targetSource, 'okr');
   assert.equal(targetQuery?.where?.objective?.cycle?.cycleType, 'MONTH');
   assert.equal(result.data?.salesBattleProfiles.find((item) => item.userId === 'sales-1')?.monthlyTargetAmount, 400000);
+  assert.equal(result.data?.salesBattleProfiles.find((item) => item.userId === 'sales-1')?.weeklyRevenueAmounts?.reduce((sum, amount) => sum + amount, 0), 32980);
   assert.equal(result.data?.departmentStatuses.find((item) => item.id === 'sales')?.memberCount, 1);
   assert.equal(result.data?.departmentStatuses.find((item) => item.id === 'sales')?.available, true);
 }
@@ -437,8 +438,10 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
     revenueAmount: 0, orderCount: 0, customerCount: 0, activeOpportunityCount: 0,
     opportunityAmount: 0, todayDueTodoCount: 0, todayCompletedTodoCount: 0, todayFollowUpCount: 0,
     overdueCustomerCount: 0, riskCustomerCount: 0, missingNextActionCount: 0,
+    needsManagerInterventionCount: 0,
     wonCount: 0, lostCount: 0, conversionRate: 0,
     monthlyTargetAmount: null, targetGapAmount: null, targetCompletionRate: null,
+    weeklyRevenueAmounts: [0, 0, 0, 0],
     stageDistribution: [],
     priorityCustomers: [],
   });

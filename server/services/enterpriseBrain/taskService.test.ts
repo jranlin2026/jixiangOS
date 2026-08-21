@@ -39,6 +39,7 @@ const repository = createMemoryEnterpriseTaskRepository({
     scheduleType: 'DAILY', weekdays: [1, 2, 3, 4, 5], dueTime: '18:00', evidenceRequired: true,
     isActive: true, effectiveAt: null, expiresAt: null,
   }],
+  customers: [{ id: 'customer-1', name: '客户甲', ownerId: employee.id }],
 });
 const service = createEnterpriseTaskService({
   repository,
@@ -91,6 +92,10 @@ assert.equal(returnedTask.data?.taskType, 'FOLLOW_UP');
 assert.equal(returnedTask.data?.priority, 'HIGH');
 assert.equal(returnedTask.data?.businessModule, 'CUSTOMER_MANAGEMENT');
 assert.equal(returnedTask.data?.sourceRoute, '/customers?customerId=customer-1');
+const linkedForManager = await service.listLinkedTasks({ sourceType: 'COCKPIT_INTERVENTION', sourceId: 'customer-1' }, manager);
+const linkedForEmployee = await service.listLinkedTasks({ sourceType: 'COCKPIT_INTERVENTION', sourceId: 'customer-1' }, employee);
+assert.equal(linkedForManager.data?.items[0]?.id, returnedTask.data?.id, '管理者应能按客户直接读取介入任务');
+assert.equal(linkedForEmployee.data?.items[0]?.id, returnedTask.data?.id, '执行员工应能按客户读取本人介入任务');
 assert.equal((await service.completeTask(returnedTask.data!.id, { result: '已提交', evidence: [] }, employee)).code, 0);
 assert.equal((await service.confirmTask(returnedTask.data!.id, { action: 'RETURN', reason: '请补充说明' }, manager)).code, 0);
 const pendingTask = await service.assignOneOff({
