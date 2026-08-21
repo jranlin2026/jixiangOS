@@ -195,6 +195,8 @@ const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = 
   { field: 'phones', label: '联系电话' },
   { field: 'wechat', label: '微信' },
   { field: 'customerLevel', label: '客户等级' },
+  { field: 'opportunityStageCode', label: '销售阶段' },
+  { field: 'opportunityAmount', label: '预计成交金额' },
   { field: 'owner', label: '销售负责人' },
   { field: 'leadInputBy', label: '线索录入人' },
   { field: 'leadContributorName', label: '线索贡献人' },
@@ -698,6 +700,8 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
     canEditLockedContact: canEditLockedCustomerContact(),
     canEditAlternatePhones: true,
   });
+  const opportunityStageChanged = Object.prototype.hasOwnProperty.call(safeData, 'opportunityStageCode')
+    && safeData.opportunityStageCode !== existing.opportunityStageCode;
   if (
     Object.prototype.hasOwnProperty.call(safeData, 'phone')
     || Object.prototype.hasOwnProperty.call(safeData, 'phones')
@@ -733,6 +737,7 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
   const activityType = safeData.owner && safeData.owner !== existing.owner ? 'transfer' : 'update';
   customers[idx] = {
     ...merged,
+    ...(opportunityStageChanged ? { opportunityStageUpdatedAt: now } : {}),
     activityRecords: changes?.length
       ? [createActivity({
         type: activityType,

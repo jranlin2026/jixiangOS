@@ -12,6 +12,8 @@ const customer = {
   ],
   opportunityStageCode: 'proposal',
   opportunityAmount: 68000,
+  nextActionTitle: '确认决策人',
+  nextActionDueAt: '2026-07-23T10:00:00.000Z',
 } as Customer;
 
 const columns = buildCustomerColumns([], 'public_pool');
@@ -26,5 +28,7 @@ assert.equal(byId('opportunityStage').label, '销售阶段');
 assert.equal(byId('opportunityAmount').label, '预计金额');
 assert.equal(byId('lastEffectiveContact').label, '最近有效联系');
 assert.notEqual(byId('contactGap').render(customer), '-');
+assert.equal(byId('nextAction').render(customer), '确认决策人');
+assert.equal(byId('nextActionDueAt').label, '动作截止');
 
 console.log('customer list columns: ok');

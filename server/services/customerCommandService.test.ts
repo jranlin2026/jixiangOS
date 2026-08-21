@@ -3224,7 +3224,7 @@ for (const targetType of ['customer', 'lead'] as const) {
   const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
   const result = await createCustomerCommandService(fake.prisma, serviceOptions).updateCustomer(
     value.id,
-    { opportunityStageCode: 'proposal', opportunityAmount: 68000 },
+    { opportunityStageCode: ' proposal ' as any, opportunityAmount: 68000 },
     customerEditor,
   );
 

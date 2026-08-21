@@ -112,6 +112,10 @@ export interface Customer {
   opportunityStageUpdatedAt?: Timestamp;
   /** 当前机会预计成交金额，单位为元。 */
   opportunityAmount?: number | null;
+  /** 最近一次待办写入时同步的下一步动作快照，供客户列表直接决策。 */
+  nextActionTitle?: string | null;
+  nextActionDueAt?: Timestamp | null;
+  nextActionAssigneeName?: string | null;
   publicPoolAt?: Timestamp;
   releasedBy?: string;
   releaseReason?: string;

@@ -151,6 +151,11 @@ export function createCustomerTodoService(
     actor: string,
     at: Date,
   ) => {
+    const [nextAction] = await tx.customerTodo.findMany({
+      where: { customerId: snapshot.customer.id, status: 'PENDING' },
+      orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+      take: 1,
+    });
     const activity: CustomerActivityRecord = {
       id: `activity-${randomUUID()}`,
       type: 'todo',
@@ -164,6 +169,9 @@ export function createCustomerTodoService(
     const updated: Customer = {
       ...snapshot.customer,
       activityRecords: [activity, ...(snapshot.customer.activityRecords || [])],
+      nextActionTitle: nextAction?.title || null,
+      nextActionDueAt: nextAction?.dueAt?.toISOString() || null,
+      nextActionAssigneeName: nextAction?.assigneeName || null,
       updatedAt: at.toISOString(),
     };
     await createCustomerBusinessRecordRepository(tx).compareAndSave(snapshot, updated, at);

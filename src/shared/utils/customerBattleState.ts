@@ -54,21 +54,31 @@ export function buildCustomerBattleSnapshot(
   const contactGapDays = contactTime === null
     ? null
     : Math.max(0, Math.floor((nowTime - contactTime) / 86_400_000));
-  const nextAction = getNextCustomerAction(todos);
+  const nextAction = getNextCustomerAction(todos) || (
+    customer.nextActionTitle && customer.nextActionDueAt
+      ? {
+        id: `snapshot:${customer.id}`,
+        customerId: customer.id,
+        customerName: customer.name,
+        title: customer.nextActionTitle,
+        status: 'pending',
+        dueAt: customer.nextActionDueAt,
+        assigneeName: customer.nextActionAssigneeName || '',
+      } as CustomerTodo
+      : null
+  );
   const nextActionTime = nextAction ? validTime(nextAction.dueAt) : null;
   const nextActionOverdue = nextActionTime !== null && nextActionTime < nowTime;
 
   let risk: { level: CustomerBattleRiskLevel; reason: string } = { level: 'low', reason: '推进正常' };
   if (nextActionOverdue) {
     risk = { level: 'high', reason: '下一步动作已逾期' };
-  } else if (contactGapDays !== null && contactGapDays >= 7) {
-    risk = { level: 'high', reason: `已 ${contactGapDays} 天未有效联系` };
+  } else if (snapshotStageIsClosed(customer.opportunityStageCode)) {
+    risk = { level: 'low', reason: customer.opportunityStageCode === 'won' ? '本轮机会已成交' : '本轮机会已结束' };
   } else if (!nextAction) {
     risk = { level: 'medium', reason: '尚未设置下一步动作' };
   } else if (!lastEffectiveContact) {
     risk = { level: 'medium', reason: '尚无有效联系记录' };
-  } else if (contactGapDays !== null && contactGapDays >= 3) {
-    risk = { level: 'medium', reason: `已 ${contactGapDays} 天未有效联系` };
   }
 
   return {
@@ -80,4 +90,8 @@ export function buildCustomerBattleSnapshot(
     nextActionOverdue,
     risk,
   };
+}
+
+function snapshotStageIsClosed(code: unknown): boolean {
+  return code === 'won' || code === 'lost';
 }

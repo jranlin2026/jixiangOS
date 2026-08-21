@@ -1715,8 +1715,12 @@ export function createCustomerCommandService(
           'not_set', 'needs_discovery', 'solution_demo', 'proposal', 'objection',
           'payment_pending', 'won', 'lost',
         ]);
-        if (hasOpportunityStage && !allowedOpportunityStages.has(cleanText(patch.opportunityStageCode))) {
+        const submittedOpportunityStage = cleanText(patch.opportunityStageCode);
+        if (hasOpportunityStage && !allowedOpportunityStages.has(submittedOpportunityStage)) {
           return failure<Customer>('销售阶段无效', 400);
+        }
+        if (hasOpportunityStage) {
+          patch.opportunityStageCode = submittedOpportunityStage as Customer['opportunityStageCode'];
         }
         if (Object.prototype.hasOwnProperty.call(patch, 'opportunityAmount')) {
           const amount = patch.opportunityAmount;

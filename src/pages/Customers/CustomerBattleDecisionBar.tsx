@@ -20,7 +20,7 @@ type Props = {
   canSetProgress: boolean;
   canSetTodos: boolean;
   saving?: boolean;
-  onSave: (stage: CustomerOpportunityStageCode, amount: number | null) => void | Promise<void>;
+  onSave: (stage: CustomerOpportunityStageCode, amount: number | null) => boolean | Promise<boolean>;
   onOpenTodos: () => void;
 };
 
@@ -41,8 +41,8 @@ const CustomerBattleDecisionBar: React.FC<Props> = ({
   };
 
   const submit = async () => {
-    await onSave(stage, amount.trim() === '' ? null : Number(amount));
-    setOpen(false);
+    const saved = await onSave(stage, amount.trim() === '' ? null : Number(amount));
+    if (saved) setOpen(false);
   };
 
   const items = [
@@ -101,7 +101,7 @@ const CustomerBattleDecisionBar: React.FC<Props> = ({
         </DialogContent>
         <DialogActions>
           <Button disabled={saving} onClick={() => setOpen(false)}>取消</Button>
-          <Button disabled={saving || (amount !== '' && Number(amount) < 0)} variant="contained" onClick={() => void submit()}>{saving ? '保存中…' : '保存'}</Button>
+          <Button disabled={saving || (amount !== '' && (!Number.isFinite(Number(amount)) || Number(amount) < 0))} variant="contained" onClick={() => void submit()}>{saving ? '保存中…' : '保存'}</Button>
         </DialogActions>
       </Dialog>
     </>

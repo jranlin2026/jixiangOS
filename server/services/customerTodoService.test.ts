@@ -139,6 +139,8 @@ const created = await service.create('customer-1', {
 assert.equal(created.code, 0);
 assert.equal(created.data?.assigneeId, actor.id);
 assert.equal(customerData.activityRecords?.[0]?.title, '新建了客户待办');
+assert.equal(customerData.nextActionTitle, '联系客户');
+assert.equal(customerData.nextActionDueAt, '2026-07-15T04:00:00.000Z');
 assert.ok(
   associationLockKeys.includes('aaos_customer_association_lock:customer-1'),
   '新建客户待办前必须取得客户关联锁，避免与删除/合并并发穿插',

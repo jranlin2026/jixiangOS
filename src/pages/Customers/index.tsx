@@ -202,6 +202,16 @@ export const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], 
     },
   },
   {
+    id: 'nextAction',
+    label: '下一步动作',
+    render: (customer) => customer.nextActionTitle || '-',
+  },
+  {
+    id: 'nextActionDueAt',
+    label: '动作截止',
+    render: (customer) => customer.nextActionDueAt ? formatDate(customer.nextActionDueAt, 'yyyy-MM-dd HH:mm') : '-',
+  },
+  {
     id: 'tags',
     label: '标签',
     render: (customer) => <ManualTagDisplay ids={customer.manualTagIds} legacyNames={customer.tags} />,
@@ -237,6 +247,8 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'opportunityAmount',
   'lastEffectiveContact',
   'contactGap',
+  'nextAction',
+  'nextActionDueAt',
   'owner',
 ];
 
@@ -251,6 +263,8 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   opportunityAmount: 120,
   lastEffectiveContact: 145,
   contactGap: 95,
+  nextAction: 150,
+  nextActionDueAt: 145,
   tags: 90,
   leadSource: 155,
   sourceProductName: 150,

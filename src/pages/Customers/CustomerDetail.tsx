@@ -221,9 +221,12 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
 
   useEffect(() => {
     if (!open) return;
+    let active = true;
+    setBattleTodos([]);
     customerTodoApi.list(customer.id).then((response) => {
-      if (response.code === 0) setBattleTodos(response.data || []);
+      if (active && response.code === 0) setBattleTodos(response.data || []);
     });
+    return () => { active = false; };
   }, [customer.id, open]);
 
   useEffect(() => {
@@ -268,8 +271,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     setDraft(response.data);
   };
 
-  const saveBattleState = async (stage: CustomerOpportunityStageCode, amount: number | null) => {
-    if (!detailActions.actions.setProgress || battleSaving) return;
+  const saveBattleState = async (stage: CustomerOpportunityStageCode, amount: number | null): Promise<boolean> => {
+    if (!detailActions.actions.setProgress || battleSaving) return false;
     setBattleSaving(true);
     try {
       const response = await customerApi.updateCustomer(currentCustomer.id, {
@@ -278,11 +281,12 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       });
       if (response.code !== 0 || !response.data) {
         await alert(response.message || '客户作战状态保存失败', '保存失败');
-        return;
+        return false;
       }
       setCurrentCustomer(response.data);
       setDraft(response.data);
       onUpdated?.(response.data);
+      return true;
     } finally {
       setBattleSaving(false);
     }
