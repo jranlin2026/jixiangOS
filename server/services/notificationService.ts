@@ -25,6 +25,7 @@ export type ScheduledNotificationInput = NotificationEventInput & {
 };
 
 type NotificationClient = {
+  $transaction?<T>(work: (client: NotificationClient) => Promise<T>): Promise<T>;
   notificationActivityProjection: {
     create(args: { data: Record<string, unknown> }): Promise<any>;
     findUnique(args: { where: { activityKey: string } }): Promise<any>;
@@ -70,6 +71,13 @@ const ACTIVITY_FAMILIES = [
   { name: 'lead-owner', stages: ['LEAD_ASSIGNED', 'LEAD_ACK_REMINDER', 'LEAD_FIRST_FOLLOW_UP_DUE'] },
   { name: 'lead-manager', stages: ['LEAD_ACK_ESCALATION', 'LEAD_FIRST_FOLLOW_UP_ESCALATION'] },
   { name: 'todo-owner', stages: ['TODO_ASSIGNED', 'TODO_DUE_SOON', 'TODO_DUE', 'TODO_OVERDUE'] },
+  {
+    name: 'workbench-task',
+    stages: [
+      'WORKBENCH_TASK_CREATED', 'WORKBENCH_TASK_REASSIGNED', 'WORKBENCH_TASK_COMPLETED',
+      'WORKBENCH_TASK_RETURNED', 'WORKBENCH_TASK_CONFIRMED', 'WORKBENCH_TASK_CANCELED',
+    ],
+  },
 ] as const;
 
 type NormalizedActivityInput = {
@@ -86,11 +94,19 @@ function activityDescriptor(input: NormalizedActivityInput) {
   const metadata = input.metadata && typeof input.metadata === 'object' ? input.metadata as Record<string, unknown> : {};
   const embeddedVersion = String(metadata.activityVersion || input.dedupeKey).match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z/)?.[0];
   const versionAt = new Date(embeddedVersion || 0);
+  const sequenceText = String(metadata.activitySequence || '0');
+  const versionSequence = /^\d+$/.test(sequenceText) ? BigInt(sequenceText) : 0n;
+  const taskWide = family.name === 'workbench-task';
   return {
-    activityKey: `${family.name}:${input.businessId}:${input.recipientId}`,
+    activityKey: taskWide
+      ? `${family.name}:${input.businessId}`
+      : `${family.name}:${input.businessId}:${input.recipientId}`,
     family: [...family.stages],
     stage: family.stages.indexOf(input.eventType as never) + 1,
     versionAt: Number.isNaN(versionAt.getTime()) ? new Date(0) : versionAt,
+    versionSequence,
+    activityId: String(metadata.activityId || ''),
+    taskWide,
   };
 }
 
@@ -99,6 +115,11 @@ function compareActivity(left: any, right: any) {
   const rightDescriptor = activityDescriptor(right);
   if (!leftDescriptor) return -1;
   if (!rightDescriptor) return 1;
+  if (leftDescriptor.versionSequence !== rightDescriptor.versionSequence) {
+    return leftDescriptor.versionSequence < rightDescriptor.versionSequence ? -1 : 1;
+  }
+  if (leftDescriptor.taskWide && leftDescriptor.activityId
+    && leftDescriptor.activityId === rightDescriptor.activityId) return 0;
   const version = leftDescriptor.versionAt.getTime() - rightDescriptor.versionAt.getTime();
   if (version) return version;
   const stage = leftDescriptor.stage - rightDescriptor.stage;
@@ -133,17 +154,26 @@ export function createNotificationPublisher(options: PublisherOptions = {}) {
   const projectActivity = async (client: NotificationClient, data: ReturnType<typeof normalized>, notification: any) => {
     const descriptor = activityDescriptor(data);
     if (!descriptor) return true;
+    const activeWhere = {
+      businessId: data.businessId,
+      ...(!descriptor.taskWide ? { recipientId: data.recipientId } : {}),
+      eventType: { in: descriptor.family },
+      resolvedAt: null,
+    };
+    const resolveOlder = async (currentNotification: any) => {
+      const active = await client.notification.findMany({ where: activeWhere });
+      for (const candidate of active) {
+        if (candidate.id !== currentNotification.id && compareActivity(candidate, currentNotification) < 0) {
+          await resolveNotification(client, candidate.id, '已更新为最新业务提醒');
+        }
+      }
+    };
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const current = await client.notificationActivityProjection.findUnique({ where: { activityKey: descriptor.activityKey } });
       if (!current) {
         try {
           const activeFamily = await client.notification.findMany({
-            where: {
-              businessId: data.businessId,
-              recipientId: data.recipientId,
-              eventType: { in: descriptor.family },
-              resolvedAt: null,
-            },
+            where: activeWhere,
           });
           const sortedFamily = activeFamily.sort(compareActivity);
           const projected = sortedFamily[sortedFamily.length - 1] || notification;
@@ -153,20 +183,12 @@ export function createNotificationPublisher(options: PublisherOptions = {}) {
               activityKey: descriptor.activityKey,
               currentNotificationId: projected.id,
               versionAt: projectedDescriptor.versionAt,
+              versionSequence: projectedDescriptor.versionSequence,
               stage: projectedDescriptor.stage,
             },
           });
-          await client.notification.updateMany({
-            where: {
-              businessId: data.businessId,
-              recipientId: data.recipientId,
-              eventType: { in: descriptor.family },
-              dedupeKey: { not: projected.dedupeKey },
-              resolvedAt: null,
-            },
-            data: { resolvedAt: now(), resolvedReason: '已更新为最新业务提醒', readAt: now() },
-          });
-          return projected.id === notification.id;
+          await resolveOlder(projected);
+          return compareActivity(notification, projected) === 0;
         } catch (error) {
           if (!uniqueConflict(error)) throw error;
           continue;
@@ -174,53 +196,56 @@ export function createNotificationPublisher(options: PublisherOptions = {}) {
       }
       const currentVersion = new Date(current.versionAt).getTime();
       const nextVersion = descriptor.versionAt.getTime();
-      const canReplace = nextVersion > currentVersion
-        || (nextVersion === currentVersion && descriptor.stage >= Number(current.stage));
+      const currentSequence = BigInt(String(current.versionSequence || '0'));
+      if (descriptor.taskWide && descriptor.versionSequence > 0n
+        && descriptor.versionSequence === currentSequence) {
+        await resolveOlder(notification);
+        return true;
+      }
+      const canReplace = descriptor.versionSequence > currentSequence
+        || (descriptor.versionSequence === currentSequence && (nextVersion > currentVersion
+          || (nextVersion === currentVersion && descriptor.stage >= Number(current.stage))));
       if (!canReplace) {
         await resolveNotification(client, notification.id, '已有更新阶段的业务提醒');
         return false;
       }
       const claimed = await client.notificationActivityProjection.updateMany({
         where: { activityKey: descriptor.activityKey, currentNotificationId: current.currentNotificationId },
-        data: { currentNotificationId: notification.id, versionAt: descriptor.versionAt, stage: descriptor.stage },
+        data: {
+          currentNotificationId: notification.id, versionAt: descriptor.versionAt,
+          versionSequence: descriptor.versionSequence, stage: descriptor.stage,
+        },
       });
       if (claimed.count !== 1) continue;
-      await client.notification.updateMany({
-        where: {
-          businessId: data.businessId,
-          recipientId: data.recipientId,
-          eventType: { in: descriptor.family },
-          dedupeKey: { not: data.dedupeKey },
-          resolvedAt: null,
-        },
-        data: { resolvedAt: now(), resolvedReason: '已更新为最新业务提醒', readAt: now() },
-      });
+      await resolveOlder(notification);
       return true;
     }
     throw new Error('NOTIFICATION_ACTIVITY_PROJECTION_CONFLICT');
   };
 
-  return {
-    async publish(client: NotificationClient, input: NotificationEventInput) {
-      const data = normalized(input);
-      let notification: any;
-      let created = false;
-      try {
-        notification = await client.notification.create({
-          data: { id: createId('notification'), ...data },
-        });
-        created = true;
-      } catch (error) {
-        if (!uniqueConflict(error)) throw error;
-        notification = await client.notification.findUnique({ where: { dedupeKey: data.dedupeKey } });
-        if (!notification) throw error;
-      }
+  const publishAtomically = async (client: NotificationClient, input: NotificationEventInput) => {
+    const data = normalized(input);
+    let notification: any;
+    let created = false;
+    try {
+      notification = await client.notification.create({
+        data: { id: createId('notification'), ...data },
+      });
+      created = true;
+    } catch (error) {
+      if (!uniqueConflict(error)) throw error;
+      notification = await client.notification.findUnique({ where: { dedupeKey: data.dedupeKey } });
+      if (!notification) throw error;
+    }
 
-      if (created) {
-        const current = await projectActivity(client, data, notification);
-        if (!current) return { created, notification };
-        const channels = [...new Set(input.channels || [])];
-        for (const channel of channels) {
+    // A retry can encounter a notification left by an older non-atomic writer.
+    // Projection and deliveries are therefore repaired idempotently even when
+    // the notification itself already exists.
+    const current = await projectActivity(client, data, notification);
+    if (current) {
+      const channels = [...new Set(input.channels || [])];
+      for (const channel of channels) {
+        try {
           await client.notificationDelivery.create({
             data: {
               id: createId('delivery'),
@@ -231,9 +256,22 @@ export function createNotificationPublisher(options: PublisherOptions = {}) {
               nextAttemptAt: now(),
             },
           });
+        } catch (error) {
+          if (!uniqueConflict(error)) throw error;
         }
       }
-      return { created, notification };
+    }
+    return { created, notification };
+  };
+
+  return {
+    async publish(client: NotificationClient, input: NotificationEventInput) {
+      if (client.$transaction) {
+        return client.$transaction((transaction) => publishAtomically(transaction, input));
+      }
+      // Prisma transaction clients intentionally do not expose $transaction;
+      // callers already inside a transaction remain part of that transaction.
+      return publishAtomically(client, input);
     },
 
     async schedule(client: NotificationClient, input: ScheduledNotificationInput) {

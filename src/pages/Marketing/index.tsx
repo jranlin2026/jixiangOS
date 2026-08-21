@@ -56,7 +56,10 @@ import {
 import TablePagination from "../../shared/components/TablePagination";
 import ProtectedFormDialog from "../../shared/components/ProtectedFormDialog";
 import useAppFeedback from "../../shared/hooks/useAppFeedback";
-import { expandMarketingAccountSelection } from "../../domain/marketing/marketingContent";
+import {
+  expandMarketingAccountSelection,
+  filterSupplementalMarketingAccounts,
+} from "../../domain/marketing/marketingContent";
 
 type MarketingTab = "contents" | "calendar" | "groups" | "plans";
 type PageState = { page: number; pageSize: number; total: number };
@@ -413,9 +416,13 @@ const MarketingCenter: React.FC = () => {
     (group) =>
       !selectedContent || selectedContent.platforms.includes(group.platform),
   );
-  const applicableAccounts = accounts.filter(
-    (account) =>
-      !selectedContent || selectedContent.platforms.includes(account.platform),
+  const applicableAccounts = filterSupplementalMarketingAccounts(
+    accounts.filter(
+      (account) =>
+        !selectedContent || selectedContent.platforms.includes(account.platform),
+    ),
+    publishDialog.groupIds,
+    groups,
   );
   const selectedAccountIds = expandMarketingAccountSelection(
     publishDialog.accountIds,
@@ -1742,15 +1749,24 @@ const MarketingCenter: React.FC = () => {
                     multiple
                     label="账号组"
                     value={publishDialog.groupIds}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const groupIds =
+                        typeof event.target.value === "string"
+                          ? event.target.value.split(",")
+                          : event.target.value;
+                      const groupedAccountIds = new Set(
+                        groups
+                          .filter((group) => groupIds.includes(group.id))
+                          .flatMap((group) => group.accountIds),
+                      );
                       setPublishDialog((current) => ({
                         ...current,
-                        groupIds:
-                          typeof event.target.value === "string"
-                            ? event.target.value.split(",")
-                            : event.target.value,
-                      }))
-                    }
+                        groupIds,
+                        accountIds: current.accountIds.filter(
+                          (accountId) => !groupedAccountIds.has(accountId),
+                        ),
+                      }));
+                    }}
                     renderValue={(values) => `已选择 ${values.length} 个账号组`}
                   >
                     {applicableGroups.map((group) => (

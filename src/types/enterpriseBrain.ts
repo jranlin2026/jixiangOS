@@ -44,9 +44,17 @@ export type TaskTemplate = {
 
 export type EmployeeTask = {
   id: string;
+  /** Nullable during the expand rollout; Task 17 contracts this after old writers are retired. */
+  sourceKey?: string | null;
+  taskType?: 'ACTION' | 'APPROVAL' | 'CONFIRMATION' | 'FOLLOW_UP' | 'LEARNING' | 'PUBLISH';
+  priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+  businessModule?: string;
+  sourceRoute?: string | null;
+  sourceLabel?: string | null;
   employeeId: string;
   employeeName: string;
   departmentIdSnapshot: string | null;
+  departmentNameSnapshot?: string | null;
   positionIdSnapshot: string | null;
   positionNameSnapshot: string | null;
   workDate: string;
@@ -56,14 +64,45 @@ export type EmployeeTask = {
   actualValue: number | null;
   unit: string | null;
   evidenceRequired: boolean;
-  status: 'PENDING' | 'COMPLETED' | 'CONFIRMED' | 'RETURNED';
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'CONFIRMED' | 'RETURNED' | 'CANCELED';
   result: string | null;
   dueAt: string | null;
   returnedReason: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  confirmedAt?: string | null;
+  confirmedById?: string | null;
+  confirmedByName?: string | null;
+  canceledAt?: string | null;
+  canceledById?: string | null;
+  canceledReason?: string | null;
+  collaboratorIds?: string[] | null;
+  estimatedMinutes?: number | null;
+  qualityScore?: number | null;
+  qualityComment?: string | null;
+  remindedAt?: string | null;
+  lastOverdueNotifiedAt?: string | null;
   sourceType?: string | null;
   sourceId?: string | null;
   sourceItemId?: string | null;
+  sourceVersion?: string | null;
   evidence: Array<{ id: string; type: string; referenceId: string | null; content: string | null }>;
+  activities?: TaskActivity[];
+};
+
+export type TaskActivity = {
+  id: string;
+  /** Database-monotonic ordering used by durable lifecycle publication. */
+  sequence?: string;
+  taskId: string;
+  action: string;
+  actorId: string | null;
+  actorName: string | null;
+  fromStatus: string | null;
+  toStatus: string | null;
+  comment: string | null;
+  metadata: unknown | null;
+  createdAt: string;
 };
 
 export type DailyReview = {

@@ -120,6 +120,10 @@ import { createPositionStandardService } from './services/enterpriseBrain/positi
 import { createPrismaPositionStandardRepository } from './services/enterpriseBrain/prismaPositionStandardRepository';
 import { createEnterpriseTaskService } from './services/enterpriseBrain/taskService';
 import { createPrismaEnterpriseTaskRepository } from './services/enterpriseBrain/prismaTaskRepository';
+import { createWorkbenchScheduler } from './services/workbench/workbenchScheduler';
+import { createPrismaSchedulerStore } from './services/workbench/prismaSchedulerStore';
+import { createWorkbenchCommandService } from './services/workbench/workbenchCommandService';
+import { createWorkbenchNotificationService } from './services/workbench/workbenchNotificationService';
 import { createEnterpriseAiAssistantService } from './services/enterpriseBrain/aiAssistantService';
 import { createPrismaEnterpriseAiRepository } from './services/enterpriseBrain/prismaAiRepository';
 import { createEnterpriseCockpitService } from './services/enterpriseBrain/cockpitService';
@@ -217,6 +221,10 @@ const aiChatClient = createAiChatClient({ configReader: aiConfigService });
 const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
 const notificationPublisher = createNotificationPublisher();
 const notificationWorkflow = createNotificationWorkflow(notificationPublisher);
+const workbenchNotificationService = createWorkbenchNotificationService({
+  prisma,
+  workflow: notificationWorkflow,
+});
 const notificationInboxService = createNotificationInboxService(prisma);
 const notificationManagementService = createNotificationManagementService(prisma);
 const notificationWorker = createNotificationWorker({
@@ -408,8 +416,13 @@ academyService = createAcademyService(createPrismaAcademyRepository(prisma as an
 const positionStandardService = createPositionStandardService({
   repository: createPrismaPositionStandardRepository(prisma as any),
 });
+const enterpriseTaskRepository = createPrismaEnterpriseTaskRepository(prisma as any);
 const enterpriseTaskService = createEnterpriseTaskService({
-  repository: createPrismaEnterpriseTaskRepository(prisma as any),
+  repository: enterpriseTaskRepository,
+  commandService: createWorkbenchCommandService({
+    repository: enterpriseTaskRepository,
+    notify: (event) => workbenchNotificationService.handleCommandEvent(event),
+  }),
   summarizeReview: (input) => aiChatClient.complete([
     {
       role: 'system',
@@ -417,6 +430,27 @@ const enterpriseTaskService = createEnterpriseTaskService({
     },
     { role: 'user', content: JSON.stringify(input) },
   ], { temperature: 0.1 }),
+});
+const workbenchSchedulerActor = {
+  id: 'system-workbench-scheduler',
+  name: '系统工作台调度器',
+  account: 'system-workbench-scheduler',
+  email: '',
+  phone: '',
+  role: '系统管理员',
+  permissions: [{ module: '全部', actions: ['admin'] }],
+  isActive: true,
+};
+const workbenchScheduler = createWorkbenchScheduler({
+  store: createPrismaSchedulerStore(prisma as any),
+  generateDailyTasks: async ({ date, signal, lease }) => {
+    const result = await enterpriseTaskService.generateDailyTasks(date, workbenchSchedulerActor, { signal, lease });
+    if (result.code !== 0 || !result.data) throw new Error('WORKBENCH_DAILY_GENERATION_FAILED');
+    return result.data;
+  },
+  scanReminders: (input) => workbenchNotificationService.scanReminders(input),
+  onRunFailed: (input) => workbenchNotificationService.schedulerFailed(input),
+  onError: () => console.error('WORKBENCH_SCHEDULER_FAILED'),
 });
 const enterpriseAiService = createEnterpriseAiAssistantService({
   repository: createPrismaEnterpriseAiRepository(prisma as any),
@@ -2726,6 +2760,7 @@ async function startServer() {
   businessImportWorker.start();
   notificationWorker.start();
   okrMetricWorker.start();
+  if (setupStatus.data.initialized) workbenchScheduler.start();
   void businessAttachmentService.cleanupExpiredAcademyTaskEvidence().catch(() => undefined);
   const taskEvidenceCleanupTimer = setInterval(() => {
     void businessAttachmentService.cleanupExpiredAcademyTaskEvidence().catch(() => undefined);
@@ -2735,6 +2770,7 @@ async function startServer() {
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    await workbenchScheduler.stop();
     await customerBatchWorker.stop();
     await businessImportWorker.stop();
     await notificationWorker.stop();

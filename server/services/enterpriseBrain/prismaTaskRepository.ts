@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { createPrismaWorkbenchRepository } from '../workbench/prismaWorkbenchRepository';
+import { MAX_GENERATED_TASK_CANDIDATES } from './taskRepository';
 import type {
   DailyReviewRecord,
   EmployeeTaskRecord,
@@ -8,15 +10,29 @@ import type {
 } from './taskRepository';
 
 type Client = {
-  $transaction<T>(callback: (tx: any) => Promise<T>, options?: { isolationLevel: 'Serializable' }): Promise<T>;
+  $transaction<T>(callback: (tx: any) => Promise<T>, options?: {
+    isolationLevel: 'Serializable'; maxWait?: number; timeout?: number;
+  }): Promise<T>;
+  $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
   taskTemplate: any;
   position: any;
   employeeTask: any;
   taskEvidence: any;
+  taskActivity: any;
   dailyReview: any;
   user: any;
+  role: any;
   department: any;
+  leadRecord: any;
+  businessRecord: any;
 };
+
+const GENERATION_TRANSACTION_MAX_WAIT_MS = 10_000;
+const GENERATION_TRANSACTION_TIMEOUT_MS = 30_000;
+// A crashed generation can block this lease only for the fixed safety margin
+// beyond Prisma's hard transaction timeout; successful runs release it sooner.
+const GENERATION_LEASE_SAFETY_MARGIN_MS = 15_000;
+const GENERATION_LEASE_DEADLINE_MS = GENERATION_TRANSACTION_TIMEOUT_MS + GENERATION_LEASE_SAFETY_MARGIN_MS;
 
 const dateText = (value: unknown): string => new Date(value as string).toISOString().slice(0, 10);
 const iso = (value: unknown): string | null => value ? new Date(value as string).toISOString() : null;
@@ -34,7 +50,9 @@ function mapTemplate(row: any): TaskTemplateRecord {
 
 function mapTask(row: any): EmployeeTaskRecord {
   return {
-    id: row.id, templateId: row.templateId || null, employeeId: row.employeeId, employeeName: row.employeeName,
+    id: row.id, templateId: row.templateId || null, sourceKey: row.sourceKey || null,
+    taskType: row.taskType || 'ACTION', priority: row.priority || 'NORMAL', businessModule: row.businessModule || 'GENERAL',
+    sourceRoute: row.sourceRoute || null, sourceLabel: row.sourceLabel || null, employeeId: row.employeeId, employeeName: row.employeeName,
     departmentIdSnapshot: row.departmentIdSnapshot || null, departmentNameSnapshot: row.departmentNameSnapshot || null,
     positionIdSnapshot: row.positionIdSnapshot || null, positionNameSnapshot: row.positionNameSnapshot || null,
     standardVersionIdSnapshot: row.standardVersionIdSnapshot || null, workDate: dateText(row.workDate),
@@ -57,8 +75,15 @@ function mapReview(row: any): DailyReviewRecord {
 }
 
 function generatedData(row: GeneratedTaskInput) {
+  const id = `task-${randomUUID()}`;
   return {
-    id: `task-${randomUUID()}`, templateId: row.templateId, employeeId: row.employeeId, employeeName: row.employeeName,
+    id,
+    templateId: row.templateId,
+    sourceKey: row.templateId
+      ? `template:${row.templateId}:${row.employeeId}:${row.workDate}`
+      : `manual:${id}`,
+    employeeId: row.employeeId,
+    employeeName: row.employeeName,
     departmentIdSnapshot: row.departmentIdSnapshot, departmentNameSnapshot: row.departmentNameSnapshot,
     positionIdSnapshot: row.positionIdSnapshot, positionNameSnapshot: row.positionNameSnapshot,
     standardVersionIdSnapshot: row.standardVersionIdSnapshot, workDate: new Date(`${row.workDate}T00:00:00Z`),
@@ -70,6 +95,7 @@ function generatedData(row: GeneratedTaskInput) {
 
 export function createPrismaEnterpriseTaskRepository(prisma: Client): EnterpriseTaskRepository {
   return {
+    ...createPrismaWorkbenchRepository(prisma),
     async listTemplates(positionId) {
       const rows = await prisma.taskTemplate.findMany({ where: positionId ? { positionId } : {}, orderBy: [{ positionId: 'asc' }, { createdAt: 'asc' }] });
       return rows.map(mapTemplate);
@@ -110,17 +136,75 @@ export function createPrismaEnterpriseTaskRepository(prisma: Client): Enterprise
         departmentName: departmentNames.get(user.departmentId) || undefined,
       }));
     },
-    async createGeneratedTasks(inputs) {
+    async createGeneratedTasks(inputs, options) {
       if (!inputs.length) return 0;
-      const result = await prisma.employeeTask.createMany({ data: inputs.map(generatedData), skipDuplicates: true });
-      return result.count;
+      if (inputs.length > MAX_GENERATED_TASK_CANDIDATES) throw new Error('GENERATED_TASK_CANDIDATE_LIMIT_EXCEEDED');
+      const batches: ReturnType<typeof generatedData>[][] = [];
+      for (let index = 0; index < inputs.length; index += 250) {
+        if (options?.signal?.aborted) throw options.signal.reason;
+        batches.push(inputs.slice(index, index + 250).map(generatedData));
+      }
+      if (options?.signal?.aborted) throw options.signal.reason;
+      return prisma.$transaction(async (tx: any) => {
+        if (options?.lease) {
+          if (typeof tx.$queryRawUnsafe !== 'function') throw new Error('SCHEDULER_LEASE_GUARD_UNAVAILABLE');
+          const rows = await tx.$queryRawUnsafe(
+            'SELECT `leaseKey` FROM `workbench_scheduler_leases` WHERE `leaseKey` = ? AND `ownerToken` = ? AND `leaseEpoch` = ? AND `expiresAt` > CURRENT_TIMESTAMP(3) FOR UPDATE',
+            options.lease.leaseKey, options.lease.ownerToken, options.lease.leaseEpoch,
+          );
+          if (!Array.isArray(rows) || !rows.length) throw new Error('SCHEDULER_LEASE_LOST');
+          const extended = await tx.$executeRawUnsafe(
+            'UPDATE `workbench_scheduler_leases` SET `expiresAt` = DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL ? MICROSECOND), `updatedAt` = CURRENT_TIMESTAMP(3) WHERE `leaseKey` = ? AND `ownerToken` = ? AND `leaseEpoch` = ? AND `expiresAt` > CURRENT_TIMESTAMP(3)',
+            GENERATION_LEASE_DEADLINE_MS * 1_000,
+            options.lease.leaseKey,
+            options.lease.ownerToken,
+            options.lease.leaseEpoch,
+          );
+          if (Number(extended) !== 1) throw new Error('SCHEDULER_LEASE_LOST');
+        }
+        let created = 0;
+        for (const batch of batches) {
+          if (options?.signal?.aborted) throw options.signal.reason;
+          const result = await tx.employeeTask.createMany({ data: batch, skipDuplicates: true });
+          created += result.count;
+          if (result.count > 0) {
+            const inserted = await tx.employeeTask.findMany({
+              where: { id: { in: batch.map((row) => row.id) } },
+              select: { id: true },
+            });
+            if (inserted.length) {
+              await tx.taskActivity.createMany({
+                data: inserted.map((row: any) => ({
+                  id: `task-activity-${randomUUID()}`,
+                  taskId: row.id,
+                  action: 'CREATE',
+                  actorId: null,
+                  actorName: null,
+                  fromStatus: null,
+                  toStatus: 'PENDING',
+                  comment: null,
+                  metadata: { source: 'DAILY_GENERATION' },
+                })),
+              });
+            }
+          }
+          if (options?.signal?.aborted) throw options.signal.reason;
+        }
+        return created;
+      }, {
+        isolationLevel: 'Serializable',
+        maxWait: GENERATION_TRANSACTION_MAX_WAIT_MS,
+        timeout: GENERATION_TRANSACTION_TIMEOUT_MS,
+      });
     },
     async listTasks(filter) {
       const where: any = {};
+      const statuses = filter.status?.split(',').map((item) => item.trim()).filter(Boolean);
       if (filter.employeeId) where.employeeId = filter.employeeId;
       if (filter.departmentIds) where.departmentIdSnapshot = { in: filter.departmentIds };
       if (filter.date) where.workDate = new Date(`${filter.date}T00:00:00Z`);
-      if (filter.status) where.status = filter.status;
+      if (statuses?.length === 1) where.status = statuses[0];
+      if (statuses && statuses.length > 1) where.status = { in: statuses };
       const [rows, total] = await Promise.all([
         prisma.employeeTask.findMany({ where, include: { evidence: { orderBy: { createdAt: 'asc' } } }, orderBy: [{ workDate: 'desc' }, { dueAt: 'asc' }, { createdAt: 'asc' }], skip: (filter.page - 1) * filter.pageSize, take: filter.pageSize }),
         prisma.employeeTask.count({ where }),
@@ -172,8 +256,24 @@ export function createPrismaEnterpriseTaskRepository(prisma: Client): Enterprise
       return row ? mapTask(row) : null;
     },
     async createOneOffTask(input) {
-      const row = await prisma.employeeTask.create({ data: { ...generatedData(input), templateId: null, assignedById: input.assignedById, assignedByName: input.assignedByName }, include: { evidence: true } });
-      return mapTask(row);
+      return prisma.$transaction(async (tx: any) => {
+        const row = await tx.employeeTask.create({
+          data: {
+            ...generatedData(input), templateId: null,
+            assignedById: input.assignedById, assignedByName: input.assignedByName,
+          },
+          include: { evidence: true },
+        });
+        await tx.taskActivity.create({
+          data: {
+            id: `task-activity-${randomUUID()}`, taskId: row.id, action: 'CREATE',
+            actorId: input.assignedById, actorName: input.assignedByName,
+            fromStatus: null, toStatus: 'PENDING', comment: null,
+            metadata: { source: 'MANUAL_ASSIGNMENT' },
+          },
+        });
+        return mapTask(row);
+      }, { isolationLevel: 'Serializable' });
     },
     async upsertDailyReview(input) {
       const data = {

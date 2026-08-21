@@ -20,7 +20,7 @@ export interface NotificationItem {
 }
 
 export interface NotificationRuleView {
-  eventType: 'LEAD_WORKFLOW' | 'CUSTOMER_TODO_WORKFLOW';
+  eventType: 'LEAD_WORKFLOW' | 'CUSTOMER_TODO_WORKFLOW' | 'OKR_WORKFLOW' | 'WORKBENCH_WORKFLOW';
   label: string;
   description: string;
   enabled: boolean;

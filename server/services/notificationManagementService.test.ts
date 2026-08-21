@@ -24,7 +24,14 @@ assert.equal(denied.code, 403);
 
 const initial = await service.listRules(admin);
 assert.equal(initial.code, 0);
-assert.equal((initial.data as any[])?.length, 3);
+assert.equal((initial.data as any[])?.length, 4);
+const workbenchRule = (initial.data as any[])?.find((rule) => rule.eventType === 'WORKBENCH_WORKFLOW');
+assert.deepEqual(workbenchRule, {
+  eventType: 'WORKBENCH_WORKFLOW', label: '员工工作台',
+  description: '任务生命周期、临期、逾期与调度失败提醒', enabled: true,
+  channels: [], config: { dueSoonMinutes: 60, schedulerFailureThreshold: 3 },
+  updatedAt: undefined, updatedByName: undefined,
+});
 const okrRule = (initial.data as any[])?.find((rule) => rule.eventType === 'OKR_WORKFLOW');
 assert.deepEqual(okrRule, {
   eventType: 'OKR_WORKFLOW',
@@ -56,5 +63,15 @@ const updatedOkr = await service.updateRule('OKR_WORKFLOW', {
 assert.equal(updatedOkr.code, 0);
 assert.equal((updatedOkr.data as any)?.enabled, false);
 assert.deepEqual((updatedOkr.data as any)?.config, { checkInReminderMinutes: 720, riskEscalationMinutes: 2880 });
+
+const updatedWorkbench = await service.updateRule('WORKBENCH_WORKFLOW', {
+  enabled: true, channels: ['FEISHU'],
+  config: { dueSoonMinutes: 999999, schedulerFailureThreshold: 0 },
+}, admin);
+assert.equal(updatedWorkbench.code, 0);
+assert.deepEqual((updatedWorkbench.data as any)?.channels, []);
+assert.deepEqual((updatedWorkbench.data as any)?.config, {
+  dueSoonMinutes: 10080, schedulerFailureThreshold: 1,
+});
 
 console.log('notification management service tests passed');

@@ -15,6 +15,7 @@ for (const label of ['朋友圈', '短视频', '图文', '适用平台', '图片
 }
 assert.match(page, /status: ["']APPROVED["']/, '发布任务只能加载审核通过的内容');
 assert.match(page, /expandMarketingAccountSelection/, '发布任务应合并账号组和补充账号');
+assert.match(page, /filterSupplementalMarketingAccounts/, '补充账号候选应排除已选账号组内账号');
 assert.match(page, /marketingApi\.createPublishPlan/, '发布计划应由内容运营 API 创建');
 assert.match(page, /<TablePagination/, '营销内容列表必须复用系统统一分页');
 assert.match(app, /ROUTES\.MARKETING/, '内容运营必须注册独立路由');

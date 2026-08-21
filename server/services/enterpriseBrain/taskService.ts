@@ -2,11 +2,18 @@ import { failure, success } from '../../api/response';
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../../src/shared/utils/permissions';
-import type { EnterpriseTaskRepository, GeneratedTaskInput } from './taskRepository';
+import {
+  MAX_GENERATED_TASK_CANDIDATES,
+  type EnterpriseTaskRepository,
+  type GeneratedTaskInput,
+  type GeneratedTaskWriteOptions,
+} from './taskRepository';
+import { createWorkbenchCommandService, type WorkbenchCommandService } from '../workbench/workbenchCommandService';
 
 type Dependencies = {
   repository: EnterpriseTaskRepository;
   now?: () => Date;
+  commandService?: WorkbenchCommandService;
   summarizeReview?: (input: {
     employeeName: string;
     workDate: string;
@@ -32,6 +39,10 @@ function dateAt(date: string, time = '00:00'): Date {
   return new Date(`${date}T${/^\d{2}:\d{2}$/.test(time) ? time : '00:00'}:00+08:00`);
 }
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('OPERATION_ABORTED');
+}
+
 const validTime = (value: unknown): string | null => {
   const time = String(value || '');
   if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) return null;
@@ -40,6 +51,7 @@ const validTime = (value: unknown): string | null => {
 
 export function createEnterpriseTaskService(deps: Dependencies) {
   const clock = deps.now || (() => new Date());
+  const commandService = deps.commandService || createWorkbenchCommandService({ repository: deps.repository, now: clock });
   return {
     async listTemplates(raw: any, actor: AuthenticatedUser) {
       if (!hasPermission(actor, PERMISSION_KEYS.STANDARD_MAINTAIN) && !hasPermission(actor, PERMISSION_KEYS.TASK_ASSIGN)) {
@@ -111,38 +123,50 @@ export function createEnterpriseTaskService(deps: Dependencies) {
       });
       return success(task);
     },
-    async generateDailyTasks(rawDate: string, actor: AuthenticatedUser) {
+    async generateDailyTasks(rawDate: string, actor: AuthenticatedUser, options: GeneratedTaskWriteOptions = {}) {
+      throwIfAborted(options.signal);
       if (!hasPermission(actor, PERMISSION_KEYS.TASK_ASSIGN, 'write')) return failure<never>('无权生成员工任务', 403);
       const date = validDate(rawDate);
       if (!date) return failure<never>('工作日期格式不正确', 400);
       const instant = dateAt(date);
       const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+      throwIfAborted(options.signal);
       const templates = (await deps.repository.listActiveTemplates(instant)).filter((item) => (
         item.scheduleType === 'DAILY' && item.weekdays.includes(weekday)
       ));
+      throwIfAborted(options.signal);
       const departmentIds = isSuperAdmin(actor) ? undefined : actor.departmentId ? await deps.repository.listDepartmentTree(actor.departmentId) : [];
+      throwIfAborted(options.signal);
       if (departmentIds && !departmentIds.length) return failure<never>('当前账号未绑定可管理部门', 409);
       const employees = await deps.repository.listActiveEmployees(Array.from(new Set(templates.map((item) => item.positionId))), departmentIds);
-      const rows: GeneratedTaskInput[] = templates.flatMap((template) => employees
-        .filter((employee) => employee.positionId === template.positionId)
-        .map((employee) => ({
-          templateId: template.id,
-          employeeId: employee.id,
-          employeeName: employee.name,
-          departmentIdSnapshot: employee.departmentId || null,
-          departmentNameSnapshot: employee.departmentName || null,
-          positionIdSnapshot: employee.positionId || null,
-          positionNameSnapshot: employee.positionName || null,
-          standardVersionIdSnapshot: template.standardVersionId,
-          workDate: date,
-          title: template.name,
-          description: template.description,
-          targetValue: template.targetValue,
-          unit: template.unit,
-          evidenceRequired: template.evidenceRequired,
-          dueAt: template.dueTime ? dateAt(date, template.dueTime).toISOString() : null,
-        })));
-      const createdCount = await deps.repository.createGeneratedTasks(rows);
+      throwIfAborted(options.signal);
+      const rows: GeneratedTaskInput[] = [];
+      for (const template of templates) {
+        for (const employee of employees) {
+          if (employee.positionId !== template.positionId) continue;
+          if (rows.length >= MAX_GENERATED_TASK_CANDIDATES) throw new Error('GENERATED_TASK_CANDIDATE_LIMIT_EXCEEDED');
+          if (rows.length % 250 === 0) throwIfAborted(options.signal);
+          rows.push({
+            templateId: template.id,
+            employeeId: employee.id,
+            employeeName: employee.name,
+            departmentIdSnapshot: employee.departmentId || null,
+            departmentNameSnapshot: employee.departmentName || null,
+            positionIdSnapshot: employee.positionId || null,
+            positionNameSnapshot: employee.positionName || null,
+            standardVersionIdSnapshot: template.standardVersionId,
+            workDate: date,
+            title: template.name,
+            description: template.description,
+            targetValue: template.targetValue,
+            unit: template.unit,
+            evidenceRequired: template.evidenceRequired,
+            dueAt: template.dueTime ? dateAt(date, template.dueTime).toISOString() : null,
+          });
+        }
+      }
+      throwIfAborted(options.signal);
+      const createdCount = await deps.repository.createGeneratedTasks(rows, options);
       return success({ date, candidateCount: rows.length, createdCount, skippedCount: rows.length - createdCount });
     },
 
@@ -167,36 +191,17 @@ export function createEnterpriseTaskService(deps: Dependencies) {
     },
 
     async completeTask(taskId: string, raw: any, actor: AuthenticatedUser) {
-      if (!hasPermission(actor, PERMISSION_KEYS.TASK_SELF, 'write')) return failure<never>('无权完成本人任务', 403);
-      const task = await deps.repository.findTask(taskId);
-      if (!task || task.employeeId !== actor.id) return failure<never>('任务不存在或不属于当前员工', 404);
-      const result = String(raw?.result || '').trim();
-      const actualValue = raw?.actualValue === null || raw?.actualValue === undefined || raw?.actualValue === '' ? null : Number(raw.actualValue);
-      const evidence = Array.isArray(raw?.evidence) ? raw.evidence.map((item: any) => ({
-        type: String(item?.type || 'TEXT').slice(0, 32),
-        referenceId: String(item?.referenceId || '').trim().slice(0, 160) || undefined,
-        content: String(item?.content || '').trim().slice(0, 10000) || undefined,
-      })).filter((item: any) => item.referenceId || item.content) : [];
-      if (!result || (task.targetValue !== null && (actualValue === null || !Number.isFinite(actualValue)))) return failure<never>('请填写完成结果和实际值', 400);
-      if (task.evidenceRequired && evidence.length === 0) return failure<never>('该任务必须提交证据', 400);
-      if (['MARKETING_PUBLISH', 'ASSET_MATRIX_PUBLISH'].includes(task.sourceType || '') && !evidence.some((item: any) => ['PUBLISH_URL', 'SCREENSHOT_URL'].includes(item.type) && /^https?:\/\//i.test(item.content || ''))) {
-        return failure<never>('发布任务必须提交有效的发布链接或截图链接', 400);
-      }
-      const completed = await deps.repository.completeTaskAtomic({ taskId, employeeId: actor.id, actualValue, result, evidence, now: clock() });
-      return completed ? success(completed) : failure<never>('任务状态已变化，请刷新后重试', 409);
+      return commandService.completeTask(taskId, raw || {}, actor);
     },
 
     async confirmTask(taskId: string, raw: any, actor: AuthenticatedUser) {
-      if (!hasPermission(actor, PERMISSION_KEYS.TASK_CONFIRM, 'write')) return failure<never>('无权确认团队任务', 403);
-      const task = await deps.repository.findTask(taskId);
-      if (!task || !actor.departmentId) return failure<never>('任务不存在', 404);
-      const allowedDepartments = await deps.repository.listDepartmentTree(actor.departmentId);
-      if (!allowedDepartments.includes(task.departmentIdSnapshot || '')) return failure<never>('任务不在授权团队范围内', 403);
-      const action = raw?.action === 'RETURN' ? 'RETURN' : 'CONFIRM';
-      const reason = String(raw?.reason || '').trim();
-      if (action === 'RETURN' && !reason) return failure<never>('退回任务必须填写原因', 400);
-      const result = await deps.repository.confirmTaskAtomic({ taskId, actorId: actor.id, actorName: actor.name, action, reason, now: clock() });
-      return result ? success(result) : failure<never>('任务状态已变化，请刷新后重试', 409);
+      if (raw?.action === 'RETURN') {
+        return commandService.returnTask(taskId, { reason: String(raw?.reason || '') }, actor);
+      }
+      return commandService.confirmTask(taskId, {
+        qualityScore: raw?.qualityScore,
+        comment: raw?.comment,
+      }, actor);
     },
 
     async submitReview(raw: any, actor: AuthenticatedUser) {

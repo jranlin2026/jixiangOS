@@ -674,6 +674,7 @@ model NotificationActivityProjection {
   activityKey          String   @id @db.VarChar(191)
   currentNotificationId String  @db.VarChar(64)
   versionAt            DateTime
+  versionSequence      BigInt   @default(0)
   stage                Int
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
@@ -976,6 +977,12 @@ model TaskTemplate {
 model EmployeeTask {
   id                        String    @id @db.VarChar(64)
   templateId                String?   @db.VarChar(64)
+  sourceKey                 String?   @unique @db.VarChar(180)
+  taskType                  String    @default("ACTION") @db.VarChar(32)
+  priority                  String    @default("NORMAL") @db.VarChar(16)
+  businessModule            String    @default("GENERAL") @db.VarChar(40)
+  sourceRoute               String?   @db.VarChar(500)
+  sourceLabel               String?   @db.VarChar(120)
   employeeId                String    @db.VarChar(64)
   employeeName              String    @db.VarChar(100)
   departmentIdSnapshot      String?   @db.VarChar(64)
@@ -995,19 +1002,31 @@ model EmployeeTask {
   dueAt                     DateTime?
   assignedById              String?   @db.VarChar(64)
   assignedByName            String?   @db.VarChar(100)
+  startedAt                 DateTime?
   completedAt               DateTime?
   confirmedAt               DateTime?
   confirmedById             String?   @db.VarChar(64)
   confirmedByName           String?   @db.VarChar(100)
   returnedReason            String?   @db.VarChar(500)
+  canceledAt                DateTime?
+  canceledById              String?   @db.VarChar(64)
+  canceledReason            String?   @db.VarChar(500)
+  collaboratorIds           Json?
+  estimatedMinutes          Int?
+  qualityScore              Int?
+  qualityComment            String?   @db.VarChar(500)
+  remindedAt                DateTime?
+  lastOverdueNotifiedAt     DateTime?
   sourceType                String?   @db.VarChar(64)
   sourceId                  String?   @db.VarChar(80)
   sourceItemId              String?   @db.VarChar(80)
+  sourceVersion             String?   @db.VarChar(80)
   createdAt                 DateTime  @default(now())
   updatedAt                 DateTime  @updatedAt
 
   template TaskTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
   evidence TaskEvidence[]
+  activities TaskActivity[]
   okrLinks OkrTaskLink[]
 
   @@unique([templateId, employeeId, workDate], map: "employee_tasks_template_employee_workDate_key")
@@ -1016,6 +1035,65 @@ model EmployeeTask {
   @@index([dueAt, status])
   @@index([sourceType, sourceId, sourceItemId], map: "employee_tasks_source_idx")
   @@map("employee_tasks")
+}
+
+model TaskActivity {
+  id                      String   @id @db.VarChar(64)
+  sequence                BigInt   @unique @default(autoincrement())
+  taskId                  String   @db.VarChar(64)
+  action                  String   @db.VarChar(40)
+  actorId                 String?  @db.VarChar(64)
+  actorName               String?  @db.VarChar(100)
+  fromStatus              String?  @db.VarChar(24)
+  toStatus                String?  @db.VarChar(24)
+  comment                 String?  @db.VarChar(500)
+  metadata                Json?
+  notificationState       String   @default("PENDING") @db.VarChar(24)
+  notificationPublishedAt DateTime?
+  notificationSkipReason  String?  @db.VarChar(100)
+  createdAt               DateTime @default(now())
+
+  task EmployeeTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([notificationState, sequence])
+  @@map("task_activities")
+}
+
+model WorkbenchSchedulerLease {
+  leaseKey   String   @id @db.VarChar(80)
+  leaseEpoch Int      @default(0)
+  ownerToken String?  @db.VarChar(160)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@map("workbench_scheduler_leases")
+}
+
+model WorkbenchSchedulerRun {
+  id             String    @id @db.VarChar(64)
+  leaseKey       String    @db.VarChar(80)
+  ownerToken     String    @db.VarChar(160)
+  leaseEpoch     Int
+  jobType        String    @db.VarChar(40)
+  businessDate   String?   @db.VarChar(10)
+  status         String    @default("RUNNING") @db.VarChar(24)
+  startedAt      DateTime
+  finishedAt     DateTime?
+  successCount   Int       @default(0)
+  skippedCount   Int       @default(0)
+  failedCount    Int       @default(0)
+  failureSummary Json?
+  cursors        Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([jobType, startedAt])
+  @@index([leaseKey, status, leaseEpoch])
+  @@map("workbench_scheduler_runs")
 }
 
 model TaskEvidence {

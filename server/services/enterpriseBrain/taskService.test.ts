@@ -65,6 +65,39 @@ const team = await service.listTeamTasks({ date: '2026-07-29' }, manager);
 assert.equal(team.code, 0);
 assert.equal(team.data?.items.length, 2, '负责人可读取本部门及下级部门任务');
 
+const completed = await service.completeTask(mine.data!.items[0]!.id, {
+  result: '已完成客户跟进',
+  actualValue: 10,
+  evidence: [{ type: 'URL', content: 'https://example.com/follow-up' }],
+}, employee);
+assert.equal(completed.code, 0, '旧完成任务API应继续可用');
+assert.equal(completed.data?.status, 'COMPLETED');
+const confirmed = await service.confirmTask(mine.data!.items[0]!.id, { action: 'CONFIRM' }, manager);
+assert.equal(confirmed.code, 0, '旧确认任务API应继续可用');
+assert.equal(confirmed.data?.status, 'CONFIRMED');
+
+const returnedTask = await service.assignOneOff({
+  employeeId: employee.id,
+  workDate: '2026-07-29',
+  title: '需要修订的任务',
+}, manager);
+assert.equal(returnedTask.code, 0);
+assert.equal((await service.completeTask(returnedTask.data!.id, { result: '已提交', evidence: [] }, employee)).code, 0);
+assert.equal((await service.confirmTask(returnedTask.data!.id, { action: 'RETURN', reason: '请补充说明' }, manager)).code, 0);
+const pendingTask = await service.assignOneOff({
+  employeeId: employee.id,
+  workDate: '2026-07-29',
+  title: '尚待处理的任务',
+}, manager);
+assert.equal(pendingTask.code, 0);
+const pendingOrReturned = await service.listMyTasks({ date: '2026-07-29', status: 'PENDING,RETURNED' }, employee);
+assert.equal(pendingOrReturned.code, 0);
+assert.deepEqual(
+  pendingOrReturned.data?.items.map((item) => item.status).sort(),
+  ['PENDING', 'RETURNED'],
+  '工作台的待处理筛选必须由 API 同时返回待处理和已退回任务',
+);
+
 const invalidTime = await service.saveTemplate({ positionId: 'pos-sales-consultant', name: '非法时间模板', weekdays: [1], dueTime: '99:99' }, manager);
 assert.equal(invalidTime.code, 400, '模板截止时间必须是合法24小时制时间');
 const childManager = { ...manager, id: 'manager-child', departmentId: 'dept-sales-one' };
@@ -74,5 +107,64 @@ assert.equal(crossDepartmentTemplate.code, 403, '下级部门负责人不得覆�
 const review = await service.submitReview({ workDate: '2026-07-29', completedSummary: '完成客户回访' }, employee);
 assert.equal(review.code, 0);
 assert.match(review.data?.aiSummary || '', /负责人验证后再更新/, '复盘应生成建议但不得直接修改岗位标准');
+
+const abortController = new AbortController();
+let abortedMutationCalls = 0;
+const abortRepository = {
+  ...createMemoryEnterpriseTaskRepository({
+    departments: [{ id: 'dept-sales', parentId: null, name: '销售部' }],
+    employees: [employee],
+    positions: [{ id: 'pos-sales-consultant', departmentId: 'dept-sales', isActive: true }],
+    templates: [{
+      id: 'template-abort', positionId: 'pos-sales-consultant', standardVersionId: null,
+      name: '终止测试', description: null, targetValue: null, unit: null,
+      scheduleType: 'DAILY', weekdays: [2], dueTime: null, evidenceRequired: false,
+      isActive: true, effectiveAt: null, expiresAt: null,
+    }],
+  }),
+};
+const originalListActiveTemplates = abortRepository.listActiveTemplates.bind(abortRepository);
+abortRepository.listActiveTemplates = async (date) => {
+  const rows = await originalListActiveTemplates(date);
+  abortController.abort(new Error('SCHEDULER_LEASE_LOST'));
+  return rows;
+};
+abortRepository.createGeneratedTasks = async () => { abortedMutationCalls += 1; return 1; };
+const abortService = createEnterpriseTaskService({ repository: abortRepository });
+await assert.rejects(
+  () => abortService.generateDailyTasks('2026-07-28', manager, {
+    signal: abortController.signal,
+    lease: { leaseKey: 'workbench:scheduler', ownerToken: 'worker', leaseEpoch: 1 },
+  }),
+  /SCHEDULER_LEASE_LOST/,
+);
+assert.equal(abortedMutationCalls, 0, 'abort must be checked before the next generation mutation');
+
+let overLimitMutationCalls = 0;
+const overLimitRepository = {
+  ...createMemoryEnterpriseTaskRepository(),
+  async listActiveTemplates() {
+    return [{
+      id: 'template-limit', positionId: 'pos-sales-consultant', standardVersionId: null,
+      name: '容量上限', description: null, targetValue: null, unit: null,
+      scheduleType: 'DAILY', weekdays: [2], dueTime: null, evidenceRequired: false,
+      isActive: true, effectiveAt: null, expiresAt: null,
+    }];
+  },
+  async listDepartmentTree() { return ['dept-sales']; },
+  async listActiveEmployees() {
+    return Array.from({ length: 5_001 }, (_, index) => ({
+      id: `limit-${index}`, name: `员工${index}`, departmentId: 'dept-sales',
+      positionId: 'pos-sales-consultant', isActive: true, employmentStatus: 'active',
+    }));
+  },
+  async createGeneratedTasks() { overLimitMutationCalls += 1; return 5_001; },
+};
+const overLimitService = createEnterpriseTaskService({ repository: overLimitRepository });
+await assert.rejects(
+  () => overLimitService.generateDailyTasks('2026-07-28', manager),
+  /GENERATED_TASK_CANDIDATE_LIMIT_EXCEEDED/,
+);
+assert.equal(overLimitMutationCalls, 0, 'candidate overflow must fail before repository mutation');
 
 console.log('enterprise task generation tests passed');
