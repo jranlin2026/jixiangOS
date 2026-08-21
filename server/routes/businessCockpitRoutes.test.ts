@@ -32,6 +32,8 @@ assert.throws(
       async get() {
         throw new Error('database offline');
       },
+      async getTargetConfig() { return { code: 0, data: null, message: '成功' }; },
+      async saveTargetConfig() { return { code: 0, data: null, message: '成功' }; },
     },
   }));
   const server = app.listen(0);

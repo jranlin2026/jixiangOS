@@ -965,7 +965,7 @@ app.get('/api/customers', requireCustomerReadAccess, async (req: AuthenticatedRe
   const tagMatch = rawTagMatch === 'any' || rawTagMatch === 'all' || rawTagMatch === 'grouped' ? rawTagMatch : null;
   const withoutTagsRaw = queryParam(req.query.withoutTags);
   const managementFilterRaw = queryParam(req.query.managementFilter);
-  const managementFilter = !managementFilterRaw || ['key_customer', 'risk', 'stale_24h', 'intervention', 'payment_pending'].includes(managementFilterRaw)
+  const managementFilter = !managementFilterRaw || ['key_customer', 'risk', 'stale_24h', 'intervention', 'payment_pending', 'data_incomplete', 'execution_exception', 'business_risk'].includes(managementFilterRaw)
     ? managementFilterRaw || undefined
     : null;
   if (tagIds.length > 20) return res.status(400).json({ code: 400, message: '客户标签最多选择 20 个', data: null });

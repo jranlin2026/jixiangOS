@@ -281,6 +281,7 @@ export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerT
     )`;
     const actionOverdue = Prisma.sql`NULLIF(${nextActionDueAt}, '') IS NOT NULL
       AND STR_TO_DATE(REPLACE(SUBSTRING(${nextActionDueAt}, 1, 19), 'T', ' '), '%Y-%m-%d %H:%i:%s') < UTC_TIMESTAMP()`;
+    const stageOpen = Prisma.sql`COALESCE(${jsonText('$.opportunityStageCode')}, 'not_set') NOT IN ('won', 'lost')`;
     if (filters.managementFilter === 'key_customer') {
       conditions.push(Prisma.sql`${jsonText('$.customerLevel')} IN ('L4', 'L5')`);
     } else if (filters.managementFilter === 'payment_pending') {
@@ -295,6 +296,19 @@ export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerT
       )`);
     } else if (filters.managementFilter === 'risk') {
       conditions.push(Prisma.sql`(NULLIF(${nextActionTitle}, '') IS NULL OR ${actionOverdue} OR NOT (${hasRecentFollow(48)}))`);
+    } else if (filters.managementFilter === 'data_incomplete') {
+      conditions.push(Prisma.sql`(
+        NULLIF(TRIM(${jsonText('$.company')}), '') IS NULL
+        OR NULLIF(TRIM(${jsonText('$.phone')}), '') IS NULL
+        OR (NULLIF(TRIM(${jsonText('$.intendedProduct')}), '') IS NULL AND NULLIF(TRIM(${jsonText('$.productLevel')}), '') IS NULL)
+      )`);
+    } else if (filters.managementFilter === 'execution_exception') {
+      conditions.push(Prisma.sql`${stageOpen} AND (NULLIF(${nextActionTitle}, '') IS NULL OR ${actionOverdue})`);
+    } else if (filters.managementFilter === 'business_risk') {
+      conditions.push(Prisma.sql`${stageOpen} AND (
+        (${jsonText('$.opportunityStageCode')} = 'payment_pending' AND NOT (${hasRecentFollow(24)}))
+        OR (${jsonText('$.customerLevel')} IN ('L4', 'L5') AND NOT (${hasRecentFollow(48)}))
+      )`);
     }
   }
   if (filters.sourceType) {

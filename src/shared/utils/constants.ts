@@ -330,6 +330,7 @@ export const STORAGE_KEYS = {
   ECOMMERCE_SETTLEMENT_RECORDS: `${STORAGE_PREFIX}ecommerce_settlement_records`,
   ECOMMERCE_SETTLEMENT_CONFIG: `${STORAGE_PREFIX}ecommerce_settlement_config`,
   MONTHLY_COMMISSION_TIER_CONFIGS: `${STORAGE_PREFIX}monthly_commission_tier_configs`,
+  MANAGEMENT_TARGETS: `${STORAGE_PREFIX}management_targets`,
   TAGS: `${STORAGE_PREFIX}tags`,
   INITIALIZED: `${STORAGE_PREFIX}initialized`,
 } as const;

@@ -1149,6 +1149,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 />
                 {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
                 {renderInfoRow('客户等级', 'customerLevel', detailActions.actions.editProfile)}
+                {renderInfoRow('意向产品', 'intendedProduct', detailActions.actions.editProfile)}
                 {renderInfoRow('行业', 'industry', detailActions.actions.editProfile)}
                 {renderInfoRow('城市', 'city', detailActions.actions.editProfile)}
                 {renderRemarkRow()}

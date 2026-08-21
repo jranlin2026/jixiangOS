@@ -515,8 +515,7 @@ const Customers: React.FC = () => {
   );
 
   const handleViewDetail = (customer: Customer) => {
-    setSelectedCustomer(customer);
-    setDetailOpen(true);
+    navigate(`${ROUTES.CUSTOMER_DETAIL.replace(':id', customer.id)}?view=profile`);
   };
 
   useEffect(() => {

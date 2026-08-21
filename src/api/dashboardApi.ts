@@ -12,6 +12,7 @@ import type {
   HomeQuickAction,
   HomeTaskItem,
   HomeWorkbenchData,
+  ManagementTargetConfig,
 } from '../types/dashboard';
 import type { ApiResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
@@ -235,10 +236,14 @@ async function fetchBusinessCockpit(range?: DashboardDateRange): Promise<ApiResp
   const query = new URLSearchParams({ preset: range?.preset || 'month' });
   if (range?.startDate) query.set('startDate', range.startDate);
   if (range?.endDate) query.set('endDate', range.endDate);
+  if (range?.anchorDate) query.set('anchorDate', range.anchorDate);
+  if (range?.departmentId) query.set('departmentId', range.departmentId);
   return backendRequest<BusinessCockpitData>(`/dashboard/business-cockpit?${query.toString()}`);
 }
 
 export const dashboardApi = {
   fetchHomeWorkbench,
   fetchBusinessCockpit,
+  fetchManagementTargets: (month: string): Promise<ApiResponse<ManagementTargetConfig>> => backendRequest(`/dashboard/management-targets/${encodeURIComponent(month)}`),
+  saveManagementTargets: (month: string, input: ManagementTargetConfig): Promise<ApiResponse<ManagementTargetConfig>> => backendRequest(`/dashboard/management-targets/${encodeURIComponent(month)}`, { method: 'PUT', body: JSON.stringify(input) }),
 };

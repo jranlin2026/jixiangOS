@@ -119,6 +119,10 @@ function fakePrisma(
   const now = new Date('2026-07-01T00:00:00.000Z');
   return {
     businessRecord: {
+      findUnique: async ({ where }: any = {}) => records.find((item) => (
+        item.domain === where?.domain_recordId?.domain
+        && item.recordId === where?.domain_recordId?.recordId
+      )) || null,
       findMany: async ({ where }: any = {}) => records.filter((item) => (
         !where?.domain
         || item.domain === where.domain
@@ -403,7 +407,7 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
     activeOpportunityCount: 1, opportunityAmount: 50000,
     todayDueTodoCount: 2, todayCompletedTodoCount: 2, todayFollowUpCount: 1, overdueCustomerCount: 1,
     wonCount: 1, lostCount: 1, conversionRate: 50,
-    riskCustomerCount: 1, missingNextActionCount: 0,
+    riskCustomerCount: 0, missingNextActionCount: 0,
     needsManagerInterventionCount: 1,
     stageDistribution: [
       { stageCode: 'proposal', stageLabel: '方案报价', customerCount: 1, opportunityAmount: 50000 },

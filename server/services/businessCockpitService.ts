@@ -1,5 +1,5 @@
-import type { PrismaClient } from '@prisma/client';
-import { success, type ApiResponse } from '../api/response';
+import type { Prisma, PrismaClient } from '@prisma/client';
+import { failure, success, type ApiResponse } from '../api/response';
 import {
   LIFECYCLE_STATUS_CODES,
   ROUTES,
@@ -18,6 +18,7 @@ import {
 } from '../../src/shared/utils/dataVisibility';
 import {
   getUserRole,
+  hasPermission,
   isSuperAdmin,
   PERMISSION_KEYS,
   canReceiveLead,
@@ -38,6 +39,7 @@ import type {
   BusinessCockpitData,
   CockpitTrendPoint,
   DashboardDateRange,
+  ManagementTargetConfig,
 } from '../../src/types/dashboard';
 import {
   attributeFinanceTransactionsToOrders,
@@ -367,12 +369,15 @@ function resolveDateRange(
   range: DashboardDateRange,
   now: Date,
 ): { startAt: string; endAt: string; label: string } {
-  const today = shanghaiDateKey(now) || now.toISOString().slice(0, 10);
+  const anchorNow = range.anchorDate
+    ? new Date(`${range.anchorDate}T23:59:59.999+08:00`)
+    : now;
+  const today = shanghaiDateKey(anchorNow) || anchorNow.toISOString().slice(0, 10);
   let startDate = today;
   let endDate = today;
   let label = '今日';
   if (range.preset === 'week') {
-    const { year, month, day } = shanghaiDateParts(now);
+    const { year, month, day } = shanghaiDateParts(anchorNow);
     const currentDate = new Date(Date.UTC(year, month - 1, day));
     const weekday = currentDate.getUTCDay() || 7;
     currentDate.setUTCDate(currentDate.getUTCDate() - weekday + 1);
@@ -389,7 +394,7 @@ function resolveDateRange(
   const startAt = new Date(`${startDate}T00:00:00.000+08:00`).toISOString();
   const endAt = range.preset === 'custom'
     ? new Date(`${endDate}T23:59:59.999+08:00`).toISOString()
-    : now.toISOString();
+    : anchorNow.toISOString();
   return { startAt, endAt, label };
 }
 
@@ -459,6 +464,78 @@ export function createBusinessCockpitService(
   prisma: BusinessCockpitPrisma,
   options: { now?: () => Date } = {},
 ) {
+  const getTargetConfig = async (month: string, actor: AuthenticatedUser): Promise<ApiResponse<ManagementTargetConfig | null>> => {
+    if (!/^\d{4}-\d{2}$/.test(month)) return failure('月份格式不正确', 400);
+    const [row, userRows, roleRows, departmentRows] = await Promise.all([
+      prisma.businessRecord.findUnique({ where: { domain_recordId: { domain: STORAGE_KEYS.MANAGEMENT_TARGETS, recordId: month } } }),
+      prisma.user.findMany(),
+      prisma.role.findMany({ where: { isActive: true } }),
+      prisma.department.findMany({ where: { isActive: true } }),
+    ]);
+    const users = userRows.map(mapPrismaUser);
+    const roles = roleRows.map(mapPrismaRole);
+    const departments = departmentRows.map(mapPrismaDepartment);
+    const stored = parseRecord<ManagementTargetConfig>(row?.data) || null;
+    const storedSales = new Map((stored?.salesTargets || []).map((item) => [item.userId, finiteMoney(item.amount)]));
+    const storedDepartments = new Map((stored?.departmentTargets || []).map((item) => [item.departmentId, finiteMoney(item.amount)]));
+    const departmentById = new Map(departments.map((item) => [item.id, item.name]));
+    const salesTargets = users.filter((user) => (
+      user.isActive
+      && (user.employmentStatus || 'active') === 'active'
+      && canReceiveLead(user, roles)
+      && Boolean(user.departmentId && departmentById.get(user.departmentId)?.includes('销售'))
+    )).map((user) => ({
+      userId: user.id,
+      userName: user.name,
+      ...(user.departmentId ? { departmentId: user.departmentId, departmentName: departmentById.get(user.departmentId) } : {}),
+      amount: storedSales.get(user.id) || 0,
+    }));
+    const departmentTargets = departments.map((department) => ({
+      departmentId: department.id,
+      departmentName: department.name,
+      amount: storedDepartments.get(department.id) || 0,
+    }));
+    return success({
+      month,
+      companyTargetAmount: stored?.companyTargetAmount == null ? null : finiteMoney(stored.companyTargetAmount),
+      departmentTargets,
+      salesTargets,
+      ...(stored?.updatedAt ? { updatedAt: stored.updatedAt } : {}),
+      ...(stored?.updatedByName ? { updatedByName: stored.updatedByName } : {}),
+    });
+  };
+
+  const saveTargetConfig = async (input: ManagementTargetConfig, actor: AuthenticatedUser): Promise<ApiResponse<ManagementTargetConfig | null>> => {
+    if (!isSuperAdmin(actor) && !hasPermission(actor, PERMISSION_KEYS.OKR_COMPANY_MANAGE, 'write')) {
+      return failure('无权配置公司经营目标', 403);
+    }
+    if (!/^\d{4}-\d{2}$/.test(input.month)) return failure('月份格式不正确', 400);
+    const companyTargetAmount = input.companyTargetAmount == null ? null : finiteMoney(input.companyTargetAmount);
+    if (companyTargetAmount !== null && companyTargetAmount <= 0) return failure('公司目标必须大于 0', 400);
+    const now = new Date().toISOString();
+    const normalized: ManagementTargetConfig = {
+      month: input.month,
+      companyTargetAmount,
+      departmentTargets: (input.departmentTargets || []).filter((item) => item.departmentId).map((item) => ({
+        departmentId: item.departmentId, departmentName: clean(item.departmentName), amount: Math.max(0, finiteMoney(item.amount)),
+      })),
+      salesTargets: (input.salesTargets || []).filter((item) => item.userId).map((item) => ({
+        userId: item.userId, userName: clean(item.userName),
+        ...(item.departmentId ? { departmentId: item.departmentId } : {}),
+        ...(item.departmentName ? { departmentName: clean(item.departmentName) } : {}),
+        amount: Math.max(0, finiteMoney(item.amount)),
+      })),
+      updatedAt: now,
+      updatedByName: actor.name,
+    };
+    await prisma.businessRecord.upsert({
+      where: { domain_recordId: { domain: STORAGE_KEYS.MANAGEMENT_TARGETS, recordId: input.month } },
+      create: { id: `${STORAGE_KEYS.MANAGEMENT_TARGETS}:${input.month}`, domain: STORAGE_KEYS.MANAGEMENT_TARGETS, recordId: input.month, title: `${input.month}经营目标`, data: normalized as unknown as Prisma.InputJsonValue },
+      update: { title: `${input.month}经营目标`, data: normalized as unknown as Prisma.InputJsonValue, recordRevision: { increment: 1 } },
+    });
+    return success(normalized);
+  };
+
   const loadSnapshotSource = async (): Promise<BusinessCockpitSnapshotSource> => {
     const [storedRows, structuredLeadRows, customerTodoRows] = await Promise.all([
       prisma.businessRecord.findMany({
@@ -859,12 +936,16 @@ export function createBusinessCockpitService(
           current.priorityCustomers.push(item);
           if (!item.nextActionTitle) current.missingNextActionCount += 1;
         }
-        if (item.riskLevel !== 'low') current.riskCustomerCount += 1;
-        if (
-          (!['won', 'lost'].includes(item.stageCode) && item.nextActionDueAt && timestamp(item.nextActionDueAt) < now.getTime())
-          || (item.stageCode === 'payment_pending' && (item.contactGapDays === undefined || item.contactGapDays >= 1))
-          || (['L4', 'L5'].includes(item.customerLevel || '') && (item.contactGapDays === undefined || item.contactGapDays >= 2))
-        ) current.needsManagerInterventionCount += 1;
+        const hasBusinessRisk = (
+          item.stageCode === 'payment_pending' && (item.contactGapDays === undefined || item.contactGapDays >= 1)
+        ) || (
+          ['L4', 'L5'].includes(item.customerLevel || '') && (item.contactGapDays === undefined || item.contactGapDays >= 2)
+        );
+        const hasExecutionException = !['won', 'lost'].includes(item.stageCode)
+          && Boolean(item.nextActionDueAt)
+          && timestamp(item.nextActionDueAt) < now.getTime();
+        if (hasBusinessRisk) current.riskCustomerCount += 1;
+        if (hasExecutionException || hasBusinessRisk) current.needsManagerInterventionCount += 1;
         if (
           !['won', 'lost'].includes(item.stageCode)
           && item.nextActionDueAt
@@ -1100,9 +1181,10 @@ export function createBusinessCockpitService(
   const get = async (
     range: DashboardDateRange,
     actor: AuthenticatedUser,
-  ): Promise<ApiResponse<BusinessCockpitData>> => {
+  ): Promise<ApiResponse<BusinessCockpitData | null>> => {
     const now = options.now?.() || new Date();
     const resolvedRange = resolveDateRange(range, now);
+    const targetMonth = (shanghaiDateKey(resolvedRange.endAt) || '').slice(0, 7);
     const managementTargetQuery = typeof (prisma as any).keyResult?.findMany === 'function'
       ? (prisma as any).keyResult.findMany({
         where: {
@@ -1125,11 +1207,14 @@ export function createBusinessCockpitService(
         orderBy: { updatedAt: 'desc' },
       })
       : Promise.resolve([]);
-    const [userRows, roleRows, departmentRows, managementTargetRows] = await Promise.all([
+    const [userRows, roleRows, departmentRows, managementTargetRows, configuredTargetRow] = await Promise.all([
       prisma.user.findMany(),
       prisma.role.findMany({ where: { isActive: true } }),
       prisma.department.findMany(),
       managementTargetQuery,
+      targetMonth
+        ? prisma.businessRecord.findUnique({ where: { domain_recordId: { domain: STORAGE_KEYS.MANAGEMENT_TARGETS, recordId: targetMonth } } })
+        : Promise.resolve(null),
     ]);
     const users = userRows.map(mapPrismaUser);
     const roles = roleRows.map(mapPrismaRole);
@@ -1147,13 +1232,53 @@ export function createBusinessCockpitService(
     const rankingUserIdByName = Object.fromEntries([...uniqueActiveUserByName.entries()]
       .filter((entry): entry is [string, typeof users[number]] => Boolean(entry[1]))
       .map(([name, user]) => [name, user.id]));
-    const scopes = {
+    let scopes = {
       orders: buildDataVisibilityScopeForUser(actor, users, roles, departments, 'orders'),
       recoveryOrders: buildDataVisibilityScopeForUser(actor, users, roles, departments, 'recoveryOrders'),
       leads: buildDataVisibilityScopeForUser(actor, users, roles, departments, 'leads'),
       customers: buildDataVisibilityScopeForUser(actor, users, roles, departments, 'customers'),
       orderApplications: buildDataVisibilityScopeForUser(actor, users, roles, departments, 'orderApplications'),
     };
+    const baseCustomerScope = scopes.customers;
+    const visibleDepartmentIds = new Set(users.filter((user) => (
+      baseCustomerScope.unrestricted || baseCustomerScope.visibleUserIds.includes(user.id)
+    )).map((user) => user.departmentId).filter((id): id is string => Boolean(id)));
+    const availableScopes = [
+      ...(baseCustomerScope.unrestricted ? [{ id: '', name: '全公司' }] : []),
+      ...departments.filter((department) => department.isActive && visibleDepartmentIds.has(department.id)).map((department) => ({ id: department.id, name: department.name })),
+    ];
+    let selectedDepartmentId: string | undefined;
+    if (range.departmentId) {
+      const selected = departments.find((department) => department.id === range.departmentId && department.isActive);
+      if (!selected || (!baseCustomerScope.unrestricted && !visibleDepartmentIds.has(selected.id))) {
+        return failure('无权查看该部门的经营数据', 403);
+      }
+      const departmentIds = new Set<string>([selected.id]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        departments.forEach((department) => {
+          if (department.parentId && departmentIds.has(department.parentId) && !departmentIds.has(department.id)) {
+            departmentIds.add(department.id);
+            changed = true;
+          }
+        });
+      }
+      const selectedUsers = users.filter((user) => Boolean(user.departmentId && departmentIds.has(user.departmentId)));
+      const selectedUserIds = new Set(selectedUsers.map((user) => user.id));
+      const selectedUserNames = new Set(selectedUsers.map((user) => user.name));
+      const narrow = (scope: DataVisibilityScope): DataVisibilityScope => ({
+        ...scope,
+        unrestricted: false,
+        visibleUserIds: users.filter((user) => selectedUserIds.has(user.id) && (scope.unrestricted || scope.visibleUserIds.includes(user.id))).map((user) => user.id),
+        visibleUserNames: users.filter((user) => selectedUserNames.has(user.name) && (scope.unrestricted || scope.visibleUserNames.includes(user.name))).map((user) => user.name),
+      });
+      scopes = {
+        orders: narrow(scopes.orders), recoveryOrders: narrow(scopes.recoveryOrders), leads: narrow(scopes.leads),
+        customers: narrow(scopes.customers), orderApplications: narrow(scopes.orderApplications),
+      };
+      selectedDepartmentId = selected.id;
+    }
     const snapshotQuery = {
       startAt: resolvedRange.startAt,
       endAt: resolvedRange.endAt,
@@ -1212,6 +1337,18 @@ export function createBusinessCockpitService(
         salesTargetByUserId.set(scopeId, targetAmount);
       }
     });
+    const configuredTargets = parseRecord<ManagementTargetConfig>(configuredTargetRow?.data);
+    if (configuredTargets) {
+      if (selectedDepartmentId) {
+        const departmentTarget = configuredTargets.departmentTargets?.find((item) => item.departmentId === selectedDepartmentId)?.amount;
+        companyTargetAmount = departmentTarget && departmentTarget > 0 ? finiteMoney(departmentTarget) : null;
+      } else if (configuredTargets.companyTargetAmount && configuredTargets.companyTargetAmount > 0) {
+        companyTargetAmount = finiteMoney(configuredTargets.companyTargetAmount);
+      }
+      (configuredTargets.salesTargets || []).forEach((item) => {
+        if (item.userId && item.amount > 0) salesTargetByUserId.set(item.userId, finiteMoney(item.amount));
+      });
+    }
     const profileRiskRank = { high: 3, medium: 2, low: 1 } as const;
     const salesBattleProfileMap = new Map<string, BusinessCockpitData['salesBattleProfiles'][number]>();
     snapshot.salesBattleProfiles.forEach((profile) => {
@@ -1376,7 +1513,7 @@ export function createBusinessCockpitService(
         ? null : Math.max(0, roundMoney(companyTargetAmount - completedAmount)),
       completionRate: companyTargetAmount === null
         ? null : roundMoney(completedAmount / companyTargetAmount * 100),
-      targetSource: companyTargetAmount === null ? 'unconfigured' : 'okr',
+      targetSource: companyTargetAmount === null ? 'unconfigured' : configuredTargets ? 'configured' : 'okr',
     };
     const canViewReconciliationEvidence = isSuperAdmin(actor);
     const financeFlowQuery = new URLSearchParams({ tab: 'flow' });
@@ -1434,11 +1571,15 @@ export function createBusinessCockpitService(
       },
     ];
     const riskTasks = riskCandidates.filter((item) => item.count > 0 || Number(item.amount || 0) > 0);
-    const scopeLabel = resolveBusinessCockpitScopeLabel(scopes);
+    const scopeLabel = selectedDepartmentId
+      ? departments.find((department) => department.id === selectedDepartmentId)?.name || resolveBusinessCockpitScopeLabel(scopes)
+      : resolveBusinessCockpitScopeLabel(scopes);
     const newLeadCount = snapshot.followUpHealth.newLeadCount;
     return success({
       rangeLabel: resolvedRange.label,
       scopeLabel,
+      ...(selectedDepartmentId ? { selectedDepartmentId } : {}),
+      availableScopes,
       updatedAt: now.toISOString(),
       summary: {
         formalReceiptAmount: snapshot.business.formalOrderPaidAmount,
@@ -1519,5 +1660,5 @@ export function createBusinessCockpitService(
     });
   };
 
-  return { get, getSnapshot };
+  return { get, getSnapshot, getTargetConfig, saveTargetConfig };
 }

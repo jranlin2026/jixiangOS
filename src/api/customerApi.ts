@@ -197,6 +197,7 @@ const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = 
   { field: 'customerLevel', label: '客户等级' },
   { field: 'opportunityStageCode', label: '销售阶段' },
   { field: 'opportunityAmount', label: '预计成交金额' },
+  { field: 'intendedProduct', label: '意向产品' },
   { field: 'owner', label: '销售负责人' },
   { field: 'leadInputBy', label: '线索录入人' },
   { field: 'leadContributorName', label: '线索贡献人' },
@@ -573,6 +574,15 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
       if (filters.managementFilter === 'payment_pending') return customer.opportunityStageCode === 'payment_pending';
       const lastFollow = lastFollowAt(customer);
       const overdue = Boolean(customer.nextActionDueAt && new Date(customer.nextActionDueAt).getTime() < now);
+      const closed = customer.opportunityStageCode === 'won' || customer.opportunityStageCode === 'lost';
+      if (filters.managementFilter === 'data_incomplete') return !customer.company?.trim()
+        || !customer.phone?.trim()
+        || !(customer.intendedProduct?.trim() || customer.productLevel);
+      if (filters.managementFilter === 'execution_exception') return !closed && (!customer.nextActionTitle || overdue);
+      if (filters.managementFilter === 'business_risk') return !closed && (
+        (customer.opportunityStageCode === 'payment_pending' && (!lastFollow || now - lastFollow > 24 * 60 * 60 * 1000))
+        || (['L4', 'L5'].includes(customer.customerLevel) && (!lastFollow || now - lastFollow > 48 * 60 * 60 * 1000))
+      );
       if (filters.managementFilter === 'stale_24h') return !lastFollow || now - lastFollow > 24 * 60 * 60 * 1000;
       if (filters.managementFilter === 'intervention') return overdue
         || (customer.opportunityStageCode === 'payment_pending' && (!lastFollow || now - lastFollow > 24 * 60 * 60 * 1000))

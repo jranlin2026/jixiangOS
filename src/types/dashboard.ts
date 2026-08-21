@@ -7,6 +7,17 @@ export interface DashboardDateRange {
   preset: DashboardRangePreset;
   startDate?: string;
   endDate?: string;
+  anchorDate?: string;
+  departmentId?: string;
+}
+
+export interface ManagementTargetConfig {
+  month: string;
+  companyTargetAmount: number | null;
+  departmentTargets: Array<{ departmentId: string; departmentName: string; amount: number }>;
+  salesTargets: Array<{ userId: string; userName: string; departmentId?: string; departmentName?: string; amount: number }>;
+  updatedAt?: Timestamp;
+  updatedByName?: string;
 }
 
 export interface HomeTaskItem {
@@ -179,7 +190,7 @@ export interface CockpitManagementPerformance {
   targetAmount: number | null;
   gapAmount: number | null;
   completionRate: number | null;
-  targetSource: 'okr' | 'unconfigured';
+  targetSource: 'configured' | 'okr' | 'unconfigured';
 }
 
 export interface CockpitLeadSourceItem {
@@ -220,6 +231,8 @@ export interface CockpitFinanceHealth {
 export interface BusinessCockpitData {
   rangeLabel: string;
   scopeLabel: string;
+  selectedDepartmentId?: string;
+  availableScopes: Array<{ id: string; name: string }>;
   updatedAt: Timestamp;
   summary: CockpitSummary;
   comparison: {

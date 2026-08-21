@@ -30,6 +30,14 @@ const statusLabel: Record<EmployeeTask['status'], string> = {
   PENDING: '待执行', IN_PROGRESS: '执行中', COMPLETED: '待验收', CONFIRMED: '已验收', RETURNED: '已退回', CANCELED: '已取消',
 };
 
+const communicationNodeLabel: Record<CustomerCommunicationNodeType, string> = {
+  LEAD_CREATED: '初次建联', WECHAT_ADDED: '添加微信', PHONE_CALL: '销售通话',
+  WECHAT_CHAT: '微信沟通', CHAT_SUMMARY: '沟通纪要', NEED_DISCOVERY: '需求挖掘',
+  DEMO: '方案演示', PROPOSAL: '方案报价', OBJECTION: '异议处理',
+  PAYMENT_PENDING: '待付款', ORDER_CREATED: '订单成交', MANAGER_INTERVENE: '管理介入',
+  FOLLOW_UP: '客户跟进',
+};
+
 function shanghaiDate(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
 }
@@ -162,7 +170,7 @@ const CustomerManagementCommandLayer: React.FC<{
         taskType: 'FOLLOW_UP',
         priority: mode === 'BOSS_FOLLOW_UP' ? 'URGENT' : 'HIGH',
         businessModule: 'CUSTOMER_MANAGEMENT',
-        sourceRoute: `/customers?customerId=${encodeURIComponent(customer.id)}`,
+        sourceRoute: `/customers/${encodeURIComponent(customer.id)}?view=management`,
         sourceLabel: `${config.label}·${customer.name}`,
         sourceType: 'COCKPIT_INTERVENTION',
         sourceId: customer.id,
@@ -229,11 +237,11 @@ const CustomerManagementCommandLayer: React.FC<{
           <Box sx={{ width: 34, height: 34, borderRadius: '50%', border: '1.5px solid #8B5CF6', bgcolor: '#fff', color: '#7C3AED', display: 'grid', placeItems: 'center', position: 'relative', zIndex: 1 }}>
             {record.type === 'manager_intervene' ? <PersonSearchOutlinedIcon fontSize="small" /> : <ForumOutlinedIcon fontSize="small" />}
           </Box>
-          <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: '#7C3AED', fontWeight: 850 }}>{nodeType}</Typography>
+          <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: '#7C3AED', fontWeight: 850 }}>{communicationNodeLabel[nodeType]}</Typography>
           <Typography variant="body2" noWrap title={record.title} sx={{ fontWeight: 850 }}>{record.title || '客户动态'}</Typography>
           <Typography variant="caption" color="text.secondary">{formatDate(record.createdAt, 'MM-dd HH:mm')}</Typography>
         </Box>)}
-        {snapshot.contactGapDays !== null && snapshot.contactGapDays >= 1 && <Box sx={{ minWidth: 150, p: 1.25, border: '1px solid #F6AAA5', borderRadius: 1.5, bgcolor: '#FFF4F2', alignSelf: 'flex-start' }}><Typography variant="caption" sx={{ color: '#C4322B', fontWeight: 900 }}>NO_COMMUNICATION</Typography><Typography variant="body2" sx={{ color: '#C4322B', fontWeight: 900 }}>无沟通 · 空窗 {snapshot.contactGapDays} 天</Typography></Box>}
+        {snapshot.contactGapDays !== null && snapshot.contactGapDays >= 1 && <Box sx={{ minWidth: 150, p: 1.25, border: '1px solid #F6AAA5', borderRadius: 1.5, bgcolor: '#FFF4F2', alignSelf: 'flex-start' }}><Typography variant="caption" sx={{ color: '#C4322B', fontWeight: 900 }}>无沟通</Typography><Typography variant="body2" sx={{ color: '#C4322B', fontWeight: 900 }}>沟通空窗 {snapshot.contactGapDays} 天</Typography></Box>}
         {!activityNodes.length && <Typography variant="body2" color="text.secondary">暂无可展示的真实沟通节点</Typography>}
       </Box>
     </Paper>
@@ -245,7 +253,7 @@ const CustomerManagementCommandLayer: React.FC<{
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(5, minmax(0, 1fr))' }, gap: 1.25, mt: 1.25 }}>
             {[
               ['负责人', customer.owner || '未分配'], ['客户等级', customer.customerLevel || '未设置'],
-              ['意向产品', customer.productLevel || '待确认'], ['预计金额', snapshot.opportunityAmount == null ? '待评估' : formatCurrency(snapshot.opportunityAmount)],
+              ['意向产品', customer.intendedProduct || customer.productLevel || '待确认'], ['预计金额', snapshot.opportunityAmount == null ? '待评估' : formatCurrency(snapshot.opportunityAmount)],
               ['销售阶段', snapshot.stage.label],
             ].map(([label, value]) => <Box key={label}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="body2" sx={{ mt: 0.25, fontWeight: 850 }}>{value}</Typography></Box>)}
           </Box>

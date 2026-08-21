@@ -121,6 +121,8 @@ export interface Customer {
   email?: string;
   /** 最新成交产品分类，由订单同步；客户新增时不手动维护 */
   productLevel?: ProductLevel;
+  /** 当前销售机会的意向产品，与历史成交产品分离。 */
+  intendedProduct?: string;
   customerLevel: CustomerLevel;
   lifecycleStatusCode?: LifecycleStatusCode;
   lifecycleStatusUpdatedAt?: Timestamp;
@@ -230,7 +232,7 @@ export interface CustomerLifecycleConfig {
 
 /** 客户列表排序 */
 export type CustomerListSort = 'created_at' | 'recent_activity' | 'platform_payment';
-export type CustomerManagementFilter = 'key_customer' | 'risk' | 'stale_24h' | 'intervention' | 'payment_pending';
+export type CustomerManagementFilter = 'key_customer' | 'risk' | 'stale_24h' | 'intervention' | 'payment_pending' | 'data_incomplete' | 'execution_exception' | 'business_risk';
 
 /** 客户筛选参数 */
 export interface CustomerFilters {

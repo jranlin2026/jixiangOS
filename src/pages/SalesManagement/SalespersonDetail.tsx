@@ -17,8 +17,16 @@ import {
 } from '../../shared/components/DataTableWorkspace';
 import TablePagination from '../../shared/components/TablePagination';
 import { buildCustomerBattleSnapshot, getOpportunityStage } from '../../shared/utils/customerBattleState';
+import { getCustomerManagementCategory, getCustomerProfileCompleteness } from '../../shared/utils/customerManagementState';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
+
+const managementCategoryLabel = {
+  normal: '正常推进',
+  data_incomplete: '资料不完整',
+  execution_exception: '执行异常',
+  business_risk: '业务风险',
+} as const;
 
 function shanghaiToday(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
@@ -141,31 +149,34 @@ const SalespersonDetail: React.FC = () => {
             <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>当前名下客户</Typography>
             <Stack direction="row" spacing={0.75} sx={{ mt: 1.5, overflowX: 'auto', pb: 0.25 }}>
               {[
-                ['', '全部'], ['key_customer', 'L4/L5高等级'], ['risk', '风险客户'], ['stale_24h', '超24小时未跟进'], ['intervention', '需要介入'], ['payment_pending', '待付款'],
+                ['', '全部'], ['data_incomplete', '资料不完整'], ['execution_exception', '执行异常'], ['business_risk', '业务风险'], ['intervention', '需要介入'], ['payment_pending', '待付款'],
               ].map(([value, label]) => <Chip key={value || 'all'} clickable label={label} color={managementFilter === value ? 'primary' : 'default'} variant={managementFilter === value ? 'filled' : 'outlined'} onClick={() => { setManagementFilter(value as CustomerManagementFilter | ''); setPage(0); }} />)}
             </Stack>
           </Box>
           {!customers.length ? <DataTableEmptyState label="当前页暂无客户" /> : <>
             <DataTableDesktopScroller>
-              <Table size="small" sx={{ minWidth: 1320 }}>
-                <TableHead><TableRow><TableCell>客户</TableCell><TableCell>等级 / 意向产品</TableCell><TableCell>销售阶段</TableCell><TableCell align="right">预计金额</TableCell><TableCell>最后跟进</TableCell><TableCell>距今</TableCell><TableCell>下一步动作</TableCell><TableCell>风险</TableCell><TableCell align="center">操作</TableCell></TableRow></TableHead>
+              <Table size="small" sx={{ minWidth: 1450 }}>
+                <TableHead><TableRow><TableCell>客户</TableCell><TableCell>资料完整度</TableCell><TableCell>等级 / 意向产品</TableCell><TableCell>销售阶段</TableCell><TableCell align="right">预计金额</TableCell><TableCell>最后跟进</TableCell><TableCell>距今</TableCell><TableCell>下一步动作</TableCell><TableCell>经营状态</TableCell><TableCell align="center">操作</TableCell></TableRow></TableHead>
                 <TableBody>{customers.map((customer) => {
                   const snapshot = buildCustomerBattleSnapshot(customer, []);
+                  const completeness = getCustomerProfileCompleteness(customer);
+                  const category = getCustomerManagementCategory(customer, []);
                   return <TableRow hover key={customer.id}>
                     <TableCell><Typography variant="body2" fontWeight={850}>{customer.name}</Typography><Typography variant="caption" color="text.secondary">{customer.company}</Typography></TableCell>
-                    <TableCell><Typography variant="body2">{customer.customerLevel}</Typography><Typography variant="caption" color="text.secondary">{customer.productLevel || '待确认'}</Typography></TableCell>
+                    <TableCell><Typography variant="body2" fontWeight={850}>{completeness.percentage}%</Typography><Typography variant="caption" color={completeness.percentage < 80 ? 'error.main' : 'success.main'}>{completeness.missingFields.length ? `缺 ${completeness.missingFields.join('、')}` : '已完整'}</Typography></TableCell>
+                    <TableCell><Typography variant="body2">{customer.customerLevel}</Typography><Typography variant="caption" color="text.secondary">{customer.intendedProduct || customer.productLevel || '待确认'}</Typography></TableCell>
                     <TableCell>{getOpportunityStage(customer.opportunityStageCode).label}</TableCell>
                     <TableCell align="right">{customer.opportunityAmount == null ? '-' : formatCurrency(customer.opportunityAmount)}</TableCell>
                     <TableCell>{snapshot.lastEffectiveContact ? new Date(snapshot.lastEffectiveContact.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '暂无'}</TableCell>
                     <TableCell>{snapshot.contactGapDays === null ? '-' : `${snapshot.contactGapDays} 天`}</TableCell>
                     <TableCell>{customer.nextActionTitle || '未设置'}</TableCell>
-                    <TableCell><Chip size="small" label={snapshot.risk.reason} color={snapshot.risk.level === 'high' ? 'error' : snapshot.risk.level === 'medium' ? 'warning' : 'success'} /></TableCell>
-                    <TableCell align="center"><Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate(`${ROUTES.CUSTOMERS}?customerId=${encodeURIComponent(customer.id)}`)}>查看客户</Button></TableCell>
+                    <TableCell><Chip size="small" label={managementCategoryLabel[category.code]} color={category.code === 'business_risk' ? 'error' : category.code === 'execution_exception' || category.code === 'data_incomplete' ? 'warning' : 'success'} /></TableCell>
+                    <TableCell align="center"><Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate(`${ROUTES.CUSTOMER_DETAIL.replace(':id', customer.id)}?view=management`)}>经营管理</Button></TableCell>
                   </TableRow>;
                 })}</TableBody>
               </Table>
             </DataTableDesktopScroller>
-            <DataTableMobileScroller>{customers.map((customer) => <Paper key={customer.id} variant="outlined" sx={{ p: 1.75, borderRadius: 2 }}><Typography fontWeight={900}>{customer.name}</Typography><Typography variant="body2" color="text.secondary">{customer.company}</Typography><Typography variant="body2" sx={{ mt: 1 }}>阶段：{getOpportunityStage(customer.opportunityStageCode).label}</Typography><Button fullWidth onClick={() => navigate(`${ROUTES.CUSTOMERS}?customerId=${encodeURIComponent(customer.id)}`)} sx={{ mt: 1 }}>查看客户</Button></Paper>)}</DataTableMobileScroller>
+            <DataTableMobileScroller>{customers.map((customer) => <Paper key={customer.id} variant="outlined" sx={{ p: 1.75, borderRadius: 2 }}><Typography fontWeight={900}>{customer.name}</Typography><Typography variant="body2" color="text.secondary">{customer.company}</Typography><Typography variant="body2" sx={{ mt: 1 }}>资料完整度：{getCustomerProfileCompleteness(customer).percentage}% · 阶段：{getOpportunityStage(customer.opportunityStageCode).label}</Typography><Button fullWidth onClick={() => navigate(`${ROUTES.CUSTOMER_DETAIL.replace(':id', customer.id)}?view=management`)} sx={{ mt: 1 }}>经营管理</Button></Paper>)}</DataTableMobileScroller>
           </>}
           <DataTableWorkspaceFooter>
             <TablePagination count={total} page={page} rowsPerPage={pageSize} rowsPerPageOptions={PAGE_SIZE_OPTIONS} onPageChange={(_, value) => setPage(value)} onRowsPerPageChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} />

@@ -120,6 +120,7 @@ export function buildCustomerDetailPatch({
       'name',
       'company',
       'customerLevel',
+      'intendedProduct',
       'industry',
       'remark',
       'wechatNickname',

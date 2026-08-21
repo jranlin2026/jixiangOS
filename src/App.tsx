@@ -19,6 +19,7 @@ const SalesBattlefield = React.lazy(() => import('./pages/SalesManagement/SalesB
 const SalespersonDetail = React.lazy(() => import('./pages/SalesManagement/SalespersonDetail'));
 const Leads = React.lazy(() => import('./pages/Leads'));
 const Customers = React.lazy(() => import('./pages/Customers'));
+const CustomerRecordPage = React.lazy(() => import('./pages/Customers/CustomerRecordPage'));
 const CustomerDuplicateGovernance = React.lazy(() => import('./pages/Customers/CustomerDuplicateGovernance'));
 const Orders = React.lazy(() => import('./pages/Orders'));
 const Delivery = React.lazy(() => import('./pages/Delivery'));
@@ -184,6 +185,10 @@ const App: React.FC = () => {
                   <Customers />
                 </Suspense>
               )}
+            />
+            <Route
+              path={ROUTES.CUSTOMER_DETAIL}
+              element={<Suspense fallback={<PageLoader />}><CustomerRecordPage /></Suspense>}
             />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.CUSTOMER_MERGE} action="write" />}>
