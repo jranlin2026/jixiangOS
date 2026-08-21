@@ -9,6 +9,8 @@ const globalStyles = read('src/index.css');
 const orders = read('src/pages/Orders/index.tsx');
 const orderReview = read('src/pages/OrderReview/index.tsx');
 const assets = read('src/pages/Assets/index.tsx');
+const delivery = read('src/pages/Delivery/index.tsx');
+const recoveryOrders = read('src/pages/AfterSales/RecoveryOrderTab.tsx');
 const standards = read('src/shared/components/dataTableStandards.ts');
 
 assert.match(workspace, /data-table-workspace="true"/);
@@ -56,6 +58,16 @@ assert.match(
 assert.match(assets, /getDataTableMinWidth/);
 assert.match(assets, /DataTableEmptyState label="暂无设备资产数据"/);
 assert.doesNotMatch(assets, /renderAssetEmptyRow/);
+assert.doesNotMatch(
+  delivery,
+  /<Typography[^>]*>\{renderCell\(delivery,/,
+  '移动端交付卡片不应使用 p 标签包装可能返回 div 的单元格内容',
+);
+assert.doesNotMatch(
+  recoveryOrders,
+  /<Typography[^>]*>\{renderCell\(row,/,
+  '移动端售后卡片不应使用 p 标签包装可能返回 Typography 或 div 的单元格内容',
+);
 assert.match(
   orders,
   /<Table stickyHeader sx=\{\[dataTableStandardSx,/,

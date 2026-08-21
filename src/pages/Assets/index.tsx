@@ -1805,11 +1805,19 @@ const AssetManagement: React.FC = () => {
     return (
       <Stack spacing={0.5}>
         {slotRows.map((row) => (
-          <Stack key={row.slotType} direction="row" spacing={0.75} alignItems="center" sx={{ minHeight: 24, whiteSpace: 'nowrap' }}>
-            <Typography variant="caption" sx={{ color: shell.muted, width: 96, flexShrink: 0 }}>
+          <Stack
+            key={row.slotType}
+            direction={isMobile ? 'column' : 'row'}
+            spacing={isMobile ? 0.25 : 0.75}
+            alignItems={isMobile ? 'flex-start' : 'center'}
+            sx={{ minHeight: 24, minWidth: 0, whiteSpace: isMobile ? 'normal' : 'nowrap' }}
+          >
+            <Typography variant="caption" sx={{ color: shell.muted, width: isMobile ? 'auto' : 96, flexShrink: 0 }}>
               {row.slotType} / {row.imeiLabel}
             </Typography>
-            <Box>{row.imeiDisplay || '-'}</Box>
+            <Box sx={{ minWidth: 0, maxWidth: '100%', overflowWrap: 'anywhere', wordBreak: 'break-all' }}>
+              {row.imeiDisplay || '-'}
+            </Box>
           </Stack>
         ))}
       </Stack>

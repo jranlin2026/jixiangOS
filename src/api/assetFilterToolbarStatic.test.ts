@@ -24,3 +24,8 @@ assert.match(pageSource, /skipNextFilterUrlWriteRef/, '浏览器前进后退回�
 assert.match(pageSource, /currentFilterSnapshotRef/, '只有外部 URL 筛选真正变化时才应抑制一次写回');
 assert.match(apiSource, /permissionByKind\[kind\]/, '本地筛选字典应与生产环境一样校验目标台账读取权限');
 assert.match(pageSource, /renderMobileAssetCards/, '移动端应使用卡片承载与桌面端相同的筛选和分页结果');
+assert.match(
+  pageSource,
+  /renderDeviceImeis[\s\S]*?direction=\{isMobile \? 'column' : 'row'\}[\s\S]*?width: isMobile \? 'auto' : 96/,
+  '移动端设备卡片中的卡槽和 IMEI 应改为上下排列，避免长号码被截断',
+);

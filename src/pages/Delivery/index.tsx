@@ -761,10 +761,10 @@ const DeliveryPage: React.FC = () => {
               {renderCell(delivery, 'status')}
             </Stack>
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1.25 }}>
-              <Box><Typography variant="caption" color="text.secondary">负责人</Typography><Typography variant="body2">{renderCell(delivery, 'owner')}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">当前阶段</Typography><Typography variant="body2">{renderCell(delivery, 'currentStage')}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">进度</Typography><Typography variant="body2">{renderCell(delivery, 'progress')}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">更新时间</Typography><Typography variant="body2">{renderCell(delivery, 'updatedAt')}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">负责人</Typography><Box sx={{ minWidth: 0, fontSize: 14, lineHeight: 1.43 }}>{renderCell(delivery, 'owner')}</Box></Box>
+              <Box><Typography variant="caption" color="text.secondary">当前阶段</Typography><Box sx={{ minWidth: 0, fontSize: 14, lineHeight: 1.43 }}>{renderCell(delivery, 'currentStage')}</Box></Box>
+              <Box><Typography variant="caption" color="text.secondary">进度</Typography><Box sx={{ minWidth: 0, fontSize: 14, lineHeight: 1.43 }}>{renderCell(delivery, 'progress')}</Box></Box>
+              <Box><Typography variant="caption" color="text.secondary">更新时间</Typography><Box sx={{ minWidth: 0, fontSize: 14, lineHeight: 1.43 }}>{renderCell(delivery, 'updatedAt')}</Box></Box>
             </Box>
             <Button size="small" startIcon={<VisibilityIcon />} onClick={() => void handleOpenDelivery(delivery)} sx={{ mt: 1 }}>查看交付</Button>
           </Paper>

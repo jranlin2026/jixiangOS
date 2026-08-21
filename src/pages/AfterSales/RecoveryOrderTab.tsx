@@ -1301,12 +1301,12 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
         {rows.map((row) => (
           <Paper key={row.id} elevation={0} sx={{ p: 1.5, border: `1px solid ${shell.line}`, borderRadius: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
-              <Box sx={{ minWidth: 0 }}><Typography variant="subtitle2" noWrap sx={{ fontWeight: 850 }}>{renderCell(row, 'recoveryNo')}</Typography><Typography variant="caption" color="text.secondary">{renderCell(row, 'customerName')}</Typography></Box>
+              <Box sx={{ minWidth: 0 }}><Box sx={{ fontSize: 14, lineHeight: 1.57, fontWeight: 850, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{renderCell(row, 'recoveryNo')}</Box><Box sx={{ color: 'text.secondary', fontSize: 12, lineHeight: 1.66 }}>{renderCell(row, 'customerName')}</Box></Box>
               {renderCell(row, 'status')}
             </Box>
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1.25 }}>
-              <Box><Typography variant="caption" color="text.secondary">产品</Typography><Typography variant="body2">{renderCell(row, 'originalProduct')}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">挽回金额</Typography><Typography variant="body2">{renderCell(row, 'recoveryAmount')}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">产品</Typography><Box sx={{ minWidth: 0, fontSize: 14, lineHeight: 1.43 }}>{renderCell(row, 'originalProduct')}</Box></Box>
+              <Box><Typography variant="caption" color="text.secondary">挽回金额</Typography><Box sx={{ minWidth: 0, fontSize: 14, lineHeight: 1.43 }}>{renderCell(row, 'recoveryAmount')}</Box></Box>
             </Box>
             <Box sx={{ mt: 1 }}>{renderCell(row, 'actions')}</Box>
           </Paper>
