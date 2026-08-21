@@ -129,6 +129,13 @@ export interface CockpitCustomerBattleItem {
   riskReason: string;
 }
 
+export interface CockpitCustomerBattleStage {
+  stageCode: string;
+  stageLabel: string;
+  customerCount: number;
+  opportunityAmount: number;
+}
+
 export interface CockpitLeadSourceItem {
   source: string;
   leadCount: number;
@@ -183,6 +190,7 @@ export interface BusinessCockpitData {
   recoveryRanking: CockpitPerformanceRankingItem[];
   customerHealth: CockpitCustomerHealth;
   customerBattles: CockpitCustomerBattleItem[];
+  customerBattleStages: CockpitCustomerBattleStage[];
   leadSources: CockpitLeadSourceItem[];
   orderHealth: CockpitOrderHealth;
   financeHealth: CockpitFinanceHealth;

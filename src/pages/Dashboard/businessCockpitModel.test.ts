@@ -71,3 +71,15 @@ test('boss command items connect customer, owner, action and verification eviden
     path: '/customers?customerId=customer-1&detailTab=todo', tone: 'error',
   });
 });
+
+test('operating errors are not displaced by a full customer command queue', () => {
+  const customers = Array.from({ length: 7 }, (_, index) => ({
+    customerId: `customer-${index}`, customerName: `客户${index}`, company: '', ownerName: '销售甲',
+    stageCode: 'proposal', stageLabel: '方案报价', opportunityAmount: 0,
+    riskLevel: 'medium' as const, riskReason: '尚未设置下一步动作',
+  }));
+  const commands = buildBossCommandItems([
+    { id: 'finance', title: '资金流水异常', count: 2, path: '/finance', tone: 'error' },
+  ], customers, 7);
+  assert.ok(commands.some((item) => item.id === 'risk:finance'));
+});

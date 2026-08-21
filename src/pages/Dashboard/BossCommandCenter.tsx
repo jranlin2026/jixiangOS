@@ -29,25 +29,22 @@ const tone: Record<HomeTaskItem['tone'], { color: string; bg: string }> = {
 
 const chainSteps = ['经营异常', '责任人', '客户 / 业务对象', '下一步动作', '结果验收'];
 
-export const CustomerBattleBoard: React.FC<{ data: BusinessCockpitData }> = ({ data }) => {
+export const CustomerBattleBoard: React.FC<{ data: BusinessCockpitData; canViewCustomers: boolean }> = ({ data, canViewCustomers }) => {
   const navigate = useNavigate();
   const stageCounts = useMemo(() => {
     const counts = new Map<string, { label: string; count: number; amount: number }>();
-    data.customerBattles.forEach((item) => {
-      const current = counts.get(item.stageCode) || { label: item.stageLabel, count: 0, amount: 0 };
-      current.count += 1;
-      current.amount += item.opportunityAmount;
-      counts.set(item.stageCode, current);
+    data.customerBattleStages.forEach((item) => {
+      counts.set(item.stageCode, { label: item.stageLabel, count: item.customerCount, amount: item.opportunityAmount });
     });
-    return [...counts.values()].sort((left, right) => right.amount - left.amount || right.count - left.count);
-  }, [data.customerBattles]);
+    return [...counts.values()];
+  }, [data.customerBattleStages]);
   const maxCount = Math.max(...stageCounts.map((item) => item.count), 1);
   return (
     <Stack spacing={2}>
       <Paper elevation={0} sx={{ border: `1px solid ${colors.line}`, borderRadius: 2, p: 2 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1} sx={{ mb: 2 }}>
           <Box><Typography variant="h6" sx={{ color: colors.ink, fontWeight: 900 }}>客户成交作战池</Typography><Typography variant="body2" sx={{ color: colors.muted }}>按阶段看客户卡点，按风险决定今天先推进谁</Typography></Box>
-          <Button endIcon={<ArrowForwardIcon />} onClick={() => navigate(ROUTES.CUSTOMERS)}>进入全部客户</Button>
+          <Button disabled={!canViewCustomers} endIcon={<ArrowForwardIcon />} onClick={() => canViewCustomers && navigate(ROUTES.CUSTOMERS)}>进入全部客户</Button>
         </Stack>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', xl: `repeat(${Math.min(Math.max(stageCounts.length, 1), 6)}, minmax(0, 1fr))` }, gap: 1 }}>
           {stageCounts.map((item) => (
@@ -66,7 +63,7 @@ export const CustomerBattleBoard: React.FC<{ data: BusinessCockpitData }> = ({ d
         <Stack divider={<Box sx={{ borderTop: `1px solid ${colors.line}` }} />}>
           {data.customerBattles.map((item) => {
             const riskTone = item.riskLevel === 'high' ? tone.error : item.riskLevel === 'medium' ? tone.warning : tone.success;
-            return <Box key={item.customerId} role="button" tabIndex={0} onClick={() => navigate(`${ROUTES.CUSTOMERS}?customerId=${encodeURIComponent(item.customerId)}&detailTab=todo`)} onKeyDown={(event) => { if (event.key === 'Enter') navigate(`${ROUTES.CUSTOMERS}?customerId=${encodeURIComponent(item.customerId)}&detailTab=todo`); }} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.2fr .8fr .9fr 1.4fr auto' }, gap: 1.5, alignItems: 'center', px: 2, py: 1.35, cursor: 'pointer', '&:hover': { bgcolor: '#F8FAFC' }, '&:focus-visible': { outline: `2px solid ${colors.blue}`, outlineOffset: -2 } }}>
+            return <Box key={item.customerId} role={canViewCustomers ? 'button' : undefined} tabIndex={canViewCustomers ? 0 : undefined} onClick={() => canViewCustomers && navigate(`${ROUTES.CUSTOMERS}?customerId=${encodeURIComponent(item.customerId)}&detailTab=todo`)} onKeyDown={(event) => { if (canViewCustomers && event.key === 'Enter') navigate(`${ROUTES.CUSTOMERS}?customerId=${encodeURIComponent(item.customerId)}&detailTab=todo`); }} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.2fr .8fr .9fr 1.4fr auto' }, gap: 1.5, alignItems: 'center', px: 2, py: 1.35, cursor: canViewCustomers ? 'pointer' : 'default', '&:hover': canViewCustomers ? { bgcolor: '#F8FAFC' } : undefined, '&:focus-visible': { outline: `2px solid ${colors.blue}`, outlineOffset: -2 } }}>
               <Box><Typography variant="body2" sx={{ fontWeight: 900 }}>{item.customerName}</Typography><Typography variant="caption" sx={{ color: colors.muted }}>{item.company || '公司未填写'}</Typography></Box>
               <Box><Typography variant="caption" sx={{ color: colors.muted }}>销售阶段</Typography><Typography variant="body2" sx={{ fontWeight: 800 }}>{item.stageLabel}</Typography></Box>
               <Box><Typography variant="caption" sx={{ color: colors.muted }}>责任人</Typography><Typography variant="body2" sx={{ fontWeight: 800 }}>{item.ownerName}</Typography></Box>
@@ -84,7 +81,10 @@ const BossCommandCenter: React.FC<{
   data: BusinessCockpitData;
   risks: CockpitRiskItem[];
   organizationData: EnterpriseCockpit | null;
-}> = ({ data, risks, organizationData }) => {
+  canViewCustomers: boolean;
+  canManageTasks: boolean;
+  canOpenPath: (path: string) => boolean;
+}> = ({ data, risks, organizationData, canViewCustomers, canManageTasks, canOpenPath }) => {
   const navigate = useNavigate();
   const commands = useMemo(() => buildBossCommandItems(risks, data.customerBattles, 7), [data.customerBattles, risks]);
   const urgentCount = commands.filter((item) => item.tone === 'error').length;
@@ -98,8 +98,8 @@ const BossCommandCenter: React.FC<{
             <Typography variant="body2" sx={{ color: '#B9C9DC', mt: .75 }}>每条指令必须落到责任人、业务对象、动作和验收结果。</Typography>
           </Box>
           <Stack direction="row" spacing={1} alignItems="center">
-            <Button variant="outlined" startIcon={<GroupsOutlinedIcon />} onClick={() => navigate(`${ROUTES.TASKS}?tab=team`)} sx={{ color: '#DCE8F8', borderColor: '#52739A' }}>团队任务</Button>
-            <Button variant="contained" startIcon={<AssignmentTurnedInOutlinedIcon />} onClick={() => navigate(ROUTES.TASKS)} sx={{ bgcolor: '#2C72F0' }}>下达与验收</Button>
+            <Button disabled={!canManageTasks} variant="outlined" startIcon={<GroupsOutlinedIcon />} onClick={() => canManageTasks && navigate(`${ROUTES.TASKS}?tab=team`)} sx={{ color: '#DCE8F8', borderColor: '#52739A' }}>团队任务</Button>
+            <Button disabled={!canManageTasks} variant="contained" startIcon={<AssignmentTurnedInOutlinedIcon />} onClick={() => canManageTasks && navigate(ROUTES.TASKS)} sx={{ bgcolor: '#2C72F0' }}>下达与验收</Button>
           </Stack>
         </Stack>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(5, 1fr)' }, borderTop: '1px solid rgba(255,255,255,.12)' }}>
@@ -113,11 +113,12 @@ const BossCommandCenter: React.FC<{
           <Stack divider={<Box sx={{ borderTop: `1px solid ${colors.line}` }} />}>
             {commands.map((item) => {
               const itemTone = tone[item.tone];
-              return <Box key={item.id} role="button" tabIndex={0} onClick={() => navigate(item.path)} onKeyDown={(event) => { if (event.key === 'Enter') navigate(item.path); }} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.15fr .7fr 1fr .9fr auto' }, gap: 1.25, alignItems: 'center', px: 2, py: 1.35, cursor: 'pointer', '&:hover': { bgcolor: '#F8FAFC' }, '&:focus-visible': { outline: `2px solid ${colors.blue}`, outlineOffset: -2 } }}>
+              const canOpen = canOpenPath(item.path);
+              return <Box key={item.id} role={canOpen ? 'button' : undefined} tabIndex={canOpen ? 0 : undefined} onClick={() => canOpen && navigate(item.path)} onKeyDown={(event) => { if (canOpen && event.key === 'Enter') navigate(item.path); }} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.15fr .7fr 1fr .9fr auto' }, gap: 1.25, alignItems: 'center', px: 2, py: 1.35, cursor: canOpen ? 'pointer' : 'default', '&:hover': canOpen ? { bgcolor: '#F8FAFC' } : undefined, '&:focus-visible': { outline: `2px solid ${colors.blue}`, outlineOffset: -2 } }}>
                 <Box><Typography variant="body2" sx={{ color: colors.ink, fontWeight: 900 }}>{item.title}</Typography><Typography variant="caption" sx={{ color: colors.muted }}>{item.target}</Typography></Box>
                 <Box><Typography variant="caption" sx={{ color: colors.muted }}>责任人</Typography><Typography variant="body2" sx={{ fontWeight: 850 }}>{item.owner}</Typography></Box>
                 <Box><Typography variant="caption" sx={{ color: colors.muted }}>下一步动作</Typography><Typography variant="body2" sx={{ fontWeight: 850 }}>{item.action}</Typography></Box>
-                <Box><Typography variant="caption" sx={{ color: colors.muted }}>验收</Typography><Typography variant="body2" sx={{ fontWeight: 850 }}>{item.verification}</Typography></Box>
+                <Box><Typography variant="caption" sx={{ color: colors.muted }}>截止时间</Typography><Typography variant="body2" sx={{ fontWeight: 850 }}>{item.verification}</Typography></Box>
                 <Chip size="small" label={item.tone === 'error' ? '立即处理' : item.tone === 'warning' ? '今日推进' : '持续跟进'} sx={{ color: itemTone.color, bgcolor: itemTone.bg, fontWeight: 850 }} />
               </Box>;
             })}
@@ -128,7 +129,7 @@ const BossCommandCenter: React.FC<{
         <Stack spacing={2}>
           <Paper elevation={0} sx={{ border: `1px solid ${colors.line}`, borderRadius: 2, p: 2 }}>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}><GroupsOutlinedIcon sx={{ color: colors.blue }} /><Box><Typography sx={{ fontWeight: 900 }}>销售队伍脉搏</Typography><Typography variant="caption" sx={{ color: colors.muted }}>本期正式订单实收</Typography></Box></Stack>
-            <Stack spacing={1.25}>{data.salesRanking.slice(0, 5).map((item, index) => <Box key={item.userId}><Stack direction="row" justifyContent="space-between" alignItems="center"><Stack direction="row" spacing={1} alignItems="center"><Typography variant="caption" sx={{ color: index < 3 ? colors.blue : colors.muted, fontWeight: 900, width: 16 }}>{index + 1}</Typography><Box><Typography variant="body2" sx={{ fontWeight: 900 }}>{item.name}</Typography><Typography variant="caption" sx={{ color: colors.muted }}>{item.count} 单 · {item.department || '部门未标注'}</Typography></Box></Stack><Button size="small" startIcon={<PersonSearchOutlinedIcon />} onClick={() => navigate(`${ROUTES.CUSTOMERS}?owner=${encodeURIComponent(item.name)}`)}>客户</Button></Stack><Typography variant="body2" sx={{ color: colors.blue, fontWeight: 900, ml: 3, mt: .35 }}>{formatCurrency(item.amount)}</Typography></Box>)}</Stack>
+            <Stack spacing={1.25}>{data.salesRanking.slice(0, 5).map((item, index) => <Box key={item.userId}><Stack direction="row" justifyContent="space-between" alignItems="center"><Stack direction="row" spacing={1} alignItems="center"><Typography variant="caption" sx={{ color: index < 3 ? colors.blue : colors.muted, fontWeight: 900, width: 16 }}>{index + 1}</Typography><Box><Typography variant="body2" sx={{ fontWeight: 900 }}>{item.name}</Typography><Typography variant="caption" sx={{ color: colors.muted }}>{item.count} 单 · {item.department || '部门未标注'}</Typography></Box></Stack><Button disabled={!canViewCustomers} size="small" startIcon={<PersonSearchOutlinedIcon />} onClick={() => canViewCustomers && navigate(`${ROUTES.CUSTOMERS}?owner=${encodeURIComponent(item.name)}`)}>客户</Button></Stack><Typography variant="body2" sx={{ color: colors.blue, fontWeight: 900, ml: 3, mt: .35 }}>{formatCurrency(item.amount)}</Typography></Box>)}</Stack>
           </Paper>
           <Paper elevation={0} sx={{ border: `1px solid ${colors.line}`, borderRadius: 2, p: 2 }}>
             <Typography sx={{ fontWeight: 900 }}>执行验收</Typography>

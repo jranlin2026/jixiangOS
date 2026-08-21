@@ -406,7 +406,8 @@ const Customers: React.FC = () => {
 
   useEffect(() => {
     const tagState = readCustomerTagFilterParams(searchParams);
-    const nextFilters = normalizeCustomerToolbarFilters({ ...filters, ...tagState, page: 1 }, customerScope);
+    const requestedOwner = searchParams.get('owner') || undefined;
+    const nextFilters = normalizeCustomerToolbarFilters({ ...filters, ...tagState, ...(requestedOwner ? { owner: requestedOwner } : {}), page: 1 }, customerScope);
     setFilters(nextFilters);
     fetchItems(nextFilters);
   }, [searchParams.toString(), customerScope, currentUser?.id, fetchItems]);

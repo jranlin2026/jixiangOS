@@ -242,6 +242,9 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
     opportunityAmount: 68000, nextActionTitle: '确认决策人', nextActionDueAt: '2026-07-21T08:00:00.000Z',
     contactGapDays: 2, riskLevel: 'high', riskReason: '下一步动作已逾期',
   });
+  assert.deepEqual(result.data?.customerBattleStages, [{
+    stageCode: 'proposal', stageLabel: '方案报价', customerCount: 1, opportunityAmount: 68000,
+  }]);
 }
 
 const application = (

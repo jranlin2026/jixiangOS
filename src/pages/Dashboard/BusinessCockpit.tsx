@@ -768,6 +768,7 @@ const RiskWorkbench: React.FC<{ risks: CockpitRiskItem[] }> = ({ risks }) => {
 };
 
 const LegacyBusinessCockpit: React.FC = () => {
+  const currentUser = useAuthStore((state) => state.currentUser);
   const [range, setRange] = useState<DashboardDateRange>(() => resolveDashboardDateRange('month'));
   const [draftRange, setDraftRange] = useState<DashboardDateRange>(() => resolveDashboardDateRange('month'));
   const [data, setData] = useState<BusinessCockpitData | null>(null);
@@ -847,6 +848,9 @@ const LegacyBusinessCockpit: React.FC = () => {
     return [...data.riskTasks, ...organizationRisks].filter((item) => item.count > 0 || Number(item.amount || 0) > 0);
   }, [data, organizationData]);
   const mainRisk = useMemo(() => priorityRisk(riskTasks), [riskTasks]);
+  const canViewCockpitCustomers = canAccessCockpitPath(currentUser, ROUTES.CUSTOMERS);
+  const canManageCockpitTasks = hasPermission(currentUser, PERMISSION_KEYS.TASK_TEAM)
+    || hasPermission(currentUser, PERMISSION_KEYS.TASK_ASSIGN, 'write');
 
   if (loading && !data) {
     return (
@@ -948,7 +952,7 @@ const LegacyBusinessCockpit: React.FC = () => {
       <Paper elevation={0} sx={{ border: `1px solid ${palette.line}`, borderRadius: 1.5, mb: 2, overflow: 'hidden' }}>
         <Tabs value={cockpitTab} onChange={(_, value) => setCockpitTab(value)} variant="scrollable" scrollButtons="auto" sx={{ px: 1, minHeight: 50, '& .MuiTab-root': { minHeight: 50, fontWeight: 850 } }}>
           <Tab value="command" label="今日指挥" />
-          <Tab value="customers" label={`客户作战 ${data.customerBattles.length}`} />
+          <Tab value="customers" label={`客户作战 ${data.customerBattleStages.reduce((sum, item) => sum + item.customerCount, 0)}`} />
           <Tab value="team" label="销售团队" />
           <Tab value="overview" label="经营总览" />
           <Tab value="organization" label="组织执行" />
@@ -957,12 +961,12 @@ const LegacyBusinessCockpit: React.FC = () => {
 
       {cockpitTab === 'command' && (
         <Stack spacing={2}>
-          <BossCommandCenter data={data} risks={riskTasks} organizationData={organizationData} />
+          <BossCommandCenter data={data} risks={riskTasks} organizationData={organizationData} canViewCustomers={canViewCockpitCustomers} canManageTasks={canManageCockpitTasks} canOpenPath={(path) => canAccessCockpitPath(currentUser, path)} />
           <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} onData={setOrganizationData} />
         </Stack>
       )}
 
-      {cockpitTab === 'customers' && <CustomerBattleBoard data={data} />}
+      {cockpitTab === 'customers' && <CustomerBattleBoard data={data} canViewCustomers={canViewCockpitCustomers} />}
 
       {cockpitTab === 'team' && (
         <Stack spacing={2}>

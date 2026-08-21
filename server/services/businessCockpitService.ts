@@ -116,6 +116,7 @@ export interface BusinessCockpitSnapshot {
     completedCustomerTodoCount: number;
   };
   customerBattles: BusinessCockpitData['customerBattles'];
+  customerBattleStages: BusinessCockpitData['customerBattleStages'];
   leadSources: Array<{ source: string; leadCount: number; followedCount: number; followRate: number; convertedCustomerCount: number; receiptAmount: number }>;
   orderHealth: {
     pendingReviewApplicationCount: number;
@@ -735,7 +736,7 @@ export function createBusinessCockpitService(
         todosByCustomerId.set(todo.customerId, current);
       });
       const riskRank = { high: 3, medium: 2, low: 1 } as const;
-      const customerBattles: BusinessCockpitSnapshot['customerBattles'] = customers
+      const allCustomerBattles: BusinessCockpitSnapshot['customerBattles'] = customers
         .filter((customer) => normalizeLifecycleStatusCode(customer.lifecycleStatusCode) !== LIFECYCLE_STATUS_CODES.PUBLIC_POOL)
         .map((customer) => {
           const battle = buildCustomerBattleSnapshot(customer, todosByCustomerId.get(customer.id) || [], now);
@@ -758,8 +759,19 @@ export function createBusinessCockpitService(
           riskRank[right.riskLevel] - riskRank[left.riskLevel]
           || right.opportunityAmount - left.opportunityAmount
           || (right.contactGapDays || 0) - (left.contactGapDays || 0)
-        ))
-        .slice(0, 12);
+        ));
+      const customerBattleStageMap = new Map<string, BusinessCockpitData['customerBattleStages'][number]>();
+      allCustomerBattles.forEach((item) => {
+        const current = customerBattleStageMap.get(item.stageCode) || {
+          stageCode: item.stageCode, stageLabel: item.stageLabel, customerCount: 0, opportunityAmount: 0,
+        };
+        current.customerCount += 1;
+        current.opportunityAmount = roundMoney(current.opportunityAmount + item.opportunityAmount);
+        customerBattleStageMap.set(item.stageCode, current);
+      });
+      const customerBattleStages = [...customerBattleStageMap.values()]
+        .sort((left, right) => right.opportunityAmount - left.opportunityAmount || right.customerCount - left.customerCount);
+      const customerBattles = allCustomerBattles.slice(0, 12);
       const followUpHealth: BusinessCockpitSnapshot['followUpHealth'] = {
         newLeadCount: leads.filter((lead) => inRange(lead.createdAt, startAt, endAt)).length,
         followedLeadCount: leads.filter((lead) => (
@@ -868,6 +880,7 @@ export function createBusinessCockpitService(
           reconciliationOrderIds: reconciliationIssueOrderIds.sort(),
         },
         customerBattles,
+        customerBattleStages,
         followUpHealth,
         leadSources,
         orderHealth,
@@ -1064,6 +1077,7 @@ export function createBusinessCockpitService(
         overdueTodoCount: snapshot.followUpHealth.overdueCustomerTodoCount,
       },
       customerBattles: snapshot.customerBattles,
+      customerBattleStages: snapshot.customerBattleStages,
       leadSources: snapshot.leadSources,
       orderHealth: {
         formalOrderCount: snapshot.business.formalOrderCount,

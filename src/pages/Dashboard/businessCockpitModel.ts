@@ -26,7 +26,8 @@ export function buildBossCommandItems(
   customerBattles: CockpitCustomerBattleItem[],
   limit = 6,
 ): BossCommandItem[] {
-  const customerCommands: BossCommandItem[] = customerBattles.map((item) => ({
+  const toneScore: Record<HomeTaskItem['tone'], number> = { error: 400, warning: 300, info: 200, primary: 150, success: 100 };
+  const customerCommands = customerBattles.map((item) => ({ command: {
     id: `customer:${item.customerId}`,
     kind: 'customer',
     title: `${item.customerName} · ${item.stageLabel}`,
@@ -36,8 +37,8 @@ export function buildBossCommandItems(
     verification: commandDueLabel(item.nextActionDueAt),
     path: `/customers?customerId=${encodeURIComponent(item.customerId)}&detailTab=todo`,
     tone: item.riskLevel === 'high' ? 'error' : item.riskLevel === 'medium' ? 'warning' : 'success',
-  }));
-  const riskCommands: BossCommandItem[] = rankCockpitRisks(risks).map((item) => ({
+  } as BossCommandItem, score: toneScore[item.riskLevel === 'high' ? 'error' : item.riskLevel === 'medium' ? 'warning' : 'success'] + Math.min(item.opportunityAmount / 10000, 50) }));
+  const riskCommands = rankCockpitRisks(risks).map((item) => ({ command: {
     id: `risk:${item.id}`,
     kind: 'risk',
     title: item.title,
@@ -47,8 +48,11 @@ export function buildBossCommandItems(
     verification: `${item.count} 项待闭环`,
     path: item.path,
     tone: item.tone,
-  }));
-  return [...customerCommands, ...riskCommands].slice(0, Math.max(0, limit));
+  } as BossCommandItem, score: toneScore[item.tone] + 60 + Math.min(Number(item.amount || 0) / 10000, 50) }));
+  return [...customerCommands, ...riskCommands]
+    .sort((left, right) => right.score - left.score || left.command.title.localeCompare(right.command.title, 'zh-CN'))
+    .slice(0, Math.max(0, limit))
+    .map((item) => item.command);
 }
 
 export function toShanghaiDateString(date: Date): string {
