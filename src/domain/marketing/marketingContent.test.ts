@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   assertMarketingContentReadyForPublish,
   expandMarketingAccountSelection,
+  filterSupplementalMarketingAccounts,
   nextMarketingContentStatus,
 } from './marketingContent';
 
@@ -23,6 +24,29 @@ assert.deepEqual(
   ),
   ['account-a', 'account-b', 'account-c', 'account-extra'],
   '账号组和补充账号应去重合并',
+);
+
+assert.deepEqual(
+  filterSupplementalMarketingAccounts(
+    [
+      { id: 'account-a', name: '组内账号' },
+      { id: 'account-b', name: '可补充账号' },
+    ],
+    ['group-wechat'],
+    [{ id: 'group-wechat', accountIds: ['account-a'] }],
+  ),
+  [{ id: 'account-b', name: '可补充账号' }],
+  '已被所选账号组包含的账号不应再出现在补充账号候选中',
+);
+
+assert.deepEqual(
+  filterSupplementalMarketingAccounts(
+    [{ id: 'account-a', name: '取消分组后可见' }],
+    [],
+    [{ id: 'group-wechat', accountIds: ['account-a'] }],
+  ),
+  [{ id: 'account-a', name: '取消分组后可见' }],
+  '取消账号组选择后账号应恢复到补充候选',
 );
 
 assert.doesNotThrow(() => assertMarketingContentReadyForPublish({

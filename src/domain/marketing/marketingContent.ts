@@ -33,6 +33,22 @@ export function expandMarketingAccountSelection(
   ].map((id) => String(id || '').trim()).filter(Boolean)));
 }
 
+export function filterSupplementalMarketingAccounts<T extends { id: string }>(
+  accounts: T[],
+  groupIds: string[],
+  groups: Array<{ id: string; accountIds: string[] }>,
+): T[] {
+  const selectedGroups = new Set(groupIds);
+  const groupedAccountIds = new Set(
+    groups
+      .filter((group) => selectedGroups.has(group.id))
+      .flatMap((group) => group.accountIds)
+      .map((id) => String(id || '').trim())
+      .filter(Boolean),
+  );
+  return accounts.filter((account) => !groupedAccountIds.has(account.id));
+}
+
 export function assertMarketingContentReadyForPublish(content: {
   title: string;
   contentType: MarketingContentType;
