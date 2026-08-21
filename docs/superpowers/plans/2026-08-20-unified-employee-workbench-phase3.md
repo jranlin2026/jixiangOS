@@ -53,7 +53,7 @@ assert.match(migration, /CREATE UNIQUE INDEX `employee_tasks_source_key_key`/);
 
 - [ ] **Step 2: Run the schema contract and observe failure**
 
-Run: `npx tsx server/db/unifiedWorkbenchMigration.test.ts`  
+Run: `npx tsx server/db/unifiedWorkbenchMigration.test.ts`
 Expected: FAIL because the migration and new schema fields do not exist.
 
 - [ ] **Step 3: Add schema fields and activity relation**
@@ -83,7 +83,7 @@ Define `TaskActivity` with task ID, action, actor snapshots, from/to status, com
 
 - [ ] **Step 4: Regenerate Prisma and run migration contract**
 
-Run: `npx prisma generate && npx tsx server/db/unifiedWorkbenchMigration.test.ts && npx tsc -b --pretty false`  
+Run: `npx prisma generate && npx tsx server/db/unifiedWorkbenchMigration.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit the task model**
@@ -119,7 +119,7 @@ assert.deepEqual(
 
 - [ ] **Step 2: Run tests and observe missing-module failure**
 
-Run: `npx tsx src/domain/workbench/taskLifecycle.test.ts && npx tsx src/domain/workbench/taskPriority.test.ts`  
+Run: `npx tsx src/domain/workbench/taskLifecycle.test.ts && npx tsx src/domain/workbench/taskPriority.test.ts`
 Expected: FAIL because domain modules do not exist.
 
 - [ ] **Step 3: Implement explicit transition maps and deterministic ranking**
@@ -137,7 +137,7 @@ Ranking order is returned, overdue, urgent, due today, high priority, then deadl
 
 - [ ] **Step 4: Run domain tests and typecheck**
 
-Run: `npx tsx src/domain/workbench/taskLifecycle.test.ts && npx tsx src/domain/workbench/taskPriority.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx src/domain/workbench/taskLifecycle.test.ts && npx tsx src/domain/workbench/taskPriority.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit task domains**
@@ -176,7 +176,7 @@ assert.equal(denied.code, 403);
 
 - [ ] **Step 2: Run command tests and observe failure**
 
-Run: `npx tsx server/services/workbench/workbenchCommandService.test.ts`  
+Run: `npx tsx server/services/workbench/workbenchCommandService.test.ts`
 Expected: FAIL because the service is absent.
 
 - [ ] **Step 3: Implement transactional commands**
@@ -198,7 +198,7 @@ export type WorkbenchCommandService = {
 
 - [ ] **Step 4: Delegate old task methods and run tests**
 
-Run: `npx tsx server/services/workbench/workbenchCommandService.test.ts && npx tsx server/services/enterpriseBrain/taskService.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx server/services/workbench/workbenchCommandService.test.ts && npx tsx server/services/enterpriseBrain/taskService.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit the command foundation**
@@ -235,7 +235,7 @@ assert.equal(cockpit.data?.canceledDenominator, 0);
 
 - [ ] **Step 2: Run query test and observe failure**
 
-Run: `npx tsx server/services/workbench/workbenchQueryService.test.ts`  
+Run: `npx tsx server/services/workbench/workbenchQueryService.test.ts`
 Expected: FAIL because query service is absent.
 
 - [ ] **Step 3: Implement scoped queries and Shanghai metric windows**
@@ -254,7 +254,7 @@ export type WorkbenchQueryService = {
 
 - [ ] **Step 4: Run query tests and typecheck**
 
-Run: `npx tsx server/services/workbench/workbenchQueryService.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx server/services/workbench/workbenchQueryService.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit query services**
@@ -363,7 +363,7 @@ Also assert source updates cannot overwrite employee result/evidence and a null 
 
 - [ ] **Step 2: Run sync tests and observe failure**
 
-Run: `npx tsx server/services/workbench/taskSyncService.test.ts`  
+Run: `npx tsx server/services/workbench/taskSyncService.test.ts`
 Expected: FAIL because the sync service is absent.
 
 - [ ] **Step 3: Implement source-owned field updates**
@@ -383,7 +383,7 @@ export async function syncDesiredTask(desired: DesiredEmployeeTask | null, sourc
 
 - [ ] **Step 4: Run tests and typecheck**
 
-Run: `npx tsx server/services/workbench/taskSyncService.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx server/services/workbench/taskSyncService.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit synchronization**
@@ -418,7 +418,7 @@ Assert two worker instances cannot hold the same lease, startup generates today'
 
 - [ ] **Step 2: Run scheduler test and observe failure**
 
-Run: `npx tsx server/services/workbench/workbenchScheduler.test.ts`  
+Run: `npx tsx server/services/workbench/workbenchScheduler.test.ts`
 Expected: FAIL because scheduler modules are absent.
 
 - [ ] **Step 3: Implement lease and schedule loops**
@@ -437,7 +437,7 @@ export type WorkbenchScheduler = {
 
 - [ ] **Step 4: Run scheduler and server startup tests**
 
-Run: `npx tsx server/services/workbench/workbenchScheduler.test.ts && npx tsx server/services/systemSetupStartupStatic.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx server/services/workbench/workbenchScheduler.test.ts && npx tsx server/services/systemSetupStartupStatic.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit scheduler**
@@ -474,7 +474,7 @@ assert.equal(overdueForEmployee.length, 1);
 
 - [ ] **Step 2: Run notification tests and observe failure**
 
-Run: `npx tsx server/services/workbench/workbenchNotificationService.test.ts`  
+Run: `npx tsx server/services/workbench/workbenchNotificationService.test.ts`
 Expected: FAIL because the workbench workflow does not exist.
 
 - [ ] **Step 3: Implement notification mapping**
@@ -489,7 +489,7 @@ const overdueDedupeKey = (taskId: string, shanghaiDate: string, recipientId: str
 
 - [ ] **Step 4: Run focused notification and command tests**
 
-Run: `npx tsx server/services/workbench/workbenchNotificationService.test.ts && npx tsx server/services/notificationWorkflow.test.ts && npx tsx server/services/workbench/workbenchCommandService.test.ts`  
+Run: `npx tsx server/services/workbench/workbenchNotificationService.test.ts && npx tsx server/services/notificationWorkflow.test.ts && npx tsx server/services/workbench/workbenchCommandService.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit notifications**
@@ -520,7 +520,7 @@ Assert a pending customer todo creates one task, completing either side complete
 
 - [ ] **Step 2: Run CRM adapter tests and observe failure**
 
-Run: `npx tsx server/services/workbench/adapters/crmWorkbenchAdapter.test.ts`  
+Run: `npx tsx server/services/workbench/adapters/crmWorkbenchAdapter.test.ts`
 Expected: FAIL because the adapter is absent.
 
 - [ ] **Step 3: Implement CRM desired-task mapping and hooks**
@@ -538,7 +538,7 @@ export const crmWorkbenchAdapter: WorkbenchSourceAdapter = {
 
 - [ ] **Step 4: Run CRM regression tests**
 
-Run: `npx tsx server/services/workbench/adapters/crmWorkbenchAdapter.test.ts && npx tsx server/services/customerTodoService.test.ts && npx tsx src/api/crmWorkflowRegression.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx server/services/workbench/adapters/crmWorkbenchAdapter.test.ts && npx tsx server/services/customerTodoService.test.ts && npx tsx src/api/crmWorkflowRegression.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit CRM integration**
@@ -571,7 +571,7 @@ Cover pending order review, returned order correction, delivery step assignment/
 
 - [ ] **Step 2: Run adapter tests and observe failure**
 
-Run: `npx tsx server/services/workbench/adapters/operationalAdapters.test.ts`  
+Run: `npx tsx server/services/workbench/adapters/operationalAdapters.test.ts`
 Expected: FAIL because adapters are absent.
 
 - [ ] **Step 3: Implement four adapters and direct sync hooks**
@@ -589,7 +589,7 @@ export const operationalWorkbenchAdapters: WorkbenchSourceAdapter[] = [
 
 - [ ] **Step 4: Run source-module regressions**
 
-Run: `npx tsx server/services/workbench/adapters/operationalAdapters.test.ts && npx tsx server/services/orderCommandService.test.ts && npx tsx server/services/deliveryCommandService.test.ts && npx tsx server/services/recoveryOrderCommandService.test.ts && npx tsx server/services/orderSettlementCommandService.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx server/services/workbench/adapters/operationalAdapters.test.ts && npx tsx server/services/orderCommandService.test.ts && npx tsx server/services/deliveryCommandService.test.ts && npx tsx server/services/recoveryOrderCommandService.test.ts && npx tsx server/services/orderSettlementCommandService.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit operational integrations**
@@ -621,7 +621,7 @@ Assert marketing plan target maps to one real task, academy task status appears 
 
 - [ ] **Step 2: Run growth/enablement adapter tests and observe failure**
 
-Run: `npx tsx server/services/workbench/adapters/growthEnablementAdapters.test.ts`  
+Run: `npx tsx server/services/workbench/adapters/growthEnablementAdapters.test.ts`
 Expected: FAIL because adapters are absent.
 
 - [ ] **Step 3: Implement adapters and legacy source-key backfill**
@@ -638,7 +638,7 @@ export const growthEnablementWorkbenchAdapters: WorkbenchSourceAdapter[] = [
 
 - [ ] **Step 4: Run marketing, academy, and OKR regressions**
 
-Run: `npx tsx server/services/workbench/adapters/growthEnablementAdapters.test.ts && npx tsx server/services/assetCommandService.test.ts && npx tsx server/services/academy/academyService.test.ts && npx tsx server/services/okr/okrService.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx server/services/workbench/adapters/growthEnablementAdapters.test.ts && npx tsx server/services/assetCommandService.test.ts && npx tsx server/services/academy/academyService.test.ts && npx tsx server/services/okr/okrService.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit growth and enablement integrations**
@@ -670,7 +670,7 @@ Assert unauthenticated requests return 401, employees cannot use team/cockpit ro
 
 - [ ] **Step 2: Run route tests and observe failure**
 
-Run: `npx tsx server/routes/workbenchRoutes.test.ts`  
+Run: `npx tsx server/routes/workbenchRoutes.test.ts`
 Expected: FAIL because workbench routes do not exist.
 
 - [ ] **Step 3: Implement route factory and frontend API**
@@ -687,7 +687,7 @@ export function createWorkbenchRouter(deps: {
 
 - [ ] **Step 4: Run route, API, and compatibility tests**
 
-Run: `npx tsx server/routes/workbenchRoutes.test.ts && npx tsx server/routes/businessCockpitRoutes.test.ts && npx tsx src/api/enterpriseBrainPermissionModel.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx server/routes/workbenchRoutes.test.ts && npx tsx server/routes/businessCockpitRoutes.test.ts && npx tsx src/api/enterpriseBrainPermissionModel.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit unified APIs**
@@ -719,7 +719,7 @@ Test returned/overdue/urgent ordering, shared mobile/desktop page items, task st
 
 - [ ] **Step 2: Run UI tests and observe failure**
 
-Run: `npx tsx src/pages/Workbench/workbenchViewModel.test.ts && npx vitest run src/pages/Workbench/EmployeeWorkbench.dom.spec.tsx`  
+Run: `npx tsx src/pages/Workbench/workbenchViewModel.test.ts && npx vitest run src/pages/Workbench/EmployeeWorkbench.dom.spec.tsx`
 Expected: FAIL because workbench components are absent.
 
 - [ ] **Step 3: Implement employee workbench and protected write dialogs**
@@ -773,7 +773,7 @@ Render team data and assert filters, totals, page size, jump-to-page, mobile car
 
 - [ ] **Step 2: Run manager UI tests and observe failure**
 
-Run: `npx vitest run src/pages/Workbench/TeamWorkbench.dom.spec.tsx`  
+Run: `npx vitest run src/pages/Workbench/TeamWorkbench.dom.spec.tsx`
 Expected: FAIL because manager components and permissions are absent.
 
 - [ ] **Step 3: Implement team workspace and permission catalog**
@@ -795,7 +795,7 @@ Use server filters for date, department, employee, module, status, priority, ove
 
 - [ ] **Step 4: Run permission and UI tests**
 
-Run: `npx vitest run src/pages/Workbench/TeamWorkbench.dom.spec.tsx && npx tsx src/api/permissionModel.test.ts && npx tsx src/pages/Settings/corePermissionCatalog.test.ts && npx tsc -b --pretty false`  
+Run: `npx vitest run src/pages/Workbench/TeamWorkbench.dom.spec.tsx && npx tsx src/api/permissionModel.test.ts && npx tsx src/pages/Settings/corePermissionCatalog.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit manager workspace**
@@ -830,7 +830,7 @@ Seed AppStorage content/group/plan records, run migration twice, and assert one 
 
 - [ ] **Step 2: Run marketing migration test and observe failure**
 
-Run: `npx tsx server/services/marketing/marketingMigrationService.test.ts`  
+Run: `npx tsx server/services/marketing/marketingMigrationService.test.ts`
 Expected: FAIL because structured repositories are absent.
 
 - [ ] **Step 3: Add schema, repository, and idempotent migration**
@@ -848,7 +848,7 @@ export type MarketingMigrationReport = {
 
 - [ ] **Step 4: Switch services and run marketing regressions**
 
-Run: `npx tsx server/services/marketing/marketingMigrationService.test.ts && npx tsx server/services/marketingContentService.test.ts && npx tsx server/services/assetCommandService.test.ts && npx tsx src/api/marketingContentCenterStatic.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx server/services/marketing/marketingMigrationService.test.ts && npx tsx server/services/marketingContentService.test.ts && npx tsx server/services/assetCommandService.test.ts && npx tsx src/api/marketingContentCenterStatic.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit structured marketing data**
@@ -879,7 +879,7 @@ Assert valid `http/https` links, non-negative integer metrics, target assignee/a
 
 - [ ] **Step 2: Run performance test and observe failure**
 
-Run: `npx tsx server/services/marketing/marketingPerformanceService.test.ts`  
+Run: `npx tsx server/services/marketing/marketingPerformanceService.test.ts`
 Expected: FAIL because the service is absent.
 
 - [ ] **Step 3: Implement service, routes, API, and panel**
@@ -903,7 +903,7 @@ export type MarketingPerformanceInput = {
 
 - [ ] **Step 4: Run marketing performance and UI tests**
 
-Run: `npx tsx server/services/marketing/marketingPerformanceService.test.ts && npx tsx src/api/marketingContentCenterStatic.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx server/services/marketing/marketingPerformanceService.test.ts && npx tsx src/api/marketingContentCenterStatic.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit content performance**
@@ -934,7 +934,7 @@ Assert confirmed vs awaiting-confirmation separation, canceled denominator exclu
 
 - [ ] **Step 2: Run cockpit tests and observe failure**
 
-Run: `npx tsx server/services/workbench/workbenchCockpitService.test.ts && npx tsx src/pages/Dashboard/workbenchCockpitModel.test.ts`  
+Run: `npx tsx server/services/workbench/workbenchCockpitService.test.ts && npx tsx src/pages/Dashboard/workbenchCockpitModel.test.ts`
 Expected: FAIL because cockpit service/model are absent.
 
 - [ ] **Step 3: Implement aggregate queries and UI panel**
@@ -953,7 +953,7 @@ export type WorkbenchCockpit = {
 
 - [ ] **Step 4: Run cockpit and permission regressions**
 
-Run: `npx tsx server/services/workbench/workbenchCockpitService.test.ts && npx tsx src/pages/Dashboard/workbenchCockpitModel.test.ts && npx tsx src/api/dashboardBusinessCockpitStatic.test.ts && npx tsc -b --pretty false`  
+Run: `npx tsx server/services/workbench/workbenchCockpitService.test.ts && npx tsx src/pages/Dashboard/workbenchCockpitModel.test.ts && npx tsx src/api/dashboardBusinessCockpitStatic.test.ts && npx tsc -b --pretty false`
 Expected: PASS.
 
 - [ ] **Step 5: Commit owner cockpit**
@@ -987,7 +987,7 @@ Test legacy general tasks, old matrix publish tasks, duplicate candidate source 
 
 - [ ] **Step 2: Run release-contract tests and observe failure**
 
-Run: `npx tsx server/services/workbench/workbenchBackfillService.test.ts && npx tsx src/api/unifiedWorkbenchPhase3Static.test.ts`  
+Run: `npx tsx server/services/workbench/workbenchBackfillService.test.ts && npx tsx src/api/unifiedWorkbenchPhase3Static.test.ts`
 Expected: FAIL because backfill and release contract are absent.
 
 - [ ] **Step 3: Implement backfill, startup registration, and runbook**
@@ -1012,15 +1012,15 @@ export async function runWorkbenchBackfill(input: {
 
 - [ ] **Step 4: Run focused release tests**
 
-Run: `npx tsx server/services/workbench/workbenchBackfillService.test.ts && npx tsx src/api/unifiedWorkbenchPhase3Static.test.ts && npx tsx server/services/systemSetupStartupStatic.test.ts && npx tsc -b --pretty false && git diff --check`  
+Run: `npx tsx server/services/workbench/workbenchBackfillService.test.ts && npx tsx src/api/unifiedWorkbenchPhase3Static.test.ts && npx tsx server/services/systemSetupStartupStatic.test.ts && npx tsc -b --pretty false && git diff --check`
 Expected: PASS.
 
 - [ ] **Step 5: Run full verification**
 
-Run: `DATABASE_URL= npm test`  
+Run: `DATABASE_URL= npm test`
 Expected: all test files pass with zero failures.
 
-Run: `npm run build`  
+Run: `npm run build`
 Expected: TypeScript and Vite production build exit 0.
 
 - [ ] **Step 6: Apply migrations to an isolated QA database and verify reports**
