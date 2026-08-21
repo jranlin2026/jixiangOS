@@ -40,7 +40,19 @@ function defaultDueAt(): string {
 }
 
 function communicationTitle(record: CustomerActivityRecord): string {
-  return record.title || (record.type === 'manager_intervene' ? '管理介入' : '客户动态');
+  const title = String(record.title || '');
+  if (record.type === 'manager_intervene') return 'MANAGER_INTERVENE';
+  if (record.type === 'create') return 'LEAD_CREATED';
+  if (record.type === 'order') return 'ORDER_CREATED';
+  if (record.type === 'refund') return 'AFTER_SALES';
+  if (record.type === 'todo') return 'NEXT_ACTION';
+  if (record.type === 'follow' && /(电话|通话)/.test(title)) return 'PHONE_CALL';
+  if (record.type === 'follow' && /(微信|聊天)/.test(title)) return 'WECHAT_CHAT';
+  if (record.type === 'follow' && /(方案|演示)/.test(title)) return 'DEMO';
+  if (record.type === 'follow' && /(报价|付款)/.test(title)) return 'PROPOSAL';
+  if (record.type === 'follow' && /异议/.test(title)) return 'OBJECTION';
+  if (record.type === 'follow') return 'FOLLOW_UP';
+  return 'BUSINESS_EVENT';
 }
 
 const CustomerManagementCommandLayer: React.FC<{
@@ -101,6 +113,9 @@ const CustomerManagementCommandLayer: React.FC<{
     : snapshot.risk.level === 'medium'
       ? '建议补齐下一步动作、执行人和截止时间。'
       : '建议按当前动作继续推进，沟通后及时记录结果。';
+  const supervisorCandidates = manageableUsers.filter((user) => (
+    user.id !== customer.ownerId && /(主管|经理|总监|负责人|总经理)/.test(String(user.positionName || ''))
+  ));
 
   const reloadAll = async () => {
     await Promise.all([loadTasks(), Promise.resolve(onRefreshCustomer())]);
@@ -193,6 +208,8 @@ const CustomerManagementCommandLayer: React.FC<{
   return <Stack spacing={1.5} sx={{ mb: 2 }}>
     {message && <Alert severity={message.severity} onClose={() => setMessage(null)}>{message.text}</Alert>}
 
+    <Typography variant="caption" sx={{ color: '#8A8794', fontWeight: 750 }}>经营驾驶舱 / 销售部经营战情 / {customer.owner || '未分配'}个人经营 / {customer.name}</Typography>
+
     <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.25 }, border: '1px solid #E7E1F1', borderRadius: 2 }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.75 }}><AccountTreeOutlinedIcon sx={{ color: '#7C3AED' }} /><Typography variant="subtitle1" sx={{ fontWeight: 900 }}>客户沟通节点</Typography><Typography variant="caption" color="text.secondary">{activityNodes.length} NODES</Typography></Stack>
       <Box sx={{ display: 'flex', gap: 1.25, overflowX: 'auto', pb: 0.75 }}>
@@ -201,12 +218,13 @@ const CustomerManagementCommandLayer: React.FC<{
           <Box sx={{ width: 34, height: 34, borderRadius: '50%', border: '1.5px solid #8B5CF6', bgcolor: '#fff', color: '#7C3AED', display: 'grid', placeItems: 'center', position: 'relative', zIndex: 1 }}>
             {record.type === 'manager_intervene' ? <PersonSearchOutlinedIcon fontSize="small" /> : <ForumOutlinedIcon fontSize="small" />}
           </Box>
-          <Typography variant="body2" noWrap title={record.title} sx={{ mt: 0.75, fontWeight: 850 }}>{communicationTitle(record)}</Typography>
+          <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: '#7C3AED', fontWeight: 850 }}>{communicationTitle(record)}</Typography>
+          <Typography variant="body2" noWrap title={record.title} sx={{ fontWeight: 850 }}>{record.title || '客户动态'}</Typography>
           <Typography variant="caption" color="text.secondary">{formatDate(record.createdAt, 'MM-dd HH:mm')}</Typography>
         </Box>)}
+        {snapshot.contactGapDays !== null && snapshot.contactGapDays >= 1 && <Box sx={{ minWidth: 150, p: 1.25, border: '1px solid #F6AAA5', borderRadius: 1.5, bgcolor: '#FFF4F2', alignSelf: 'flex-start' }}><Typography variant="caption" sx={{ color: '#C4322B', fontWeight: 900 }}>NO_COMMUNICATION</Typography><Typography variant="body2" sx={{ color: '#C4322B', fontWeight: 900 }}>无沟通 · 空窗 {snapshot.contactGapDays} 天</Typography></Box>}
         {!activityNodes.length && <Typography variant="body2" color="text.secondary">暂无可展示的真实沟通节点</Typography>}
       </Box>
-      {snapshot.contactGapDays !== null && snapshot.contactGapDays >= 1 && <Chip color="error" size="small" label={`无沟通 · 空窗 ${snapshot.contactGapDays} 天`} sx={{ mt: 1.25, fontWeight: 850 }} />}
     </Paper>
 
     <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.25 }, border: '1px solid #E7E1F1', borderRadius: 2 }}>
@@ -241,7 +259,7 @@ const CustomerManagementCommandLayer: React.FC<{
       <DialogContent dividers><Stack spacing={2}>
         <Alert severity="info">任务将进入员工任务中心，处理结果需由管理者验收。</Alert>
         <TextField select label="介入方式" value={mode} onChange={(event) => setMode(event.target.value as InterventionMode)}>{Object.entries(modeConfig).map(([key, config]) => <MenuItem key={key} value={key}>{config.label} · {config.description}</MenuItem>)}</TextField>
-        {mode === 'SUPERVISOR_ASSIST' && <TextField select label="协同负责人" value={assistAssigneeId} onChange={(event) => setAssistAssigneeId(event.target.value)} helperText="选择当前授权团队内的主管或协同人员">{manageableUsers.filter((user) => user.id !== customer.ownerId).map((user) => <MenuItem key={user.id} value={user.id}>{user.name}{user.positionName ? ` · ${user.positionName}` : ''}</MenuItem>)}</TextField>}
+        {mode === 'SUPERVISOR_ASSIST' && <TextField select label="协同主管" value={assistAssigneeId} onChange={(event) => setAssistAssigneeId(event.target.value)} helperText={supervisorCandidates.length ? '仅展示当前可见范围内的管理岗位' : '当前权限范围内没有可选主管'}>{supervisorCandidates.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}{user.positionName ? ` · ${user.positionName}` : ''}</MenuItem>)}</TextField>}
         <TextField label="介入要求与验收口径" value={note} onChange={(event) => setNote(event.target.value)} multiline minRows={3} placeholder="例如：今日18:00前联系客户，确认决策人和下次会议时间，提交沟通结果。" />
         <TextField label="截止时间" type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} InputLabelProps={{ shrink: true }} />
       </Stack></DialogContent>

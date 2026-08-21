@@ -107,8 +107,9 @@ test('generation rejects more than 5000 candidates before opening a transaction'
 });
 
 test('cockpit intervention creates its task and customer activity in one transaction', async () => {
-  const customer = { id: 'customer-1', name: '客户甲', ownerId: 'employee-1', activityRecords: [] as any[] };
+  const customer = { id: 'customer-1', name: '客户甲', ownerId: 'employee-1', activityRecords: [] as any[], recordRevision: 0 };
   const createdTasks: any[] = [];
+  let storedRecordRevision = 0;
   const prisma: any = {
     async $transaction(work: any) {
       const tx = {
@@ -121,8 +122,8 @@ test('cockpit intervention creates its task and customer activity in one transac
         },
         taskActivity: { async create() { return {}; } },
         businessRecord: {
-          async findUnique() { return { data: customer }; },
-          async update({ data }: any) { Object.assign(customer, data.data); return { data: customer }; },
+          async findUnique() { return { data: customer, recordRevision: storedRecordRevision }; },
+          async update({ data }: any) { Object.assign(customer, data.data); storedRecordRevision = data.recordRevision; return { data: customer }; },
         },
       };
       return work(tx);
@@ -139,6 +140,8 @@ test('cockpit intervention creates its task and customer activity in one transac
   assert.equal(customer.activityRecords[0].type, 'manager_intervene');
   assert.equal(customer.activityRecords[0].relatedId, task.id);
   assert.equal(customer.activityRecords[0].relatedType, 'task');
+  assert.equal(customer.recordRevision, 1);
+  assert.equal(storedRecordRevision, 1, '顶层与 JSON 中的客户版本号必须同步提升');
 });
 
 test('delayed multi-chunk generation exceeds Prisma default 5s but commits within its explicit deadline', async () => {

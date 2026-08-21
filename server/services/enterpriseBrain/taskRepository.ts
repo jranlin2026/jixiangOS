@@ -93,6 +93,7 @@ export interface EnterpriseTaskRepository extends WorkbenchRepository {
   createGeneratedTasks(inputs: GeneratedTaskInput[], options?: GeneratedTaskWriteOptions): Promise<number>;
   listTasks(filter: { employeeId?: string; departmentIds?: string[]; date?: string; status?: string; sourceType?: string; sourceId?: string; page: number; pageSize: number }): Promise<{ items: EmployeeTaskRecord[]; total: number }>;
   findCustomerInterventionTarget(customerId: string): Promise<{ id: string; name: string; ownerId: string | null } | null>;
+  canActorReadCustomer(customerId: string, actor: AuthenticatedUser): Promise<boolean>;
   listDepartmentTree(rootId: string): Promise<string[]>;
   findEmployee(id: string): Promise<EmployeeDirectoryRecord | null>;
   findTask(id: string): Promise<EmployeeTaskRecord | null>;
@@ -176,6 +177,7 @@ export function createMemoryEnterpriseTaskRepository(input: MemoryInput = {}): E
     async findEmployee(id) { return employees.get(id) || null; },
     async findTask(id) { return tasks.find((item) => item.id === id) || null; },
     async findCustomerInterventionTarget(customerId) { return customers.get(customerId) || null; },
+    async canActorReadCustomer(customerId) { return customers.has(customerId); },
     async completeTaskAtomic(payload) {
       const task = tasks.find((item) => item.id === payload.taskId && item.employeeId === payload.employeeId && ['PENDING', 'RETURNED'].includes(item.status));
       if (!task) return null;

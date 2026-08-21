@@ -117,6 +117,7 @@ export interface CockpitCustomerBattleItem {
   customerId: string;
   customerName: string;
   company: string;
+  customerLevel?: string;
   ownerId?: string;
   ownerName: string;
   stageCode: string;

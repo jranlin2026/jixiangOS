@@ -342,6 +342,7 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
 
   assert.deepEqual(result.data?.customerBattles[0], {
     customerId: 'battle', customerName: '客户-battle', company: '作战客户公司',
+    customerLevel: 'L1',
     ownerId: 'sales-1', ownerName: '销售甲', stageCode: 'proposal', stageLabel: '方案报价',
     opportunityAmount: 68000, nextActionTitle: '确认决策人', nextActionDueAt: '2026-07-21T08:00:00.000Z',
     contactGapDays: 2, riskLevel: 'high', riskReason: '下一步动作已逾期',
@@ -403,6 +404,7 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
     todayDueTodoCount: 2, todayCompletedTodoCount: 2, todayFollowUpCount: 1, overdueCustomerCount: 1,
     wonCount: 1, lostCount: 1, conversionRate: 50,
     riskCustomerCount: 1, missingNextActionCount: 0,
+    needsManagerInterventionCount: 1,
     stageDistribution: [
       { stageCode: 'proposal', stageLabel: '方案报价', customerCount: 1, opportunityAmount: 50000 },
       { stageCode: 'won', stageLabel: '已成交', customerCount: 1, opportunityAmount: 30000 },

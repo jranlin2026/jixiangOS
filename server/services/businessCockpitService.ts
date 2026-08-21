@@ -135,6 +135,7 @@ export interface BusinessCockpitSnapshot {
     todayFollowUpCount: number;
     overdueCustomerCount: number;
     riskCustomerCount: number;
+    needsManagerInterventionCount: number;
     missingNextActionCount: number;
     wonCount: number;
     lostCount: number;
@@ -784,6 +785,7 @@ export function createBusinessCockpitService(
             customerId: customer.id,
             customerName: customer.name,
             company: customer.company || '',
+            customerLevel: customer.customerLevel,
             ...(customer.ownerId ? { ownerId: customer.ownerId } : {}),
             ownerName: customer.owner || '未分配',
             stageCode: battle.stage.code,
@@ -826,6 +828,7 @@ export function createBusinessCockpitService(
           todayFollowUpCount: 0,
           overdueCustomerCount: 0,
           riskCustomerCount: 0,
+          needsManagerInterventionCount: 0,
           missingNextActionCount: 0,
           wonCount: 0,
           lostCount: 0,
@@ -858,6 +861,11 @@ export function createBusinessCockpitService(
         }
         if (item.riskLevel !== 'low') current.riskCustomerCount += 1;
         if (
+          (!['won', 'lost'].includes(item.stageCode) && item.nextActionDueAt && timestamp(item.nextActionDueAt) < now.getTime())
+          || (item.stageCode === 'payment_pending' && (item.contactGapDays || 0) >= 1)
+          || (['L4', 'L5'].includes(item.customerLevel || '') && (item.contactGapDays || 0) >= 2)
+        ) current.needsManagerInterventionCount += 1;
+        if (
           !['won', 'lost'].includes(item.stageCode)
           && item.nextActionDueAt
           && timestamp(item.nextActionDueAt) < now.getTime()
@@ -878,6 +886,7 @@ export function createBusinessCockpitService(
           todayFollowUpCount: 0,
           overdueCustomerCount: 0,
           riskCustomerCount: 0,
+          needsManagerInterventionCount: 0,
           missingNextActionCount: 0,
           wonCount: 0,
           lostCount: 0,
@@ -926,6 +935,7 @@ export function createBusinessCockpitService(
               todayFollowUpCount: 0,
               overdueCustomerCount: 0,
               riskCustomerCount: 0,
+              needsManagerInterventionCount: 0,
               missingNextActionCount: 0,
               wonCount: 0,
               lostCount: 0,
@@ -1250,7 +1260,7 @@ export function createBusinessCockpitService(
         todayFollowUpCount: (existing?.todayFollowUpCount || 0) + profile.todayFollowUpCount,
         overdueCustomerCount: (existing?.overdueCustomerCount || 0) + profile.overdueCustomerCount,
         riskCustomerCount: (existing?.riskCustomerCount || 0) + profile.riskCustomerCount,
-        needsManagerInterventionCount: (existing?.needsManagerInterventionCount || 0) + profile.overdueCustomerCount,
+        needsManagerInterventionCount: (existing?.needsManagerInterventionCount || 0) + profile.needsManagerInterventionCount,
         missingNextActionCount: (existing?.missingNextActionCount || 0) + profile.missingNextActionCount,
         wonCount,
         lostCount,

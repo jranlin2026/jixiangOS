@@ -288,7 +288,11 @@ export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerT
     } else if (filters.managementFilter === 'stale_24h') {
       conditions.push(Prisma.sql`NOT (${hasRecentFollow(24)})`);
     } else if (filters.managementFilter === 'intervention') {
-      conditions.push(actionOverdue);
+      conditions.push(Prisma.sql`(
+        ${actionOverdue}
+        OR (${jsonText('$.opportunityStageCode')} = 'payment_pending' AND NOT (${hasRecentFollow(24)}))
+        OR (${jsonText('$.customerLevel')} IN ('L4', 'L5') AND NOT (${hasRecentFollow(48)}))
+      )`);
     } else if (filters.managementFilter === 'risk') {
       conditions.push(Prisma.sql`(NULLIF(${nextActionTitle}, '') IS NULL OR ${actionOverdue} OR NOT (${hasRecentFollow(48)}))`);
     }

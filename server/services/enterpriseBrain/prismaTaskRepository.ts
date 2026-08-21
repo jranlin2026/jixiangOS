@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { STORAGE_KEYS } from '../../../src/shared/utils/constants';
+import { canReadCustomer, loadCustomerAccessContext } from '../customerAccessPolicy';
 import { createPrismaWorkbenchRepository } from '../workbench/prismaWorkbenchRepository';
 import { MAX_GENERATED_TASK_CANDIDATES } from './taskRepository';
 import type {
@@ -115,6 +116,7 @@ async function appendManagerInterventionActivity(tx: any, input: GeneratedTaskIn
   const customer = row.data && typeof row.data === 'object' ? row.data : {};
   const now = new Date().toISOString();
   const activityRecords = Array.isArray(customer.activityRecords) ? customer.activityRecords : [];
+  const nextRevision = Number(customer.recordRevision || row.recordRevision || 0) + 1;
   await tx.businessRecord.update({
     where: selector,
     data: {
@@ -131,8 +133,9 @@ async function appendManagerInterventionActivity(tx: any, input: GeneratedTaskIn
           relatedType: 'task',
         }],
         updatedAt: now,
-        recordRevision: Number(customer.recordRevision || 0) + 1,
+        recordRevision: nextRevision,
       },
+      recordRevision: nextRevision,
     },
   });
 }
@@ -285,6 +288,16 @@ export function createPrismaEnterpriseTaskRepository(prisma: Client): Enterprise
       return customer && !customer.deletedAt && !customer.mergedIntoId
         ? { id: customerId, name: String(customer.name || customer.company || customerId), ownerId: customer.ownerId ? String(customer.ownerId) : null }
         : null;
+    },
+    async canActorReadCustomer(customerId, actor) {
+      const row = await prisma.businessRecord.findUnique({
+        where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
+        select: { data: true },
+      });
+      const customer = row?.data && typeof row.data === 'object' ? row.data as any : null;
+      if (!customer || customer.deletedAt || customer.mergedIntoId) return false;
+      const context = await loadCustomerAccessContext(prisma as any, actor);
+      return canReadCustomer(context, customer);
     },
     async findTask(id) {
       const row = await prisma.employeeTask.findUnique({ where: { id }, include: { evidence: { orderBy: { createdAt: 'asc' } } } });

@@ -141,7 +141,7 @@ const SalespersonDetail: React.FC = () => {
             <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>当前名下客户</Typography>
             <Stack direction="row" spacing={0.75} sx={{ mt: 1.5, overflowX: 'auto', pb: 0.25 }}>
               {[
-                ['', '全部'], ['key_customer', '重点客户'], ['risk', '风险客户'], ['stale_24h', '超24小时未跟进'], ['intervention', '需要介入'], ['payment_pending', '待付款'],
+                ['', '全部'], ['key_customer', 'L4/L5高等级'], ['risk', '风险客户'], ['stale_24h', '超24小时未跟进'], ['intervention', '需要介入'], ['payment_pending', '待付款'],
               ].map(([value, label]) => <Chip key={value || 'all'} clickable label={label} color={managementFilter === value ? 'primary' : 'default'} variant={managementFilter === value ? 'filled' : 'outlined'} onClick={() => { setManagementFilter(value as CustomerManagementFilter | ''); setPage(0); }} />)}
             </Stack>
           </Box>

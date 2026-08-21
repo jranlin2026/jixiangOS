@@ -574,7 +574,9 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
       const lastFollow = lastFollowAt(customer);
       const overdue = Boolean(customer.nextActionDueAt && new Date(customer.nextActionDueAt).getTime() < now);
       if (filters.managementFilter === 'stale_24h') return !lastFollow || now - lastFollow > 24 * 60 * 60 * 1000;
-      if (filters.managementFilter === 'intervention') return overdue;
+      if (filters.managementFilter === 'intervention') return overdue
+        || (customer.opportunityStageCode === 'payment_pending' && (!lastFollow || now - lastFollow > 24 * 60 * 60 * 1000))
+        || (['L4', 'L5'].includes(customer.customerLevel) && (!lastFollow || now - lastFollow > 48 * 60 * 60 * 1000));
       return !customer.nextActionTitle || overdue || !lastFollow || now - lastFollow > 48 * 60 * 60 * 1000;
     });
   }

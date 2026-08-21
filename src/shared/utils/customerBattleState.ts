@@ -79,6 +79,8 @@ export function buildCustomerBattleSnapshot(
     risk = { level: 'medium', reason: '尚未设置下一步动作' };
   } else if (!lastEffectiveContact) {
     risk = { level: 'medium', reason: '尚无有效联系记录' };
+  } else if ((contactGapDays || 0) >= 2) {
+    risk = { level: 'medium', reason: `已 ${contactGapDays} 天无有效沟通` };
   }
 
   return {

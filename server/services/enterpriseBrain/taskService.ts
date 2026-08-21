@@ -115,6 +115,7 @@ export function createEnterpriseTaskService(deps: Dependencies) {
         }
         const customer = await deps.repository.findCustomerInterventionTarget(sourceId);
         if (!customer?.ownerId) return failure<never>('客户不存在或未绑定负责人', 404);
+        if (!await deps.repository.canActorReadCustomer(sourceId, actor)) return failure<never>('客户不在当前账号可见范围内', 403);
         const owner = await deps.repository.findEmployee(customer.ownerId);
         if (!owner?.isActive || owner.employmentStatus === 'left') return failure<never>('客户负责人不存在或已离职', 409);
         if (sourceItemId === 'REMIND_SALES' && employee.id !== customer.ownerId) {
@@ -122,6 +123,9 @@ export function createEnterpriseTaskService(deps: Dependencies) {
         }
         if (sourceItemId === 'BOSS_FOLLOW_UP' && employee.id !== actor.id) {
           return failure<never>('老板亲跟必须由当前管理者本人执行', 400);
+        }
+        if (sourceItemId === 'SUPERVISOR_ASSIST' && !/(主管|经理|总监|负责人|总经理)/.test(String(employee.positionName || ''))) {
+          return failure<never>('主管协同必须指派给管理岗位人员', 400);
         }
         if (!isSuperAdmin(actor)) {
           const allowed = await deps.repository.listDepartmentTree(actor.departmentId!);
