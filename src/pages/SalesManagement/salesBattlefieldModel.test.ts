@@ -18,6 +18,7 @@ const profile = (overrides: Partial<CockpitSalesBattleProfile> = {}): CockpitSal
   opportunityAmount: 0,
   todayDueTodoCount: 0,
   todayCompletedTodoCount: 0,
+  todayFollowUpCount: 1,
   overdueCustomerCount: 0,
   riskCustomerCount: 0,
   missingNextActionCount: 0,
@@ -44,6 +45,9 @@ assert.deepEqual(getSalespersonBattleStatus(profile({ riskCustomerCount: 3 })), 
 });
 assert.deepEqual(getSalespersonBattleStatus(profile({ missingNextActionCount: 2 })), {
   code: 'attention', label: '需关注', reason: '2 个客户缺少下一步动作',
+});
+assert.deepEqual(getSalespersonBattleStatus(profile({ todayFollowUpCount: 0 })), {
+  code: 'attention', label: '需关注', reason: '今日尚无客户跟进记录',
 });
 assert.deepEqual(getSalespersonBattleStatus(profile({ overdueCustomerCount: 1 })), {
   code: 'intervene', label: '需要介入', reason: '1 个客户下一步动作已逾期',

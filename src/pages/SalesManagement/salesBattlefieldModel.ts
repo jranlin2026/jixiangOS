@@ -32,6 +32,13 @@ export function getSalespersonBattleStatus(profile: CockpitSalesBattleProfile): 
       reason: `${profile.missingNextActionCount} 个客户缺少下一步动作`,
     };
   }
+  if (profile.customerCount > 0 && profile.todayFollowUpCount === 0) {
+    return {
+      code: 'attention',
+      label: '需关注',
+      reason: '今日尚无客户跟进记录',
+    };
+  }
   return { code: 'normal', label: '正常', reason: '当前无逾期或风险客户' };
 }
 

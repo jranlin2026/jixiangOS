@@ -145,7 +145,7 @@ const BusinessCockpit: React.FC = () => {
 
   const salesProfiles = useMemo(() => (data?.salesBattleProfiles || [])
     .filter((profile) => profile.identityStatus === 'resolved' && profile.department?.includes('销售')), [data]);
-  const todayCompletedActions = salesProfiles.reduce((sum, profile) => sum + profile.todayCompletedTodoCount, 0);
+  const todayFollowedCustomers = salesProfiles.reduce((sum, profile) => sum + profile.todayFollowUpCount, 0);
   const atRiskSalesCount = salesProfiles.filter((profile) => profile.overdueCustomerCount > 0 || profile.riskCustomerCount > 0).length;
   const overdueCustomerCount = salesProfiles.reduce((sum, profile) => sum + profile.overdueCustomerCount, 0);
   const performance = data?.managementPerformance || {
@@ -195,8 +195,8 @@ const BusinessCockpit: React.FC = () => {
             <Typography variant="caption" sx={{ color: colors.muted }}>{formatUpdatedAt(String(data.updatedAt))}</Typography>
           </Stack>
           <Typography sx={{ color: colors.ink, fontSize: { xs: 24, md: 34 }, lineHeight: 1.45, fontWeight: 950, mt: 2, maxWidth: 1060 }}>
-            今日已完成 <Box component="span" sx={{ color: colors.purple }}>{todayCompletedActions}</Box> 项客户动作，
-            本月正式订单净实收 <Box component="span" sx={{ color: colors.purple }}>{formatCurrency(performance.completedAmount)}</Box>，
+            今日已跟进 <Box component="span" sx={{ color: colors.purple }}>{todayFollowedCustomers}</Box> 位客户，
+            本月正式订单实收 <Box component="span" sx={{ color: colors.purple }}>{formatCurrency(performance.completedAmount)}</Box>，
             <Box component="span" sx={{ color: atRiskSalesCount ? colors.red : colors.green }}>{atRiskSalesCount} 名销售存在风险，其中 {overdueCustomerCount} 个客户动作已逾期</Box>。
           </Typography>
           <Typography variant="body2" sx={{ color: colors.muted, mt: 1.5 }}>基于当前权限范围内的订单、客户动作和风险规则自动生成</Typography>
@@ -219,7 +219,7 @@ const BusinessCockpit: React.FC = () => {
           <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={1} sx={{ px: { xs: 2, md: 2.5 }, py: 1.75, borderBottom: '1px solid #EEEAF4' }}>
             <Box>
               <Typography id="performance-title" variant="subtitle1" sx={{ color: colors.ink, fontWeight: 950 }}>公司业绩目标</Typography>
-              <Typography variant="caption" sx={{ color: colors.muted }}>正式订单净实收，不含售后回收</Typography>
+              <Typography variant="caption" sx={{ color: colors.muted }}>正式订单实收，不含售后回收</Typography>
             </Box>
             <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate(ROUTES.ORDERS)}>查看业绩明细</Button>
           </Stack>

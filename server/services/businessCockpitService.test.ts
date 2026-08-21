@@ -266,18 +266,24 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
       managerId: 'sales-1', memberCount: 1, sortOrder: 2, isActive: true, createdAt: now, updatedAt: now,
     },
   ];
+  let targetQuery: any;
   targetPrisma.keyResult = {
-    findMany: async () => [
+    findMany: async (query: any) => {
+      targetQuery = query;
+      return [
       { targetValue: 3000000, updatedAt: now, metricBinding: { scopeType: 'COMPANY', scopeId: null } },
       { targetValue: 400000, updatedAt: now, metricBinding: { scopeType: 'USER', scopeId: 'sales-1' } },
-    ],
+      ];
+    },
   };
   const result = await createBusinessCockpitService(targetPrisma).get(
     { preset: 'custom', startDate: '2026-07-01', endDate: '2026-07-31' },
     admin,
   );
   assert.equal(result.data?.managementPerformance.targetAmount, 3000000);
+  assert.equal(result.data?.managementPerformance.completedAmount, 32980);
   assert.equal(result.data?.managementPerformance.targetSource, 'okr');
+  assert.equal(targetQuery?.where?.objective?.cycle?.cycleType, 'MONTH');
   assert.equal(result.data?.salesBattleProfiles.find((item) => item.userId === 'sales-1')?.monthlyTargetAmount, 400000);
   assert.equal(result.data?.departmentStatuses.find((item) => item.id === 'sales')?.memberCount, 1);
   assert.equal(result.data?.departmentStatuses.find((item) => item.id === 'sales')?.available, true);
@@ -348,6 +354,10 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
 {
   const activeCustomer = customer('profile-active', 'sales-1', {
     opportunityStageCode: 'proposal', opportunityAmount: 50000,
+    activityRecords: [{
+      id: 'profile-follow', type: 'follow', title: '跟进客户', operator: '销售甲',
+      createdAt: '2026-07-22T01:30:00.000Z',
+    }],
   });
   const wonCustomer = customer('profile-won', 'sales-1', {
     opportunityStageCode: 'won', opportunityAmount: 30000,
@@ -382,13 +392,14 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
   }).getSnapshot({
     startAt: START_AT, endAt: END_AT,
     visibility: { unrestricted: true, visibleUserIds: [], visibleUserNames: [] },
+    rankingUserIdByName: { 销售甲: 'sales-1' },
   });
 
   const profile = (result.data as any)?.salesBattleProfiles[0];
   assert.deepEqual({ ...profile, priorityCustomers: undefined }, {
     ownerId: 'sales-1', ownerName: '销售甲', customerCount: 3,
     activeOpportunityCount: 1, opportunityAmount: 50000,
-    todayDueTodoCount: 2, todayCompletedTodoCount: 2, overdueCustomerCount: 1,
+    todayDueTodoCount: 2, todayCompletedTodoCount: 2, todayFollowUpCount: 1, overdueCustomerCount: 1,
     wonCount: 1, lostCount: 1, conversionRate: 50,
     riskCustomerCount: 1, missingNextActionCount: 0,
     priorityCustomers: undefined,
@@ -419,7 +430,7 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
   assert.deepEqual(zeroProfile, {
     userId: 'sales-zero', name: '零动作销售', department: '管理部', identityStatus: 'resolved',
     revenueAmount: 0, orderCount: 0, customerCount: 0, activeOpportunityCount: 0,
-    opportunityAmount: 0, todayDueTodoCount: 0, todayCompletedTodoCount: 0,
+    opportunityAmount: 0, todayDueTodoCount: 0, todayCompletedTodoCount: 0, todayFollowUpCount: 0,
     overdueCustomerCount: 0, riskCustomerCount: 0, missingNextActionCount: 0,
     wonCount: 0, lostCount: 0, conversionRate: 0,
     monthlyTargetAmount: null, targetGapAmount: null, targetCompletionRate: null,

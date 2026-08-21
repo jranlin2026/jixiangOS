@@ -80,8 +80,8 @@ const SalesBattlefield: React.FC = () => {
     () => paginateSalesProfiles(profiles, page, rowsPerPage),
     [page, profiles, rowsPerPage],
   );
-  const noCompletedActionNames = profiles
-    .filter((profile) => profile.customerCount > 0 && profile.todayCompletedTodoCount === 0)
+  const noFollowUpNames = profiles
+    .filter((profile) => profile.customerCount > 0 && profile.todayFollowUpCount === 0)
     .map((profile) => profile.name);
   const interveneProfiles = profiles.filter((profile) => getSalespersonBattleStatus(profile).code === 'intervene');
 
@@ -127,10 +127,10 @@ const SalesBattlefield: React.FC = () => {
 
         <Paper elevation={0} sx={{ mb: 2, px: { xs: 2, md: 2.5 }, py: 1.75, borderRadius: 2, border: '1px solid #E7E1F1', bgcolor: '#FFFDFE' }}>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={{ xs: 0.75, md: 2.5 }}>
-            <Typography variant="body2" sx={{ color: noCompletedActionNames.length ? '#C4322B' : '#16875D', fontWeight: 800 }}>
-              {noCompletedActionNames.length
-                ? `今日暂无已完成客户动作：${noCompletedActionNames.slice(0, 8).join('、')}${noCompletedActionNames.length > 8 ? ` 等${noCompletedActionNames.length}人` : ''}`
-                : '今日销售客户动作均已有完成记录'}
+            <Typography variant="body2" sx={{ color: noFollowUpNames.length ? '#C4322B' : '#16875D', fontWeight: 800 }}>
+              {noFollowUpNames.length
+                ? `今日暂无客户跟进记录：${noFollowUpNames.slice(0, 8).join('、')}${noFollowUpNames.length > 8 ? ` 等${noFollowUpNames.length}人` : ''}`
+                : '今日销售均已有客户跟进记录'}
             </Typography>
             <Typography variant="body2" sx={{ color: interveneProfiles.length ? '#A35F00' : '#777184', fontWeight: 800 }}>
               {interveneProfiles.length

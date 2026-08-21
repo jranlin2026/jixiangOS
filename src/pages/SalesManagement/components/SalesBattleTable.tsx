@@ -103,7 +103,7 @@ const SalesBattleTable: React.FC<SalesBattleTableProps> = ({
               <TableRow>
                 <TableCell>状态</TableCell>
                 <TableCell>销售</TableCell>
-                <TableCell align="right">今日已完成动作</TableCell>
+                <TableCell align="right">今日跟进客户</TableCell>
                 <TableCell align="right">风险客户</TableCell>
                 <TableCell align="right">需要介入</TableCell>
                 <TableCell align="right">月目标</TableCell>
@@ -121,10 +121,7 @@ const SalesBattleTable: React.FC<SalesBattleTableProps> = ({
                     <Typography variant="body2" sx={metricTextSx}>{profile.name}</Typography>
                     <Typography variant="caption" sx={{ color: '#8A8794' }}>{profile.department || '部门未配置'}</Typography>
                   </TableCell>
-                  <TableCell align="right" sx={metricTextSx}>
-                    {profile.todayCompletedTodoCount}
-                    <Typography component="span" variant="caption" sx={{ color: '#8A8794', ml: 0.5 }}>/ 应做 {profile.todayDueTodoCount}</Typography>
-                  </TableCell>
+                  <TableCell align="right" sx={metricTextSx}>{profile.todayFollowUpCount}</TableCell>
                   <TableCell align="right" sx={{ ...metricTextSx, color: profile.riskCustomerCount ? '#A35F00' : '#101828' }}>{profile.riskCustomerCount}</TableCell>
                   <TableCell align="right" sx={{ ...metricTextSx, color: profile.overdueCustomerCount ? '#C4322B' : '#101828' }}>{profile.overdueCustomerCount}</TableCell>
                   <TableCell align="right" sx={metricTextSx}>
@@ -158,7 +155,7 @@ const SalesBattleTable: React.FC<SalesBattleTableProps> = ({
                   {[
                     ['本月完成', formatCurrency(profile.revenueAmount)],
                     ['月目标', profile.monthlyTargetAmount === null ? '未配置' : formatCurrency(profile.monthlyTargetAmount)],
-                    ['今日跟进', `${profile.todayCompletedTodoCount} 完成 / ${profile.todayDueTodoCount} 应做`],
+                    ['今日跟进客户', `${profile.todayFollowUpCount}`],
                     ['风险 / 介入', `${profile.riskCustomerCount} / ${profile.overdueCustomerCount}`],
                   ].map(([label, value]) => (
                     <Box key={label}>

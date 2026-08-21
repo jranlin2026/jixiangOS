@@ -131,6 +131,7 @@ export interface BusinessCockpitSnapshot {
     opportunityAmount: number;
     todayDueTodoCount: number;
     todayCompletedTodoCount: number;
+    todayFollowUpCount: number;
     overdueCustomerCount: number;
     riskCustomerCount: number;
     missingNextActionCount: number;
@@ -817,6 +818,7 @@ export function createBusinessCockpitService(
           opportunityAmount: 0,
           todayDueTodoCount: 0,
           todayCompletedTodoCount: 0,
+          todayFollowUpCount: 0,
           overdueCustomerCount: 0,
           riskCustomerCount: 0,
           missingNextActionCount: 0,
@@ -837,7 +839,11 @@ export function createBusinessCockpitService(
           if (!item.nextActionTitle) current.missingNextActionCount += 1;
         }
         if (item.riskLevel !== 'low') current.riskCustomerCount += 1;
-        if (item.riskLevel === 'high') current.overdueCustomerCount += 1;
+        if (
+          !['won', 'lost'].includes(item.stageCode)
+          && item.nextActionDueAt
+          && timestamp(item.nextActionDueAt) < now.getTime()
+        ) current.overdueCustomerCount += 1;
         salesBattleProfileMap.set(key, current);
       });
       const salesProfileForTodo = (todo: CustomerTodo) => {
@@ -851,6 +857,7 @@ export function createBusinessCockpitService(
           opportunityAmount: 0,
           todayDueTodoCount: 0,
           todayCompletedTodoCount: 0,
+          todayFollowUpCount: 0,
           overdueCustomerCount: 0,
           riskCustomerCount: 0,
           missingNextActionCount: 0,
@@ -873,6 +880,45 @@ export function createBusinessCockpitService(
         && shanghaiDateKey(todo.completedAt) === shanghaiDateKey(now)
       )).forEach((todo) => {
         salesProfileForTodo(todo).todayCompletedTodoCount += 1;
+      });
+      const todayFollowedCustomerIdsBySales = new Map<string, Set<string>>();
+      customers.forEach((customer) => {
+        (customer.activityRecords || []).filter((record) => (
+          record.type === 'follow'
+          && record.title !== '历史最后跟进记录'
+          && shanghaiDateKey(record.createdAt) === shanghaiDateKey(now)
+        )).forEach((record) => {
+          const operatorName = clean(record.operator);
+          const operatorId = query.rankingUserIdByName?.[operatorName]
+            || (operatorName && operatorName === clean(customer.owner) ? clean(customer.ownerId) : '');
+          const key = rankingKey(operatorId, operatorName);
+          const customerIds = todayFollowedCustomerIdsBySales.get(key) || new Set<string>();
+          customerIds.add(customer.id);
+          todayFollowedCustomerIdsBySales.set(key, customerIds);
+          if (!salesBattleProfileMap.has(key)) {
+            salesBattleProfileMap.set(key, {
+              ...(operatorId ? { ownerId: operatorId } : {}),
+              ownerName: operatorName || '未分配',
+              customerCount: 0,
+              activeOpportunityCount: 0,
+              opportunityAmount: 0,
+              todayDueTodoCount: 0,
+              todayCompletedTodoCount: 0,
+              todayFollowUpCount: 0,
+              overdueCustomerCount: 0,
+              riskCustomerCount: 0,
+              missingNextActionCount: 0,
+              wonCount: 0,
+              lostCount: 0,
+              conversionRate: 0,
+              priorityCustomers: [],
+            });
+          }
+        });
+      });
+      todayFollowedCustomerIdsBySales.forEach((customerIds, key) => {
+        const profile = salesBattleProfileMap.get(key);
+        if (profile) profile.todayFollowUpCount = customerIds.size;
       });
       const salesBattleProfiles = [...salesBattleProfileMap.values()]
         .map((profile) => ({
@@ -1034,6 +1080,7 @@ export function createBusinessCockpitService(
             status: 'PUBLISHED',
             cycle: {
               status: 'ACTIVE',
+              cycleType: 'MONTH',
               startAt: { lte: new Date(resolvedRange.endAt) },
               endAt: { gte: new Date(resolvedRange.startAt) },
             },
@@ -1166,6 +1213,7 @@ export function createBusinessCockpitService(
         opportunityAmount: roundMoney((existing?.opportunityAmount || 0) + profile.opportunityAmount),
         todayDueTodoCount: (existing?.todayDueTodoCount || 0) + profile.todayDueTodoCount,
         todayCompletedTodoCount: (existing?.todayCompletedTodoCount || 0) + profile.todayCompletedTodoCount,
+        todayFollowUpCount: (existing?.todayFollowUpCount || 0) + profile.todayFollowUpCount,
         overdueCustomerCount: (existing?.overdueCustomerCount || 0) + profile.overdueCustomerCount,
         riskCustomerCount: (existing?.riskCustomerCount || 0) + profile.riskCustomerCount,
         missingNextActionCount: (existing?.missingNextActionCount || 0) + profile.missingNextActionCount,
@@ -1207,6 +1255,7 @@ export function createBusinessCockpitService(
         opportunityAmount: 0,
         todayDueTodoCount: 0,
         todayCompletedTodoCount: 0,
+        todayFollowUpCount: 0,
         overdueCustomerCount: 0,
         riskCustomerCount: 0,
         missingNextActionCount: 0,
@@ -1269,7 +1318,7 @@ export function createBusinessCockpitService(
         available,
       };
     });
-    const completedAmount = snapshot.financeHealth.formalOrderNetReceiptAmount;
+    const completedAmount = snapshot.business.formalOrderPaidAmount;
     const managementPerformance: BusinessCockpitData['managementPerformance'] = {
       completedAmount,
       targetAmount: companyTargetAmount,

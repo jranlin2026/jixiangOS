@@ -148,6 +148,7 @@ export interface CockpitSalesBattleProfile {
   opportunityAmount: number;
   todayDueTodoCount: number;
   todayCompletedTodoCount: number;
+  todayFollowUpCount: number;
   overdueCustomerCount: number;
   riskCustomerCount: number;
   missingNextActionCount: number;
