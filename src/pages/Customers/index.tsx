@@ -533,6 +533,7 @@ const Customers: React.FC = () => {
 
   const handleCloseDetail = () => {
     setDetailOpen(false);
+    setSelectedCustomer(null);
     if (!searchParams.get('customerId') && !searchParams.get('detailTab')) return;
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('customerId');

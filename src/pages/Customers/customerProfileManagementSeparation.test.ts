@@ -12,6 +12,11 @@ assert.match(
   /const handleViewDetail = \(customer: Customer\) => \{\s*setSelectedCustomer\(customer\);\s*setDetailOpen\(true\);\s*\}/,
   'Customer list should open the original customer profile dialog.',
 );
+assert.match(
+  customersPageSource,
+  /const handleCloseDetail = \(\) => \{\s*setDetailOpen\(false\);\s*setSelectedCustomer\(null\);/,
+  'Closing the profile dialog should discard transient detail state before reopening the same customer.',
+);
 assert.doesNotMatch(
   customerDetailSource,
   /CustomerManagementCommandLayer/,
