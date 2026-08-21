@@ -71,10 +71,10 @@ export function buildCustomerBattleSnapshot(
   const nextActionOverdue = nextActionTime !== null && nextActionTime < nowTime;
 
   let risk: { level: CustomerBattleRiskLevel; reason: string } = { level: 'low', reason: '推进正常' };
-  if (nextActionOverdue) {
-    risk = { level: 'high', reason: '下一步动作已逾期' };
-  } else if (snapshotStageIsClosed(customer.opportunityStageCode)) {
+  if (snapshotStageIsClosed(customer.opportunityStageCode)) {
     risk = { level: 'low', reason: customer.opportunityStageCode === 'won' ? '本轮机会已成交' : '本轮机会已结束' };
+  } else if (nextActionOverdue) {
+    risk = { level: 'high', reason: '下一步动作已逾期' };
   } else if (!nextAction) {
     risk = { level: 'medium', reason: '尚未设置下一步动作' };
   } else if (!lastEffectiveContact) {

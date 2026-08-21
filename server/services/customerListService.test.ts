@@ -555,6 +555,14 @@ const listService = createCustomerListService({
   user: { findMany: async () => [{ id: 'sales-1', name: '销售甲', account: 'sales', email: '', phone: '', role: '销售顾问', avatar: null, departmentId: 'd1', positionId: null, positionName: null, roleId: 'r1', passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, lastLoginAt: null, isActive: true, employmentStatus: 'active', createdAt: now, updatedAt: now }] },
   role: { findMany: async () => [{ id: 'r1', name: '销售顾问', code: 'sales', description: null, departmentId: null, permissions: [{ module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] }], dataScopes: { customers: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now }] },
   department: { findMany: async () => [] },
+  customerTodo: { findMany: async ({ where }: any) => (
+    where.customerId.in.includes('sales-a-hit-1')
+      ? [{
+        customerId: 'sales-a-hit-1', title: '确认决策人', dueAt: new Date('2026-07-13T02:00:00.000Z'),
+        assigneeName: '销售甲', createdAt: new Date(now),
+      }]
+      : []
+  ) },
   $queryRaw: async (...args: any[]) => {
     const sql = flattenSql(args);
     capturedQueries.push(sql);
@@ -580,6 +588,8 @@ executingFilters = { tagIds: ['t-agent', 't-private', 't-high-budget'], tagMatch
 const sqlList = await listService.list(executingFilters, salesActor);
 assert.equal(sqlList.code, 0);
 assert.deepEqual(sqlList.data?.items.map((item) => item.id), ['sales-a-hit-1']);
+assert.equal(sqlList.data?.items[0]?.nextActionTitle, '确认决策人');
+assert.equal(sqlList.data?.items[0]?.nextActionDueAt, '2026-07-13T02:00:00.000Z');
 assert.deepEqual(sqlList.data?.pagination, { page: 1, pageSize: 1, total: 2, totalPages: 2 });
 assert.equal(capturedQueries.length, 2);
 for (const sql of capturedQueries) {

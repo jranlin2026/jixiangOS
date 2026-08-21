@@ -53,7 +53,7 @@ import { normalizeOptionalSocialProfileFields } from '../../src/shared/utils/soc
 
 type CustomerListPrisma = Pick<PrismaClient,
   'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerAuditEvent'
-  | 'contactIdentity' | 'contactIdentityLink' | 'appStorage' | '$queryRaw' | '$transaction'
+  | 'contactIdentity' | 'contactIdentityLink' | 'appStorage' | 'customerTodo' | '$queryRaw' | '$transaction'
 >;
 
 type CustomerListServiceOptions = {
@@ -622,10 +622,34 @@ export function createCustomerListService(
         LIMIT ${pageSize} OFFSET ${offset}
       `;
       const totalPages = Math.ceil(total / pageSize);
+      const visibleItems = rows.map(customerFromRow).filter((customer) => (
+        visibility.context ? canReadCustomer(visibility.context, customer) : false
+      ));
+      const customersMissingNextAction = visibleItems
+        .filter((customer) => !customer.nextActionTitle)
+        .map((customer) => customer.id);
+      const customerTodoDirectory = (prisma as Partial<CustomerListPrisma>).customerTodo;
+      const legacyPendingTodos = customersMissingNextAction.length && customerTodoDirectory
+        ? await customerTodoDirectory.findMany({
+          where: { customerId: { in: customersMissingNextAction }, status: 'PENDING' },
+          orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+        })
+        : [];
+      const firstTodoByCustomerId = new Map<string, typeof legacyPendingTodos[number]>();
+      legacyPendingTodos.forEach((todo) => {
+        if (!firstTodoByCustomerId.has(todo.customerId)) firstTodoByCustomerId.set(todo.customerId, todo);
+      });
       return success<PaginatedResponse<Customer>>({
-        items: rows.map(customerFromRow).filter((customer) => (
-          visibility.context ? canReadCustomer(visibility.context, customer) : false
-        )),
+        items: visibleItems.map((customer) => {
+          if (customer.nextActionTitle) return customer;
+          const todo = firstTodoByCustomerId.get(customer.id);
+          return todo ? {
+            ...customer,
+            nextActionTitle: todo.title,
+            nextActionDueAt: todo.dueAt.toISOString(),
+            nextActionAssigneeName: todo.assigneeName,
+          } : customer;
+        }),
         pagination: { page, pageSize, total, totalPages },
       });
     },

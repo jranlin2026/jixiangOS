@@ -49,7 +49,7 @@ assert.equal(noAction.nextAction, null);
 assert.equal(noAction.risk.level, 'medium');
 assert.match(noAction.risk.reason, /下一步动作/);
 
-const closed = buildCustomerBattleSnapshot({ ...customer, opportunityStageCode: 'won' }, [], new Date('2026-08-21T02:00:00.000Z'));
+const closed = buildCustomerBattleSnapshot({ ...customer, opportunityStageCode: 'won' }, todos, new Date('2026-08-21T02:00:00.000Z'));
 assert.equal(closed.risk.level, 'low');
 assert.match(closed.risk.reason, /已成交/);
 
