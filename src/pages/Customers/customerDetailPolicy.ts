@@ -137,8 +137,12 @@ export function buildCustomerDetailPatch({
       : current.phone;
     addChanged(patch, current, 'phone', phone);
     const currentPhones = canonicalizeContactPhones(current.phone, current.phones);
-    const requestedPhones = canonicalizeContactPhones(phone, draftValue(current, draft, 'phones'));
-    if (phoneEditAllowed && JSON.stringify(currentPhones) !== JSON.stringify(requestedPhones)) {
+    const draftPhones = draftValue(current, draft, 'phones') || [];
+    const requestedPhones = canonicalizeContactPhones(
+      phone,
+      phoneEditAllowed ? draftPhones : draftPhones.filter((item) => !item.isPrimary),
+    );
+    if (JSON.stringify(currentPhones) !== JSON.stringify(requestedPhones)) {
       patch.phones = requestedPhones;
     }
 

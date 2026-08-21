@@ -1719,6 +1719,7 @@ export function createCustomerCommandService(
         }
         patch = applyContactEditLock(customer, patch, {
           canEditLockedContact: context.customerAccess.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_DELETE),
+          canEditAlternatePhones: true,
         });
         if (
           Object.prototype.hasOwnProperty.call(patch, 'phone')

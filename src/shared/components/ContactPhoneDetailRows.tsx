@@ -7,7 +7,8 @@ type ContactPhoneDetailRowsProps = {
   primaryPhone: string;
   alternatePhone: string;
   editing: boolean;
-  editable: boolean;
+  primaryEditable: boolean;
+  alternateEditable: boolean;
   onPrimaryChange: (value: string) => void;
   onAlternateChange: (value: string) => void;
   error?: boolean;
@@ -33,7 +34,8 @@ const ContactPhoneDetailRows: React.FC<ContactPhoneDetailRowsProps> = ({
   primaryPhone,
   alternatePhone,
   editing,
-  editable,
+  primaryEditable,
+  alternateEditable,
   onPrimaryChange,
   onAlternateChange,
   error,
@@ -56,8 +58,8 @@ const ContactPhoneDetailRows: React.FC<ContactPhoneDetailRowsProps> = ({
     <>
       <Box data-testid="contact-phone-detail-primary-row" sx={rowSx}>
         <Box sx={labelSx}>手机</Box>
-        <Box sx={{ px: 1.5, py: editing && editable ? 0.5 : 1, minWidth: 0, fontSize: 13 }}>
-          {editing && editable ? (
+        <Box sx={{ px: 1.5, py: editing && primaryEditable ? 0.5 : 1, minWidth: 0, fontSize: 13 }}>
+          {editing && primaryEditable ? (
             <PhoneNumberInput
               label="主手机号"
               value={primaryPhone}
@@ -73,8 +75,8 @@ const ContactPhoneDetailRows: React.FC<ContactPhoneDetailRowsProps> = ({
 
       <Box data-testid="contact-phone-detail-alternate-row" sx={rowSx}>
         <Box sx={labelSx}>备用手机</Box>
-        <Box sx={{ px: 1.5, py: editing && editable ? 0.5 : 1, minWidth: 0, fontSize: 13 }}>
-          {editing && editable ? (
+        <Box sx={{ px: 1.5, py: editing && alternateEditable ? 0.5 : 1, minWidth: 0, fontSize: 13 }}>
+          {editing && alternateEditable ? (
             showAlternateInput ? (
               <Stack spacing={0.5} sx={{ minWidth: 0 }}>
                 <PhoneNumberInput
@@ -86,9 +88,11 @@ const ContactPhoneDetailRows: React.FC<ContactPhoneDetailRowsProps> = ({
                   fullWidth
                 />
                 <Stack direction="row" spacing={0.5} justifyContent="flex-end" sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
-                  <Button size="small" onClick={switchPrimary} sx={{ whiteSpace: 'nowrap' }}>
-                    设为主号
-                  </Button>
+                  {primaryEditable && (
+                    <Button size="small" onClick={switchPrimary} sx={{ whiteSpace: 'nowrap' }}>
+                      设为主号
+                    </Button>
+                  )}
                   <Button
                     size="small"
                     color="error"

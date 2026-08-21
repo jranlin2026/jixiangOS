@@ -101,6 +101,25 @@ const customer = (overrides: Partial<Customer> = {}): Customer => ({
     canEditAttribution: false,
     canEditLockedContact: false,
   }), {}, '已锁定联系方式被恶意改写时不得连带修改城市');
+
+  assert.deepEqual(buildCustomerDetailPatch({
+    current,
+    draft: {
+      ...current,
+      phones: [
+        { number: current.phone, isPrimary: true, label: '主手机号' },
+        { number: '13900000000', isPrimary: false, label: '备用手机号' },
+      ],
+    },
+    canEditProfile: true,
+    canEditAttribution: false,
+    canEditLockedContact: false,
+  }), {
+    phones: [
+      { number: '+8613800000000', isPrimary: true, label: '主手机号' },
+      { number: '+8613900000000', isPrimary: false, label: '备用手机号' },
+    ],
+  }, '员工可在主手机号锁定时维护备用手机号');
 }
 
 {

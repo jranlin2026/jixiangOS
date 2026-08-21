@@ -11,7 +11,8 @@ const readOnlyMarkup = renderToStaticMarkup(React.createElement(ContactPhoneDeta
   primaryPhone: '+8613800138000',
   alternatePhone: '+8613900139000',
   editing: false,
-  editable: false,
+  primaryEditable: false,
+  alternateEditable: false,
   onPrimaryChange: noop,
   onAlternateChange: noop,
 }));
@@ -23,7 +24,8 @@ const emptyAlternateMarkup = renderToStaticMarkup(React.createElement(ContactPho
   primaryPhone: '+8613800138000',
   alternatePhone: '',
   editing: true,
-  editable: true,
+  primaryEditable: false,
+  alternateEditable: true,
   onPrimaryChange: noop,
   onAlternateChange: noop,
 }));
@@ -31,6 +33,7 @@ const emptyAlternateMarkup = renderToStaticMarkup(React.createElement(ContactPho
 assert.match(emptyAlternateMarkup, /data-testid="contact-phone-detail-alternate-row"/);
 assert.match(emptyAlternateMarkup, /添加备用手机号/);
 assert.doesNotMatch(emptyAlternateMarkup, /设为主号/);
+assert.doesNotMatch(emptyAlternateMarkup, /label="主手机号"/);
 
 console.log('CRM contact phone detail rows render independently: ok');
 await vite.close();

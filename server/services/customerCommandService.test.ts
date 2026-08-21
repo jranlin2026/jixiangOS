@@ -1527,6 +1527,32 @@ const serviceOptions = {
   assert.equal(deniedFake.transactionCalls, 0);
 }
 
+// 员工拥有编辑客户资料权限时，可以维护备用手机号，但不能借此改写主手机号。
+{
+  const value = customer('cust-employee-edit-alternate-phone');
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  const result = await service.updateCustomer(value.id, {
+    phone: value.phone,
+    phones: [
+      { number: value.phone, isPrimary: true, label: '主手机号' },
+      { number: '13122222222', isPrimary: false, label: '备用手机号' },
+    ],
+  }, customerEditor);
+
+  assert.equal(result.code, 0);
+  assert.equal(
+    result.data?.phones?.find((phone) => !phone.isPrimary)?.number,
+    '+8613122222222',
+    '拥有编辑客户资料权限的员工应能维护备用手机号',
+  );
+  assert.equal(
+    normalizeContactIdentity('phone', result.data?.phone || ''),
+    normalizeContactIdentity('phone', value.phone),
+    '员工维护备用手机号时主手机号身份仍保持锁定',
+  );
+}
+
 // 备用手机号写入操作记录时必须显示真实号码，不能把手机号对象隐式转成 [object Object]。
 {
   const value = customer('cust-update-alternate-phone-audit');

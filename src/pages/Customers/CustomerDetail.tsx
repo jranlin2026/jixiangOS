@@ -1095,7 +1095,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                     ? alternateContactPhone(draft.phone, draft.phones)
                     : alternateContactPhone(currentCustomer.phone, currentCustomer.phones)}
                   editing={editing}
-                  editable={detailActions.actions.editProfile && (canEditLockedContact || canCompletePhoneField(currentCustomer.phone))}
+                  primaryEditable={detailActions.actions.editProfile && (canEditLockedContact || canCompletePhoneField(currentCustomer.phone))}
+                  alternateEditable={detailActions.actions.editProfile}
                   onPrimaryChange={handlePhoneChange}
                   onAlternateChange={handleAlternatePhoneChange}
                 />

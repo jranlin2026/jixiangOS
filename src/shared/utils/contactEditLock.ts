@@ -1,4 +1,5 @@
 import { isPhoneNumberValid } from './phoneNumber';
+import { canonicalizeContactPhones } from './contactPhones';
 import type { ContactPhone } from '../../types/contact';
 
 type ContactLike = {
@@ -23,12 +24,19 @@ export const canCompletePhoneField = (currentValue?: string | null): boolean => 
 export function applyContactEditLock<T extends ContactLike>(
   existing: ContactLike,
   patch: Partial<T>,
-  options: { canEditLockedContact?: boolean } = {},
+  options: { canEditLockedContact?: boolean; canEditAlternatePhones?: boolean } = {},
 ): Partial<T> {
   const next = { ...patch };
   if (Object.prototype.hasOwnProperty.call(patch, 'phones') && !options.canEditLockedContact) {
     const canComplete = canCompletePhoneField(existing.phone);
-    (next as ContactLike).phones = canComplete ? patch.phones : existing.phones;
+    const requestedAlternatePhones = Array.isArray(patch.phones)
+      ? patch.phones.filter((item) => !item.isPrimary)
+      : [];
+    (next as ContactLike).phones = canComplete
+      ? patch.phones
+      : options.canEditAlternatePhones
+        ? canonicalizeContactPhones(existing.phone, requestedAlternatePhones)
+        : existing.phones;
   }
   (['phone', 'wechat'] as const).forEach((field) => {
     if (!Object.prototype.hasOwnProperty.call(patch, field)) return;

@@ -696,6 +696,7 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
   const safeData = applyContactEditLock<Customer>(existing, data, {
     // Mock mode still requires a stable role ID and the explicit high-risk leaf.
     canEditLockedContact: canEditLockedCustomerContact(),
+    canEditAlternatePhones: true,
   });
   if (
     Object.prototype.hasOwnProperty.call(safeData, 'phone')

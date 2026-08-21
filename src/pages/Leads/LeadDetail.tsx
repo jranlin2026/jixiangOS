@@ -636,7 +636,8 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                     ? draft.alternatePhone
                     : alternateContactPhone(currentLead.phone, currentLead.phones)}
                   editing={editing}
-                  editable={canEditLockedContact || canCompleteContactField(currentLead.phone)}
+                  primaryEditable={canEditLockedContact || canCompleteContactField(currentLead.phone)}
+                  alternateEditable={canEditLockedContact || canCompleteContactField(currentLead.phone)}
                   onPrimaryChange={(value) => setDraft((prev) => ({ ...prev, phone: value }))}
                   onAlternateChange={(value) => setDraft((prev) => ({ ...prev, alternatePhone: value }))}
                 />
