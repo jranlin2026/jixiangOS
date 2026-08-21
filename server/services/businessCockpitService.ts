@@ -966,10 +966,10 @@ export function createBusinessCockpitService(
     const userById = new Map(users.map((user) => [user.id, user]));
     const departmentById = new Map(departments.map((department) => [department.id, department.name]));
     const mapRanking = (item: BusinessCockpitRankingItem) => {
-      const user = item.userId
-        ? userById.get(item.userId)
-        : uniqueActiveUserByName.get(clean(item.name)) || undefined;
-      const stableUserId = item.userId || user?.id;
+      const user = (item.userId ? userById.get(item.userId) : undefined)
+        || uniqueActiveUserByName.get(clean(item.name))
+        || undefined;
+      const stableUserId = user?.id;
       return {
         userId: stableUserId || `legacy:${item.name}`,
         name: item.name,
@@ -978,7 +978,7 @@ export function createBusinessCockpitService(
         count: item.orderCount,
         averageAmount: item.orderCount ? roundMoney(item.amount / item.orderCount) : 0,
         ...(item.assistCount === undefined ? {} : { assistCount: item.assistCount }),
-        identityStatus: stableUserId ? 'resolved' as const : 'legacy' as const,
+        identityStatus: stableUserId ? 'resolved' as const : item.userId ? 'unresolved' as const : 'legacy' as const,
       };
     };
     const canViewReconciliationEvidence = isSuperAdmin(actor);

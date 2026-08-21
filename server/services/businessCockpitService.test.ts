@@ -209,6 +209,19 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
   ...overrides,
 });
 
+// 历史订单中的失效员工 ID 不能被误判为可下钻的当前销售身份。
+{
+  const result = await createBusinessCockpitService(fakePrisma([
+    row(STORAGE_KEYS.ORDERS, order('stale-sales', 'departed-user', '离职销售', [
+      payment('stale-sales-payment', 899, '2026-07-10T08:00:00.000Z'),
+    ])),
+  ]) as any).get({ preset: 'custom', startDate: '2026-07-01', endDate: '2026-07-31' }, admin);
+  assert.deepEqual(result.data?.salesRanking[0], {
+    userId: 'legacy:离职销售', name: '离职销售', amount: 899, count: 1, averageAmount: 899,
+    identityStatus: 'unresolved',
+  });
+}
+
 // 驾驶舱权限不能成为绕过客户列表权限的数据旁路。
 {
   const restrictedPrisma = fakePrisma([row(STORAGE_KEYS.CUSTOMERS, customer('restricted', 'admin-1', {
@@ -929,7 +942,12 @@ const financeTransaction = (
       sourceEventId: 'public-contract:public-payment:800',
     })),
   ];
-  const service = createBusinessCockpitService(fakePrisma(records) as any, {
+  const cockpitPrisma = fakePrisma(records) as any;
+  const baseUsers = await cockpitPrisma.user.findMany();
+  cockpitPrisma.user.findMany = async () => [...baseUsers, {
+    ...baseUsers[0], id: 'sales-1', name: '销售甲', account: 'sales-1', role: '销售', departmentId: null,
+  }];
+  const service = createBusinessCockpitService(cockpitPrisma, {
     now: () => new Date('2026-07-31T12:00:00.000Z'),
   });
   const result = await service.get({
