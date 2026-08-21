@@ -113,7 +113,10 @@ const departments = [
     task('wrong-filter', { status: 'PENDING', priority: 'LOW', businessModule: 'FINANCE' }),
   ];
   const memory = createMemoryWorkbenchRepository({ tasks, departments });
-  const service = createWorkbenchQueryService({ repository: memory.repository });
+  const service = createWorkbenchQueryService({
+    repository: memory.repository,
+    now: () => new Date('2026-08-20T02:00:00.000Z'),
+  });
 
   const collaboration = await service.listMine({ employeeId: 'employee-2' }, employee);
   assert.deepEqual(collaboration.data?.items.map((item) => item.id), ['collaboration']);
