@@ -292,6 +292,22 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
   assert.equal(result.data?.salesBattleProfiles.find((item) => item.userId === 'sales-1')?.weeklyRevenueAmounts?.reduce((sum, amount) => sum + amount, 0), 32980);
   assert.equal(result.data?.departmentStatuses.find((item) => item.id === 'sales')?.memberCount, 1);
   assert.equal(result.data?.departmentStatuses.find((item) => item.id === 'sales')?.available, true);
+
+  const scopedSalesActor: AuthenticatedUser = {
+    ...admin,
+    id: 'sales-1',
+    name: '销售甲',
+    account: 'sales-1',
+    role: '销售顾问',
+    roleId: 'role-sales',
+    departmentId: 'department-sales',
+    permissions: [{ module: '客户', actions: ['read'] }],
+  };
+  const scopedResult = await createBusinessCockpitService(targetPrisma).get(
+    { preset: 'custom', startDate: '2026-07-01', endDate: '2026-07-31' },
+    scopedSalesActor,
+  );
+  assert.deepEqual(scopedResult.data?.availableScopes[0], { id: '', name: '我的数据' });
 }
 
 // 驾驶舱权限不能成为绕过客户列表权限的数据旁路。

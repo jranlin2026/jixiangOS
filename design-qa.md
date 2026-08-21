@@ -56,6 +56,7 @@ Acceptable differences:
 1. First customer-page pass was too sparse below the decision card (P1 relative to the source). Added the three-card management overview for profile completeness, recent operating activity and next action.
 2. Re-captured the customer page and compared it side by side. The lower workspace now preserves the source hierarchy while keeping the full record behind the explicit view switch.
 3. Boss and salesperson comparisons showed no remaining P0/P1/P2 design drift; differences are explained by live data and target configuration state.
+4. Regression pass found the default department scope rendered blank because MUI treats an empty-string value as empty display content. Added an explicit default-scope option and `renderValue`, then re-captured the boss cockpit with “全公司” visible.
 
 Focused region comparison was not separately required: the side-by-side desktop boards render all key controls, text, table headers and status chips at readable size.
 

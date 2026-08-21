@@ -122,6 +122,12 @@ const BusinessCockpit: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    if (departmentId && data && !data.availableScopes.some((scope) => scope.id === departmentId)) {
+      setDepartmentId('');
+    }
+  }, [data, departmentId]);
+
   const salesProfiles = useMemo(() => (data?.salesBattleProfiles || []).filter((item) => item.identityStatus === 'resolved'), [data]);
   const followed = salesProfiles.reduce((sum, item) => sum + item.todayFollowUpCount, 0);
   const intervention = salesProfiles.reduce((sum, item) => sum + (item.needsManagerInterventionCount || 0), 0);
@@ -139,7 +145,20 @@ const BusinessCockpit: React.FC = () => {
         <Box><Typography variant="h5" fontWeight={950}>早上好，{currentUser?.name || '管理者'}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>专注当下，掌控全局，推动业务高效增长。</Typography></Box>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
           <TextField size="small" type="date" value={anchorDate} onChange={(event) => setAnchorDate(event.target.value)} inputProps={{ max: shanghaiToday(), 'aria-label': '经营日期' }} title={dateLabel(anchorDate)} sx={{ minWidth: 168, bgcolor: '#fff' }} />
-          <TextField size="small" select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)} sx={{ minWidth: 150, bgcolor: '#fff' }}>{data.availableScopes.map((scope) => <MenuItem key={scope.id || 'all'} value={scope.id}>{scope.name}</MenuItem>)}</TextField>
+          <TextField
+            size="small"
+            select
+            value={departmentId}
+            onChange={(event) => setDepartmentId(event.target.value)}
+            SelectProps={{
+              displayEmpty: true,
+              inputProps: { 'aria-label': '部门范围' },
+              renderValue: (value) => data.availableScopes.find((scope) => scope.id === String(value))?.name || data.scopeLabel,
+            }}
+            sx={{ minWidth: 150, bgcolor: '#fff' }}
+          >
+            {data.availableScopes.map((scope) => <MenuItem key={scope.id || 'all'} value={scope.id}>{scope.name}</MenuItem>)}
+          </TextField>
           <Button variant="outlined" startIcon={<SettingsOutlinedIcon />} onClick={() => setTargetOpen(true)}>配置销售目标</Button>
         </Stack>
       </Stack>

@@ -1244,7 +1244,7 @@ export function createBusinessCockpitService(
       baseCustomerScope.unrestricted || baseCustomerScope.visibleUserIds.includes(user.id)
     )).map((user) => user.departmentId).filter((id): id is string => Boolean(id)));
     const availableScopes = [
-      ...(baseCustomerScope.unrestricted ? [{ id: '', name: '全公司' }] : []),
+      { id: '', name: resolveBusinessCockpitScopeLabel(scopes) },
       ...departments.filter((department) => department.isActive && visibleDepartmentIds.has(department.id)).map((department) => ({ id: department.id, name: department.name })),
     ];
     let selectedDepartmentId: string | undefined;
