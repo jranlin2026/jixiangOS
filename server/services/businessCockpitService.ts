@@ -862,8 +862,8 @@ export function createBusinessCockpitService(
         if (item.riskLevel !== 'low') current.riskCustomerCount += 1;
         if (
           (!['won', 'lost'].includes(item.stageCode) && item.nextActionDueAt && timestamp(item.nextActionDueAt) < now.getTime())
-          || (item.stageCode === 'payment_pending' && (item.contactGapDays || 0) >= 1)
-          || (['L4', 'L5'].includes(item.customerLevel || '') && (item.contactGapDays || 0) >= 2)
+          || (item.stageCode === 'payment_pending' && (item.contactGapDays === undefined || item.contactGapDays >= 1))
+          || (['L4', 'L5'].includes(item.customerLevel || '') && (item.contactGapDays === undefined || item.contactGapDays >= 2))
         ) current.needsManagerInterventionCount += 1;
         if (
           !['won', 'lost'].includes(item.stageCode)

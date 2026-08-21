@@ -28,7 +28,7 @@ const manager: AuthenticatedUser = {
 const repository = createMemoryEnterpriseTaskRepository({
   departments: [
     { id: 'dept-sales', parentId: null, name: '销售部' },
-    { id: 'dept-sales-one', parentId: 'dept-sales', name: '销售一部' },
+    { id: 'dept-sales-one', parentId: 'dept-sales', name: '销售一部', managerId: manager.id },
     { id: 'dept-market', parentId: null, name: '市场部' },
   ],
   employees: [employee, otherEmployee, outOfScopeEmployee, manager],
@@ -96,6 +96,15 @@ const linkedForManager = await service.listLinkedTasks({ sourceType: 'COCKPIT_IN
 const linkedForEmployee = await service.listLinkedTasks({ sourceType: 'COCKPIT_INTERVENTION', sourceId: 'customer-1' }, employee);
 assert.equal(linkedForManager.data?.items[0]?.id, returnedTask.data?.id, '管理者应能按客户直接读取介入任务');
 assert.equal(linkedForEmployee.data?.items[0]?.id, returnedTask.data?.id, '执行员工应能按客户读取本人介入任务');
+const configuredSupervisors = await service.listInterventionSupervisors({ customerId: 'customer-1' }, manager);
+assert.deepEqual(configuredSupervisors.data?.map((item) => item.id), [manager.id], '协同主管必须来自组织架构中配置的部门负责人');
+const supervisorTask = await service.assignOneOff({
+  employeeId: manager.id,
+  workDate: '2026-07-29',
+  title: '主管协同推进客户',
+  sourceType: 'COCKPIT_INTERVENTION', sourceId: 'customer-1', sourceItemId: 'SUPERVISOR_ASSIST',
+}, manager);
+assert.equal(supervisorTask.code, 0, '已配置的部门负责人可承接主管协同任务');
 assert.equal((await service.completeTask(returnedTask.data!.id, { result: '已提交', evidence: [] }, employee)).code, 0);
 assert.equal((await service.confirmTask(returnedTask.data!.id, { action: 'RETURN', reason: '请补充说明' }, manager)).code, 0);
 const pendingTask = await service.assignOneOff({

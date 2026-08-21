@@ -104,6 +104,7 @@ export function createEnterpriseTaskService(deps: Dependencies) {
       const sourceType = String(raw?.sourceType || '').trim().slice(0, 100) || null;
       const sourceId = String(raw?.sourceId || '').trim().slice(0, 100) || null;
       const sourceItemId = String(raw?.sourceItemId || '').trim().slice(0, 100) || null;
+      let customerOwnerIdSnapshot: string | undefined;
       if (!isSuperAdmin(actor)) {
         if (!actor.departmentId) return failure<never>('当前账号未绑定部门', 409);
         const allowed = await deps.repository.listDepartmentTree(actor.departmentId);
@@ -115,6 +116,7 @@ export function createEnterpriseTaskService(deps: Dependencies) {
         }
         const customer = await deps.repository.findCustomerInterventionTarget(sourceId);
         if (!customer?.ownerId) return failure<never>('客户不存在或未绑定负责人', 404);
+        customerOwnerIdSnapshot = customer.ownerId;
         if (!await deps.repository.canActorReadCustomer(sourceId, actor)) return failure<never>('客户不在当前账号可见范围内', 403);
         const owner = await deps.repository.findEmployee(customer.ownerId);
         if (!owner?.isActive || owner.employmentStatus === 'left') return failure<never>('客户负责人不存在或已离职', 409);
@@ -124,7 +126,10 @@ export function createEnterpriseTaskService(deps: Dependencies) {
         if (sourceItemId === 'BOSS_FOLLOW_UP' && employee.id !== actor.id) {
           return failure<never>('老板亲跟必须由当前管理者本人执行', 400);
         }
-        if (sourceItemId === 'SUPERVISOR_ASSIST' && !/(主管|经理|总监|负责人|总经理)/.test(String(employee.positionName || ''))) {
+        if (sourceItemId === 'SUPERVISOR_ASSIST' && (
+          employee.id === customer.ownerId
+          || !(await deps.repository.listSupervisorsForEmployee(customer.ownerId)).some((supervisor) => supervisor.id === employee.id)
+        )) {
           return failure<never>('主管协同必须指派给管理岗位人员', 400);
         }
         if (!isSuperAdmin(actor)) {
@@ -153,6 +158,7 @@ export function createEnterpriseTaskService(deps: Dependencies) {
         sourceRoute: String(raw?.sourceRoute || '').trim().slice(0, 500) || null,
         sourceLabel: String(raw?.sourceLabel || '').trim().slice(0, 200) || null,
         sourceType, sourceId, sourceItemId,
+        ...(sourceType === 'COCKPIT_INTERVENTION' ? { authorizationActor: actor, customerOwnerIdSnapshot } : {}),
         assignedById: actor.id, assignedByName: actor.name,
       });
       return success(task);
@@ -238,6 +244,20 @@ export function createEnterpriseTaskService(deps: Dependencies) {
       if (!hasPermission(actor, PERMISSION_KEYS.TASK_SELF)) return failure<never>('无权读取介入任务', 403);
       const data = await deps.repository.listTasks({ employeeId: actor.id, sourceType, sourceId, ...pagination });
       return success({ ...data, ...pagination });
+    },
+
+    async listInterventionSupervisors(raw: any, actor: AuthenticatedUser) {
+      if (!hasPermission(actor, PERMISSION_KEYS.TASK_ASSIGN)) return failure<never>('无权查看可协同主管', 403);
+      const customerId = String(raw?.customerId || '').trim();
+      const customer = customerId ? await deps.repository.findCustomerInterventionTarget(customerId) : null;
+      if (!customer?.ownerId) return failure<never>('客户不存在或未绑定负责人', 404);
+      if (!await deps.repository.canActorReadCustomer(customerId, actor)) return failure<never>('客户不在当前账号可见范围内', 403);
+      const supervisors = (await deps.repository.listSupervisorsForEmployee(customer.ownerId))
+        .filter((item) => item.id !== customer.ownerId);
+      if (isSuperAdmin(actor)) return success(supervisors);
+      if (!actor.departmentId) return failure<never>('当前账号未绑定部门', 409);
+      const departmentIds = await deps.repository.listDepartmentTree(actor.departmentId);
+      return success(supervisors.filter((item) => departmentIds.includes(item.departmentId || '')));
     },
 
     async completeTask(taskId: string, raw: any, actor: AuthenticatedUser) {

@@ -29,6 +29,7 @@ export const enterpriseBrainApi = {
   listMyTasks: (input: Record<string, unknown>): Promise<ApiResponse<Paginated<EmployeeTask>>> => backendRequest(`${base}/tasks/mine?${query(input)}`),
   listTeamTasks: (input: Record<string, unknown>): Promise<ApiResponse<Paginated<EmployeeTask>>> => backendRequest(`${base}/tasks/team?${query(input)}`),
   listLinkedTasks: (input: Record<string, unknown>): Promise<ApiResponse<Paginated<EmployeeTask>>> => backendRequest(`${base}/tasks/linked?${query(input)}`),
+  listInterventionSupervisors: (customerId: string): Promise<ApiResponse<Array<{ id: string; name: string; positionName?: string }>>> => backendRequest(`${base}/tasks/intervention-supervisors?${query({ customerId })}`),
   assignTask: (input: Record<string, unknown>): Promise<ApiResponse<EmployeeTask>> => backendRequest(`${base}/tasks/assign`, { method: 'POST', body: JSON.stringify(input) }),
   completeTask: (id: string, input: Record<string, unknown>): Promise<ApiResponse<EmployeeTask>> => backendRequest(`${base}/tasks/${encodeURIComponent(id)}/complete`, { method: 'POST', body: JSON.stringify(input) }),
   confirmTask: (id: string, input: Record<string, unknown>): Promise<ApiResponse<EmployeeTask>> => backendRequest(`${base}/tasks/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: JSON.stringify(input) }),

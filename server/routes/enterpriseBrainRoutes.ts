@@ -58,6 +58,10 @@ export function createEnterpriseBrainRouter(deps: {
     const result = await deps.tasks.listLinkedTasks(req.query, req.currentUser!);
     res.status(statusFor(result.code)).json(result);
   });
+  router.get('/tasks/intervention-supervisors', async (req: AuthenticatedRequest, res) => {
+    const result = await deps.tasks.listInterventionSupervisors(req.query, req.currentUser!);
+    res.status(statusFor(result.code)).json(result);
+  });
   router.post('/tasks/assign', async (req: AuthenticatedRequest, res) => {
     const result = await deps.tasks.assignOneOff(req.body || {}, req.currentUser!);
     res.status(statusFor(result.code, 201)).json(result);

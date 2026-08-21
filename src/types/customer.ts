@@ -48,6 +48,22 @@ export type CustomerActivityType =
   | 'todo'
   | 'manager_intervene';
 
+/** 老板穿透式管理中的统一沟通节点类型。 */
+export type CustomerCommunicationNodeType =
+  | 'LEAD_CREATED'
+  | 'WECHAT_ADDED'
+  | 'PHONE_CALL'
+  | 'WECHAT_CHAT'
+  | 'CHAT_SUMMARY'
+  | 'NEED_DISCOVERY'
+  | 'DEMO'
+  | 'PROPOSAL'
+  | 'OBJECTION'
+  | 'FOLLOW_UP'
+  | 'PAYMENT_PENDING'
+  | 'ORDER_CREATED'
+  | 'MANAGER_INTERVENE';
+
 export interface CustomerActivityRecord {
   id: ID;
   type: CustomerActivityType;

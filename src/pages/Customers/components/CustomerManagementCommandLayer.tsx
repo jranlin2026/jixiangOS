@@ -9,7 +9,7 @@ import AssignmentTurnedInOutlinedIcon from '@mui/icons-material/AssignmentTurned
 import ForumOutlinedIcon from '@mui/icons-material/ForumOutlined';
 import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined';
 import type { AuthenticatedUser } from '../../../types/auth';
-import type { Customer, CustomerActivityRecord, CustomerManageableUser, CustomerOpportunityStageCode } from '../../../types/customer';
+import type { Customer, CustomerActivityRecord, CustomerCommunicationNodeType, CustomerOpportunityStageCode } from '../../../types/customer';
 import type { CustomerTodo } from '../../../types/customerTodo';
 import type { EmployeeTask } from '../../../types/enterpriseBrain';
 import { enterpriseBrainApi } from '../../../api/enterpriseBrainApi';
@@ -39,20 +39,22 @@ function defaultDueAt(): string {
   return new Date(due.getTime() - due.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
 
-function communicationTitle(record: CustomerActivityRecord): string {
+function communicationNodeType(record: CustomerActivityRecord): CustomerCommunicationNodeType | null {
   const title = String(record.title || '');
   if (record.type === 'manager_intervene') return 'MANAGER_INTERVENE';
   if (record.type === 'create') return 'LEAD_CREATED';
   if (record.type === 'order') return 'ORDER_CREATED';
-  if (record.type === 'refund') return 'AFTER_SALES';
-  if (record.type === 'todo') return 'NEXT_ACTION';
-  if (record.type === 'follow' && /(电话|通话)/.test(title)) return 'PHONE_CALL';
-  if (record.type === 'follow' && /(微信|聊天)/.test(title)) return 'WECHAT_CHAT';
-  if (record.type === 'follow' && /(方案|演示)/.test(title)) return 'DEMO';
-  if (record.type === 'follow' && /(报价|付款)/.test(title)) return 'PROPOSAL';
-  if (record.type === 'follow' && /异议/.test(title)) return 'OBJECTION';
-  if (record.type === 'follow') return 'FOLLOW_UP';
-  return 'BUSINESS_EVENT';
+  if (record.type !== 'follow') return null;
+  if (/(添加企微|添加微信|加微信)/.test(title)) return 'WECHAT_ADDED';
+  if (/(电话|通话)/.test(title)) return 'PHONE_CALL';
+  if (/(聊天摘要|沟通纪要|沟通摘要)/.test(title)) return 'CHAT_SUMMARY';
+  if (/(微信|聊天)/.test(title)) return 'WECHAT_CHAT';
+  if (/(需求|挖掘)/.test(title)) return 'NEED_DISCOVERY';
+  if (/演示/.test(title)) return 'DEMO';
+  if (/(方案|报价)/.test(title)) return 'PROPOSAL';
+  if (/异议/.test(title)) return 'OBJECTION';
+  if (/(待付款|付款|催款)/.test(title)) return 'PAYMENT_PENDING';
+  return 'FOLLOW_UP';
 }
 
 const CustomerManagementCommandLayer: React.FC<{
@@ -64,8 +66,7 @@ const CustomerManagementCommandLayer: React.FC<{
   progressSaving?: boolean;
   onSaveProgress: (stage: CustomerOpportunityStageCode, amount: number | null) => boolean | Promise<boolean>;
   onOpenTodos: () => void;
-  manageableUsers: CustomerManageableUser[];
-}> = ({ customer, todos, currentUser, onRefreshCustomer, canSetProgress, progressSaving = false, onSaveProgress, onOpenTodos, manageableUsers }) => {
+}> = ({ customer, todos, currentUser, onRefreshCustomer, canSetProgress, progressSaving = false, onSaveProgress, onOpenTodos }) => {
   const [tasks, setTasks] = useState<EmployeeTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [message, setMessage] = useState<{ severity: 'success' | 'error'; text: string } | null>(null);
@@ -79,6 +80,7 @@ const CustomerManagementCommandLayer: React.FC<{
   const [returnReason, setReturnReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [assistAssigneeId, setAssistAssigneeId] = useState('');
+  const [supervisorCandidates, setSupervisorCandidates] = useState<Array<{ id: string; name: string; positionName?: string }>>([]);
   const [progressOpen, setProgressOpen] = useState(false);
   const [progressStage, setProgressStage] = useState<CustomerOpportunityStageCode>(customer.opportunityStageCode || 'not_set');
   const [progressAmount, setProgressAmount] = useState(customer.opportunityAmount == null ? '' : String(customer.opportunityAmount));
@@ -105,18 +107,27 @@ const CustomerManagementCommandLayer: React.FC<{
 
   useEffect(() => { void loadTasks(); }, [loadTasks]);
 
+  useEffect(() => {
+    if (!canAssign) return setSupervisorCandidates([]);
+    let active = true;
+    void enterpriseBrainApi.listInterventionSupervisors(customer.id).then((response) => {
+      if (!active) return;
+      if (response.code === 0) setSupervisorCandidates(response.data || []);
+      else setSupervisorCandidates([]);
+    });
+    return () => { active = false; };
+  }, [canAssign, customer.id]);
+
   const latestTask = tasks[0];
-  const activityNodes = useMemo(() => [...(customer.activityRecords || [])]
-    .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()), [customer.activityRecords]);
+  const activityNodes = useMemo(() => (customer.activityRecords || [])
+    .map((record) => ({ record, nodeType: communicationNodeType(record) }))
+    .filter((item): item is { record: CustomerActivityRecord; nodeType: CustomerCommunicationNodeType } => item.nodeType !== null)
+    .sort((left, right) => new Date(left.record.createdAt).getTime() - new Date(right.record.createdAt).getTime()), [customer.activityRecords]);
   const recommendation = snapshot.risk.level === 'high'
     ? '建议今日由主管介入，先处理逾期动作并重新约定时间。'
     : snapshot.risk.level === 'medium'
       ? '建议补齐下一步动作、执行人和截止时间。'
       : '建议按当前动作继续推进，沟通后及时记录结果。';
-  const supervisorCandidates = manageableUsers.filter((user) => (
-    user.id !== customer.ownerId && /(主管|经理|总监|负责人|总经理)/.test(String(user.positionName || ''))
-  ));
-
   const reloadAll = async () => {
     await Promise.all([loadTasks(), Promise.resolve(onRefreshCustomer())]);
   };
@@ -213,12 +224,12 @@ const CustomerManagementCommandLayer: React.FC<{
     <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.25 }, border: '1px solid #E7E1F1', borderRadius: 2 }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.75 }}><AccountTreeOutlinedIcon sx={{ color: '#7C3AED' }} /><Typography variant="subtitle1" sx={{ fontWeight: 900 }}>客户沟通节点</Typography><Typography variant="caption" color="text.secondary">{activityNodes.length} NODES</Typography></Stack>
       <Box sx={{ display: 'flex', gap: 1.25, overflowX: 'auto', pb: 0.75 }}>
-        {activityNodes.map((record, index) => <Box key={record.id} sx={{ position: 'relative', minWidth: 132 }}>
+        {activityNodes.map(({ record, nodeType }, index) => <Box key={record.id} sx={{ position: 'relative', minWidth: 132 }}>
           {index < activityNodes.length - 1 && <Box sx={{ display: { xs: 'none', md: 'block' }, position: 'absolute', top: 16, left: '58%', right: '-42%', borderTop: '1px solid #C9B7F7' }} />}
           <Box sx={{ width: 34, height: 34, borderRadius: '50%', border: '1.5px solid #8B5CF6', bgcolor: '#fff', color: '#7C3AED', display: 'grid', placeItems: 'center', position: 'relative', zIndex: 1 }}>
             {record.type === 'manager_intervene' ? <PersonSearchOutlinedIcon fontSize="small" /> : <ForumOutlinedIcon fontSize="small" />}
           </Box>
-          <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: '#7C3AED', fontWeight: 850 }}>{communicationTitle(record)}</Typography>
+          <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: '#7C3AED', fontWeight: 850 }}>{nodeType}</Typography>
           <Typography variant="body2" noWrap title={record.title} sx={{ fontWeight: 850 }}>{record.title || '客户动态'}</Typography>
           <Typography variant="caption" color="text.secondary">{formatDate(record.createdAt, 'MM-dd HH:mm')}</Typography>
         </Box>)}
@@ -259,7 +270,7 @@ const CustomerManagementCommandLayer: React.FC<{
       <DialogContent dividers><Stack spacing={2}>
         <Alert severity="info">任务将进入员工任务中心，处理结果需由管理者验收。</Alert>
         <TextField select label="介入方式" value={mode} onChange={(event) => setMode(event.target.value as InterventionMode)}>{Object.entries(modeConfig).map(([key, config]) => <MenuItem key={key} value={key}>{config.label} · {config.description}</MenuItem>)}</TextField>
-        {mode === 'SUPERVISOR_ASSIST' && <TextField select label="协同主管" value={assistAssigneeId} onChange={(event) => setAssistAssigneeId(event.target.value)} helperText={supervisorCandidates.length ? '仅展示当前可见范围内的管理岗位' : '当前权限范围内没有可选主管'}>{supervisorCandidates.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}{user.positionName ? ` · ${user.positionName}` : ''}</MenuItem>)}</TextField>}
+        {mode === 'SUPERVISOR_ASSIST' && <TextField select label="协同主管" value={assistAssigneeId} onChange={(event) => setAssistAssigneeId(event.target.value)} helperText={supervisorCandidates.length ? '仅展示组织架构中该销售所在部门及上级部门的负责人' : '组织架构中未配置可选主管'}>{supervisorCandidates.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}{user.positionName ? ` · ${user.positionName}` : ''}</MenuItem>)}</TextField>}
         <TextField label="介入要求与验收口径" value={note} onChange={(event) => setNote(event.target.value)} multiline minRows={3} placeholder="例如：今日18:00前联系客户，确认决策人和下次会议时间，提交沟通结果。" />
         <TextField label="截止时间" type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} InputLabelProps={{ shrink: true }} />
       </Stack></DialogContent>

@@ -94,18 +94,24 @@ export interface EnterpriseTaskRepository extends WorkbenchRepository {
   listTasks(filter: { employeeId?: string; departmentIds?: string[]; date?: string; status?: string; sourceType?: string; sourceId?: string; page: number; pageSize: number }): Promise<{ items: EmployeeTaskRecord[]; total: number }>;
   findCustomerInterventionTarget(customerId: string): Promise<{ id: string; name: string; ownerId: string | null } | null>;
   canActorReadCustomer(customerId: string, actor: AuthenticatedUser): Promise<boolean>;
+  listSupervisorsForEmployee(employeeId: string): Promise<EmployeeDirectoryRecord[]>;
   listDepartmentTree(rootId: string): Promise<string[]>;
   findEmployee(id: string): Promise<EmployeeDirectoryRecord | null>;
   findTask(id: string): Promise<EmployeeTaskRecord | null>;
   completeTaskAtomic(input: { taskId: string; employeeId: string; actualValue: number | null; result: string; evidence: Array<{ type: string; referenceId?: string; content?: string }>; now: Date }): Promise<EmployeeTaskRecord | null>;
   confirmTaskAtomic(input: { taskId: string; actorId: string; actorName: string; action: 'CONFIRM' | 'RETURN'; reason?: string; now: Date }): Promise<EmployeeTaskRecord | null>;
-  createOneOffTask(input: GeneratedTaskInput & { assignedById: string; assignedByName: string }): Promise<EmployeeTaskRecord>;
+  createOneOffTask(input: GeneratedTaskInput & {
+    assignedById: string;
+    assignedByName: string;
+    authorizationActor?: AuthenticatedUser;
+    customerOwnerIdSnapshot?: string;
+  }): Promise<EmployeeTaskRecord>;
   upsertDailyReview(input: Omit<DailyReviewRecord, 'id' | 'submittedAt'>): Promise<DailyReviewRecord>;
   listDailyReviews(filter: { employeeId?: string; departmentIds?: string[]; date?: string; page: number; pageSize: number }): Promise<{ items: DailyReviewRecord[]; total: number }>;
 }
 
 type MemoryInput = {
-  departments?: Array<{ id: string; parentId: string | null; name: string }>;
+  departments?: Array<{ id: string; parentId: string | null; name: string; managerId?: string }>;
   employees?: EmployeeDirectoryRecord[];
   positions?: TaskPositionRecord[];
   templates?: TaskTemplateRecord[];
@@ -178,6 +184,20 @@ export function createMemoryEnterpriseTaskRepository(input: MemoryInput = {}): E
     async findTask(id) { return tasks.find((item) => item.id === id) || null; },
     async findCustomerInterventionTarget(customerId) { return customers.get(customerId) || null; },
     async canActorReadCustomer(customerId) { return customers.has(customerId); },
+    async listSupervisorsForEmployee(employeeId) {
+      const employee = employees.get(employeeId);
+      if (!employee?.departmentId) return [];
+      const byId = new Map(departments.map((item) => [item.id, item]));
+      const managerIds = new Set<string>();
+      let departmentId: string | null = employee.departmentId;
+      while (departmentId) {
+        const department = byId.get(departmentId);
+        if (!department) break;
+        if (department.managerId) managerIds.add(department.managerId);
+        departmentId = department.parentId;
+      }
+      return [...managerIds].map((id) => employees.get(id)).filter((item): item is EmployeeDirectoryRecord => Boolean(item?.isActive && item.employmentStatus !== 'left'));
+    },
     async completeTaskAtomic(payload) {
       const task = tasks.find((item) => item.id === payload.taskId && item.employeeId === payload.employeeId && ['PENDING', 'RETURNED'].includes(item.status));
       if (!task) return null;

@@ -1063,7 +1063,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
           progressSaving={battleSaving}
           onSaveProgress={saveBattleState}
           onOpenTodos={() => setActiveTab(1)}
-          manageableUsers={manageableUsers}
         />
         <Box sx={{
           display: 'grid',

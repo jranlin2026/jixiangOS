@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { AuthenticatedUser } from '../../../src/types/auth';
 import { STORAGE_KEYS } from '../../../src/shared/utils/constants';
 import { canReadCustomer, loadCustomerAccessContext } from '../customerAccessPolicy';
 import { createPrismaWorkbenchRepository } from '../workbench/prismaWorkbenchRepository';
@@ -101,6 +102,8 @@ function generatedData(row: GeneratedTaskInput) {
 async function appendManagerInterventionActivity(tx: any, input: GeneratedTaskInput & {
   assignedById: string;
   assignedByName: string;
+  authorizationActor?: AuthenticatedUser;
+  customerOwnerIdSnapshot?: string;
 }, taskId: string): Promise<void> {
   if (input.sourceType !== 'COCKPIT_INTERVENTION' || !input.sourceId) return;
   const selector = { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: input.sourceId } };
@@ -114,6 +117,14 @@ async function appendManagerInterventionActivity(tx: any, input: GeneratedTaskIn
   const row = await tx.businessRecord.findUnique({ where: selector });
   if (!row) throw new Error('客户不存在，无法发起管理介入');
   const customer = row.data && typeof row.data === 'object' ? row.data : {};
+  if (customer.deletedAt || customer.mergedIntoId) throw new Error('客户已删除或已合并，无法发起管理介入');
+  if (input.customerOwnerIdSnapshot && String(customer.ownerId || '') !== input.customerOwnerIdSnapshot) {
+    throw new Error('客户负责人已变更，请刷新后重新下达');
+  }
+  if (input.authorizationActor) {
+    const context = await loadCustomerAccessContext(tx as any, input.authorizationActor);
+    if (!canReadCustomer(context, customer as any)) throw new Error('客户已不在当前账号可见范围内');
+  }
   const now = new Date().toISOString();
   const activityRecords = Array.isArray(customer.activityRecords) ? customer.activityRecords : [];
   const nextRevision = Number(customer.recordRevision || row.recordRevision || 0) + 1;
@@ -298,6 +309,34 @@ export function createPrismaEnterpriseTaskRepository(prisma: Client): Enterprise
       if (!customer || customer.deletedAt || customer.mergedIntoId) return false;
       const context = await loadCustomerAccessContext(prisma as any, actor);
       return canReadCustomer(context, customer);
+    },
+    async listSupervisorsForEmployee(employeeId) {
+      const employee = await prisma.user.findUnique({ where: { id: employeeId } });
+      if (!employee?.departmentId) return [];
+      const departments = await prisma.department.findMany({
+        where: { isActive: true },
+        select: { id: true, parentId: true, managerId: true },
+      });
+      const byId = new Map(departments.map((item: any) => [item.id, item]));
+      const managerIds = new Set<string>();
+      let departmentId: string | null = employee.departmentId;
+      while (departmentId) {
+        const department: any = byId.get(departmentId);
+        if (!department) break;
+        if (department.managerId) managerIds.add(String(department.managerId));
+        departmentId = department.parentId || null;
+      }
+      if (!managerIds.size) return [];
+      const users = await prisma.user.findMany({
+        where: { id: { in: [...managerIds] }, isActive: true, employmentStatus: 'active' },
+      });
+      const departmentNames = new Map((await prisma.department.findMany({ select: { id: true, name: true } })).map((item: any) => [item.id, item.name]));
+      return users.map((user: any) => ({
+        id: user.id, name: user.name, departmentId: user.departmentId || undefined,
+        departmentName: departmentNames.get(user.departmentId) || undefined,
+        positionId: user.positionId || undefined, positionName: user.positionName || undefined,
+        isActive: user.isActive, employmentStatus: user.employmentStatus,
+      }));
     },
     async findTask(id) {
       const row = await prisma.employeeTask.findUnique({ where: { id }, include: { evidence: { orderBy: { createdAt: 'asc' } } } });
