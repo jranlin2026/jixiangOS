@@ -874,3 +874,48 @@ final result: passed
 No remaining P0, P1, or P2 visual findings.
 
 final result: passed
+
+---
+
+# 老板驾驶舱穿透式管理 V1 设计 QA
+
+## 对照范围
+
+- 参考图（公司驾驶舱）：`/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-399bfb2e-89cd-40c0-a3bd-1fe34a08579a.png`，1672×941。
+- 实现截图（公司驾驶舱）：`/Users/nge/.codex/visualizations/2026/08/21/01a02235-02c1-7860-9096-c8f6df96cf4c/cockpit-build-qa/dashboard.jpg`，1280×720。
+- 参考图（销售部战情）：`/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-5c744570-0674-4c8d-bd58-8e4dab7b7f47.png`，1672×941。
+- 实现截图（销售部战情）：`/Users/nge/.codex/visualizations/2026/08/21/01a02235-02c1-7860-9096-c8f6df96cf4c/cockpit-build-qa/sales-battlefield.jpg`，1280×720。
+- 状态：系统管理员、全公司、2026 年 8 月、当前本地真实数据。
+
+## 同屏比较输入
+
+- 公司驾驶舱全景：`/Users/nge/.codex/visualizations/2026/08/21/01a02235-02c1-7860-9096-c8f6df96cf4c/cockpit-build-qa/dashboard-comparison.jpg`
+- 公司驾驶舱焦点区：`/Users/nge/.codex/visualizations/2026/08/21/01a02235-02c1-7860-9096-c8f6df96cf4c/cockpit-build-qa/dashboard-focus-comparison.jpg`
+- 销售部战情全景：`/Users/nge/.codex/visualizations/2026/08/21/01a02235-02c1-7860-9096-c8f6df96cf4c/cockpit-build-qa/sales-comparison.jpg`
+- 销售部战情焦点区：`/Users/nge/.codex/visualizations/2026/08/21/01a02235-02c1-7860-9096-c8f6df96cf4c/cockpit-build-qa/sales-focus-comparison.jpg`
+
+## 比较结论
+
+### 公司驾驶舱
+
+- 已匹配参考图的单屏信息层级：顶部经营晨报、六宫格部门矩阵、底部公司月业绩。
+- 已沿用极享OS现有侧栏、顶栏、图标与白紫视觉，不引入第二套设计系统。
+- 晨报数字均来自当前权限范围内的订单、客户动作和风险规则；未配置月目标时明确显示“未配置”，不虚构完成率。
+- 与参考图的刻意差异：不使用无法追溯的 3D 金额装饰图；部门状态只对已接入的销售部给出风险结论，其余部门显示“待接入”。
+
+### 销售部战情
+
+- 已匹配参考图的“一句异常摘要 + 一张销售序列表”结构。
+- 首屏优先展示状态、销售、今日完成动作、风险客户和需要介入；目标、实收、完成率及客户数在同一张统一表内。
+- 桌面表格和移动卡片共用相同筛选、总数和分页语义；销售到其客户清单的负责人筛选下钻已在浏览器中验证。
+- 与参考图的刻意差异：第一版不放趋势图，避免稀释员工穿透主任务；月目标未配置时不展示伪造进度。
+
+## 修正记录
+
+1. 将风险客户、需要介入前置到首屏可扫描列，避免横向滚动后才看到关键异常。
+2. 将“今日应做”和“今日实际完成”并列展示，取消跨口径相减产生的错误剩余数。
+3. 将晨报从客户总风险堆叠改为销售风险人数 + 逾期客户动作，更适合老板先判断是否需要介入。
+
+## 最终结果
+
+通过。未发现仍需修正的 P0、P1 或 P2 视觉与交互问题；现有差异均是数据真实性、现有设计系统或第一阶段范围导致的明确取舍。

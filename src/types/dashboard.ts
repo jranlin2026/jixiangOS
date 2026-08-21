@@ -154,7 +154,27 @@ export interface CockpitSalesBattleProfile {
   wonCount: number;
   lostCount: number;
   conversionRate: number;
+  monthlyTargetAmount: number | null;
+  targetGapAmount: number | null;
+  targetCompletionRate: number | null;
   priorityCustomers: CockpitCustomerBattleItem[];
+}
+
+export interface CockpitDepartmentStatus {
+  id: 'sales' | 'customer-success' | 'delivery' | 'academy' | 'finance' | 'marketing';
+  name: string;
+  memberCount: number;
+  attentionCount: number;
+  state: 'normal' | 'attention' | 'building';
+  available: boolean;
+}
+
+export interface CockpitManagementPerformance {
+  completedAmount: number;
+  targetAmount: number | null;
+  gapAmount: number | null;
+  completionRate: number | null;
+  targetSource: 'okr' | 'unconfigured';
 }
 
 export interface CockpitLeadSourceItem {
@@ -216,5 +236,7 @@ export interface BusinessCockpitData {
   leadSources: CockpitLeadSourceItem[];
   orderHealth: CockpitOrderHealth;
   financeHealth: CockpitFinanceHealth;
+  departmentStatuses: CockpitDepartmentStatus[];
+  managementPerformance: CockpitManagementPerformance;
   riskTasks: CockpitRiskItem[];
 }

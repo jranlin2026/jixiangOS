@@ -17,7 +17,7 @@ assert.doesNotMatch(tasks, /<Tab value="templates"/, '员工任务台账不应�
 assert.match(tasks, /\/enablement\?tab=task-templates/, '旧模板地址应跳转到企业标准');
 assert.match(enablement, /label: '执行模板'/, '企业标准应包含执行模板');
 assert.match(taskTemplates, /<TablePagination/, '执行模板必须继承系统分页语义');
-assert.match(cockpit, /MarketingPublishPanel/, '经营驾驶舱应展示内容发布执行指标');
+assert.doesNotMatch(cockpit, /MarketingPublishPanel/, '老板首页应保持三块结构，内容发布指标下沉到内容运营');
 assert.match(server, /\/api\/marketing\/publish-plans/, '发布计划必须拥有内容运营路由');
 assert.equal(PERMISSION_KEYS.MARKETING_PUBLISH, '营销内容中心/发布任务', '已存储的营销权限键不得随界面改名');
 assert.equal(hasPermission({

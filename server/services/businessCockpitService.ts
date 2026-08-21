@@ -48,7 +48,7 @@ import { buildCustomerBattleSnapshot } from '../../src/shared/utils/customerBatt
 
 type BusinessCockpitPrisma = Pick<
   PrismaClient,
-  'businessRecord' | 'leadRecord' | 'customerTodo' | 'user' | 'role' | 'department'
+  'businessRecord' | 'leadRecord' | 'customerTodo' | 'user' | 'role' | 'department' | 'keyResult'
 >;
 
 export interface BusinessCockpitVisibility {
@@ -167,6 +167,18 @@ type BusinessCockpitSnapshotSource = {
 };
 
 const MAX_RECONCILIATION_DRILLDOWN_ORDERS = 100;
+const MANAGEMENT_DEPARTMENT_GROUPS: Array<{
+  id: BusinessCockpitData['departmentStatuses'][number]['id'];
+  name: string;
+  matches: (departmentName: string) => boolean;
+}> = [
+  { id: 'sales', name: '销售部', matches: (name) => name.includes('销售') },
+  { id: 'customer-success', name: '客户成功', matches: (name) => /客户成功|客户服务/.test(name) },
+  { id: 'delivery', name: '售后/交付', matches: (name) => /售后|交付|技术/.test(name) },
+  { id: 'academy', name: '商学院', matches: (name) => /商学|学院|培训|课程/.test(name) },
+  { id: 'finance', name: '财务', matches: (name) => name.includes('财务') },
+  { id: 'marketing', name: '市场/运营', matches: (name) => /市场|运营|增长/.test(name) },
+];
 const roundMoney = (value: number) => Number.isFinite(value)
   ? Math.round((value + Number.EPSILON) * 100) / 100
   : 0;
@@ -1014,10 +1026,32 @@ export function createBusinessCockpitService(
   ): Promise<ApiResponse<BusinessCockpitData>> => {
     const now = options.now?.() || new Date();
     const resolvedRange = resolveDateRange(range, now);
-    const [userRows, roleRows, departmentRows] = await Promise.all([
+    const managementTargetQuery = typeof (prisma as any).keyResult?.findMany === 'function'
+      ? (prisma as any).keyResult.findMany({
+        where: {
+          metricBinding: { is: { metricCode: 'FORMAL_ORDER_PAID_AMOUNT' } },
+          objective: {
+            status: 'PUBLISHED',
+            cycle: {
+              status: 'ACTIVE',
+              startAt: { lte: new Date(resolvedRange.endAt) },
+              endAt: { gte: new Date(resolvedRange.startAt) },
+            },
+          },
+        },
+        select: {
+          targetValue: true,
+          updatedAt: true,
+          metricBinding: { select: { scopeType: true, scopeId: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+      })
+      : Promise.resolve([]);
+    const [userRows, roleRows, departmentRows, managementTargetRows] = await Promise.all([
       prisma.user.findMany(),
       prisma.role.findMany({ where: { isActive: true } }),
       prisma.department.findMany(),
+      managementTargetQuery,
     ]);
     const users = userRows.map(mapPrismaUser);
     const roles = roleRows.map(mapPrismaRole);
@@ -1083,6 +1117,19 @@ export function createBusinessCockpitService(
       };
     };
     const mappedSalesRanking = snapshot.salesRanking.map(mapRanking);
+    let companyTargetAmount: number | null = null;
+    const salesTargetByUserId = new Map<string, number>();
+    (managementTargetRows as any[]).forEach((row) => {
+      const targetAmount = finiteMoney(row?.targetValue);
+      const scopeType = clean(row?.metricBinding?.scopeType).toUpperCase();
+      const scopeId = clean(row?.metricBinding?.scopeId);
+      if (targetAmount <= 0) return;
+      if (scopeType === 'COMPANY' && companyTargetAmount === null) {
+        companyTargetAmount = targetAmount;
+      } else if (scopeType === 'USER' && scopeId && !salesTargetByUserId.has(scopeId)) {
+        salesTargetByUserId.set(scopeId, targetAmount);
+      }
+    });
     const profileRiskRank = { high: 3, medium: 2, low: 1 } as const;
     const salesBattleProfileMap = new Map<string, BusinessCockpitData['salesBattleProfiles'][number]>();
     snapshot.salesBattleProfiles.forEach((profile) => {
@@ -1105,12 +1152,14 @@ export function createBusinessCockpitService(
         .slice(0, 5);
       const wonCount = (existing?.wonCount || 0) + profile.wonCount;
       const lostCount = (existing?.lostCount || 0) + profile.lostCount;
+      const revenueAmount = Math.max(existing?.revenueAmount || 0, ranking?.amount || 0);
+      const monthlyTargetAmount = stableUserId ? salesTargetByUserId.get(stableUserId) || null : null;
       salesBattleProfileMap.set(key, {
         userId: key,
         name: user?.name || profile.ownerName,
         ...(user?.departmentId ? { department: departmentById.get(user.departmentId) } : {}),
         identityStatus,
-        revenueAmount: Math.max(existing?.revenueAmount || 0, ranking?.amount || 0),
+        revenueAmount,
         orderCount: Math.max(existing?.orderCount || 0, ranking?.count || 0),
         customerCount: (existing?.customerCount || 0) + profile.customerCount,
         activeOpportunityCount: (existing?.activeOpportunityCount || 0) + profile.activeOpportunityCount,
@@ -1123,6 +1172,11 @@ export function createBusinessCockpitService(
         wonCount,
         lostCount,
         conversionRate: wonCount + lostCount ? roundMoney(wonCount / (wonCount + lostCount) * 100) : 0,
+        monthlyTargetAmount,
+        targetGapAmount: monthlyTargetAmount === null
+          ? null : Math.max(0, roundMoney(monthlyTargetAmount - revenueAmount)),
+        targetCompletionRate: monthlyTargetAmount === null
+          ? null : roundMoney(revenueAmount / monthlyTargetAmount * 100),
         priorityCustomers,
       });
     });
@@ -1138,6 +1192,9 @@ export function createBusinessCockpitService(
     }) => {
       if (mappedSalesProfileKeys.has(ranking.userId)) return;
       mappedSalesProfileKeys.add(ranking.userId);
+      const monthlyTargetAmount = ranking.identityStatus === 'resolved'
+        ? salesTargetByUserId.get(ranking.userId) || null
+        : null;
       salesBattleProfiles.push({
         userId: ranking.userId,
         name: ranking.name,
@@ -1156,6 +1213,11 @@ export function createBusinessCockpitService(
         wonCount: 0,
         lostCount: 0,
         conversionRate: 0,
+        monthlyTargetAmount,
+        targetGapAmount: monthlyTargetAmount === null
+          ? null : Math.max(0, roundMoney(monthlyTargetAmount - ranking.amount)),
+        targetCompletionRate: monthlyTargetAmount === null
+          ? null : roundMoney(ranking.amount / monthlyTargetAmount * 100),
         priorityCustomers: [],
       });
     };
@@ -1180,6 +1242,43 @@ export function createBusinessCockpitService(
       || right.opportunityAmount - left.opportunityAmount
       || right.revenueAmount - left.revenueAmount
     ));
+    const visibleUserIds = new Set(scopes.customers.visibleUserIds);
+    const visibleActiveUsers = users.filter((user) => (
+      user.isActive
+      && (user.employmentStatus || 'active') === 'active'
+      && (scopes.customers.unrestricted || visibleUserIds.has(user.id))
+    ));
+    const departmentStatuses: BusinessCockpitData['departmentStatuses'] = MANAGEMENT_DEPARTMENT_GROUPS.map((group) => {
+      const groupDepartmentNames = new Set(departments
+        .filter((department) => department.isActive && group.matches(department.name))
+        .map((department) => department.name));
+      const memberIds = new Set(visibleActiveUsers
+        .filter((user) => Boolean(user.departmentId && groupDepartmentNames.has(departmentById.get(user.departmentId) || '')))
+        .map((user) => user.id));
+      const attentionCount = salesBattleProfiles.filter((profile) => (
+        memberIds.has(profile.userId)
+        && (profile.overdueCustomerCount > 0 || profile.riskCustomerCount > 0)
+      )).length;
+      const available = group.id === 'sales' && canViewCustomerBattles;
+      return {
+        id: group.id,
+        name: group.name,
+        memberCount: memberIds.size,
+        attentionCount,
+        state: available ? (attentionCount > 0 ? 'attention' : 'normal') : 'building',
+        available,
+      };
+    });
+    const completedAmount = snapshot.financeHealth.formalOrderNetReceiptAmount;
+    const managementPerformance: BusinessCockpitData['managementPerformance'] = {
+      completedAmount,
+      targetAmount: companyTargetAmount,
+      gapAmount: companyTargetAmount === null
+        ? null : Math.max(0, roundMoney(companyTargetAmount - completedAmount)),
+      completionRate: companyTargetAmount === null
+        ? null : roundMoney(completedAmount / companyTargetAmount * 100),
+      targetSource: companyTargetAmount === null ? 'unconfigured' : 'okr',
+    };
     const canViewReconciliationEvidence = isSuperAdmin(actor);
     const financeFlowQuery = new URLSearchParams({ tab: 'flow' });
     if (canViewReconciliationEvidence && snapshot.financeHealth.reconciliationOrderIds.length) {
@@ -1315,6 +1414,8 @@ export function createBusinessCockpitService(
         pendingPayCommissionAmount: snapshot.commissionHealth.pendingPayAmount,
         paidCommissionAmount: snapshot.commissionHealth.paidAmount,
       },
+      departmentStatuses,
+      managementPerformance,
       riskTasks,
     });
   };

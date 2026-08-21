@@ -116,18 +116,18 @@ const customerSaveProfileSource = customerDetailSource.slice(
 
 assert.match(
   businessCockpitSource,
-  /期间经营结果/,
-  'Business cockpit should use a distinctive operating signal strip instead of generic equal KPI cards.',
+  /极享智控 · AI晨报/,
+  'Business cockpit should lead with one concise operating brief.',
 );
 assert.match(
   businessCockpitSource,
-  /最高优先级/,
-  'Business cockpit should make the highest-priority blocker explicit.',
+  /组织 · 部门矩阵/,
+  'Business cockpit should let the boss enter the department that needs attention.',
 );
 assert.match(
   businessCockpitSource,
-  /线索入库[\s\S]*客户沉淀[\s\S]*订单申请[\s\S]*财务入库[\s\S]*分账确认/,
-  'Business cockpit should render the core CRM operating chain in order.',
+  /本月完成[\s\S]*月目标[\s\S]*目标差额/,
+  'Business cockpit should keep company performance to the three decision numbers.',
 );
 
 assert.match(

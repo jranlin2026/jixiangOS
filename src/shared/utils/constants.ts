@@ -2,6 +2,8 @@
 export const ROUTES = {
   HOME: '/',
   DASHBOARD: '/dashboard',
+  SALES_MANAGEMENT: '/management/sales',
+  SALESPERSON_MANAGEMENT: '/management/sales/:salespersonId',
   LEADS: '/leads',
   LEAD_DETAIL: '/leads/:id',
   OPPORTUNITIES: '/opportunities',

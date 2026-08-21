@@ -222,6 +222,67 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
   });
 }
 
+// 穿透式驾驶舱必须复用已发布 OKR 目标，并按真实组织范围返回部门人数。
+{
+  const targetPrisma = fakePrisma([
+    row(STORAGE_KEYS.ORDERS, order('target-sales', 'sales-1', '销售甲', [
+      payment('target-sales-payment', 32980, '2026-07-10T08:00:00.000Z'),
+    ])),
+  ]) as any;
+  const now = new Date('2026-07-01T00:00:00.000Z');
+  targetPrisma.user.findMany = async () => [
+    {
+      id: 'admin-1', name: '系统管理员', account: 'admin', email: '', phone: '', role: '超级管理员',
+      avatar: null, departmentId: 'department-1', positionId: null, positionName: null, roleId: 'role-admin',
+      passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, mustChangePassword: false, lastLoginAt: null,
+      isActive: true, employmentStatus: 'active', leftAt: null, leftBy: null, createdAt: now, updatedAt: now,
+    },
+    {
+      id: 'sales-1', name: '销售甲', account: 'sales-1', email: '', phone: '', role: '销售顾问',
+      avatar: null, departmentId: 'department-sales', positionId: null, positionName: '销售顾问', roleId: 'role-sales',
+      passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, mustChangePassword: false, lastLoginAt: null,
+      isActive: true, employmentStatus: 'active', leftAt: null, leftBy: null, createdAt: now, updatedAt: now,
+    },
+  ];
+  targetPrisma.role.findMany = async () => [
+    {
+      id: 'role-admin', name: '超级管理员', code: 'super_admin', description: null, departmentId: null,
+      permissions: [{ module: '全部', actions: ['admin'] }], dataScopes: {}, memberCount: 1, isActive: true,
+      createdAt: now, updatedAt: now,
+    },
+    {
+      id: 'role-sales', name: '销售顾问', code: 'sales', description: null, departmentId: 'department-sales',
+      permissions: [{ module: '客户', actions: ['read'] }], dataScopes: { customers: 'self' }, memberCount: 1, isActive: true,
+      createdAt: now, updatedAt: now,
+    },
+  ];
+  targetPrisma.department.findMany = async () => [
+    {
+      id: 'department-1', name: '管理部', code: 'management', description: null, parentId: null,
+      managerId: 'admin-1', memberCount: 1, sortOrder: 1, isActive: true, createdAt: now, updatedAt: now,
+    },
+    {
+      id: 'department-sales', name: '销售一部', code: 'sales-1', description: null, parentId: null,
+      managerId: 'sales-1', memberCount: 1, sortOrder: 2, isActive: true, createdAt: now, updatedAt: now,
+    },
+  ];
+  targetPrisma.keyResult = {
+    findMany: async () => [
+      { targetValue: 3000000, updatedAt: now, metricBinding: { scopeType: 'COMPANY', scopeId: null } },
+      { targetValue: 400000, updatedAt: now, metricBinding: { scopeType: 'USER', scopeId: 'sales-1' } },
+    ],
+  };
+  const result = await createBusinessCockpitService(targetPrisma).get(
+    { preset: 'custom', startDate: '2026-07-01', endDate: '2026-07-31' },
+    admin,
+  );
+  assert.equal(result.data?.managementPerformance.targetAmount, 3000000);
+  assert.equal(result.data?.managementPerformance.targetSource, 'okr');
+  assert.equal(result.data?.salesBattleProfiles.find((item) => item.userId === 'sales-1')?.monthlyTargetAmount, 400000);
+  assert.equal(result.data?.departmentStatuses.find((item) => item.id === 'sales')?.memberCount, 1);
+  assert.equal(result.data?.departmentStatuses.find((item) => item.id === 'sales')?.available, true);
+}
+
 // 驾驶舱权限不能成为绕过客户列表权限的数据旁路。
 {
   const restrictedPrisma = fakePrisma([row(STORAGE_KEYS.CUSTOMERS, customer('restricted', 'admin-1', {
@@ -360,7 +421,9 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
     revenueAmount: 0, orderCount: 0, customerCount: 0, activeOpportunityCount: 0,
     opportunityAmount: 0, todayDueTodoCount: 0, todayCompletedTodoCount: 0,
     overdueCustomerCount: 0, riskCustomerCount: 0, missingNextActionCount: 0,
-    wonCount: 0, lostCount: 0, conversionRate: 0, priorityCustomers: [],
+    wonCount: 0, lostCount: 0, conversionRate: 0,
+    monthlyTargetAmount: null, targetGapAmount: null, targetCompletionRate: null,
+    priorityCustomers: [],
   });
 }
 
