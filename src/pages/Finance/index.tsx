@@ -36,6 +36,13 @@ import Commission from '../Commission';
 import RecoverySettlement from './RecoverySettlement';
 import CommissionPayout from './CommissionPayout';
 import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/ModuleShell';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+} from '../../shared/components/DataTableWorkspace';
 import type { FinancePaymentEvidenceIssueCode, FinanceTransaction, FinanceTransactionDirection, FinanceTransactionFilterCoverage, FinanceTransactionFilters, FinanceTransactionSummary } from '../../types/finance';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
@@ -43,13 +50,13 @@ import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils
 type FinanceTab = 'mine' | 'settlement' | 'recovery-settlement' | 'disbursement' | 'flow' | 'rules';
 
 const shell = {
-  ink: '#0f172a',
-  muted: '#64748b',
-  line: '#dbe4ee',
-  soft: '#f8fafc',
+  ink: '#19142C',
+  muted: '#7B7690',
+  line: '#E8E4F1',
+  soft: '#FAF9FD',
   paper: '#ffffff',
-  wash: '#eef4fb',
-  blue: '#2563eb',
+  wash: '#F4F0FF',
+  blue: '#7447F5',
   green: '#059669',
   amber: '#f59e0b',
   red: '#dc2626',
@@ -494,7 +501,7 @@ const Finance: React.FC = () => {
           </Box>
         </Paper>}
 
-        {showFlowWorkspace && <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1.5, bgcolor: '#fff', p: 1.25 }}>
+        {showFlowWorkspace && <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 2, bgcolor: '#fff', p: { xs: 1.5, md: 2 }, boxShadow: '0 14px 40px rgba(73, 50, 120, 0.05)' }}>
           <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1} alignItems={{ xs: 'stretch', lg: 'center' }}>
             <TextField
               size="small"
@@ -539,9 +546,9 @@ const Finance: React.FC = () => {
         </Paper>}
 
         {showFlowWorkspace && <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1fr) 330px' }, gap: 1.5, alignItems: 'start' }}>
-          <Box>
-            <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: '6px 6px 0 0', overflowX: 'auto' }}>
-              <Table sx={{ minWidth: 1140 }}>
+          <DataTableWorkspace>
+            <DataTableDesktopScroller>
+              <Table stickyHeader sx={{ minWidth: 1140 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell>流水编号</TableCell>
@@ -599,17 +606,67 @@ const Finance: React.FC = () => {
                       </TableRow>
                     );
                   })}
-                  {!flowRows.length && (
-                    <TableRow>
-                      <TableCell colSpan={10} align="center" sx={{ py: 5, color: '#9ca3af' }}>
-                        {flowLoading ? '加载中...' : isReconciliationView ? '未找到这些异常订单的资金流水，请返回订单核对付款记录' : '暂无收支流水'}
-                      </TableCell>
-                    </TableRow>
-                  )}
                 </TableBody>
               </Table>
-            </TableContainer>
-            <TablePagination
+              {!flowRows.length && (
+                <DataTableEmptyState label={flowLoading ? '加载中...' : isReconciliationView ? '未找到这些异常订单的资金流水，请返回订单核对付款记录' : '暂无收支流水'} />
+              )}
+            </DataTableDesktopScroller>
+            <DataTableMobileScroller>
+              {flowRows.map((row) => {
+                const meta = directionMeta[row.direction] || { label: '异常', color: shell.red, mark: '' };
+                const selected = selectedFlow?.id === row.id;
+                return (
+                  <Paper
+                    key={row.id}
+                    elevation={0}
+                    onClick={() => setSelectedFlowId(row.id)}
+                    sx={{
+                      border: `1px solid ${selected ? '#C9B9FF' : shell.line}`,
+                      borderLeft: `4px solid ${meta.color}`,
+                      borderRadius: 2,
+                      p: 1.5,
+                      bgcolor: selected ? '#F7F4FF' : '#fff',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, alignItems: 'flex-start' }}>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="subtitle2" noWrap sx={{ color: shell.ink, fontWeight: 900 }}>{row.transactionNo}</Typography>
+                        <Typography variant="caption" sx={{ color: shell.muted }}>{row.type} · {row.relatedBusiness || '暂无关联业务'}</Typography>
+                      </Box>
+                      <Typography variant="subtitle1" sx={{ color: meta.color, fontWeight: 900, whiteSpace: 'nowrap' }}>
+                        {meta.mark}{formatCurrency(row.amount)}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 1 }}>
+                      <Chip size="small" label={meta.label} sx={{ bgcolor: `${meta.color}14`, color: meta.color, fontWeight: 800 }} />
+                      <Chip size="small" label={row.status || '异常'} sx={{ bgcolor: row.status === '已确认' ? '#ECFDF5' : '#FFF7ED', color: row.status === '已确认' ? shell.green : shell.amber, fontWeight: 800 }} />
+                    </Box>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1.25, pt: 1.25, borderTop: `1px solid ${shell.line}` }}>
+                      <Box>
+                        <Typography variant="caption" sx={{ color: shell.muted }}>客户/对象</Typography>
+                        <Typography variant="body2" noWrap sx={{ color: shell.ink, fontWeight: 800 }}>{row.customerName || '-'}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" sx={{ color: shell.muted }}>经办人</Typography>
+                        <Typography variant="body2" noWrap sx={{ color: shell.ink, fontWeight: 800 }}>{row.operatorName || '-'}</Typography>
+                      </Box>
+                      <Box sx={{ gridColumn: '1 / -1' }}>
+                        <Typography variant="caption" sx={{ color: shell.muted }}>发生时间</Typography>
+                        <Typography variant="body2" sx={{ color: shell.ink }}>{row.occurredAt ? formatDate(row.occurredAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</Typography>
+                      </Box>
+                    </Box>
+                  </Paper>
+                );
+              })}
+              {!flowRows.length && (
+                <Typography variant="body2" sx={{ py: 6, textAlign: 'center', color: shell.muted }}>
+                  {flowLoading ? '加载中...' : isReconciliationView ? '未找到这些异常订单的资金流水' : '暂无收支流水'}
+                </Typography>
+              )}
+            </DataTableMobileScroller>
+            <DataTableWorkspaceFooter>
+              <TablePagination
               component="div"
               count={flowTotal}
               page={Math.min(flowPage, Math.max(Math.ceil(flowTotal / flowRowsPerPage) - 1, 0))}
@@ -622,11 +679,12 @@ const Finance: React.FC = () => {
               }}
               labelRowsPerPage="每页条数"
               labelDisplayedRows={formatPaginationRows}
-              sx={{ border: `1px solid ${shell.line}`, borderTop: 0, bgcolor: '#fff' }}
-            />
-          </Box>
+                sx={{ bgcolor: '#fff' }}
+              />
+            </DataTableWorkspaceFooter>
+          </DataTableWorkspace>
 
-          <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1.5, bgcolor: '#fff', overflow: 'hidden' }}>
+          <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 2, bgcolor: '#fff', overflow: 'hidden', boxShadow: '0 14px 40px rgba(73, 50, 120, 0.05)' }}>
             <Box sx={{ display: 'grid', gridTemplateColumns: '5px 1fr' }}>
               <Box sx={{ bgcolor: selectedDirectionMeta?.color || shell.line }} />
               <Box sx={{ p: 1.5 }}>
@@ -675,7 +733,7 @@ const Finance: React.FC = () => {
   };
 
   return (
-    <ModulePage>
+    <ModulePage workspace={activeTab === 'settlement' || activeTab === 'recovery-settlement' || activeTab === 'disbursement' || activeTab === 'flow'}>
       <ModuleHeader
         title="财务中心"
         description="聚焦提成核算、员工发放、月度对账、收支流水和规则配置。"

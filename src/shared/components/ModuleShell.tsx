@@ -37,11 +37,11 @@ export const ModulePage: React.FC<ModulePageProps> = ({
       bgcolor: moduleTokens.page,
       p: { xs: 2, md: 3 },
       ...(workspace ? {
-        height: '100%',
-        minHeight: 0,
+        height: { xs: 'auto', md: '100%' },
+        minHeight: { xs: '100%', md: 0 },
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden',
+        overflow: { xs: 'visible', md: 'hidden' },
       } : {}),
       ...sx,
     }}
@@ -57,18 +57,18 @@ export const ModulePage: React.FC<ModulePageProps> = ({
       boxShadow: '0 10px 40px -18px rgba(31, 41, 55, 0.18)',
       p: { xs: 2, md: 3 },
       ...(workspace ? {
-        flex: 1,
-        minHeight: 0,
+        flex: { xs: '0 0 auto', md: 1 },
+        minHeight: { xs: 'auto', md: 0 },
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden',
+        overflow: { xs: 'visible', md: 'hidden' },
       } : {}),
     }}>
       <Box
         data-module-workspace="true"
         sx={{
           minWidth: 0,
-          ...(workspace ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : {}),
+          ...(workspace ? { flex: { xs: '0 0 auto', md: 1 }, minHeight: { xs: 'auto', md: 0 }, display: 'flex', flexDirection: 'column' } : {}),
         }}
       >
         {children}

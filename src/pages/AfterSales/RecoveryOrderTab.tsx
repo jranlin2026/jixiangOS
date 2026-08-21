@@ -73,6 +73,13 @@ import {
   getRecoveryOrderReviewStatuses,
   type ReviewQueueView,
 } from '../../shared/utils/reviewQueue';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+} from '../../shared/components/DataTableWorkspace';
 import BusinessImportReviewControls from '../../shared/components/BusinessImportReviewControls';
 import BusinessImportReviewPageCheckbox from '../../shared/components/BusinessImportReviewPageCheckbox';
 import {
@@ -1102,7 +1109,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   });
 
   return (
-    <Box sx={{ display: 'grid', gap: 1.5 }}>
+    <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1.5, overflow: { xs: 'visible', md: 'hidden' } }}>
       {loadError && (
         <Alert severity="error">
           售后订单加载失败：{loadError}。当前列表未更新，请重试。
@@ -1212,12 +1219,13 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
         />
       ) : null}
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: '6px 6px 0 0' }}>
-        <Table sx={{ minWidth: 1360 }}>
+      <DataTableWorkspace>
+      <DataTableDesktopScroller sx={{ display: 'block' }}>
+        <Table stickyHeader sx={{ minWidth: 1360 }}>
           <TableHead>
             <TableRow>
               {mode === 'review' ? (
-                <TableCell padding="checkbox">
+                <TableCell padding="checkbox" sx={{ position: 'sticky', left: 0, zIndex: 6, bgcolor: '#f8fafc' }}>
                   <BusinessImportReviewPageCheckbox
                     module="recovery_orders"
                     canReview={canReviewAction}
@@ -1246,7 +1254,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
             {rows.map((row) => (
               <TableRow key={row.id} hover>
                 {mode === 'review' ? (
-                  <TableCell padding="checkbox">
+                  <TableCell padding="checkbox" sx={{ position: 'sticky', left: 0, zIndex: 4, bgcolor: '#fff' }}>
                     <Checkbox
                       aria-label={`选择导入售后挽回订单 ${row.recoveryNo}`}
                       disabled={!canReviewAction
@@ -1277,20 +1285,35 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
                 <TableCell align="center" sx={{ minWidth: mode === 'review' ? 176 : 96, width: mode === 'review' ? 176 : 96, whiteSpace: 'nowrap', position: 'sticky', right: 0, zIndex: 3, bgcolor: '#fff', boxShadow: `-1px 0 0 ${shell.line}` }}>{renderCell(row, 'actions')}</TableCell>
               </TableRow>
             ))}
-            {!rows.length && (
-              <TableRow>
-                <TableCell colSpan={visibleColumns.length + (mode === 'review' ? 2 : 1)} align="center" sx={{ py: 6, color: '#9ca3af' }}>
-                  {loading ? '加载中...' : mode === 'review'
-                    ? reviewQueueView === 'pending'
-                      ? '暂无待审核/退回修改售后挽回订单'
-                      : '当前审核视图暂无记录'
-                    : '暂无售后挽回订单'}
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
-      </TableContainer>
+        {!rows.length && (
+          <DataTableEmptyState
+            label={loading ? '加载中...' : mode === 'review'
+              ? reviewQueueView === 'pending'
+                ? '暂无待审核/退回修改售后挽回订单'
+                : '当前审核视图暂无记录'
+              : '暂无售后挽回订单'}
+          />
+        )}
+      </DataTableDesktopScroller>
+      <DataTableMobileScroller>
+        {rows.map((row) => (
+          <Paper key={row.id} elevation={0} sx={{ p: 1.5, border: `1px solid ${shell.line}`, borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ minWidth: 0 }}><Typography variant="subtitle2" noWrap sx={{ fontWeight: 850 }}>{renderCell(row, 'recoveryNo')}</Typography><Typography variant="caption" color="text.secondary">{renderCell(row, 'customerName')}</Typography></Box>
+              {renderCell(row, 'status')}
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1.25 }}>
+              <Box><Typography variant="caption" color="text.secondary">产品</Typography><Typography variant="body2">{renderCell(row, 'originalProduct')}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">挽回金额</Typography><Typography variant="body2">{renderCell(row, 'recoveryAmount')}</Typography></Box>
+            </Box>
+            <Box sx={{ mt: 1 }}>{renderCell(row, 'actions')}</Box>
+          </Paper>
+        ))}
+        {!rows.length && <Typography sx={{ py: 5, textAlign: 'center', color: '#9ca3af' }}>{loading ? '加载中...' : '暂无售后挽回订单'}</Typography>}
+      </DataTableMobileScroller>
+      <DataTableWorkspaceFooter>
       <TablePagination
         component="div"
         count={total}
@@ -1306,6 +1329,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
         labelDisplayedRows={formatPaginationRows}
         sx={{ border: `1px solid ${shell.line}`, borderTop: 0, bgcolor: '#fff' }}
       />
+      </DataTableWorkspaceFooter>
+      </DataTableWorkspace>
 
       <Dialog
         open={open}

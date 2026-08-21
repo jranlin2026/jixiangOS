@@ -18,7 +18,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TableRow,
   Tabs,
@@ -65,7 +64,6 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import {
   ModuleHeader,
-  ModuleListSurface,
   ModulePage,
   ModuleTabs,
   ModuleToolbar,
@@ -73,6 +71,13 @@ import {
   moduleListTablePaperSx,
 } from '../../shared/components/ModuleShell';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+} from '../../shared/components/DataTableWorkspace';
 
 type LeadColumn = {
   id: string;
@@ -551,7 +556,7 @@ const Leads: React.FC = () => {
   };
 
   return (
-    <ModulePage workspace={activeTab === 0 && canViewLeadList}>
+    <ModulePage workspace={(activeTab === 0 && canViewLeadList) || (activeTab === 1 && canViewLeadIntake)}>
       <ModuleHeader
         title="线索管理"
         description="线索录入、批量入库、分配和转客户。"
@@ -606,9 +611,12 @@ const Leads: React.FC = () => {
       </ModuleTabs>
 
       {activeTab === 0 && canViewLeadList && (
-        <ModuleListSurface
+        <DataTableWorkspace
           sx={{
             flex: 1,
+            border: 0,
+            borderRadius: 0,
+            boxShadow: 'none',
           }}
         >
           <ModuleToolbar sx={{ flexShrink: 0 }}>
@@ -654,7 +662,7 @@ const Leads: React.FC = () => {
           </ModuleToolbar>
 
           <Box sx={{ display: { xs: 'none', md: 'flex' }, flex: 1, minHeight: 0, flexDirection: 'column' }}>
-          <TableContainer component={Paper} elevation={0} sx={[moduleListTablePaperSx, { flex: 1, minHeight: 0, overflow: 'auto' }]}>
+          <DataTableDesktopScroller sx={moduleListTablePaperSx}>
             <Table stickyHeader sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
@@ -727,28 +735,14 @@ const Leads: React.FC = () => {
                     </TableCell>
                   </TableRow>
                 ))}
-                {items.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
-                      暂无线索数据
-                    </TableCell>
-                  </TableRow>
-                )}
               </TableBody>
             </Table>
-          </TableContainer>
+            {items.length === 0 && <DataTableEmptyState label="暂无线索数据" />}
+          </DataTableDesktopScroller>
           </Box>
 
-          <Box
+          <DataTableMobileScroller
             sx={{
-              display: { xs: 'grid', md: 'none' },
-              flex: 1,
-              minHeight: 0,
-              overflowY: 'auto',
-              alignContent: 'start',
-              gap: 1.25,
-              p: 1.5,
-              bgcolor: '#FAF9FD',
               borderTop: '1px solid #EEEAF5',
             }}
           >
@@ -806,7 +800,8 @@ const Leads: React.FC = () => {
             {items.length === 0 && (
               <Typography variant="body2" sx={{ py: 6, textAlign: 'center', color: '#8B86A0' }}>暂无线索数据</Typography>
             )}
-          </Box>
+          </DataTableMobileScroller>
+          <DataTableWorkspaceFooter>
           <TablePagination
             component="div"
             count={pagination.total}
@@ -819,7 +814,8 @@ const Leads: React.FC = () => {
             labelDisplayedRows={formatPaginationRows}
             sx={moduleListPaginationSx}
           />
-        </ModuleListSurface>
+          </DataTableWorkspaceFooter>
+        </DataTableWorkspace>
       )}
 
       {activeTab === 1 && canViewLeadIntake && <LeadIntakeTab viewSettingsSignal={intakeViewSettingsSignal} />}

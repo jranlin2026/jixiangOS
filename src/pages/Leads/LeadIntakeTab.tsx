@@ -15,7 +15,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TableRow,
   TextField,
@@ -42,6 +41,18 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import useAuthStore from '../../store/useAuthStore';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
+import {
+  ModuleToolbar,
+  moduleListPaginationSx,
+  moduleListTablePaperSx,
+} from '../../shared/components/ModuleShell';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+} from '../../shared/components/DataTableWorkspace';
 
 type IntakeColumn = {
   id: string;
@@ -248,9 +259,8 @@ const LeadIntakeTab: React.FC<LeadIntakeTabProps> = ({ viewSettingsSignal = 0 })
   );
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+    <DataTableWorkspace sx={{ flex: 1, border: 0, borderRadius: 0, boxShadow: 'none' }}>
+      <ModuleToolbar sx={{ flexShrink: 0 }}>
         <TextField
           size="small"
           placeholder="搜索姓名/公司/手机号/微信"
@@ -277,11 +287,10 @@ const LeadIntakeTab: React.FC<LeadIntakeTabProps> = ({ viewSettingsSignal = 0 })
             <MenuItem value="待分配">待分配</MenuItem>
           </Select>
         </FormControl>
-        </Box>
-      </Box>
+      </ModuleToolbar>
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
-        <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
+      <DataTableDesktopScroller sx={moduleListTablePaperSx}>
+        <Table stickyHeader sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
               {visibleColumns.map((column, columnIndex) => (
@@ -343,16 +352,32 @@ const LeadIntakeTab: React.FC<LeadIntakeTabProps> = ({ viewSettingsSignal = 0 })
                 )}
               </TableRow>
             ))}
-            {items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={visibleColumns.length + (isSuperAdmin ? 1 : 0)} align="center" sx={{ py: 6, color: '#9ca3af' }}>
-                  暂无入库记录
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
-      </TableContainer>
+        {items.length === 0 && <DataTableEmptyState label="暂无入库记录" />}
+      </DataTableDesktopScroller>
+      <DataTableMobileScroller>
+        {items.map((record) => (
+          <Paper key={record.id} elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="subtitle2" noWrap sx={{ fontWeight: 800 }}>{record.name}</Typography>
+                <Typography variant="caption" color="text.secondary">{record.company || '暂无公司'} · {record.phone || record.wechat || '未填写联系方式'}</Typography>
+              </Box>
+              {INTAKE_COLUMNS.find((column) => column.id === 'status')?.render(record)}
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1.25 }}>
+              <Box><Typography variant="caption" color="text.secondary">来源</Typography><Typography variant="body2">{record.source || '未填写'}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">录入人</Typography><Typography variant="body2">{record.inputBy || '-'}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">分配销售</Typography><Typography variant="body2">{record.assignedTo || '未分配'}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">入库时间</Typography><Typography variant="body2">{formatDate(record.createdAt)}</Typography></Box>
+            </Box>
+            {isSuperAdmin && <Button color="error" size="small" startIcon={<DeleteOutlineIcon />} onClick={() => handleOpenCleanup(record)} sx={{ mt: 1 }}>清理记录</Button>}
+          </Paper>
+        ))}
+        {!items.length && <Typography sx={{ py: 5, textAlign: 'center', color: '#9ca3af' }}>暂无入库记录</Typography>}
+      </DataTableMobileScroller>
+      <DataTableWorkspaceFooter>
       <TablePagination
         component="div"
         count={pagination.total}
@@ -363,13 +388,9 @@ const LeadIntakeTab: React.FC<LeadIntakeTabProps> = ({ viewSettingsSignal = 0 })
         onRowsPerPageChange={handleRowsPerPageChange}
         labelRowsPerPage="每页条数"
         labelDisplayedRows={formatPaginationRows}
-        sx={{
-          border: '1px solid #f0f0f0',
-          borderTop: 0,
-          bgcolor: '#fff',
-          '& .MuiTablePagination-toolbar': { minHeight: 48 },
-        }}
+        sx={moduleListPaginationSx}
       />
+      </DataTableWorkspaceFooter>
       <Dialog open={Boolean(cleanupRecord)} onClose={cleanupSubmitting ? undefined : handleCloseCleanup} maxWidth="xs" fullWidth>
         <DialogCloseTitle onClose={() => {
           if (!cleanupSubmitting) handleCloseCleanup();
@@ -421,7 +442,7 @@ const LeadIntakeTab: React.FC<LeadIntakeTabProps> = ({ viewSettingsSignal = 0 })
         onReset={handleResetViewConfig}
       />
       {feedbackDialog}
-    </Box>
+    </DataTableWorkspace>
   );
 };
 

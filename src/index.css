@@ -63,19 +63,19 @@ body {
 
 .MuiTableContainer-root {
   border-color: var(--jx-line) !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   box-shadow: none !important;
 }
 
 .MuiTableHead-root .MuiTableCell-root {
-  background: #f3f7fb !important;
-  color: #526173 !important;
+  background: #faf9fd !important;
+  color: #625d76 !important;
   font-weight: 900 !important;
-  border-right: 1px solid #e4ebf3;
+  border-right: 1px solid #eeeaf5;
 }
 
 .MuiTableBody-root .MuiTableRow-root:hover {
-  background: #f7faff !important;
+  background: #faf8ff !important;
 }
 
 .MuiTableBody-root .MuiTableCell-root {
@@ -84,7 +84,7 @@ body {
 
 .MuiTablePagination-root {
   border-top: 1px solid var(--jx-soft-line);
-  background: #fbfcfe;
+  background: #ffffff;
   min-width: 0 !important;
   overflow: visible;
 }
@@ -184,7 +184,7 @@ body {
   width: 100%;
   padding: 8px 14px;
   border-top: 1px solid var(--jx-soft-line);
-  background: #fbfcfe;
+  background: #ffffff;
   box-sizing: border-box;
   overflow: visible;
   white-space: nowrap;
@@ -297,10 +297,10 @@ body {
 }
 
 .JxPaginationPage.is-active {
-  border-color: #1e6bff !important;
-  background: #eaf2ff !important;
-  color: #1e6bff !important;
-  box-shadow: inset 0 0 0 1px rgba(30, 107, 255, 0.18);
+  border-color: #7447f5 !important;
+  background: #f0e9ff !important;
+  color: #7447f5 !important;
+  box-shadow: inset 0 0 0 1px rgba(116, 71, 245, 0.16);
 }
 
 .JxPaginationEllipsis {
@@ -309,6 +309,57 @@ body {
   font-size: 12px;
   font-weight: 800;
   text-align: center;
+}
+
+@media (max-width: 600px) {
+  .JxTablePagination {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 10px;
+    min-height: 0;
+    padding: 8px 10px 10px;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .JxPaginationTotal {
+    min-width: 0;
+    margin-right: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .JxPaginationRowsSelect {
+    justify-self: end;
+  }
+
+  .JxPaginationPages {
+    grid-column: 1;
+    justify-self: start;
+    gap: 2px;
+  }
+
+  .JxPaginationJump {
+    grid-column: 2;
+    justify-self: end;
+    gap: 4px;
+  }
+
+  .JxPaginationArrow,
+  .JxPaginationPage {
+    min-width: 24px;
+    height: 24px;
+  }
+
+  .JxPaginationPage {
+    padding: 0 5px;
+  }
+
+  .JxPaginationJumpInput,
+  .JxPaginationJumpInput .MuiInputBase-root {
+    width: 46px;
+    min-width: 46px;
+  }
 }
 
 .MuiTabs-root {

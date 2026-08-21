@@ -62,7 +62,7 @@ const AfterSales: React.FC = () => {
   };
 
   return (
-    <ModulePage>
+    <ModulePage workspace>
       <ModuleHeader
         title="售后服务"
         description="售后只提交挽回事实，财务审核通过后再进入售后挽回分账。"

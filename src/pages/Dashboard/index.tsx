@@ -15,6 +15,15 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined';
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
+import GroupAddOutlinedIcon from '@mui/icons-material/GroupAddOutlined';
+import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined';
+import PersonAddAltOutlinedIcon from '@mui/icons-material/PersonAddAltOutlined';
+import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
+import ReplayCircleFilledOutlinedIcon from '@mui/icons-material/ReplayCircleFilledOutlined';
 import { useNavigate } from 'react-router-dom';
 import { customerTodoApi, dashboardApi, enterpriseBrainApi } from '../../api';
 import { ROUTES } from '../../shared/utils/constants';
@@ -26,13 +35,13 @@ import type { HomeTaskItem, HomeWorkbenchData } from '../../types/dashboard';
 import type { EmployeeTask } from '../../types/enterpriseBrain';
 
 const palette = {
-  page: '#F6F8FB',
+  page: '#F8F7FC',
   surface: '#FFFFFF',
-  ink: '#101828',
-  muted: '#667085',
-  line: '#DDE4EC',
-  softLine: '#EEF2F6',
-  blue: '#1E6BFF',
+  ink: '#19152D',
+  muted: '#706B86',
+  line: '#E8E4F1',
+  softLine: '#EEEAF5',
+  violet: '#7447F5',
   cyan: '#087C8C',
   green: '#16845B',
   amber: '#B46A08',
@@ -40,7 +49,7 @@ const palette = {
 };
 
 const toneColor: Record<HomeTaskItem['tone'], { color: string; bg: string; border: string; icon: React.ReactElement }> = {
-  primary: { color: palette.blue, bg: '#EFF5FF', border: '#BDD4FF', icon: <TrendingUpIcon /> },
+  primary: { color: palette.violet, bg: '#F2EDFF', border: '#D8CAFF', icon: <TrendingUpIcon /> },
   warning: { color: palette.amber, bg: '#FFF7E8', border: '#EDCC8B', icon: <ScheduleIcon /> },
   error: { color: palette.red, bg: '#FFF1F0', border: '#F0B8B2', icon: <WarningAmberIcon /> },
   success: { color: palette.green, bg: '#EBF8F1', border: '#B8DDC7', icon: <CheckCircleOutlineIcon /> },
@@ -57,17 +66,18 @@ const Panel: React.FC<{
     elevation={0}
     sx={{
       border: `1px solid ${palette.line}`,
-      borderRadius: 1,
+      borderRadius: 2,
       bgcolor: palette.surface,
       overflow: 'hidden',
       height: '100%',
+      boxShadow: '0 10px 36px rgba(73, 50, 120, 0.04)',
     }}
   >
     <Stack
       direction="row"
       justifyContent="space-between"
       alignItems="center"
-      sx={{ minHeight: 68, px: 2, py: 1.25, borderBottom: `1px solid ${palette.softLine}` }}
+      sx={{ minHeight: 58, px: 2, py: 1.25, borderBottom: `1px solid ${palette.softLine}` }}
     >
       <Box>
         {eyebrow && (
@@ -234,47 +244,79 @@ const HomeWorkbench: React.FC = () => {
   const headline = taskTotal > 0
     ? `${currentUser?.name || '你好'}，先处理 ${showEmployeePriority ? employeePriorityTask?.title : mainTask?.title || '待办'}`
     : `${currentUser?.name || '你好'}，今天没有阻塞事项`;
+  const quickActionIcons: Record<string, React.ReactElement> = {
+    lead: <PersonAddAltOutlinedIcon />,
+    customer: <GroupAddOutlinedIcon />,
+    order: <ReceiptLongOutlinedIcon />,
+    review: <FactCheckOutlinedIcon />,
+    commission: <AccountBalanceWalletOutlinedIcon />,
+    refund: <ReplayCircleFilledOutlinedIcon />,
+    delivery: <LocalShippingOutlinedIcon />,
+    ai: <AutoAwesomeOutlinedIcon />,
+  };
 
   return (
     <Box
       sx={{
         p: { xs: 2, md: 3 },
-        maxWidth: 1320,
+        maxWidth: 1500,
         mx: 'auto',
         minHeight: '100%',
         bgcolor: palette.page,
         fontFamily: '"Inter", "Noto Sans SC", sans-serif',
       }}
     >
-      <Stack spacing={2}>
-        <Paper elevation={0} sx={{ border: `1px solid ${palette.line}`, borderRadius: 1, bgcolor: palette.surface, overflow: 'hidden' }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', xl: 'minmax(0, 1fr) 330px' }, gap: 2.25, alignItems: 'start' }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1} sx={{ gridColumn: '1 / -1' }}>
+          <Box>
+            <Typography variant="h4" sx={{ color: palette.ink, fontWeight: 900 }}>
+              早上好，{currentUser?.name || '系统用户'}
+            </Typography>
+            <Typography variant="body2" sx={{ color: palette.muted, mt: 0.25 }}>
+              专注当下，掌控全局，推动业务高效增长。
+            </Typography>
+          </Box>
+          <Chip label={`${data.todayLabel} · ${data.scopeLabel}`} sx={{ bgcolor: '#F0E9FF', color: palette.violet, fontWeight: 900 }} />
+        </Stack>
+
+        <Paper elevation={0} sx={{ gridColumn: { xs: '1', xl: '1' }, border: `1px solid ${palette.line}`, borderRadius: 2, bgcolor: '#F6F1FF', overflow: 'hidden', boxShadow: '0 16px 46px rgba(88, 55, 160, 0.08)' }}>
           <Box
             sx={{
               display: 'grid',
-              gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.05fr) minmax(300px, 0.75fr) minmax(300px, 0.75fr)' },
-              minHeight: 156,
+              gridTemplateColumns: { xs: '1fr', lg: 'minmax(430px, 1.25fr) minmax(240px, 0.6fr)' },
+              minHeight: 226,
             }}
           >
-            <Box sx={{ p: { xs: 2, md: 2.25 }, borderRight: { lg: `1px solid ${palette.softLine}` } }}>
+            <Box sx={{ p: { xs: 2.5, md: 3 }, borderRight: { lg: `1px solid ${palette.softLine}` }, position: 'relative', overflow: 'hidden', minHeight: 226 }}>
+              <Box component="img" src="/assets/dashboard/settlement-hero.png" alt="" sx={{ display: { xs: 'none', sm: 'block' }, position: 'absolute', width: { sm: 280, xl: 340 }, right: -10, bottom: -20, objectFit: 'contain', pointerEvents: 'none' }} />
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25, flexWrap: 'wrap', rowGap: 1 }}>
-                <Chip size="small" label={data.todayLabel} sx={{ bgcolor: '#EEF4FF', color: palette.blue, fontWeight: 900 }} />
-                <Chip size="small" label={data.scopeLabel} sx={{ bgcolor: '#F2F4F7', color: palette.ink, fontWeight: 800 }} />
+                <Chip size="small" label={data.todayLabel} sx={{ bgcolor: '#E8DDFF', color: palette.violet, fontWeight: 900 }} />
+                <Chip size="small" label={data.scopeLabel} sx={{ bgcolor: '#FFFFFF', color: palette.ink, fontWeight: 800 }} />
                 <Typography variant="caption" sx={{ color: palette.muted, fontWeight: 800 }}>
                   {currentUser?.role || '系统用户'}
                 </Typography>
               </Stack>
-              <Typography variant="caption" sx={{ color: palette.muted, fontWeight: 900 }}>
-                开工指挥条
+              <Typography variant="h4" sx={{ color: palette.ink, fontWeight: 900, mt: 1.5, mb: 0.75, lineHeight: 1.3, letterSpacing: 0, maxWidth: { sm: '58%' } }}>
+                {showEmployeePriority ? employeePriorityTask?.title : mainTask?.title || headline}·优先处理
               </Typography>
-              <Typography variant="h5" sx={{ color: palette.ink, fontWeight: 900, mt: 0.75, mb: 0.75, lineHeight: 1.25, letterSpacing: 0 }}>
-                {headline}
-              </Typography>
-              <Typography variant="body2" sx={{ color: palette.muted, maxWidth: 560 }}>
+              <Typography variant="body2" sx={{ color: palette.muted, maxWidth: { sm: '58%' } }}>
                 先推进卡住流转的事项，再补齐获客、成交、财务和履约动作。
               </Typography>
+              <Button
+                variant="contained"
+                endIcon={<ArrowForwardIcon />}
+                disabled={!mainTask && !employeePriorityTask}
+                onClick={() => {
+                  if (showEmployeePriority && employeePriorityTask) navigate(`${ROUTES.TASKS}?tab=mine&date=${workDate}&page=${employeePriorityPage}&taskId=${encodeURIComponent(employeePriorityTask.id)}`);
+                  else if (mainTask) navigate(mainTask.path);
+                }}
+                sx={{ mt: 2, px: 2.25 }}
+              >
+                进入处理中心
+              </Button>
             </Box>
 
-            <Box sx={{ p: { xs: 2, md: 2.25 }, bgcolor: mainTone.bg, borderRight: { lg: `1px solid ${mainTone.border}` } }}>
+            <Box sx={{ p: { xs: 2.5, md: 3 }, bgcolor: '#FBF9FF', borderRight: { lg: `1px solid ${mainTone.border}` } }}>
               <Typography variant="caption" sx={{ color: mainTone.color, fontWeight: 900 }}>
                 当前优先
               </Typography>
@@ -289,23 +331,9 @@ const HomeWorkbench: React.FC = () => {
                       : mainTask?.description || '当前没有需要处理的事项'}
                   </Typography>
                 </Box>
-                <Box
-                  sx={{
-                    minWidth: 68,
-                    height: 68,
-                    border: `1px solid ${mainTone.border}`,
-                    borderRadius: 1,
-                    bgcolor: '#fff',
-                    color: mainTone.color,
-                    display: 'grid',
-                    placeItems: 'center',
-                    fontSize: 28,
-                    fontWeight: 900,
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
+                <Typography sx={{ color: palette.violet, fontSize: 44, lineHeight: 1, fontWeight: 900, fontVariantNumeric: 'tabular-nums' }}>
                   {showEmployeePriority ? actionableEmployeeTasks.length : mainTask?.count || 0}
-                </Box>
+                </Typography>
               </Stack>
               <Button
                 variant="contained"
@@ -315,37 +343,65 @@ const HomeWorkbench: React.FC = () => {
                     navigate(`${ROUTES.TASKS}?tab=mine&date=${workDate}&page=${employeePriorityPage}&taskId=${encodeURIComponent(employeePriorityTask.id)}`);
                   } else if (mainTask) navigate(mainTask.path);
                 }}
-                sx={{ mt: 1.5, bgcolor: mainTone.color, '&:hover': { bgcolor: mainTone.color } }}
+                sx={{ mt: 2, bgcolor: palette.violet, '&:hover': { bgcolor: '#6035D5' } }}
               >
                 进入处理
               </Button>
             </Box>
 
-            <Box sx={{ p: { xs: 2, md: 2.25 } }}>
-              <Typography variant="caption" sx={{ color: palette.muted, fontWeight: 900 }}>
-                今日摘要
-              </Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, mt: 1 }}>
-                {data.personalMetrics.slice(0, 4).map((metric) => {
-                  const tone = toneColor[metric.tone];
-                  return (
-                    <Box key={metric.label} sx={{ border: `1px solid ${palette.softLine}`, borderRadius: 1, p: 1, bgcolor: '#FBFCFE' }}>
-                      <Typography variant="caption" sx={{ color: palette.muted, fontWeight: 800 }}>
-                        {metric.label}
-                      </Typography>
-                      <Typography variant="h6" sx={{ color: tone.color, fontWeight: 900, fontVariantNumeric: 'tabular-nums' }}>
-                        {metric.value}
-                      </Typography>
-                    </Box>
-                  );
-                })}
-              </Box>
-            </Box>
           </Box>
         </Paper>
 
+        <Stack spacing={2} sx={{ gridColumn: { xs: '1', xl: '2' }, gridRow: { xl: '2 / span 4' }, alignSelf: 'start' }}>
+          <Panel title="今日摘要">
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, p: 1.5 }}>
+              {data.personalMetrics.slice(0, 4).map((metric) => {
+                const tone = toneColor[metric.tone];
+                return (
+                  <Box key={metric.label} sx={{ border: `1px solid ${palette.softLine}`, borderRadius: 1.5, p: 1.25, bgcolor: '#FCFBFE' }}>
+                    <Typography variant="caption" sx={{ color: palette.muted, fontWeight: 800 }}>{metric.label}</Typography>
+                    <Typography variant="h6" sx={{ color: tone.color, fontWeight: 900, fontVariantNumeric: 'tabular-nums' }}>{metric.value}</Typography>
+                  </Box>
+                );
+              })}
+            </Box>
+          </Panel>
+
+          {data.quickActions.length > 0 && (
+            <Panel title="快捷操作">
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, p: 1.5 }}>
+                {data.quickActions.slice(0, 4).map((action) => (
+                  <Button key={action.id} onClick={() => navigate(action.path)} sx={{ minHeight: 70, display: 'flex', flexDirection: 'column', gap: 0.6, color: palette.ink, border: `1px solid ${palette.softLine}`, bgcolor: '#FCFBFE', boxShadow: 'none', '&:hover': { bgcolor: '#F4EFFF', borderColor: '#D9CBFF', color: palette.violet, boxShadow: 'none' } }}>
+                    <Box sx={{ color: palette.violet, lineHeight: 0 }}>{quickActionIcons[action.icon]}</Box>
+                    <Typography variant="caption" sx={{ fontWeight: 900 }}>{action.label}</Typography>
+                  </Button>
+                ))}
+              </Box>
+              {data.quickActions.find((action) => action.id === 'customer') && (
+                <Box sx={{ px: 1.5, pb: 1.5 }}>
+                  <Button fullWidth variant="contained" startIcon={<GroupAddOutlinedIcon />} onClick={() => navigate(data.quickActions.find((action) => action.id === 'customer')!.path)}>新增客户</Button>
+                </Box>
+              )}
+            </Panel>
+          )}
+
+          <Panel title="范围指标" eyebrow={data.scopeLabel}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, p: 1.5 }}>
+              {data.personalMetrics.map((metric) => {
+                const tone = toneColor[metric.tone];
+                return (
+                  <Box key={metric.label} sx={{ border: `1px solid ${palette.softLine}`, borderRadius: 1.5, p: 1.15, bgcolor: '#FCFBFE' }}>
+                    <Typography variant="caption" sx={{ color: palette.muted, fontWeight: 800 }}>{metric.label}</Typography>
+                    <Typography variant="h6" sx={{ color: tone.color, fontWeight: 900 }}>{metric.value}</Typography>
+                  </Box>
+                );
+              })}
+            </Box>
+          </Panel>
+        </Stack>
+
         {(canViewOwnTasks || canViewTeamTasks) && (
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: canViewTeamTasks ? 'minmax(0, 1.35fr) minmax(320px, 0.65fr)' : '1fr' }, gap: 2 }}>
+          <Box sx={{ gridColumn: '1', display: 'grid', gridTemplateColumns: { xs: '1fr', lg: canViewTeamTasks ? 'minmax(0, 1.35fr) minmax(280px, 0.65fr)' : '1fr' }, gap: 2 }}>
             {canViewOwnTasks && (
               <Panel
                 title="我的工作事项"
@@ -355,7 +411,7 @@ const HomeWorkbench: React.FC = () => {
                 <Stack direction="row" spacing={1} sx={{ px: 2, py: 1.25, borderBottom: `1px solid ${palette.softLine}`, flexWrap: 'wrap', rowGap: 1 }}>
                   <Chip size="small" label={`待处理 ${employeeTaskSummary.pending}`} sx={{ bgcolor: '#FFF7E8', color: palette.amber, fontWeight: 900 }} />
                   <Chip size="small" label={`被退回 ${employeeTaskSummary.returned}`} sx={{ bgcolor: '#FFF1F0', color: palette.red, fontWeight: 900 }} />
-                  <Chip size="small" label={`待确认 ${employeeTaskSummary.awaitingConfirmation}`} sx={{ bgcolor: '#EFF5FF', color: palette.blue, fontWeight: 900 }} />
+                  <Chip size="small" label={`待确认 ${employeeTaskSummary.awaitingConfirmation}`} sx={{ bgcolor: '#F0E9FF', color: palette.violet, fontWeight: 900 }} />
                   {employeeTaskSummary.overdue > 0 && <Chip size="small" color="error" label={`已逾期 ${employeeTaskSummary.overdue}`} />}
                 </Stack>
                 {employeeTasksError && (
@@ -370,7 +426,7 @@ const HomeWorkbench: React.FC = () => {
                     {employeeTasks.slice(0, 8).map((task) => {
                       const overdue = task.status === 'PENDING' && Boolean(task.dueAt) && new Date(task.dueAt || '').getTime() < Date.now();
                       const statusLabel = task.status === 'RETURNED' ? '被退回' : task.status === 'COMPLETED' ? '待确认' : task.status === 'CONFIRMED' ? '已确认' : overdue ? '已逾期' : '待处理';
-                      const statusColor = task.status === 'CONFIRMED' ? palette.green : task.status === 'COMPLETED' ? palette.blue : task.status === 'RETURNED' || overdue ? palette.red : palette.amber;
+                      const statusColor = task.status === 'CONFIRMED' ? palette.green : task.status === 'COMPLETED' ? palette.violet : task.status === 'RETURNED' || overdue ? palette.red : palette.amber;
                       return (
                         <Button key={task.id} onClick={() => navigate(`${ROUTES.TASKS}?tab=mine&date=${workDate}&taskId=${encodeURIComponent(task.id)}`)} sx={{ display: 'block', textAlign: 'left', borderRadius: 0, px: 2, py: 1.15, color: palette.ink, '&:hover': { bgcolor: '#F8FAFC' } }}>
                           <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
@@ -404,10 +460,10 @@ const HomeWorkbench: React.FC = () => {
                   {[
                     ['待处理', teamTaskSummary.pending, palette.amber],
                     ['被退回', teamTaskSummary.returned, palette.red],
-                    ['待确认', teamTaskSummary.awaitingConfirmation, palette.blue],
+                    ['待确认', teamTaskSummary.awaitingConfirmation, palette.violet],
                     ['已确认', teamTaskSummary.confirmed, palette.green],
                   ].map(([label, value, color]) => (
-                    <Box key={String(label)} sx={{ border: `1px solid ${palette.softLine}`, borderRadius: 1, p: 1.25, bgcolor: '#FBFCFE' }}>
+                    <Box key={String(label)} sx={{ border: `1px solid ${palette.softLine}`, borderRadius: 1.5, p: 1.25, bgcolor: '#FCFBFE' }}>
                       <Typography variant="caption" sx={{ color: palette.muted, fontWeight: 800 }}>{label}</Typography>
                       <Typography variant="h5" sx={{ color, fontWeight: 900 }}>{value}</Typography>
                     </Box>
@@ -433,6 +489,7 @@ const HomeWorkbench: React.FC = () => {
           </Box>
         )}
 
+        <Box sx={{ gridColumn: '1' }}>
         <Panel title="我的客户待办" eyebrow={`未完成 ${data.customerTodos.length} 项`}>
           {todoError && <Alert severity="error" sx={{ m: 1.25 }}>{todoError}</Alert>}
           <Stack divider={<Box sx={{ borderBottom: `1px solid ${palette.softLine}` }} />} sx={{ maxHeight: 380, overflowY: 'auto' }}>
@@ -470,9 +527,11 @@ const HomeWorkbench: React.FC = () => {
               );
             })}
             {!data.customerTodos.length && (
-              <Typography variant="body2" sx={{ color: '#94a3b8', px: 2, py: 4, textAlign: 'center' }}>
-                当前没有分配给你的客户待办
-              </Typography>
+              <Stack alignItems="center" spacing={0.75} sx={{ px: 2, py: 2.5, textAlign: 'center' }}>
+                <Box component="img" src="/assets/dashboard/customer-todo-empty.png" alt="" sx={{ width: 118, height: 118, objectFit: 'contain' }} />
+                <Typography variant="body2" sx={{ color: palette.muted }}>当前没有分配给你的客户待办</Typography>
+                <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate(ROUTES.CUSTOMERS)}>去客户列表看看</Button>
+              </Stack>
             )}
           </Stack>
           {data.customerTodos.length > 10 && (
@@ -481,11 +540,13 @@ const HomeWorkbench: React.FC = () => {
             </Box>
           )}
         </Panel>
+        </Box>
 
         <Box
           sx={{
+            gridColumn: '1',
             display: 'grid',
-            gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.45fr) minmax(320px, 0.75fr)' },
+            gridTemplateColumns: 'minmax(0, 1fr)',
             gap: 2,
             alignItems: 'stretch',
           }}
@@ -509,7 +570,7 @@ const HomeWorkbench: React.FC = () => {
                 >
                   <Stack direction="row" spacing={1.25} alignItems="stretch">
                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pt: 0.65, flexShrink: 0 }}>
-                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: palette.blue }} />
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: palette.violet }} />
                       {index < data.activities.length - 1 && (
                         <Box sx={{ width: 1, flex: 1, minHeight: 36, bgcolor: palette.softLine, mt: 0.5 }} />
                       )}
@@ -542,34 +603,8 @@ const HomeWorkbench: React.FC = () => {
             </Stack>
           </Panel>
 
-          <Panel title="范围指标" eyebrow={data.scopeLabel}>
-            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1.25, p: 2 }}>
-              {data.personalMetrics.map((metric) => {
-                const tone = toneColor[metric.tone];
-                return (
-                  <Box
-                    key={metric.label}
-                    sx={{
-                      border: `1px solid ${palette.softLine}`,
-                      borderRadius: 1,
-                      p: 1.25,
-                      bgcolor: '#FBFCFE',
-                      minHeight: 86,
-                    }}
-                  >
-                    <Typography variant="caption" sx={{ color: palette.muted, fontWeight: 800 }}>
-                      {metric.label}
-                    </Typography>
-                    <Typography variant="h4" sx={{ color: tone.color, fontWeight: 900, fontVariantNumeric: 'tabular-nums', mt: 0.5 }}>
-                      {metric.value}
-                    </Typography>
-                  </Box>
-                );
-              })}
-            </Box>
-          </Panel>
         </Box>
-      </Stack>
+      </Box>
     </Box>
   );
 };

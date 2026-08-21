@@ -283,8 +283,8 @@ assert.match(
 );
 assert.match(
   ordersPageSource,
-  /items\.length\s*===\s*0[\s\S]*colSpan=\{visibleColumns\.length \+ 1\}[\s\S]*暂无订单数据/,
-  'Order list table should render an empty-state row like the other CRM tables instead of collapsing to header plus pagination.',
+  /items\.length\s*===\s*0[\s\S]*<DataTableEmptyState label=\{loading \? '加载中\.\.\.' : '暂无订单数据'\}/,
+  'Order list should render the shared workspace empty state instead of collapsing to header plus pagination.',
 );
 assert.match(
   orderFormSource,

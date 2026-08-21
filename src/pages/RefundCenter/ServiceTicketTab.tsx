@@ -13,7 +13,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TableRow,
   TextField,
@@ -24,6 +23,13 @@ import type { ServiceTicket, ServiceTicketCategory, ServiceTicketStatus } from '
 import { serviceTicketApi } from '../../api';
 import { formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+} from '../../shared/components/DataTableWorkspace';
 
 const categories: ServiceTicketCategory[] = ['咨询', '故障', '培训', '交付问题', '退款前风险'];
 const statuses: ServiceTicketStatus[] = ['待处理', '处理中', '待客户反馈', '已解决', '已关闭'];
@@ -91,7 +97,7 @@ const ServiceTicketTab: React.FC = () => {
   const priorityColor = (priority: string) => priority === '高' ? 'error' : priority === '中' ? 'warning' : 'default';
 
   return (
-    <Box sx={{ display: 'grid', gap: 1.5 }}>
+    <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1.5, overflow: { xs: 'visible', md: 'hidden' } }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', lg: 'repeat(5, 1fr)' }, gap: 1 }}>
         {[
           ['待处理', stats.pending],
@@ -128,9 +134,9 @@ const ServiceTicketTab: React.FC = () => {
       </Box>
       </Paper>
 
-      <Box>
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #dbe4ee', borderRadius: '6px 6px 0 0', overflowX: 'auto' }}>
-        <Table sx={{ minWidth: 1080, tableLayout: 'fixed' }}>
+      <DataTableWorkspace>
+      <DataTableDesktopScroller sx={{ display: 'block' }}>
+        <Table stickyHeader sx={{ minWidth: 1080, tableLayout: 'fixed' }}>
           <TableHead>
             <TableRow sx={{ bgcolor: '#f8fafc' }}>
               <TableCell sx={{ width: 140, fontWeight: 700 }}>工单号</TableCell>
@@ -168,16 +174,24 @@ const ServiceTicketTab: React.FC = () => {
                 <TableCell>{formatDate(item.updatedAt)}</TableCell>
               </TableRow>
             ))}
-            {!items.length && (
-              <TableRow>
-                <TableCell colSpan={9} align="center" sx={{ py: 6, color: '#94a3b8' }}>
-                  暂无售后工单
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
-      </TableContainer>
+        {!items.length && <DataTableEmptyState label="暂无售后工单" />}
+      </DataTableDesktopScroller>
+      <DataTableMobileScroller>
+        {items.map((item) => (
+          <Paper key={item.id} elevation={0} onClick={() => setSelected(item)} sx={{ p: 1.5, border: '1px solid #dbe4ee', borderRadius: 2, cursor: 'pointer' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ minWidth: 0 }}><Typography variant="subtitle2" noWrap sx={{ fontWeight: 800 }}>{item.ticketNo}</Typography><Typography variant="caption" color="text.secondary">{item.customerName}</Typography></Box>
+              <Chip label={item.status} size="small" />
+            </Box>
+            <Typography variant="body2" sx={{ mt: 1, fontWeight: 700 }}>{item.title}</Typography>
+            <Typography variant="caption" color="text.secondary">{item.category} · {item.priority} · {item.ownerName || '未分配'} · {formatDate(item.updatedAt)}</Typography>
+          </Paper>
+        ))}
+        {!items.length && <Typography sx={{ py: 5, textAlign: 'center', color: '#94a3b8' }}>暂无售后工单</Typography>}
+      </DataTableMobileScroller>
+      <DataTableWorkspaceFooter>
       <TablePagination
         component="div"
         count={total}
@@ -193,7 +207,8 @@ const ServiceTicketTab: React.FC = () => {
         labelDisplayedRows={formatPaginationRows}
         sx={{ border: '1px solid #dbe4ee', borderTop: 0, bgcolor: '#fff' }}
       />
-      </Box>
+      </DataTableWorkspaceFooter>
+      </DataTableWorkspace>
 
       <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} maxWidth="md" fullWidth>
         {selected && (
@@ -230,4 +245,3 @@ const ServiceTicketTab: React.FC = () => {
 };
 
 export default ServiceTicketTab;
-

@@ -6,7 +6,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TableRow,
   Paper,
@@ -49,6 +48,13 @@ import ResizableHeaderCell, {
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
 import useResetListFiltersOnPageExit from '../../shared/hooks/useResetListFiltersOnPageExit';
 import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/ModuleShell';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+} from '../../shared/components/DataTableWorkspace';
 
 type RefundColumn = {
   id: string;
@@ -290,7 +296,7 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
   const RootComponent: React.ElementType = embedded ? Box : ModulePage;
 
   return (
-    <RootComponent sx={embedded ? { p: 0 } : undefined}>
+    <RootComponent sx={embedded ? { p: 0 } : undefined} workspace={embedded ? undefined : true}>
       {!embedded && (
         <ModuleHeader
           title="退款中心"
@@ -316,6 +322,8 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
 
       {!showInternalTabs || activeTab === 0 ? (
         <>
+
+      <DataTableWorkspace>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(7, 1fr)' }, gap: 2, mb: 3 }}>
         {[
@@ -378,8 +386,8 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
       </Box>
 
       {/* 表格 */}
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
-        <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
+      <DataTableDesktopScroller sx={{ display: 'block' }}>
+        <Table stickyHeader sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
               {visibleColumns.map((column, columnIndex) => (
@@ -443,16 +451,30 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
                 </TableRow>
               );
             })}
-            {items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
-                  暂无退款记录
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
-      </TableContainer>
+        {items.length === 0 && <DataTableEmptyState label="暂无退款记录" />}
+      </DataTableDesktopScroller>
+      <DataTableMobileScroller>
+        {items.map((refund: Refund) => (
+          <Paper key={refund.id} elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="subtitle2" noWrap sx={{ fontWeight: 800 }}>{refund.refundNo}</Typography>
+                <Typography variant="caption" color="text.secondary">{refund.customerName || '暂无客户'} · {refund.productName || refund.productLevel || '暂无产品'}</Typography>
+              </Box>
+              <Chip label={refund.status} size="small" color={getStatusColor(refund.status)} />
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1.25 }}>
+              <Box><Typography variant="caption" color="text.secondary">订单号</Typography><Typography variant="body2" noWrap>{refund.orderNo || '-'}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">退款金额</Typography><Typography variant="body2" sx={{ color: '#F44336', fontWeight: 800 }}>{formatCurrency(refund.refundAmount)}</Typography></Box>
+            </Box>
+            <Button size="small" startIcon={<VisibilityIcon />} onClick={() => handleViewDetail(refund)} sx={{ mt: 1 }}>查看详情</Button>
+          </Paper>
+        ))}
+        {!items.length && <Typography sx={{ py: 5, textAlign: 'center', color: '#9ca3af' }}>暂无退款记录</Typography>}
+      </DataTableMobileScroller>
+      <DataTableWorkspaceFooter>
       <TablePagination
         component="div"
         count={pagination.total}
@@ -470,6 +492,8 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
           '& .MuiTablePagination-toolbar': { minHeight: 48 },
         }}
       />
+      </DataTableWorkspaceFooter>
+      </DataTableWorkspace>
       <TableViewSettingsDialog
         open={viewSettingsOpen}
         title="退款列表视图设置"

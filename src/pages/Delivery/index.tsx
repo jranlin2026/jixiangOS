@@ -19,7 +19,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TableRow,
   Tabs,
@@ -67,6 +66,13 @@ import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import BusinessAttachmentPicker from '../../shared/components/BusinessAttachmentPicker';
 import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+} from '../../shared/components/DataTableWorkspace';
 
 type DeliveryColumnId =
   | 'orderNo'
@@ -704,9 +710,9 @@ const DeliveryPage: React.FC = () => {
   );
 
   const renderTable = () => (
-    <>
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflowX: 'auto' }}>
-        <Table sx={{ minWidth: visibleColumns.reduce((sum, column) => sum + column.width, 150), tableLayout: 'fixed' }}>
+    <DataTableWorkspace>
+      <DataTableDesktopScroller sx={{ display: 'block' }}>
+        <Table stickyHeader sx={{ minWidth: visibleColumns.reduce((sum, column) => sum + column.width, 150), tableLayout: 'fixed' }}>
           <TableHead>
             <TableRow sx={{ bgcolor: '#f8fafc' }}>
               {visibleColumns.map((column) => (
@@ -740,16 +746,32 @@ const DeliveryPage: React.FC = () => {
                 </TableCell>
               </TableRow>
             ))}
-            {!visibleRows.length && (
-              <TableRow>
-                <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 6, color: '#94a3b8' }}>
-                  {loading ? '加载中...' : '暂无交付单'}
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
-      </TableContainer>
+        {!visibleRows.length && <DataTableEmptyState label={loading ? '加载中...' : '暂无交付单'} />}
+      </DataTableDesktopScroller>
+      <DataTableMobileScroller>
+        {visibleRows.map((delivery) => (
+          <Paper key={delivery.id} elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2 }}>
+            <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="subtitle2" noWrap sx={{ fontWeight: 800 }}>{delivery.orderNo || delivery.id}</Typography>
+                <Typography variant="caption" color="text.secondary">{delivery.customerName || '暂无客户'} · {delivery.productName || '暂无产品'}</Typography>
+              </Box>
+              {renderCell(delivery, 'status')}
+            </Stack>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1.25 }}>
+              <Box><Typography variant="caption" color="text.secondary">负责人</Typography><Typography variant="body2">{renderCell(delivery, 'owner')}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">当前阶段</Typography><Typography variant="body2">{renderCell(delivery, 'currentStage')}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">进度</Typography><Typography variant="body2">{renderCell(delivery, 'progress')}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">更新时间</Typography><Typography variant="body2">{renderCell(delivery, 'updatedAt')}</Typography></Box>
+            </Box>
+            <Button size="small" startIcon={<VisibilityIcon />} onClick={() => void handleOpenDelivery(delivery)} sx={{ mt: 1 }}>查看交付</Button>
+          </Paper>
+        ))}
+        {!visibleRows.length && <Typography sx={{ py: 5, textAlign: 'center', color: '#94a3b8' }}>{loading ? '加载中...' : '暂无交付单'}</Typography>}
+      </DataTableMobileScroller>
+      <DataTableWorkspaceFooter>
       <TablePagination
         component="div"
         count={tabValue === 1 ? visibleRows.length : pagination.total}
@@ -760,7 +782,8 @@ const DeliveryPage: React.FC = () => {
         labelRowsPerPage="每页条数"
         labelDisplayedRows={({ from, to, count }) => (count === 0 ? '0 / 共 0 条' : `${from}-${to} / 共 ${count} 条`)}
       />
-    </>
+      </DataTableWorkspaceFooter>
+    </DataTableWorkspace>
   );
 
   const renderStats = () => (
@@ -1123,7 +1146,7 @@ const DeliveryPage: React.FC = () => {
   );
 
   return (
-    <ModulePage>
+    <ModulePage workspace={tabValue !== 2}>
       <ModuleHeader
         title="交付中心"
         description="客户成功处理代理、贴牌、合伙人交付，主管在最终节点确认交付完成。"

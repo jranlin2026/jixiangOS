@@ -1,4 +1,4 @@
-import { Box, ButtonBase, IconButton, MenuItem, Select, TextField, Typography } from '@mui/material';
+import { Box, ButtonBase, IconButton, MenuItem, Select, TextField, Typography, useMediaQuery, useTheme } from '@mui/material';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import type { MouseEvent, ReactNode } from 'react';
@@ -20,8 +20,15 @@ type TablePaginationProps = {
   labelDisplayedRows?: (paginationInfo: { from: number; to: number; count: number; page: number }) => ReactNode;
 };
 
-const getPageItems = (page: number, totalPages: number): Array<number | 'ellipsis'> => {
+const getPageItems = (page: number, totalPages: number, compact = false): Array<number | 'ellipsis'> => {
   if (totalPages <= 0) return [];
+  if (compact) {
+    if (totalPages <= 5) return Array.from({ length: totalPages }, (_, index) => index);
+    const lastPage = totalPages - 1;
+    if (page <= 2) return [0, 1, 2, 'ellipsis', lastPage];
+    if (page >= lastPage - 2) return [0, 'ellipsis', lastPage - 2, lastPage - 1, lastPage];
+    return [0, 'ellipsis', page, 'ellipsis', lastPage];
+  }
   if (totalPages <= 8) {
     return Array.from({ length: totalPages }, (_, index) => index);
   }
@@ -52,9 +59,11 @@ export default function TablePagination({
   sx,
   labelDisplayedRows,
 }: TablePaginationProps) {
+  const theme = useTheme();
+  const compact = useMediaQuery(theme.breakpoints.down('sm'));
   const totalPages = Math.max(1, Math.ceil(count / Math.max(rowsPerPage, 1)));
   const currentPage = Math.min(Math.max(page, 0), totalPages - 1);
-  const pageItems = count > 0 ? getPageItems(currentPage, totalPages) : [];
+  const pageItems = count > 0 ? getPageItems(currentPage, totalPages, compact) : [];
   const options = rowsPerPageOptions.map(normalizeOption);
   const [jumpPage, setJumpPage] = useState('');
 

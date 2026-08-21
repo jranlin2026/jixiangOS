@@ -42,6 +42,81 @@
 
 final result: passed
 
+# 订单与线索扁平工作区 Design QA（2026-08-21）
+
+## Comparison target
+
+- Source visual truth：`/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-10955cbe-8e1c-4388-99ff-be7dcd9afcd7.png`，用户确认的图二扁平列表标准，原图 2846 × 1622 pixels。
+- Order implementation：`/tmp/jixiangos-orders-flat.png`，CSS viewport 1446 × 815，device scale factor 1，已登录管理员、订单列表第一页。
+- Lead implementation：`/tmp/jixiangos-leads-flat.png`，CSS viewport 1446 × 815，device scale factor 1，已登录管理员、线索列表第一页。
+- Side-by-side comparison：`/tmp/jixiangos-orders-flat-comparison.png`，参考图按比例适配至 1446 × 815 后与订单实现并排对照。
+
+## Required fidelity surfaces
+
+- Typography：延用模块现有标题、页签、筛选器和表格字重，不引入新的字体层级。
+- Spacing and hierarchy：列表内容直接承接模块页签；工作区自身 `border: 0`、`borderRadius: 0`、`boxShadow: none`，不再形成第二层大圆角卡片。
+- Table surface：边框与 12px 圆角仅归属表格滚动区，筛选区、表格与固定分页组成一整块连续内容。
+- Colors and tokens：继续使用现有紫色主色、浅灰背景、表头底色和分隔线，没有新增色系。
+- Assets and copy：不涉及图片资产；订单、线索筛选项、字段、操作和业务文案均保持不变。
+
+## Findings and comparison history
+
+1. Earlier P1：先前改造只完成内部滚动、吸顶表头和固定分页，`DataTableWorkspace` 仍保留边框、圆角与阴影，因此视觉上仍像旧版嵌套卡片。
+   - Fix：订单和线索的工作区改为扁平容器；标准边框与圆角下沉到 `DataTableDesktopScroller`。
+   - Post-fix evidence：浏览器计算样式显示 workspace `border: 0px`、`border-radius: 0px`、`box-shadow: none`；table surface `border: 1px`、`border-radius: 12px`。
+2. Acceptable P3：订单列表业务筛选项多于参考页，在 1446 × 815 下会自然换为两行；不影响层级、操作和表格可视区域，保留响应式换行。
+
+## Interaction and console checks
+
+- 订单与线索桌面表头均为 `position: sticky`，内部滚动与底部分页继续工作。
+- 两页浏览器错误均为 0。
+- `dataTableWorkspaceStatic.test.ts` 通过，并新增扁平工作区防回归断言。
+- `npm run build` 通过，仅保留既有 chunk-size 提示。
+
+No remaining P0, P1, or P2 visual findings.
+
+final result: passed
+
+---
+
+# 线索入库工作区与滚动提示 Design QA（2026-08-21）
+
+## Comparison target
+
+- Source visual truth：`/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-395d181f-cb69-4839-be2a-bfa324d509a0.png`，用户确认后的线索列表扁平工作区，2844 × 1568 pixels，约 1422 × 784 CSS px，device scale factor 2。
+- Implementation：`/tmp/jixiangos-lead-intake-final.png`，1280 × 720 pixels；浏览器 viewport 1280 × 720 CSS px，device scale factor 2，截图按浏览器输出规则归一化为 `/tmp/jixiangos-lead-intake-final-normalized.png`。
+- Side-by-side evidence：`/tmp/jixiangos-lead-intake-final-comparison.png`，2560 × 720 pixels；两侧均归一化为 1280 × 720，左侧线索列表标准，右侧入库情况实现。
+- State：已登录管理员；线索列表第一页与入库情况第一页；每页均为 10 条。
+
+## Required fidelity surfaces
+
+- Typography：沿用现有系统字体、字号、表头字重与状态标签，没有新增字体层级。
+- Spacing and layout rhythm：入库情况移除第二层圆角工作区，改为“筛选 → 表格 → 固定分页”的连续结构；表格自身保留 12px 顶部圆角和统一边线。
+- Colors and tokens：紫色主色、浅灰页面底、表头底色和分页边线均复用 `ModuleShell` 令牌；滚动条使用浅紫轨道与主题紫 hover。
+- Image quality and assets：本次不涉及图片资产；继续使用 MUI 图标与现有品牌资源。
+- Copy and content：入库状态、客户、联系方式、来源、录入人、操作及分页文案全部保留。
+
+## Findings and comparison history
+
+1. Earlier P2：入库情况仍使用带边框、14px 圆角和阴影的旧工作区，与线索列表和订单列表形成两套 UI。
+   - Fix：工作区改为无边框、无圆角、无阴影；标准边框和圆角下沉至桌面表格；筛选区复用 `ModuleToolbar`，分页复用统一样式。
+   - Post-fix evidence：计算样式为 workspace `border: 0px`、`border-radius: 0px`、`box-shadow: none`；table `border: 1px`、`border-radius: 12px`。
+2. Earlier P1：线索和订单每页实际加载 10 条，但固定工作区只露出部分行；首次滚动条增强后复查发现表格装饰样式中的 `overflow: hidden` 会覆盖滚动器，末尾数据可能不可达。
+   - Fix：把 `overflow: auto` 提升为滚动器不可覆盖的组件约束；增加稳定滚动槽、8px 紫色滚动条和仅在下方还有数据时显示的“向下滚动查看本页剩余数据”提示。
+   - Post-fix evidence：线索、订单、入库情况 DOM 均为 10 个数据行；三页计算样式均为 `overflow: auto`。自动滚到底部后第 10 行均进入可视区域，提示自动消失；分页分别显示 `1-10 / 共 28 条`、`1-10 / 共 61 条`、`1-10 / 共 42 条`。
+
+## Interaction and verification
+
+- 线索列表与入库情况页签切换正常，筛选、表格和分页保持在同一模块层级。
+- 线索、订单、入库情况均保持固定表头、内部滚动和固定分页。
+- 桌面滚动区可通过键盘聚焦（`tabIndex=0`），并提供“数据表格，可上下左右滚动”的可访问名称。
+- `dataTableWorkspaceStatic.test.ts`、TypeScript 和生产构建通过。
+- 完整测试套件在既有 `businessRecycleBinPurge.integration.test.ts` 数据库隔离保护处停止：当前数据库名不含 `_qa` 或 `_test`，与本次 UI 修改无关。
+
+No remaining P0, P1, or P2 visual findings.
+
+final result: passed
+
 ---
 
 # 模块工作台统一 Design QA（2026-08-21）
@@ -706,6 +781,54 @@ final result: passed
 ## Findings
 
 No P0, P1, P2, or P3 findings remain.
+
+final result: passed
+
+---
+
+# 组织架构导航与紫色体系 Design QA（2026-08-20）
+
+## 对比目标
+
+- Source visual truth：`/tmp/jixiangos-organization-audit-991.png`，991 × 918 pixels，CSS 视口 991 × 918，device scale factor 1。
+- Desktop implementation：`/tmp/jixiangos-organization-after-991.png`，991 × 918 pixels，同视口、同登录状态、同组织根节点选中状态。
+- Mobile implementation：`/tmp/jixiangos-organization-after-mobile.png`，390 × 844 pixels，CSS 视口 390 × 844，device scale factor 1。
+- Full-view comparison：`/tmp/jixiangos-organization-before-after.jpg`。
+- Focused comparison：`/tmp/jixiangos-organization-focus-before-after.jpg`，覆盖两级导航、内容间距、部门结构标题和组织树选中态。
+- State：系统管理员打开“系统设置 -> 组织架构 -> 员工&部门”，公司根节点选中。
+
+## Full-view comparison evidence
+
+- 中间重复的“组织架构”标题已移除，一级分组导航与二级功能导航直接形成连续层级。
+- 二级导航铺满设置卡片宽度，底部分隔线连通左右边界；选中项改为浅紫胶囊，不再和一级导航重复使用下划线。
+- 内容区顶部间距收紧到 24px，部门工作区与导航保持明确但不松散的间隔。
+- 组织树从旧浅蓝选中态切换为当前主题紫；普通文件夹、人数和边线改为中性灰紫。
+
+## Required fidelity surfaces
+
+- Fonts and typography：保留原系统字体、字号与 800 字重；删除重复标题后没有出现新的换行或截断。左侧小标题改为更准确的“部门结构”。
+- Spacing and layout rhythm：一级导航保持 52px 主层级；二级导航使用 56px 满宽容器和 36px 胶囊项；桌面与移动端无页面横向溢出。
+- Colors and visual tokens：选中文字和图标使用现有 `moduleTokens.blue`（当前运行时为 `#7C3AED`）；胶囊底 `#F1ECFF`，组织选中底 `#F2EDFF`，选中边框 `#D8CCFF`，通用边线复用模块令牌。
+- Image quality and asset fidelity：没有新增或替换图片资产；继续使用现有品牌 Logo 和 MUI 图标，没有代码绘制占位资产。
+- Copy and content：权限分组、设置标签、部门数据和操作文案均保留；只将组件内部的重复“组织架构”改为“部门结构”。
+
+## Findings and comparison history
+
+1. Earlier P2：一级和二级导航之间重复显示“组织架构”，二级底线只覆盖内容宽度，两侧出现断裂感。
+   - Fix：删除重复标题，把二级导航提到满宽层，并使用浅紫胶囊选中态。
+   - Post-fix evidence：聚焦对照图中两级导航已连成统一容器，DOM 中不再存在“组织架构”中间标题。
+2. Earlier P2：组织树使用蓝字 `#0F5FCA`、浅蓝底 `#E8F2FF` 和蓝色图标，与当前系统紫色主题脱节。
+   - Fix：选中文字/图标改用主题令牌，选中底、边框、阴影、hover 和人数徽标改为紫色与中性灰紫体系。
+   - Post-fix evidence：浏览器计算样式显示公司选中行背景 `rgb(242, 237, 255)`、边框 `rgb(216, 204, 255)`、文字 `rgb(124, 58, 237)`。
+
+## Interaction, responsive, and console checks
+
+- 二级导航“员工&部门 -> 岗位管理 -> 员工&部门”：选中态和内容同步切换，passed。
+- 991 × 918：导航、内容边界、组织树和主操作均可见，passed。
+- 390 × 844：一二级导航保持横向滚动能力，页面 `scrollWidth = 390`，无整页横向溢出，passed。
+- Console：无与本次修改相关的 error；仅有现存 React Router v7 future-flag 警告。
+
+No remaining P0, P1, or P2 visual findings.
 
 final result: passed
 

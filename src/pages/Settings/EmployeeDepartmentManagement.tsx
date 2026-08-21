@@ -25,6 +25,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
 import ApartmentIcon from '@mui/icons-material/Apartment';
@@ -55,6 +56,7 @@ import { DEFAULT_USER_ROLE, normalizeUserRoleName } from '../../shared/utils/rol
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import { isPositionApplicableToDepartment } from '../../shared/utils/positionApplicability';
 import ProtectedFormDialog from '../../shared/components/ProtectedFormDialog';
+import { moduleTokens } from '../../shared/components/ModuleShell';
 
 type UserForm = {
   name: string;
@@ -703,19 +705,19 @@ const EmployeeDepartmentManagement: React.FC = () => {
               pl: 1 + depth * 2.25,
               pr: 0.5,
               cursor: 'pointer',
-              bgcolor: selected ? '#eaf3ff' : 'transparent',
-              color: selected ? '#0f5fca' : '#243044',
+              bgcolor: selected ? '#F2EDFF' : 'transparent',
+              color: selected ? moduleTokens.blue : moduleTokens.ink,
               borderRadius: 1,
               border: '1px solid',
-              borderColor: selected ? '#b7d7ff' : 'transparent',
-              '&:hover': { bgcolor: selected ? '#eaf3ff' : '#f7faff', borderColor: selected ? '#b7d7ff' : '#e6eef8' },
+              borderColor: selected ? '#D8CCFF' : 'transparent',
+              '&:hover': { bgcolor: selected ? '#F2EDFF' : '#F7F3FF', borderColor: selected ? '#D8CCFF' : moduleTokens.line },
             }}
           >
-            <FolderIcon sx={{ fontSize: 18, color: selected ? '#1976d2' : '#8aa1bd' }} />
+            <FolderIcon sx={{ fontSize: 18, color: selected ? moduleTokens.blue : '#9A94AD' }} />
             <Typography variant="body2" sx={{ flex: 1, fontWeight: selected ? 700 : 500 }}>
               {department.name}
             </Typography>
-            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+            <Typography variant="caption" sx={{ color: moduleTokens.muted }}>
               {scopeCount === directCount ? directCount : `${directCount}/${scopeCount}`}
             </Typography>
             <IconButton size="small" onClick={(event) => openNodeMenu(event, department)}>
@@ -735,18 +737,26 @@ const EmployeeDepartmentManagement: React.FC = () => {
   });
 
   return (
-    <Box sx={{ border: '1px solid #dfe7f1', borderRadius: 1.5, overflow: 'hidden', minHeight: 700, bgcolor: '#fff' }}>
+    <Box sx={{ border: `1px solid ${moduleTokens.line}`, borderRadius: 2, overflow: 'hidden', minHeight: 700, bgcolor: moduleTokens.surface }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '300px minmax(0, 1fr)' }, minHeight: 700 }}>
-        <Box sx={{ borderRight: { lg: '1px solid #dfe7f1' }, bgcolor: '#f7faff', p: 2 }}>
+        <Box sx={{ borderRight: { lg: `1px solid ${moduleTokens.line}` }, bgcolor: moduleTokens.subtle, p: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#132238' }}>
-              组织架构
+            <Typography variant="subtitle2" sx={{ fontWeight: 800, color: moduleTokens.ink }}>
+              部门结构
             </Typography>
             <Tooltip title="在公司下添加部门">
               <IconButton
                 size="small"
                 onClick={() => openCreateDepartment(COMPANY_ROOT)}
-                sx={{ width: 32, height: 32, border: '1px solid #c9d8ea', borderRadius: 1, bgcolor: '#fff' }}
+                sx={{
+                  width: 36,
+                  height: 36,
+                  border: `1px solid ${moduleTokens.line}`,
+                  borderRadius: 1.25,
+                  bgcolor: moduleTokens.surface,
+                  color: moduleTokens.muted,
+                  '&:hover': { color: moduleTokens.blue, borderColor: '#D8CCFF', bgcolor: '#F7F3FF' },
+                }}
               >
                 <AddIcon fontSize="small" />
               </IconButton>
@@ -780,19 +790,19 @@ const EmployeeDepartmentManagement: React.FC = () => {
               mb: 0.75,
               borderRadius: 1,
               cursor: 'pointer',
-              bgcolor: selectedNodeId === COMPANY_ROOT ? '#e8f2ff' : '#fff',
-              color: selectedNodeId === COMPANY_ROOT ? '#0f5fca' : '#182235',
+              bgcolor: selectedNodeId === COMPANY_ROOT ? '#F2EDFF' : moduleTokens.surface,
+              color: selectedNodeId === COMPANY_ROOT ? moduleTokens.blue : moduleTokens.ink,
               border: '1px solid',
-              borderColor: selectedNodeId === COMPANY_ROOT ? '#b7d7ff' : '#e4edf7',
-              boxShadow: selectedNodeId === COMPANY_ROOT ? '0 8px 18px rgba(25, 118, 210, 0.08)' : 'none',
-              '&:hover': { borderColor: '#b7d7ff' },
+              borderColor: selectedNodeId === COMPANY_ROOT ? '#D8CCFF' : moduleTokens.line,
+              boxShadow: selectedNodeId === COMPANY_ROOT ? `0 8px 18px ${alpha(moduleTokens.blue, 0.08)}` : 'none',
+              '&:hover': { borderColor: '#D8CCFF', bgcolor: selectedNodeId === COMPANY_ROOT ? '#F2EDFF' : '#F7F3FF' },
             }}
           >
-            <BusinessIcon sx={{ fontSize: 20, color: selectedNodeId === COMPANY_ROOT ? '#1976d2' : '#7890ad' }} />
+            <BusinessIcon sx={{ fontSize: 20, color: selectedNodeId === COMPANY_ROOT ? moduleTokens.blue : '#9A94AD' }} />
             <Typography variant="body2" sx={{ flex: 1, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {organizationProfile.companyName}
             </Typography>
-            <Chip label={users.length} size="small" sx={{ height: 20, bgcolor: '#eef4fb', color: '#52677f', fontSize: 11 }} />
+            <Chip label={users.length} size="small" sx={{ height: 20, bgcolor: '#F0EDF8', color: '#625D76', fontSize: 11 }} />
             <Tooltip title={companyExpanded ? '收起组织树' : '展开组织树'}>
               <IconButton
                 size="small"
@@ -810,7 +820,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
           </Box>
         </Box>
 
-        <Box sx={{ minWidth: 0, bgcolor: '#fbfcfe' }}>
+        <Box sx={{ minWidth: 0, bgcolor: '#FCFBFF' }}>
           <Box sx={{ p: { xs: 2, md: 3 }, display: 'grid', gap: 2 }}>
             {error && (
               <Typography variant="body2" sx={{ color: '#d32f2f' }}>

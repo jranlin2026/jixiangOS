@@ -21,7 +21,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TableRow,
   TextField,
@@ -102,6 +101,13 @@ import CustomerImportDialog from './CustomerImportDialog';
 import CustomerExportDialog from './CustomerExportDialog';
 import { buildPreviousOwnerFilterUsers, getLastFollowUpOperator, getPreviousOwnerLabel } from './customerListPresentation';
 import BusinessSubmissionResultDialog from '../../shared/components/BusinessSubmissionResultDialog';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+} from '../../shared/components/DataTableWorkspace';
 
 type CustomerColumn = {
   id: string;
@@ -799,7 +805,7 @@ const Customers: React.FC = () => {
       />
 
 
-      <Paper elevation={0} sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: '1px solid #E8E4F1', borderRadius: 2, overflow: 'hidden', bgcolor: '#FFFFFF', boxShadow: '0 14px 40px rgba(73, 50, 120, 0.05)' }}>
+      <DataTableWorkspace>
       <ModuleToolbar sx={{ mb: 0, p: 2, borderBottom: '1px solid #EEEAF5', bgcolor: '#FFFFFF' }}>
         <TextField
           placeholder="搜索客户姓名/公司/电话/微信"
@@ -908,7 +914,7 @@ const Customers: React.FC = () => {
       )}
 
       {isDesktopTable ? (
-      <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { flex: 1, minHeight: 0, overflow: 'auto', border: 0, borderRadius: 0 }]}>
+      <DataTableDesktopScroller sx={{ border: 0 }}>
         <Table stickyHeader sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
@@ -1039,18 +1045,12 @@ const Customers: React.FC = () => {
               </TableRow>
               );
             })}
-            {items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={visibleColumns.length + 1 + (hasCustomerSelectionActions ? 1 : 0)} align="center" sx={{ py: 6, color: '#9ca3af' }}>
-                  暂无客户数据
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
-      </TableContainer>
+        {items.length === 0 && <DataTableEmptyState label="暂无客户数据" />}
+      </DataTableDesktopScroller>
       ) : (
-        <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', alignContent: 'start', gap: 1.25, p: 1.5, bgcolor: '#FAF9FD' }}>
+        <DataTableMobileScroller>
           {items.map((customer) => {
             const lifecycleCode = normalizeLifecycleStatusCode(customer.lifecycleStatusCode);
             const lifecycleConfig = lifecycleConfigs.find((item) => item.code === lifecycleCode) || getLifecycleConfigByCode(lifecycleCode);
@@ -1086,8 +1086,9 @@ const Customers: React.FC = () => {
             );
           })}
           {items.length === 0 && <Typography variant="body2" sx={{ color: '#9B95AA', py: 6, textAlign: 'center' }}>暂无客户数据</Typography>}
-        </Box>
+        </DataTableMobileScroller>
       )}
+      <DataTableWorkspaceFooter>
       <TablePagination
         component="div"
         count={pagination.total}
@@ -1106,7 +1107,8 @@ const Customers: React.FC = () => {
           '& .MuiTablePagination-toolbar': { minHeight: 48 },
         }}
       />
-      </Paper>
+      </DataTableWorkspaceFooter>
+      </DataTableWorkspace>
 
       {selectedCustomer && (
         <CustomerDetail

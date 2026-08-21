@@ -5,11 +5,13 @@ import { join } from 'node:path';
 const customerPageSource = readFileSync(join(process.cwd(), 'src/pages/Customers/index.tsx'), 'utf8');
 const serverSource = readFileSync(join(process.cwd(), 'server/index.ts'), 'utf8');
 const listServiceSource = readFileSync(join(process.cwd(), 'server/services/customerListService.ts'), 'utf8');
+const toolbarStart = customerPageSource.indexOf('<ModuleToolbar');
 const toolbarSource = customerPageSource.slice(
-  customerPageSource.indexOf('<ModuleToolbar>'),
-  customerPageSource.indexOf('</ModuleToolbar>'),
+  toolbarStart,
+  customerPageSource.indexOf('</ModuleToolbar>', toolbarStart),
 );
 
+assert.ok(toolbarStart >= 0, '客户列表缺少筛选工具栏');
 assert.match(toolbarSource, /<CustomerTagFilter[\s\S]*<CustomerLeadSourceFilter/);
 assert.match(toolbarSource, /<InputLabel>排序<\/InputLabel>/);
 ['最新创建', '最近动态', '平台付款时间'].forEach((label) => assert.ok(toolbarSource.includes(label), `客户列表缺少${label}排序选项`));

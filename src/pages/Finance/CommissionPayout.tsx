@@ -134,7 +134,7 @@ const employeeMonthLabel = (row: CommissionPayoutEmployeeRow) => {
   return `${months[0]} 至 ${months[months.length - 1]} · ${months.length}个月`;
 };
 
-const metricCard = (label: string, value: string, hint: string, color = '#0f172a') => (
+const metricCard = (label: string, value: string, hint: string, color = '#19142C') => (
   <Paper variant="outlined" sx={{ p: 2, minWidth: 0 }}>
     <Typography variant="body2" color="text.secondary">{label}</Typography>
     <Typography variant="h5" sx={{ mt: 0.5, fontWeight: 800, color }}>{value}</Typography>
@@ -444,14 +444,14 @@ const CommissionPayout: React.FC = () => {
   };
 
   const renderPending = () => (
-    <Stack spacing={2}>
+    <Stack spacing={2} sx={{ flex: 1, minHeight: 0, overflow: { xs: 'visible', md: 'hidden' } }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1.5 }}>
         {metricCard('待发放员工', `${workspace?.summary.pendingEmployeeCount || 0} 人`, '全部月份中有提成尚未发放')}
         {metricCard('待处理', `${workspace?.summary.pendingHandlingCount || 0} 笔`, '需补齐人员、规则或依据', '#64748b')}
         {metricCard('待确认', formatCurrency(workspace?.summary.pendingConfirmAmount || 0), `${workspace?.summary.pendingConfirmCount || 0} 笔 · 确认后进入待发放`)}
         {metricCard('待发放', formatCurrency(workspace?.summary.pendingPayAmount || 0), `${workspace?.summary.pendingPayCount || 0} 笔 · 全部可执行发放`, '#d97706')}
       </Box>
-      <Paper variant="outlined">
+      <Paper variant="outlined" sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <Box sx={{ p: 2, display: 'flex', gap: 1.5, justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
           <Box>
             <Typography variant="h6" fontWeight={800}>全部员工提成待办清单</Typography>
@@ -518,8 +518,8 @@ const CommissionPayout: React.FC = () => {
           })}
           {!pendingRows.length && <Box sx={{ py: 7, textAlign: 'center', color: 'text.secondary' }}>暂无待处理、待确认或待发放提成</Box>}
         </Box>
-        <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
-          <Table size="small" sx={[moduleTableSx, { minWidth: 1040 }]}>
+        <TableContainer sx={{ display: { xs: 'none', md: 'block' }, flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <Table stickyHeader size="small" sx={[moduleTableSx, { minWidth: 1040 }]}>
             <TableHead><TableRow>
               <TableCell sx={{ minWidth: 150 }}>
                 <Stack direction="row" alignItems="center" spacing={1}>
@@ -576,7 +576,7 @@ const CommissionPayout: React.FC = () => {
   );
 
   const renderRecords = () => (
-    <Paper variant="outlined">
+    <Paper variant="outlined" sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <Box sx={{ p: 2 }}>
         <Typography variant="h6" fontWeight={800}>发放记录</Typography>
         <Typography variant="body2" color="text.secondary">每次确认发放自动生成记录；原发放事实永久保留，超级管理员可对逐笔提成发起留痕的发放后处理。</Typography>
@@ -607,7 +607,7 @@ const CommissionPayout: React.FC = () => {
         ))}
         {!recordRows.length && <Box sx={{ py: 7, textAlign: 'center', color: 'text.secondary' }}>暂无发放记录</Box>}
       </Box>
-      <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}><Table size="small" sx={moduleTableSx}>
+      <TableContainer sx={{ display: { xs: 'none', md: 'block' }, flex: 1, minHeight: 0, overflow: 'auto' }}><Table stickyHeader size="small" sx={moduleTableSx}>
         <TableHead><TableRow>
           <TableCell sx={{ minWidth: 180 }}>发放单号</TableCell><TableCell sx={{ minWidth: 145 }}>发放时间</TableCell><TableCell align="center" sx={{ minWidth: 100 }}>员工 / 提成</TableCell>
           <TableCell align="right" sx={{ minWidth: 110 }}>发放金额</TableCell><TableCell sx={{ minWidth: 140 }}>发放信息</TableCell><TableCell sx={{ minWidth: 90 }}>状态</TableCell><TableCell align="center" sx={{ ...payoutStickyActionHeaderSx, width: 132, minWidth: 132 }}>操作</TableCell>
@@ -643,15 +643,15 @@ const CommissionPayout: React.FC = () => {
   );
 
   const renderCorrections = () => (
-    <Stack spacing={2}>
+    <Stack spacing={2} sx={{ flex: 1, minHeight: 0, overflow: { xs: 'visible', md: 'hidden' } }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 1.5 }}>
         {metricCard('更正记录', `${correctionData?.summary.correctionCount || 0} 单`, '发放后业务更正全部留痕')}
-        {metricCard('待补发', formatCurrency(correctionData?.summary.pendingSupplementAmount || 0), '已生成补发提成，按原流程确认与发放', '#2563eb')}
+        {metricCard('待补发', formatCurrency(correctionData?.summary.pendingSupplementAmount || 0), '已生成补发提成，按原流程确认与发放', '#7447F5')}
         {metricCard('待追回', formatCurrency(correctionData?.summary.pendingRecoverAmount || 0), '需超级管理员记录线下处理结果', '#d97706')}
         {metricCard('已处理差额', formatCurrency(correctionData?.summary.handledAmount || 0), '包含已补发与已确认追回金额', '#15803d')}
       </Box>
 
-      <Paper variant="outlined">
+      <Paper variant="outlined" sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <Box sx={{ p: 2, display: 'flex', gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'center' }, flexDirection: { xs: 'column', md: 'row' } }}>
           <Box>
             <Typography variant="h6" fontWeight={800}>更正与差额</Typography>
@@ -711,8 +711,8 @@ const CommissionPayout: React.FC = () => {
           {!visibleCorrectionRows.length && <Box sx={{ py: 7, textAlign: 'center', color: 'text.secondary' }}>暂无更正与差额记录</Box>}
         </Box>
 
-        <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
-          <Table size="small" sx={[moduleTableSx, { minWidth: 1560 }]}>
+        <TableContainer sx={{ display: { xs: 'none', md: 'block' }, flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <Table stickyHeader size="small" sx={[moduleTableSx, { minWidth: 1560 }]}>
             <TableHead><TableRow>
               <TableCell sx={{ minWidth: 180 }}>更正单号</TableCell>
               <TableCell sx={{ minWidth: 110 }}>业务来源</TableCell>
@@ -767,8 +767,8 @@ const CommissionPayout: React.FC = () => {
     </Stack>
   );
 
-  return <Stack spacing={2}>
-    <Paper variant="outlined" sx={{ p: 2 }}>
+  return <Stack spacing={2} sx={{ flex: 1, minHeight: 0, overflow: { xs: 'visible', md: 'hidden' } }}>
+    <Paper variant="outlined" sx={{ p: 2, flexShrink: 0 }}>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'flex-start' }}>
         <Box>
           <Typography variant="h5" fontWeight={900}>提成发放</Typography>

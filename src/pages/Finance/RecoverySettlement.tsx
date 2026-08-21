@@ -17,7 +17,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TableRow,
   TextField,
@@ -63,13 +62,20 @@ import SettlementOperationTimeline from '../../shared/components/SettlementOpera
 import { SETTLEMENT_STATUSES, normalizeSettlementStatus } from '../../shared/utils/settlementStatus';
 import { getSettlementRowActionVisibility } from '../../shared/settlementListActions';
 import RecoveryOrderDetailContent from '../../shared/components/RecoveryOrderDetailContent';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+} from '../../shared/components/DataTableWorkspace';
 
 const shell = {
-  ink: '#0f172a',
-  muted: '#64748b',
-  line: '#dbe4ee',
-  soft: '#f8fafc',
-  blue: '#2563eb',
+  ink: '#19142C',
+  muted: '#7B7690',
+  line: '#E8E4F1',
+  soft: '#FAF9FD',
+  blue: '#7447F5',
   green: '#059669',
   amber: '#b45309',
   red: '#dc2626',
@@ -1331,12 +1337,12 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       left,
       zIndex: header ? 6 : 3,
       bgcolor: header ? '#f1f5f9' : '#fff',
-      boxShadow: columnIndex === viewConfig.frozenColumnCount - 1 ? '1px 0 0 #dbe4ee' : undefined,
+      boxShadow: columnIndex === viewConfig.frozenColumnCount - 1 ? '1px 0 0 #E8E4F1' : undefined,
     };
   };
 
   return (
-    <Box sx={{ display: 'grid', gap: 0 }}>
+    <DataTableWorkspace>
       <OperationFeedbackDialog open={Boolean(message)} severity={message?.type} message={message?.text || ''} onClose={() => setMessage(null)} />
 
       <StatusSegmentBar
@@ -1413,8 +1419,9 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
           </Button>
       </Stack>
 
-      <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}>
+      <DataTableDesktopScroller sx={{ display: 'block' }}>
         <Table
+          stickyHeader
           size="small"
           sx={[
             moduleTableSx,
@@ -1449,7 +1456,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                   bgcolor: '#f1f5f9',
                   width: RECOVERY_ACTION_COLUMN_WIDTH,
                   minWidth: RECOVERY_ACTION_COLUMN_WIDTH,
-                  boxShadow: '-1px 0 0 #dbe4ee',
+                  boxShadow: '-1px 0 0 #E8E4F1',
                 }}
               >
                 操作
@@ -1484,23 +1491,34 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                     bgcolor: '#fff',
                     width: RECOVERY_ACTION_COLUMN_WIDTH,
                     minWidth: RECOVERY_ACTION_COLUMN_WIDTH,
-                    boxShadow: '-1px 0 0 #dbe4ee',
+                    boxShadow: '-1px 0 0 #E8E4F1',
                   }}
                 >
                   {renderActions(row)}
                 </TableCell>
               </TableRow>
             ))}
-            {!rows.length && (
-              <TableRow>
-                <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 3.5, color: '#9ca3af', height: 72 }}>
-                  暂无售后挽回分账数据
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
-      </TableContainer>
+        {!rows.length && <DataTableEmptyState label="暂无售后挽回分账数据" />}
+      </DataTableDesktopScroller>
+      <DataTableMobileScroller>
+        {rows.map((row) => (
+          <Paper key={row.id} elevation={0} sx={{ p: 1.5, border: `1px solid ${shell.line}`, borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ minWidth: 0 }}><Typography variant="subtitle2" noWrap sx={{ fontWeight: 850 }}>{renderCell(row, 'recoveryNo')}</Typography><Typography variant="caption" color="text.secondary">{renderCell(row, 'customerName')}</Typography></Box>
+              {renderCell(row, 'status')}
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1.25 }}>
+              <Box><Typography variant="caption" color="text.secondary">产品</Typography><Typography variant="body2">{renderCell(row, 'originalProduct')}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">挽回金额</Typography><Typography variant="body2">{renderCell(row, 'recoveryAmount')}</Typography></Box>
+            </Box>
+            <Box sx={{ mt: 1 }}>{renderActions(row)}</Box>
+          </Paper>
+        ))}
+        {!rows.length && <Typography sx={{ py: 5, textAlign: 'center', color: '#9ca3af' }}>暂无售后挽回分账数据</Typography>}
+      </DataTableMobileScroller>
+      <DataTableWorkspaceFooter>
       <TablePagination
         component="div"
         count={total}
@@ -1516,6 +1534,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         labelDisplayedRows={formatPaginationRows}
         sx={{ border: `1px solid ${shell.line}`, borderTop: 0, bgcolor: '#fff', '& .MuiTablePagination-toolbar': { minHeight: 44 }, '& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows': { my: 0 } }}
       />
+      </DataTableWorkspaceFooter>
 
       <Dialog
         open={Boolean(sourceDetailOrder)}
@@ -1525,7 +1544,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         PaperProps={{ sx: { maxHeight: { xs: '100dvh', sm: '94vh' }, bgcolor: '#f8fafc' } }}
       >
         <DialogCloseTitle onClose={closeSourceDetail} sx={{ px: { xs: 2, sm: 3 }, py: 2, bgcolor: '#fff' }}>
-          <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 850 }}>售后挽回订单详情</Typography>
+          <Typography variant="h6" sx={{ color: '#19142C', fontWeight: 850 }}>售后挽回订单详情</Typography>
         </DialogCloseTitle>
         <DialogContent sx={{ px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' }}>
           {sourceDetailLoading ? (
@@ -1708,7 +1727,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                   sx={{ minWidth: 0, minHeight: 0, height: { xs: 'auto', lg: '100%' } }}
                 >
                   <Paper elevation={0} sx={{ border: '1px solid #dbeafe', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
-                    <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #dbeafe', bgcolor: '#f8fbff' }}>
+                    <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #dbeafe', bgcolor: '#FAF9FD' }}>
                       <Typography variant="subtitle2" sx={{ color: shell.blue, fontWeight: 900 }}>当前动作</Typography>
                     </Box>
                     <Stack spacing={1.25} sx={{ p: 1.5 }}>
@@ -2214,7 +2233,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
 
                 <Stack spacing={1.5} sx={{ minWidth: 0 }}>
                   <Paper elevation={0} sx={{ border: '1px solid #dbeafe', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
-                    <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #dbeafe', bgcolor: '#f8fbff' }}>
+                    <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #dbeafe', bgcolor: '#FAF9FD' }}>
                       <Typography variant="subtitle2" sx={{ color: shell.blue, fontWeight: 900 }}>当前动作</Typography>
                     </Box>
                     <Stack spacing={1.25} sx={{ p: 1.5 }}>
@@ -2409,7 +2428,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         onClose={() => setExportOpen(false)}
         onRequestExport={handleExportRecoverySettlements}
       />
-    </Box>
+    </DataTableWorkspace>
   );
 };
 

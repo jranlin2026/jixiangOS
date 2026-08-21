@@ -24,3 +24,5 @@ private_reports/
 .DS_Store
 Thumbs.db
 .codex-*.log
+.codex_tmp/
+/极享AI浏览器员工插件

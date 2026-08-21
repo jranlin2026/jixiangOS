@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Box, Tab, Tabs, Typography } from '@mui/material';
+import { Box, Tab } from '@mui/material';
 import RolePermission from './RolePermission';
 import ProductConfigPage from './ProductConfig';
 import BrowserAgentConfigPage from './BrowserAgentConfig';
@@ -49,7 +49,7 @@ type SettingsGroupConfig = {
 };
 
 const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => (
-  <Box sx={{ display: value === index ? 'block' : 'none', pt: 3 }}>
+  <Box sx={{ display: value === index ? 'block' : 'none' }}>
     {value === index ? children : null}
   </Box>
 );
@@ -216,22 +216,47 @@ const Settings: React.FC = () => {
               {groups.map((group) => <Tab key={group.key} value={group.key} label={group.label} />)}
             </ModuleTabs>
             <Box sx={{ minWidth: 0 }}>
-              <Box sx={{ px: 3, pt: 2, pb: 1.5, borderBottom: `1px solid ${moduleTokens.softLine}` }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-                  {activeGroup?.label}
-                </Typography>
-                <ModuleTabs
-                  value={tabs.length ? tabValue : false}
-                  onChange={(_, value) => handleTabChange(value)}
-                  variant="scrollable"
-                  scrollButtons="auto"
-                  sx={{ mb: 0 }}
-                >
-                  {tabs.map((tab) => <Tab key={tab.label} label={tab.label} />)}
-                </ModuleTabs>
-              </Box>
+              <ModuleTabs
+                data-settings-tabs="secondary"
+                value={tabs.length ? tabValue : false}
+                onChange={(_, value) => handleTabChange(value)}
+                variant="scrollable"
+                scrollButtons="auto"
+                aria-label={`${activeGroup?.label || '当前设置'}功能`}
+                sx={{
+                  mb: 0,
+                  minHeight: 56,
+                  px: { xs: 1.5, md: 3 },
+                  py: 1.25,
+                  bgcolor: moduleTokens.surface,
+                  borderTop: 0,
+                  borderBottom: `1px solid ${moduleTokens.line}`,
+                  '& .MuiTabs-flexContainer': { gap: 0.75 },
+                  '& .MuiTab-root': {
+                    minHeight: 36,
+                    px: { xs: 1.5, md: 2 },
+                    py: 0.75,
+                    borderRadius: 2,
+                    color: moduleTokens.muted,
+                    fontSize: { xs: '0.8125rem', md: '0.875rem' },
+                    fontWeight: 800,
+                    transition: 'color 160ms ease, background-color 160ms ease',
+                    '&:hover': {
+                      color: moduleTokens.blue,
+                      bgcolor: '#F7F3FF',
+                    },
+                  },
+                  '& .MuiTab-root.Mui-selected': {
+                    color: `${moduleTokens.blue} !important`,
+                    bgcolor: '#F1ECFF',
+                  },
+                  '& .MuiTabs-indicator': { display: 'none' },
+                }}
+              >
+                {tabs.map((tab) => <Tab key={tab.label} label={tab.label} />)}
+              </ModuleTabs>
 
-              <Box sx={{ p: 3 }}>
+              <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: moduleTokens.surface }}>
                 {tabs.map((tab, index) => (
                   <TabPanel key={tab.label} value={tabValue} index={index}>
                     {tab.component}

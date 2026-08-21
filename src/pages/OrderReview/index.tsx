@@ -73,6 +73,15 @@ import useAuthStore from '../../store/useAuthStore';
 import BusinessImportReviewPageCheckbox from '../../shared/components/BusinessImportReviewPageCheckbox';
 import { createOrderReviewLoadGate } from './orderReviewLoadGate';
 import type { User } from '../../types/settings';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+  dataTableStandardSx,
+} from '../../shared/components/DataTableWorkspace';
+import { getDataTableMinWidth } from '../../shared/components/dataTableStandards';
 
 type ReviewAction = {
   type: 'approve' | 'return' | 'reject';
@@ -640,7 +649,10 @@ const OrderReview: React.FC<OrderReviewProps> = ({
   );
   const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
   const tableMinWidth = useMemo(
-    () => visibleColumns.reduce((sum, column) => sum + (REVIEW_COLUMN_WIDTHS[column.id] || 140), 0) + REVIEW_ACTION_COLUMN_WIDTH,
+    () => getDataTableMinWidth(
+      visibleColumns.map((column) => ({ width: REVIEW_COLUMN_WIDTHS[column.id] })),
+      { selection: true, actionWidth: REVIEW_ACTION_COLUMN_WIDTH },
+    ),
     [visibleColumns],
   );
 
@@ -786,7 +798,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({
   }, [detailApplication]);
 
   return (
-    <Box sx={embedded ? { pt: 1 } : { p: 3 }}>
+    <Box sx={embedded ? { pt: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : { p: 3 }}>
       {!embedded && (
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2 }}>
           <Box>
@@ -870,8 +882,9 @@ const OrderReview: React.FC<OrderReviewProps> = ({
         </Box>
       ) : null}
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
-        <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
+      <DataTableWorkspace>
+      <DataTableDesktopScroller>
+        <Table stickyHeader sx={[dataTableStandardSx, { tableLayout: 'fixed', minWidth: tableMinWidth }]}>
           <TableHead>
             <TableRow>
               <TableCell padding="checkbox">
@@ -1005,22 +1018,38 @@ const OrderReview: React.FC<OrderReviewProps> = ({
                 </TableRow>
               );
             })}
-            {!items.length && (
-              <TableRow>
-                <TableCell colSpan={visibleColumns.length + 2} align="center" sx={{ py: 5, color: '#9ca3af' }}>
-                  {loading
-                    ? '加载中...'
-                    : reviewQueueView === 'pending'
-                      ? '暂无待审核/退回修改订单申请'
-                      : '当前审核视图暂无订单申请'}
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
-      </TableContainer>
+        {!items.length && (
+          <DataTableEmptyState
+            label={loading
+              ? '加载中...'
+              : reviewQueueView === 'pending'
+                ? '暂无待审核/退回修改订单申请'
+                : '当前审核视图暂无订单申请'}
+          />
+        )}
+      </DataTableDesktopScroller>
 
-      <TablePagination
+      <DataTableMobileScroller>
+        {items.map((application) => (
+          <Paper key={application.id} elevation={0} sx={{ p: 1.5, border: '1px solid #f0f0f0', borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ minWidth: 0 }}><Typography variant="subtitle2" noWrap sx={{ fontWeight: 850 }}>{application.applicationNo}</Typography><Typography variant="caption" color="text.secondary">{application.orderData.customerName} · {application.orderData.productName || application.orderData.productLevel || '-'}</Typography></Box>
+              {renderReviewCell(application, 'status')}
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1.25 }}>
+              <Box><Typography variant="caption" color="text.secondary">实付金额</Typography><Typography variant="body2">{renderReviewCell(application, 'amount')}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">申请人</Typography><Typography variant="body2">{application.applicantName}</Typography></Box>
+              <Box sx={{ gridColumn: '1 / -1' }}><Typography variant="caption" color="text.secondary">付款时间</Typography><Typography variant="body2">{renderReviewCell(application, 'paymentAt')}</Typography></Box>
+            </Box>
+            <Button size="small" startIcon={<VisibilityIcon />} onClick={() => void openApplicationDetail(application)} sx={{ mt: 1 }}>查看审核详情</Button>
+          </Paper>
+        ))}
+        {!items.length && <Typography sx={{ py: 5, textAlign: 'center', color: '#9ca3af' }}>{loading ? '加载中...' : '暂无订单申请'}</Typography>}
+      </DataTableMobileScroller>
+
+      <DataTableWorkspaceFooter><TablePagination
         component="div"
         count={pagination.total}
         page={Math.max((pagination.page || 1) - 1, 0)}
@@ -1036,7 +1065,8 @@ const OrderReview: React.FC<OrderReviewProps> = ({
           bgcolor: '#fff',
           '& .MuiTablePagination-toolbar': { minHeight: 48 },
         }}
-      />
+      /></DataTableWorkspaceFooter>
+      </DataTableWorkspace>
 
       <TableViewSettingsDialog
         open={viewSettingsOpen}

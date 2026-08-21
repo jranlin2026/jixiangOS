@@ -14,7 +14,7 @@ for (const [label, source] of [
   assert.match(source, /SettlementDetailCard/, `${label}必须复用统一详情卡片组件`);
   assert.match(source, /StatusSegmentBar/, `${label}必须复用统一分账状态分段栏`);
   assert.match(source, /moduleTableSx/, `${label}必须复用统一表格字体与边框样式`);
-  assert.match(source, /<Table\s+size="small"/, `${label}表格必须使用统一的紧凑密度`);
+  assert.match(source, /<Table[^>]*size="small"/, `${label}表格必须使用统一的紧凑密度`);
   for (const action of ['处理分账', '调整分账', '重置分账', '确认分账', '撤回提成', '重新分账']) {
     assert.match(source, new RegExp(action), `${label}必须提供统一动作：${action}`);
   }

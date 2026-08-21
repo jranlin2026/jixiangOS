@@ -16,7 +16,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TableRow,
   TextField,
@@ -34,7 +33,7 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import useOrderStore from '../../store/useOrderStore';
-import { businessExportApi, customerApi, orderApi, productApi, settingsApi } from '../../api';
+import { businessExportApi, customerApi, orderApi, settingsApi } from '../../api';
 import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerDetail from '../Customers/CustomerDetail';
@@ -65,7 +64,6 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import useResetListFiltersOnPageExit from '../../shared/hooks/useResetListFiltersOnPageExit';
 import {
   ModuleHeader,
-  ModuleListSurface,
   ModulePage,
   ModuleTabs,
   ModuleToolbar,
@@ -87,6 +85,15 @@ import {
   resolveOrderSortOption,
   type OrderSortOption,
 } from './orderSortModel';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+  dataTableStandardSx,
+} from '../../shared/components/DataTableWorkspace';
+import { getDataTableMinWidth } from '../../shared/components/dataTableStandards';
 
 type OrderColumn = {
   id: string;
@@ -102,8 +109,8 @@ type OrderViewConfig = {
 
 const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v7';
 // 状态与退款状态成为上线必备默认列，升级配置版本以迁移旧的本地视图。
-const ORDER_VIEW_SCHEMA_VERSION = 13;
-const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
+const ORDER_VIEW_SCHEMA_VERSION = 14;
+const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v3';
 const ORDER_ACTION_COLUMN_WIDTH = 96;
 const ORDER_SETTLEMENT_STATUS_OPTIONS: OrderSettlementProgress[] = [...SETTLEMENT_STATUSES];
 
@@ -136,33 +143,26 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'settlementStatus',
   'customer',
   'productName',
-  'productLevel',
-  'orderType',
   'actualAmount',
-  'officialPaymentChannel',
-  'thirdPartyOrderNo',
-  'resourceOwnership',
   'owner',
-  'createdByName',
   'paymentDate',
-  'createdAt',
 ];
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
-  orderNo: 180,
-  status: 120,
-  refundStatus: 130,
-  settlementStatus: 120,
-  customer: 180,
-  productName: 180,
+  orderNo: 130,
+  status: 100,
+  refundStatus: 105,
+  settlementStatus: 105,
+  customer: 130,
+  productName: 150,
   productLevel: 140,
   orderType: 140,
-  actualAmount: 140,
+  actualAmount: 110,
   officialPaymentChannel: 160,
   thirdPartyOrderNo: 180,
   resourceOwnership: 140,
-  paymentDate: 180,
-  owner: 140,
+  paymentDate: 140,
+  owner: 120,
   createdByName: 140,
   leadInputBy: 140,
   leadContributorName: 150,
@@ -253,7 +253,6 @@ const Orders: React.FC = () => {
   const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
   const [customerOrdersOpen, setCustomerOrdersOpen] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
-  const [productLevels, setProductLevels] = useState<{ name: string; color: string }[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
@@ -290,11 +289,6 @@ const Orders: React.FC = () => {
   };
 
   useEffect(() => {
-    productApi.getProductLevelConfigs().then((res) => {
-      if (res.code === 0) {
-        setProductLevels(res.data.filter((level) => level.isActive).map((level) => ({ name: level.name, color: level.color })));
-      }
-    });
     settingsApi.fetchOrderTypeConfigs().then((res) => {
       if (res.code === 0) setOrderTypeConfigs(res.data);
     });
@@ -656,10 +650,6 @@ const Orders: React.FC = () => {
     setCustomerOrdersOpen(true);
   };
 
-  const productLevelOptions = productLevels;
-  const selectedProductLevel = productLevelOptions.some((level) => level.name === filters.productLevel)
-    ? filters.productLevel || ''
-    : '';
   const orderTypeOptions = orderTypeConfigs.filter((item) => item.isActive);
   const selectedOrderType = orderTypeOptions.some((item) => item.name === filters.orderType)
     ? filters.orderType || ''
@@ -683,7 +673,10 @@ const Orders: React.FC = () => {
     [currentUser, users],
   );
   const tableMinWidth = useMemo(
-    () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + ORDER_ACTION_COLUMN_WIDTH,
+    () => getDataTableMinWidth(
+      visibleColumns.map((column) => ({ width: columnWidths[column.id] })),
+      { actionWidth: ORDER_ACTION_COLUMN_WIDTH },
+    ),
     [columnWidths, visibleColumns],
   );
   const canExportOrders = hasPermission(currentUser, PERMISSION_KEYS.ORDER_EXPORT);
@@ -778,7 +771,7 @@ const Orders: React.FC = () => {
   };
 
   return (
-    <ModulePage>
+    <ModulePage workspace={activeTab === 'list' || activeTab === 'review'}>
       <ModuleHeader
         title="订单管理"
         description="提交订单申请、财务审核和正式订单管理。"
@@ -831,7 +824,7 @@ const Orders: React.FC = () => {
               订单数据加载失败：{error}。当前列表未更新，请重试。
             </Alert>
           )}
-          <ModuleListSurface>
+          <DataTableWorkspace sx={{ border: 0, borderRadius: 0, boxShadow: 'none' }}>
           <ModuleToolbar sx={{ pt: 1.5 }}>
             <TextField
               placeholder="搜索订单号/客户/第三方订单/付款单号"
@@ -845,20 +838,6 @@ const Orders: React.FC = () => {
               <Select value={filters.settlementStatus || ''} label="分账状态" onChange={(e) => handleFilterChange('settlementStatus', e.target.value)}>
                 <MenuItem value="">全部</MenuItem>
                 {ORDER_SETTLEMENT_STATUS_OPTIONS.map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 120 }}>
-              <InputLabel>产品等级</InputLabel>
-              <Select value={selectedProductLevel} label="产品等级" onChange={(e) => handleFilterChange('productLevel', e.target.value)}>
-                <MenuItem value="">全部</MenuItem>
-                {productLevelOptions.map((level) => (
-                  <MenuItem key={level.name} value={level.name}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: level.color }} />
-                      {level.name}
-                    </Box>
-                  </MenuItem>
-                ))}
               </Select>
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 120 }}>
@@ -912,8 +891,8 @@ const Orders: React.FC = () => {
             </Button>
           </ModuleToolbar>
 
-          <TableContainer component={Paper} elevation={0} sx={[moduleListTablePaperSx, { overflowX: 'auto' }]}>
-            <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
+          <DataTableDesktopScroller sx={moduleListTablePaperSx}>
+            <Table stickyHeader sx={[dataTableStandardSx, { tableLayout: 'fixed', minWidth: tableMinWidth }]}>
               <TableHead>
                 <TableRow>
                   {visibleColumns.map((column, columnIndex) => (
@@ -966,35 +945,59 @@ const Orders: React.FC = () => {
                     </TableRow>
                   );
                 })}
-                {items.length === 0 && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={visibleColumns.length + 1}
-                      align="center"
-                      sx={{
-                        p: 0,
-                        color: '#9ca3af',
-                        bgcolor: '#fff',
-                      }}
-                    >
-                      <Box
-                        sx={{
-                          py: 6,
-                          position: 'sticky',
-                          left: 0,
-                          width: 'calc(100vw - 360px)',
-                          maxWidth: '100vw',
-                          textAlign: 'center',
-                        }}
-                      >
-                        {loading ? '加载中...' : '暂无订单数据'}
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                )}
               </TableBody>
             </Table>
-          </TableContainer>
+            {items.length === 0 && <DataTableEmptyState label={loading ? '加载中...' : '暂无订单数据'} />}
+          </DataTableDesktopScroller>
+
+          <DataTableMobileScroller sx={{ borderTop: '1px solid #EEEAF5' }}>
+            {items.map((order) => (
+              <Paper
+                key={order.id}
+                elevation={0}
+                sx={{ border: '1px solid #E8E4F1', borderRadius: 2, p: 1.5, bgcolor: '#fff' }}
+              >
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, alignItems: 'flex-start' }}>
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Typography variant="subtitle2" noWrap sx={{ fontWeight: 900, color: '#19142C' }}>{order.orderNo}</Typography>
+                    <Typography variant="caption" sx={{ color: '#7B7690', display: 'block', mt: 0.25 }}>
+                      {order.customerName || '暂无客户'} · {order.productName || '暂无产品'}
+                    </Typography>
+                  </Box>
+                  <Button size="small" onClick={() => handleViewDetail(order)} sx={{ minWidth: 48, flexShrink: 0, fontWeight: 800 }}>查看</Button>
+                </Box>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 1.25 }}>
+                  {renderOrderCell(order, 'status')}
+                  {renderOrderCell(order, 'refundStatus')}
+                  {renderOrderCell(order, 'settlementStatus')}
+                </Box>
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1.25, pt: 1.25, borderTop: '1px solid #EEEAF5' }}>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#8B86A0' }}>实付金额</Typography>
+                    <Typography variant="body2" sx={{ color: '#19142C', fontWeight: 900 }}>{formatCurrency(order.actualAmount || 0)}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#8B86A0' }}>销售负责人</Typography>
+                    <Typography variant="body2" noWrap sx={{ color: '#19142C', fontWeight: 800 }}>{order.owner || '-'}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#8B86A0' }}>付款时间</Typography>
+                    <Typography variant="body2" sx={{ color: '#5F5A72' }}>{formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd')}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#8B86A0' }}>订单类型</Typography>
+                    <Typography variant="body2" noWrap sx={{ color: '#5F5A72' }}>{order.orderType || '-'}</Typography>
+                  </Box>
+                </Box>
+              </Paper>
+            ))}
+            {items.length === 0 && (
+              <Typography variant="body2" sx={{ py: 6, textAlign: 'center', color: '#8B86A0' }}>
+                {loading ? '加载中...' : '暂无订单数据'}
+              </Typography>
+            )}
+          </DataTableMobileScroller>
+          <DataTableWorkspaceFooter>
           <TablePagination
             component="div"
             count={pagination.total}
@@ -1007,7 +1010,8 @@ const Orders: React.FC = () => {
             labelDisplayedRows={formatPaginationRows}
             sx={moduleListPaginationSx}
           />
-          </ModuleListSurface>
+          </DataTableWorkspaceFooter>
+          </DataTableWorkspace>
         </>
       ) : activeTab === 'review' ? (
         <OrderReview

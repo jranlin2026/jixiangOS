@@ -106,7 +106,11 @@ export const enhanceTable = (table: HTMLTableElement, pathname: string, tableInd
 
     if (header.querySelector('[role="separator"]')) return;
 
-    header.style.position = 'relative';
+    // A sticky header is also a valid positioning context for the resize
+    // handle. Preserve it instead of silently disabling fixed table headers.
+    header.style.position = header.classList.contains('MuiTableCell-stickyHeader')
+      ? 'sticky'
+      : 'relative';
     header.style.paddingRight = '20px';
     header.style.userSelect = 'none';
 

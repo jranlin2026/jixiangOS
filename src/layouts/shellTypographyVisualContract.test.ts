@@ -10,8 +10,8 @@ const topHeaderSource = fs.readFileSync(new URL('./TopHeader.tsx', import.meta.u
 assert.equal(typography.body1?.fontSize, '0.9375rem', '全局正文应使用 15px 舒适字号');
 assert.equal(typography.body2?.fontSize, '0.875rem', '次级正文不应低于 14px');
 assert.equal(typography.caption?.fontSize, '0.8125rem', '辅助信息应使用 13px');
-assert.equal((theme.components?.MuiTableCell?.styleOverrides?.root as { fontSize?: string })?.fontSize, '0.875rem', '统一表格正文应使用 14px');
-assert.equal((theme.components?.MuiTableCell?.styleOverrides?.head as { fontSize?: string })?.fontSize, '0.8125rem', '统一表头应使用 13px');
+assert.equal((theme.components?.MuiTableCell?.styleOverrides?.root as { fontSize?: string | number })?.fontSize, 14, '统一表格正文应使用 14px');
+assert.equal((theme.components?.MuiTableCell?.styleOverrides?.head as { fontSize?: string | number })?.fontSize, 13, '统一表头应使用 13px');
 assert.match(moduleShellSource, /variant="h5"[\s\S]*?fontSize:\s*\{\s*xs:\s*'1\.25rem',\s*md:\s*'1\.5rem'\s*\}/, '模块页标题在桌面端应达到 24px');
 assert.equal((sidebarSource.match(/primaryTypographyProps=\{\{\s*fontSize:\s*'0\.9375rem'/g) || []).length, 2, '两类一级导航都应使用 15px');
 assert.equal((sidebarSource.match(/primaryTypographyProps=\{\{\s*fontSize:\s*'0\.875rem'/g) || []).length, 1, '二级导航应使用 14px');

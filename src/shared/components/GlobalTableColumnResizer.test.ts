@@ -23,6 +23,12 @@ assert.match(
   '列宽重新应用时应同时阻止内容绘制到相邻单元格',
 );
 
+assert.match(
+  source,
+  /header\.classList\.contains\('MuiTableCell-stickyHeader'\)[\s\S]*\? 'sticky'[\s\S]*: 'relative'/,
+  '全局列宽拖动必须保留 MUI stickyHeader，不能把固定表头覆盖为 relative',
+);
+
 assert.equal(
   resolveTargetColumnWidth('180px', '180px', 264),
   180,

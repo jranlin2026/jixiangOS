@@ -102,6 +102,13 @@ import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDi
 import { SettlementCompactDetailItem, SettlementDetailCard } from '../../shared/components/SettlementDetailUi';
 import SettlementOperationTimeline from '../../shared/components/SettlementOperationTimeline';
 import { SETTLEMENT_STATUSES } from '../../shared/utils/settlementStatus';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+} from '../../shared/components/DataTableWorkspace';
 import { downloadMineCommissionStatement } from './mineCommissionExport';
 import {
   buildMineCommissionIdentity,
@@ -450,7 +457,7 @@ function OrderPaymentEvidence({ order }: { order: Order }) {
           }}
         >
           <Typography variant="caption" sx={{ color: '#475569' }}>{payment.paidAt ? formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm') : '-'}</Typography>
-          <Typography variant="body2" sx={{ color: '#0f172a', fontWeight: 900 }}>{formatCurrency(payment.amount)}</Typography>
+          <Typography variant="body2" sx={{ color: '#19142C', fontWeight: 900 }}>{formatCurrency(payment.amount)}</Typography>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="caption" sx={{ display: 'block', color: '#475569' }}>
               {payment.paymentMethod || (payment as typeof payment & { method?: string }).method || '-'}
@@ -2069,7 +2076,7 @@ const Commission: React.FC<CommissionProps> = ({
     const roleNote = summary.isTiered ? formatTierBrief(summary) : '按所选提成方案逐笔结算，不参与月度阶梯';
     const metricItems = [
       { label: '待确认', value: summary.pendingConfirmAmount, color: '#d97706' },
-      { label: '待发放', value: summary.pendingPayAmount, color: '#2563eb' },
+      { label: '待发放', value: summary.pendingPayAmount, color: '#7447F5' },
       { label: '已发放', value: summary.paidAmount, color: '#16a34a' },
       { label: '已撤回', value: summary.withdrawnAmount, color: '#6b7280' },
     ];
@@ -2090,7 +2097,7 @@ const Commission: React.FC<CommissionProps> = ({
       <Box
         key={`${summary.role}:${summary.payoutPlanId || 'simple'}:${summary.payoutPlanVersion || 1}`}
         sx={{
-          border: summary.isTiered ? '1px solid #bfdbfe' : '1px solid #dbe3ef',
+          border: summary.isTiered ? '1px solid #DDD2FF' : '1px solid #E8E4F1',
           borderRadius: 1,
           bgcolor: '#fff',
           overflow: 'hidden',
@@ -2102,7 +2109,7 @@ const Commission: React.FC<CommissionProps> = ({
               px: compact ? 1.4 : 1.6,
               py: compact ? 1.2 : 1.35,
               bgcolor: '#eff6ff',
-              borderBottom: '1px solid #bfdbfe',
+              borderBottom: '1px solid #DDD2FF',
             }}
           >
             <Stack
@@ -2122,7 +2129,7 @@ const Commission: React.FC<CommissionProps> = ({
               </Box>
               <Box sx={{ textAlign: { xs: 'left', md: 'right' }, flexShrink: 0 }}>
                 <Typography variant="caption" sx={{ color: '#475569', display: 'block' }}>本角色应发</Typography>
-                <Typography variant={compact ? 'h6' : 'h5'} sx={{ color: '#0f172a', fontWeight: 900, lineHeight: 1.15 }}>
+                <Typography variant={compact ? 'h6' : 'h5'} sx={{ color: '#19142C', fontWeight: 900, lineHeight: 1.15 }}>
                   {formatCurrency(summary.totalAmount)}
                 </Typography>
               </Box>
@@ -2134,9 +2141,9 @@ const Commission: React.FC<CommissionProps> = ({
                 { label: '当前档位', value: currentTier ? `${currentTier.rate}%` : '-', helper: tierRange },
                 { label: '下一档', value: tierGapText, helper: nextTier ? `下一档 ${nextTier.rate}%` : '当前阶梯状态' },
               ].map((item) => (
-                <Box key={item.label} sx={{ border: '1px solid #bfdbfe', borderRadius: 1, px: 1, py: 0.85, bgcolor: '#fff' }}>
+                <Box key={item.label} sx={{ border: '1px solid #DDD2FF', borderRadius: 1, px: 1, py: 0.85, bgcolor: '#fff' }}>
                   <Typography variant="caption" sx={{ display: 'block', color: '#64748b', lineHeight: 1.2 }}>{item.label}</Typography>
-                  <Typography variant="body2" sx={{ color: '#0f172a', fontWeight: 900, mt: 0.25, overflowWrap: 'anywhere' }}>
+                  <Typography variant="body2" sx={{ color: '#19142C', fontWeight: 900, mt: 0.25, overflowWrap: 'anywhere' }}>
                     {item.value}
                   </Typography>
                   <Typography variant="caption" sx={{ color: '#64748b', overflowWrap: 'anywhere', display: 'block', mt: 0.1 }}>
@@ -2240,7 +2247,7 @@ const Commission: React.FC<CommissionProps> = ({
                 mt: 0.6,
                 height: 22,
                 bgcolor: sourceLabel === '售后挽回分账' ? '#ecfdf5' : '#eff6ff',
-                color: sourceLabel === '售后挽回分账' ? '#047857' : '#2563eb',
+                color: sourceLabel === '售后挽回分账' ? '#047857' : '#7447F5',
                 fontWeight: 800,
               }}
             />
@@ -2300,7 +2307,7 @@ const Commission: React.FC<CommissionProps> = ({
         description: '来自订单审核通过后的正式订单分账。',
         rowLabel: '正式订单',
         chipBg: '#eff6ff',
-        chipColor: '#2563eb',
+        chipColor: '#7447F5',
       };
   };
 
@@ -2416,7 +2423,7 @@ const Commission: React.FC<CommissionProps> = ({
         ? '已到最高档'
         : '阶梯方案待结算';
     const metricItems = [
-      { label: '待确认', value: summary.pendingConfirmAmount, color: '#2563eb' },
+      { label: '待确认', value: summary.pendingConfirmAmount, color: '#7447F5' },
       { label: '待发放', value: summary.pendingPayAmount, color: '#d97706' },
       { label: '已发放', value: summary.paidAmount, color: '#16a34a' },
       { label: '已撤回', value: summary.withdrawnAmount, color: '#6b7280' },
@@ -2431,7 +2438,7 @@ const Commission: React.FC<CommissionProps> = ({
             py: 1,
             cursor: 'pointer',
             bgcolor: summary.isTiered ? '#eff6ff' : '#fff',
-            borderLeft: summary.isTiered ? '3px solid #2563eb' : '3px solid #cbd5e1',
+            borderLeft: summary.isTiered ? '3px solid #7447F5' : '3px solid #cbd5e1',
             '&:hover': { bgcolor: summary.isTiered ? '#dbeafe' : '#f8fafc' },
           }}
         >
@@ -2442,7 +2449,7 @@ const Commission: React.FC<CommissionProps> = ({
               </IconButton>
               <Box sx={{ minWidth: 0 }}>
                 <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5 }}>
-                  <Typography variant="body2" sx={{ fontWeight: 900, color: '#0f172a', overflowWrap: 'anywhere' }}>
+                  <Typography variant="body2" sx={{ fontWeight: 900, color: '#19142C', overflowWrap: 'anywhere' }}>
                     {title}
                   </Typography>
                   <Chip label={sourceLabel} size="small" sx={{ height: 22, bgcolor: '#f8fafc', fontWeight: 800 }} />
@@ -2478,9 +2485,9 @@ const Commission: React.FC<CommissionProps> = ({
                   { label: '当前档位', value: currentTier ? `${currentTier.rate}%` : '-', helper: tierRange },
                   { label: '本组预估提成', value: formatCurrency(summary.totalAmount), helper: tierNextText },
                 ].map((item) => (
-                  <Box key={item.label} sx={{ border: '1px solid #bfdbfe', borderRadius: 1, px: 1, py: 0.85, bgcolor: '#fff' }}>
+                  <Box key={item.label} sx={{ border: '1px solid #DDD2FF', borderRadius: 1, px: 1, py: 0.85, bgcolor: '#fff' }}>
                     <Typography variant="caption" sx={{ color: '#64748b', display: 'block' }}>{item.label}</Typography>
-                    <Typography variant="body2" sx={{ color: '#0f172a', fontWeight: 900, mt: 0.2 }}>{item.value}</Typography>
+                    <Typography variant="body2" sx={{ color: '#19142C', fontWeight: 900, mt: 0.2 }}>{item.value}</Typography>
                     <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.1, overflowWrap: 'anywhere' }}>{item.helper}</Typography>
                   </Box>
                 ))}
@@ -2539,11 +2546,11 @@ const Commission: React.FC<CommissionProps> = ({
             const totalAmount = summaries.reduce((sum, summary) => sum + summary.totalAmount, 0);
             const orderCount = new Set(group.commissions.map((commission) => commission.orderId || commission.orderNo)).size;
             return (
-              <Box key={sourceKey} sx={{ border: '1px solid #dbe3ef', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
+              <Box key={sourceKey} sx={{ border: '1px solid #E8E4F1', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
                 <Box sx={{ px: 1.4, py: 1.05, bgcolor: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
                   <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between' }}>
                     <Box sx={{ minWidth: 0 }}>
-                      <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 900 }}>
+                      <Typography variant="subtitle2" sx={{ color: '#19142C', fontWeight: 900 }}>
                         {group.title}
                       </Typography>
                       <Typography variant="caption" sx={{ color: '#64748b', display: 'block', overflowWrap: 'anywhere' }}>
@@ -2551,7 +2558,7 @@ const Commission: React.FC<CommissionProps> = ({
                       </Typography>
                     </Box>
                     <Stack direction="row" spacing={0.8} sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
-                      <Chip label={`${orderCount} 单`} size="small" sx={{ height: 24, bgcolor: '#eef2ff', color: '#2563eb', fontWeight: 800 }} />
+                      <Chip label={`${orderCount} 单`} size="small" sx={{ height: 24, bgcolor: '#F1EDFF', color: '#7447F5', fontWeight: 800 }} />
                       <Chip label={`应发 ${formatCurrency(totalAmount)}`} size="small" sx={{ height: 24, bgcolor: '#ecfdf5', color: '#047857', fontWeight: 800 }} />
                     </Stack>
                   </Stack>
@@ -2687,8 +2694,8 @@ const Commission: React.FC<CommissionProps> = ({
         : `${formatCurrency(currentTier.minAmount)} - ${formatCurrency(currentTier.maxAmount)}`
       : '尚未进入有效档位';
     return (
-      <Paper key={row.id} elevation={0} sx={{ border: '1px solid #bfdbfe', borderRadius: 1.5, overflow: 'hidden', bgcolor: '#fff' }}>
-        <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1.5, bgcolor: '#f8fbff', borderBottom: '1px solid #dbeafe' }}>
+      <Paper key={row.id} elevation={0} sx={{ border: '1px solid #DDD2FF', borderRadius: 1.5, overflow: 'hidden', bgcolor: '#fff' }}>
+        <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1.5, bgcolor: '#FAF9FD', borderBottom: '1px solid #dbeafe' }}>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} justifyContent="space-between">
             <Box>
               <Typography variant="subtitle1" fontWeight={900} color="#1d4ed8">正式订单月度阶梯提成</Typography>
@@ -2803,11 +2810,11 @@ const Commission: React.FC<CommissionProps> = ({
 
     return (
       <Stack spacing={2}>
-        <Paper elevation={0} sx={{ border: '1px solid #dbe3ef', borderRadius: 1.5, p: { xs: 1.5, md: 2.25 }, bgcolor: '#fff' }}>
+        <Paper elevation={0} sx={{ border: '1px solid #E8E4F1', borderRadius: 1.5, p: { xs: 1.5, md: 2.25 }, bgcolor: '#fff' }}>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between">
             <Box>
               <Typography variant="body2" color="text.secondary">{isCurrentPeriod ? '本月预计提成' : '本月应发提成'}</Typography>
-              <Typography variant="h3" sx={{ mt: 0.4, fontWeight: 900, color: '#0f172a', fontSize: { xs: '2.1rem', md: '2.65rem' } }}>
+              <Typography variant="h3" sx={{ mt: 0.4, fontWeight: 900, color: '#19142C', fontSize: { xs: '2.1rem', md: '2.65rem' } }}>
                 {formatCurrency(displayedTotalAmount)}
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -2822,7 +2829,7 @@ const Commission: React.FC<CommissionProps> = ({
           </Stack>
           <Box sx={{ mt: 2, pt: 1.75, borderTop: '1px solid #e5e7eb', display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(4, minmax(0, 1fr))' }, gap: 1 }}>
             {[
-              { label: '待确认', value: displayedAmounts.pendingConfirmAmount, color: '#2563eb' },
+              { label: '待确认', value: displayedAmounts.pendingConfirmAmount, color: '#7447F5' },
               { label: '待发放', value: displayedAmounts.pendingPayAmount, color: '#d97706' },
               { label: '已发放', value: displayedAmounts.paidAmount, color: '#16a34a' },
               { label: '已撤回', value: displayedAmounts.withdrawnAmount, color: '#64748b' },
@@ -2837,7 +2844,7 @@ const Commission: React.FC<CommissionProps> = ({
 
         {tierRows.map((row) => renderMineTierPanel(row, isCurrentPeriod))}
 
-        <Paper elevation={0} sx={{ border: '1px solid #dbe3ef', borderRadius: 1.5, overflow: 'hidden', bgcolor: '#fff' }}>
+        <Paper elevation={0} sx={{ border: '1px solid #E8E4F1', borderRadius: 1.5, overflow: 'hidden', bgcolor: '#fff' }}>
           <Tabs
             value={minePayoutCategory}
             onChange={(_, value: MinePayoutCategory) => {
@@ -3055,7 +3062,7 @@ const Commission: React.FC<CommissionProps> = ({
     return (
       <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
         <Box sx={{ px: 1.5, py: 1, borderBottom: '1px solid #eef2f7', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-          <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 900 }}>财务核对</Typography>
+          <Typography variant="subtitle2" sx={{ color: '#19142C', fontWeight: 900 }}>财务核对</Typography>
           <Chip
             size="small"
             label={settlementOrderLoading ? '核对中' : (risks.length ? `${risks.length} 项需关注` : '核对通过')}
@@ -3214,9 +3221,10 @@ const Commission: React.FC<CommissionProps> = ({
   );
 
   const renderOrderSplitTable = () => (
-    <>
-      <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}>
+    <DataTableWorkspace>
+      <DataTableDesktopScroller sx={{ display: 'block' }}>
         <Table
+          stickyHeader
           size="small"
           sx={[
             moduleTableSx,
@@ -3348,16 +3356,27 @@ const Commission: React.FC<CommissionProps> = ({
               </TableRow>
               );
             })}
-            {!orderRows.length && (
-              <TableRow>
-                <TableCell colSpan={visibleOrderSplitColumns.length + 1} align="center" sx={{ py: 5, color: '#9ca3af' }}>
-                  {orderLoading ? '加载中...' : '暂无订单分账'}
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
-      </TableContainer>
+        {!orderRows.length && <DataTableEmptyState label={orderLoading ? '加载中...' : '暂无订单分账'} />}
+      </DataTableDesktopScroller>
+      <DataTableMobileScroller>
+        {orderRows.map((summary) => (
+          <Paper key={summary.orderId} elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ minWidth: 0 }}><Typography variant="subtitle2" noWrap sx={{ fontWeight: 850 }}>{renderOrderSplitCell(summary, 'orderNo')}</Typography><Typography variant="caption" color="text.secondary">{renderOrderSplitCell(summary, 'customerName')}</Typography></Box>
+              {renderOrderSplitCell(summary, 'status')}
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1.25 }}>
+              <Box><Typography variant="caption" color="text.secondary">产品</Typography><Typography variant="body2">{renderOrderSplitCell(summary, 'productName')}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">实付金额</Typography><Typography variant="body2">{renderOrderSplitCell(summary, 'orderAmount')}</Typography></Box>
+            </Box>
+            <Button size="small" startIcon={<VisibilityIcon />} onClick={() => openSettlementDetail(summary)} sx={{ mt: 1 }}>查看分账</Button>
+          </Paper>
+        ))}
+        {!orderRows.length && <Typography sx={{ py: 5, textAlign: 'center', color: '#9ca3af' }}>{orderLoading ? '加载中...' : '暂无订单分账'}</Typography>}
+      </DataTableMobileScroller>
+      <DataTableWorkspaceFooter>
       <TablePagination
         component="div"
         count={orderPagination.total}
@@ -3375,7 +3394,8 @@ const Commission: React.FC<CommissionProps> = ({
           '& .MuiTablePagination-toolbar': { minHeight: 48 },
         }}
       />
-    </>
+      </DataTableWorkspaceFooter>
+    </DataTableWorkspace>
   );
 
   const renderEditorFieldLabel = (label: string) => (
@@ -3419,7 +3439,7 @@ const Commission: React.FC<CommissionProps> = ({
               key={row.id || `detail-card-${index}`}
               elevation={0}
               sx={{
-                border: '1px solid #dbe3ef',
+                border: '1px solid #E8E4F1',
                 borderRadius: 1,
                 bgcolor: '#fff',
                 overflow: 'hidden',
@@ -3806,7 +3826,7 @@ const Commission: React.FC<CommissionProps> = ({
               { label: '售后挽回成交额', display: formatCurrency(financePeriodSummary?.recoveryBusinessAmount || 0), color: '#7c3aed' },
               { label: '本月提成总额', display: formatCurrency(financePeriodSummary?.totalCommissionAmount || 0), color: '#111827' },
               { label: '待处理', display: `${financePeriodSummary?.pendingHandlingCount || 0} 笔`, color: '#64748b' },
-              { label: '待确认', display: formatCurrency(financePeriodSummary?.pendingConfirmAmount || 0), color: '#2563eb' },
+              { label: '待确认', display: formatCurrency(financePeriodSummary?.pendingConfirmAmount || 0), color: '#7447F5' },
               { label: '待发放', display: formatCurrency(financePeriodSummary?.pendingPayAmount || 0), color: '#d97706' },
               { label: '已发放', display: formatCurrency(financePeriodSummary?.paidAmount || 0), color: '#16a34a' },
               { label: '待补发差额', display: formatCurrency(financePeriodSummary?.pendingCorrectionSupplementAmount || 0), color: '#7c3aed' },
@@ -3815,7 +3835,7 @@ const Commission: React.FC<CommissionProps> = ({
             ] : [
               { label: '阶梯核算业绩', display: formatCurrency(monthlyPayoutSummary.monthlyPaidAmount), color: '#0f766e' },
               { label: '本月提成总额', display: formatCurrency(monthlyPayoutSummary.totalAmount), color: '#111827' },
-              { label: '待确认', display: formatCurrency(monthlyPayoutSummary.pendingConfirmAmount), color: '#2563eb' },
+              { label: '待确认', display: formatCurrency(monthlyPayoutSummary.pendingConfirmAmount), color: '#7447F5' },
               { label: '待发放', display: formatCurrency(monthlyPayoutSummary.pendingPayAmount), color: '#d97706' },
               { label: '已发放', display: formatCurrency(monthlyPayoutSummary.paidAmount), color: '#16a34a' },
               { label: '已撤回', display: formatCurrency(monthlyPayoutSummary.withdrawnAmount), color: '#6b7280' },
@@ -3828,7 +3848,7 @@ const Commission: React.FC<CommissionProps> = ({
               </Box>
             ))}
           </Box>
-          <Paper elevation={0} sx={{ border: '1px solid #dbe3ef', borderRadius: 1.5, overflow: 'hidden', bgcolor: '#fff', mb: 2 }}>
+          <Paper elevation={0} sx={{ border: '1px solid #E8E4F1', borderRadius: 1.5, overflow: 'hidden', bgcolor: '#fff', mb: 2 }}>
             <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1.5, borderBottom: '1px solid #e5e7eb' }}>
               <Typography variant="h6" fontWeight={900}>员工月度报告</Typography>
               <Typography variant="body2" color="text.secondary">先选择员工，再按“我的提成”相同口径核对阶梯、普通与售后挽回提成。</Typography>
@@ -3879,7 +3899,7 @@ const Commission: React.FC<CommissionProps> = ({
                     const ownerKey = monthlyPayoutOwnerKey(row);
                     const selected = monthlyPayoutOwnerKey(selectedFinancePayoutRow || row) === ownerKey;
                     return (
-                      <TableRow key={ownerKey} hover selected={selected} sx={{ '& td:first-of-type': { borderLeft: selected ? '4px solid #2563eb' : '4px solid transparent' } }}>
+                      <TableRow key={ownerKey} hover selected={selected} sx={{ '& td:first-of-type': { borderLeft: selected ? '4px solid #7447F5' : '4px solid transparent' } }}>
                         <TableCell sx={{ position: 'sticky', left: 0, zIndex: 4, width: 180, minWidth: 180, bgcolor: selected ? '#eff6ff' : '#fff', boxShadow: '1px 0 0 #e5e7eb', whiteSpace: 'nowrap' }}><Typography fontWeight={900} noWrap>{formatOwnerDisplayName(row.ownerId, row.owner)}</Typography></TableCell>
                         {visibleFinanceMonthlyColumns.map((column) => (
                           <TableCell key={column.id} align={column.align} sx={{ width: column.width, minWidth: column.width, overflow: 'hidden' }}>
@@ -3890,9 +3910,9 @@ const Commission: React.FC<CommissionProps> = ({
                       </TableRow>
                     );
                   })}
-                  {!payoutRows.length && <TableRow><TableCell colSpan={visibleFinanceMonthlyColumns.length + 2} align="center" sx={{ py: 5, color: 'text.secondary' }}>{payoutLoading ? '加载中...' : '暂无员工提成月报数据'}</TableCell></TableRow>}
                 </TableBody>
               </Table>
+              {!payoutRows.length && <DataTableEmptyState label={payoutLoading ? '加载中...' : '暂无员工提成月报数据'} />}
             </TableContainer>
             <TablePagination
               component="div"
@@ -3912,7 +3932,7 @@ const Commission: React.FC<CommissionProps> = ({
           </Paper>
           {selectedFinancePayoutRow && (
             <Stack spacing={1.5}>
-              <Paper elevation={0} sx={{ px: { xs: 1.5, md: 2 }, py: 1.5, border: '1px solid #bfdbfe', borderRadius: 1.5, bgcolor: '#f8fbff' }}>
+              <Paper elevation={0} sx={{ px: { xs: 1.5, md: 2 }, py: 1.5, border: '1px solid #DDD2FF', borderRadius: 1.5, bgcolor: '#FAF9FD' }}>
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
                   <Box>
                     <Typography variant="h6" fontWeight={900}>{formatOwnerDisplayName(selectedFinancePayoutRow.ownerId, selectedFinancePayoutRow.owner)} · {payoutPeriod} 月度报告</Typography>
@@ -3925,13 +3945,13 @@ const Commission: React.FC<CommissionProps> = ({
                   )}
                 </Stack>
               </Paper>
-              <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, border: '1px solid #dbe3ef', borderRadius: 1.5 }}>
+              <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, border: '1px solid #E8E4F1', borderRadius: 1.5 }}>
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 0.8 }}>
                   {[
                     { label: `正式订单 ${selectedFinancePayoutRow.formalOrderCount || 0} 笔`, value: formatCurrency(selectedFinancePayoutRow.formalOrderPaidAmount || 0), color: '#0f766e' },
                     { label: `售后挽回 ${selectedFinancePayoutRow.recoveryOrderCount || 0} 笔`, value: formatCurrency(selectedFinancePayoutRow.recoveryBusinessAmount || 0), color: '#7c3aed' },
                     { label: '本月提成总额', value: formatCurrency(selectedFinancePayoutRow.totalAmount), color: '#111827' },
-                    { label: '待确认', value: formatCurrency(selectedFinancePayoutRow.pendingConfirmAmount), color: '#2563eb' },
+                    { label: '待确认', value: formatCurrency(selectedFinancePayoutRow.pendingConfirmAmount), color: '#7447F5' },
                     { label: '待发放', value: formatCurrency(selectedFinancePayoutRow.pendingPayAmount), color: '#d97706' },
                     { label: '已发放', value: formatCurrency(selectedFinancePayoutRow.paidAmount), color: '#16a34a' },
                     { label: '更正原已发', value: formatCurrency(selectedFinancePayoutRow.correctionOriginalPaidAmount || 0), color: '#475569' },
@@ -3959,7 +3979,16 @@ const Commission: React.FC<CommissionProps> = ({
   );
 
   return (
-    <Box sx={{ p: embedded ? 0 : 3 }}>
+    <Box sx={{
+      p: embedded ? 0 : 3,
+      ...(embedded && tabValue === 0 ? {
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      } : {}),
+    }}>
       {!embedded && (
         <>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, gap: 2 }}>
@@ -4126,7 +4155,7 @@ const Commission: React.FC<CommissionProps> = ({
         <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
           {mineDetailRow && (
             <Stack spacing={2}>
-              <Paper elevation={0} sx={{ border: '1px solid #dbe3ef', borderRadius: 1.5, p: 2, bgcolor: '#fff' }}>
+              <Paper elevation={0} sx={{ border: '1px solid #E8E4F1', borderRadius: 1.5, p: 2, bgcolor: '#fff' }}>
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(5, minmax(0, 1fr))' }, gap: 1.5 }}>
                   {[
                     { label: '提成类型', value: mineDetailRow.typeLabel },
@@ -4165,7 +4194,7 @@ const Commission: React.FC<CommissionProps> = ({
                 </Alert>
               )}
 
-              <Paper elevation={0} sx={{ border: '1px solid #dbe3ef', borderRadius: 1.5, overflow: 'hidden', bgcolor: '#fff' }}>
+              <Paper elevation={0} sx={{ border: '1px solid #E8E4F1', borderRadius: 1.5, overflow: 'hidden', bgcolor: '#fff' }}>
                 <Box sx={{ px: 2, py: 1.5, borderBottom: '1px solid #e5e7eb' }}>
                   <Typography variant="subtitle1" fontWeight={900}>参与计算明细</Typography>
                   <Typography variant="caption" color="text.secondary">共 {mineDetailRow.commissions.length} 笔</Typography>
@@ -4440,7 +4469,7 @@ const Commission: React.FC<CommissionProps> = ({
                 >
                   <Box sx={{ px: 2, py: 1.5, borderRight: { lg: '1px solid #e5e7eb' }, minWidth: 0 }}>
                     <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5, mb: 0.5 }}>
-                      <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 900, letterSpacing: 0 }}>
+                      <Typography variant="h6" sx={{ color: '#19142C', fontWeight: 900, letterSpacing: 0 }}>
                         {summaryDetail.orderNo}
                       </Typography>
                       <SettlementStatusChip status={summaryDetail.status} />
@@ -4451,9 +4480,9 @@ const Commission: React.FC<CommissionProps> = ({
                     </Typography>
                   </Box>
                   {[
-                    { label: '实付金额', value: formatCurrency(summaryDetail.orderAmount), color: '#0f172a' },
+                    { label: '实付金额', value: formatCurrency(summaryDetail.orderAmount), color: '#19142C' },
                     { label: '分账总额', value: formatCurrency(summaryDetail.totalCommissionAmount), color: '#d97706' },
-                    { label: '提成角色', value: `${summaryDetail.splitSummary.length} 个`, color: '#2563eb' },
+                    { label: '提成角色', value: `${summaryDetail.splitSummary.length} 个`, color: '#7447F5' },
                     {
                       label: '凭证状态',
                       value: settlementOrderLoading ? '加载中' : getOrderSettlementEvidenceStatus(summaryDetail, settlementOrderDetail),
@@ -4503,7 +4532,7 @@ const Commission: React.FC<CommissionProps> = ({
                     }}
                   >
                     <Box sx={{ minWidth: 0 }}>
-                      <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 900 }}>
+                      <Typography variant="subtitle2" sx={{ color: '#19142C', fontWeight: 900 }}>
                         {detailEditMode ? '分账明细编辑' : '分账明细'}
                       </Typography>
                       <Typography variant="caption" sx={{ color: '#64748b' }}>
@@ -4544,8 +4573,8 @@ const Commission: React.FC<CommissionProps> = ({
                   sx={{ minWidth: 0, minHeight: 0, height: { xs: 'auto', lg: '100%' } }}
                 >
                   <Paper elevation={0} sx={{ border: '1px solid #dbeafe', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
-                    <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #dbeafe', bgcolor: '#f8fbff' }}>
-                      <Typography variant="subtitle2" sx={{ color: '#2563eb', fontWeight: 900 }}>当前动作</Typography>
+                    <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #dbeafe', bgcolor: '#FAF9FD' }}>
+                      <Typography variant="subtitle2" sx={{ color: '#7447F5', fontWeight: 900 }}>当前动作</Typography>
                     </Box>
                     <Box sx={{ p: 1.5 }}>
                       {renderSettlementDetailActions()}

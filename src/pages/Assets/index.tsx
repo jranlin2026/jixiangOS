@@ -116,6 +116,18 @@ import {
 } from '../../domain/assets/accountIdentityBindings';
 import { normalizeAccountLoginDeviceIds } from '../../domain/assets/accountDeviceBindings';
 import { groupAssetHandoverTasks } from '../../domain/assets/assetGovernance';
+import {
+  DataTableEmptyState,
+  DataTableDesktopScroller,
+  DataTableMobileScroller,
+  DataTableWorkspace,
+  DataTableWorkspaceFooter,
+  dataTableStandardSx,
+} from '../../shared/components/DataTableWorkspace';
+import {
+  DATA_TABLE_TOKENS,
+  getDataTableMinWidth,
+} from '../../shared/components/dataTableStandards';
 
 type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'logs' | 'offboarding';
 
@@ -289,30 +301,16 @@ const assetTableContainerSx = {
 
 const assetTableSx = {
   ...moduleTableSx,
-  '& .MuiTableHead-root .MuiTableCell-root': {
-    ...moduleTableSx['& .MuiTableHead-root .MuiTableCell-root'],
-    height: 44,
-    px: 1.5,
-    py: 1,
-    whiteSpace: 'nowrap',
-    lineHeight: 1.35,
-  },
-  '& .MuiTableBody-root .MuiTableCell-root': {
-    height: 52,
-    px: 1.5,
-    py: 1,
-    verticalAlign: 'middle',
-  },
-  '& .MuiTableCell-root': {
-    ...moduleTableSx['& .MuiTableCell-root'],
-    color: moduleTokens.ink,
-  },
+  ...dataTableStandardSx,
   '& .MuiTableRow-root:last-of-type .MuiTableCell-root': {
     borderBottom: 0,
   },
 };
 
 const assetActionCellSx = {
+  position: 'sticky' as const,
+  right: 0,
+  zIndex: 4,
   width: ASSET_ACTION_COLUMN_WIDTH,
   minWidth: ASSET_ACTION_COLUMN_WIDTH,
   textAlign: 'center',
@@ -338,14 +336,6 @@ const assetPaginationSx = {
   },
 };
 
-const renderAssetEmptyRow = (colSpan: number, label: string) => (
-  <TableRow>
-    <TableCell colSpan={colSpan} align="center" sx={{ py: 6, color: '#9ca3af' }}>
-      {label}
-    </TableCell>
-  </TableRow>
-);
-
 const ASSET_CREATE_LABELS: Record<ConfigurableAssetTab, string> = {
   devices: '新增设备',
   phones: '新增手机号',
@@ -366,7 +356,7 @@ const VALID_TABS = new Set(ASSET_TABS.map((tab) => tab.value));
 
 const shell = {
   ...moduleTokens,
-  tableLink: '#1E6BFF',
+  tableLink: DATA_TABLE_TOKENS.link,
 };
 
 const emptyForm: AssetFormState = {
@@ -1753,8 +1743,9 @@ const AssetManagement: React.FC = () => {
     );
   };
 
-  const getTableMinWidth = (columns: AssetColumnConfig[]) => (
-    columns.reduce((sum, column) => sum + column.width, 0) + ASSET_ACTION_COLUMN_WIDTH
+  const getTableMinWidth = (columns: AssetColumnConfig[]) => getDataTableMinWidth(
+    columns,
+    { actionWidth: ASSET_ACTION_COLUMN_WIDTH },
   );
 
   const getFrozenColumnSx = (columns: AssetColumnConfig[], columnIndex: number, frozenColumnCount: number, isHeader = false) => {
@@ -2040,7 +2031,7 @@ const AssetManagement: React.FC = () => {
   ) {
     return (
       <>
-        <Stack spacing={1.25}>
+        <DataTableMobileScroller sx={{ display: 'grid' }}>
           {rows.map((row) => (
             <Paper key={row.id} variant="outlined" onClick={() => openDetail(type, row.id)} sx={{ p: 1.75, borderRadius: 2.5, cursor: 'pointer' }}>
               <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
@@ -2062,7 +2053,7 @@ const AssetManagement: React.FC = () => {
             </Paper>
           ))}
           {!rows.length ? <Paper variant="outlined" sx={{ py: 5, textAlign: 'center', color: shell.muted }}>{emptyLabel}</Paper> : null}
-        </Stack>
+        </DataTableMobileScroller>
         {renderPagination()}
       </>
     );
@@ -2079,8 +2070,8 @@ const AssetManagement: React.FC = () => {
     '暂无设备资产数据',
   ) : (
     <>
-    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
-      <Table size="small" sx={{ ...assetTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(deviceView.visibleColumns) }}>
+    <DataTableDesktopScroller sx={{ display: 'block' }}>
+      <Table stickyHeader size="small" sx={{ ...assetTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(deviceView.visibleColumns) }}>
         <TableHead>
           <TableRow>
             {deviceView.visibleColumns.map((column, columnIndex) => (
@@ -2127,10 +2118,10 @@ const AssetManagement: React.FC = () => {
               </TableCell>
             </TableRow>
           ))}
-          {devices.length === 0 && renderAssetEmptyRow(deviceView.visibleColumns.length + 1, '暂无设备资产数据')}
         </TableBody>
       </Table>
-    </TableContainer>
+      {devices.length === 0 && <DataTableEmptyState label="暂无设备资产数据" />}
+    </DataTableDesktopScroller>
     {renderPagination()}
     </>
   );
@@ -2146,8 +2137,8 @@ const AssetManagement: React.FC = () => {
     '暂无手机号资产数据',
   ) : (
     <>
-    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
-      <Table size="small" sx={{ ...assetTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(phoneView.visibleColumns) }}>
+    <DataTableDesktopScroller sx={{ display: 'block' }}>
+      <Table stickyHeader size="small" sx={{ ...assetTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(phoneView.visibleColumns) }}>
         <TableHead>
           <TableRow>
             {phoneView.visibleColumns.map((column, columnIndex) => (
@@ -2194,10 +2185,10 @@ const AssetManagement: React.FC = () => {
                 </TableCell>
               </TableRow>
           ))}
-          {phones.length === 0 && renderAssetEmptyRow(phoneView.visibleColumns.length + 1, '暂无手机号资产数据')}
         </TableBody>
       </Table>
-    </TableContainer>
+      {phones.length === 0 && <DataTableEmptyState label="暂无手机号资产数据" />}
+    </DataTableDesktopScroller>
     {renderPagination()}
     </>
   );
@@ -2213,8 +2204,8 @@ const AssetManagement: React.FC = () => {
     '暂无互联网账号数据',
   ) : (
     <>
-    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
-      <Table size="small" sx={{ ...assetTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(accountView.visibleColumns) }}>
+    <DataTableDesktopScroller sx={{ display: 'block' }}>
+      <Table stickyHeader size="small" sx={{ ...assetTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(accountView.visibleColumns) }}>
         <TableHead>
           <TableRow>
             {accountView.visibleColumns.map((column, columnIndex) => (
@@ -2255,18 +2246,18 @@ const AssetManagement: React.FC = () => {
                 </TableCell>
               </TableRow>
           ))}
-          {accounts.length === 0 && renderAssetEmptyRow(accountView.visibleColumns.length + 1, '暂无互联网账号数据')}
         </TableBody>
       </Table>
-    </TableContainer>
+      {accounts.length === 0 && <DataTableEmptyState label="暂无互联网账号数据" />}
+    </DataTableDesktopScroller>
     {renderPagination()}
     </>
   );
 
   const renderLogsTable = () => (
     <>
-    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
-      <Table size="small" sx={assetTableSx}>
+    <DataTableDesktopScroller sx={{ display: 'block' }}>
+      <Table stickyHeader size="small" sx={assetTableSx}>
         <TableHead>
           <TableRow>
             {['时间', '动作', '对象类型', '对象名称', '操作人', '详情'].map((column) => <TableCell key={column}>{column}</TableCell>)}
@@ -2283,18 +2274,28 @@ const AssetManagement: React.FC = () => {
               <TableCell>{log.detail}</TableCell>
             </TableRow>
           ))}
-          {logs.length === 0 && renderAssetEmptyRow(6, '暂无操作日志数据')}
         </TableBody>
       </Table>
-    </TableContainer>
+      {logs.length === 0 && <DataTableEmptyState label="暂无操作日志数据" />}
+    </DataTableDesktopScroller>
+    <DataTableMobileScroller>
+      {logs.map((log) => (
+        <Paper key={log.id} elevation={0} sx={{ p: 1.5, border: `1px solid ${shell.line}`, borderRadius: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}><Typography variant="subtitle2" sx={{ fontWeight: 850 }}>{log.action}</Typography><Typography variant="caption" color="text.secondary">{formatDate(log.time, 'yyyy-MM-dd HH:mm')}</Typography></Box>
+          <Typography variant="body2" sx={{ mt: 0.75 }}>{log.targetType} · {log.targetName}</Typography>
+          <Typography variant="caption" color="text.secondary">{log.operator} · {log.detail}</Typography>
+        </Paper>
+      ))}
+      {!logs.length && <Typography sx={{ py: 5, textAlign: 'center', color: shell.muted }}>暂无操作日志数据</Typography>}
+    </DataTableMobileScroller>
     {renderPagination()}
     </>
   );
 
   const renderOffboardingTable = () => (
     <>
-    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
-      <Table size="small" sx={assetTableSx}>
+    <DataTableDesktopScroller sx={{ display: 'block' }}>
+      <Table stickyHeader size="small" sx={assetTableSx}>
         <TableHead>
           <TableRow>
             {['交接员工', '交接原因', '交接资产', '交接进度', '截止时间', '操作'].map((column) => <TableCell key={column}>{column}</TableCell>)}
@@ -2371,15 +2372,29 @@ const AssetManagement: React.FC = () => {
             </TableRow>
             );
           })}
-          {handoverGroups.length === 0 && renderAssetEmptyRow(6, '暂无资产交接数据')}
         </TableBody>
       </Table>
-    </TableContainer>
+      {handoverGroups.length === 0 && <DataTableEmptyState label="暂无资产交接数据" />}
+    </DataTableDesktopScroller>
+    <DataTableMobileScroller>
+      {handoverGroups.map((group) => {
+        const pendingIds = group.tasks.filter((task) => task.status !== '已回收').map((task) => task.id);
+        return (
+          <Paper key={group.id} elevation={0} sx={{ p: 1.5, border: `1px solid ${shell.line}`, borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}><Box><Typography variant="subtitle2" sx={{ fontWeight: 850 }}>{group.employeeName}</Typography><Typography variant="caption" color="text.secondary">{group.department || '未归属部门'} · {group.reason}</Typography></Box><Chip size="small" label={group.status} sx={chipSx(statusTone(group.status))} /></Box>
+            <Typography variant="body2" sx={{ mt: 1 }}>{group.completed} 项 / 共 {group.total} 项 · 截止 {group.dueAt || '-'}</Typography>
+            {canHandleOffboarding && pendingIds.length ? <Button size="small" variant="outlined" onClick={() => void handleCompleteHandoverGroup(pendingIds)} sx={{ mt: 1 }}>完成全部待交接项</Button> : null}
+          </Paper>
+        );
+      })}
+      {!handoverGroups.length && <Typography sx={{ py: 5, textAlign: 'center', color: shell.muted }}>暂无资产交接数据</Typography>}
+    </DataTableMobileScroller>
     {renderPagination()}
     </>
   );
 
   const renderPagination = () => (
+    <DataTableWorkspaceFooter>
     <TablePagination
       component="div"
       count={pagination.total}
@@ -2395,6 +2410,7 @@ const AssetManagement: React.FC = () => {
       labelDisplayedRows={formatPaginationRows}
       sx={assetPaginationSx}
     />
+    </DataTableWorkspaceFooter>
   );
 
   const renderActiveTable = () => {
@@ -4051,7 +4067,7 @@ const AssetManagement: React.FC = () => {
   };
 
   return (
-    <ModulePage>
+    <ModulePage workspace={activeTab !== 'overview'}>
       <ModuleHeader
         title="资产管理"
         description="管理设备、手机号与互联网账号，明确管理责任、实际使用与资产交接。"
@@ -4084,7 +4100,7 @@ const AssetManagement: React.FC = () => {
         {visibleTabs.map((tab) => <Tab key={tab.value} value={tab.value} label={tab.label} />)}
       </ModuleTabs>
       {renderToolbar()}
-      {renderActiveTable()}
+      {activeTab === 'overview' ? renderActiveTable() : <DataTableWorkspace>{renderActiveTable()}</DataTableWorkspace>}
       {renderDeviceAccountDrawer()}
       {renderDetailDialog()}
       {renderImportDialog()}

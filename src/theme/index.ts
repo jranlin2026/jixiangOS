@@ -2,6 +2,7 @@ import { createTheme } from '@mui/material/styles';
 import palette from './palette';
 import typography from './typography';
 import TablePaginationActions from '../shared/components/TablePaginationActions';
+import { DATA_TABLE_METRICS, DATA_TABLE_TOKENS } from '../shared/components/dataTableStandards';
 
 const theme = createTheme({
   palette,
@@ -64,7 +65,7 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           '&.MuiTableRow-hover:hover': {
-            backgroundColor: '#F7F5FF',
+            backgroundColor: DATA_TABLE_TOKENS.rowHover,
           },
         },
       },
@@ -73,17 +74,39 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           borderBottom: '1px solid #ECEEF1',
-          padding: '11px 14px',
-          color: '#1F2937',
-          fontSize: '0.875rem',
+          height: DATA_TABLE_METRICS.rowHeight,
+          padding: '8px 14px',
+          color: DATA_TABLE_TOKENS.ink,
+          fontSize: DATA_TABLE_METRICS.bodyFontSize,
+          lineHeight: 1.5,
+          '& .MuiButton-text': {
+            color: DATA_TABLE_TOKENS.link,
+            fontSize: DATA_TABLE_METRICS.bodyFontSize,
+            fontWeight: 700,
+            '&:hover': {
+              color: DATA_TABLE_TOKENS.linkHover,
+              backgroundColor: 'transparent',
+              textDecoration: 'underline',
+            },
+          },
+          '& .MuiIconButton-colorPrimary': {
+            color: DATA_TABLE_TOKENS.action,
+            '&:hover': {
+              color: DATA_TABLE_TOKENS.link,
+              backgroundColor: '#EFF6FF',
+            },
+          },
         },
         head: {
-          fontWeight: 900,
-          color: '#5F6674',
-          fontSize: '0.8125rem',
+          height: DATA_TABLE_METRICS.headerHeight,
+          padding: '6px 14px',
+          fontWeight: 800,
+          color: DATA_TABLE_TOKENS.muted,
+          fontSize: DATA_TABLE_METRICS.headerFontSize,
           textTransform: 'none',
           letterSpacing: 0,
-          backgroundColor: '#F9F9FC',
+          backgroundColor: DATA_TABLE_TOKENS.headBackground,
+          whiteSpace: 'nowrap',
         },
       },
     },
