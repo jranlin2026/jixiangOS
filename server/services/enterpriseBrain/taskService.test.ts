@@ -83,10 +83,11 @@ const returnedTask = await service.assignOneOff({
   title: '需要修订的任务',
   taskType: 'FOLLOW_UP', priority: 'HIGH', businessModule: 'CUSTOMER_MANAGEMENT',
   sourceRoute: '/customers?customerId=customer-1', sourceLabel: '提醒销售·客户甲',
-  sourceType: 'COCKPIT_INTERVENTION', sourceId: 'customer-1', sourceItemId: 'REMIND_SALES',
+  sourceType: 'COCKPIT_INTERVENTION', sourceId: 'customer-1', sourceItemId: 'REMIND_SALES', sourceVersion: 'todo-risk-1',
 }, manager);
 assert.equal(returnedTask.code, 0);
 assert.equal(returnedTask.data?.sourceType, 'COCKPIT_INTERVENTION');
+assert.equal(returnedTask.data?.sourceVersion, 'todo-risk-1');
 assert.equal(returnedTask.data?.sourceId, 'customer-1');
 assert.equal(returnedTask.data?.taskType, 'FOLLOW_UP');
 assert.equal(returnedTask.data?.priority, 'HIGH');

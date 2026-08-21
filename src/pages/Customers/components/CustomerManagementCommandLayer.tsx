@@ -186,7 +186,9 @@ const CustomerManagementCommandLayer: React.FC<{
         sourceType: 'COCKPIT_INTERVENTION',
         sourceId: customer.id,
         sourceItemId: mode,
-        sourceVersion: snapshot.nextAction?.id || null,
+        sourceVersion: snapshot.nextActionOverdue && snapshot.nextAction && !snapshot.nextAction.id.startsWith('snapshot:')
+          ? snapshot.nextAction.id
+          : null,
         evidenceRequired: false,
       });
       if (response.code !== 0) throw new Error(response.message || '介入任务下达失败');
