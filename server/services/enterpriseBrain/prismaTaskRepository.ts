@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { STORAGE_KEYS } from '../../../src/shared/utils/constants';
 import { createPrismaWorkbenchRepository } from '../workbench/prismaWorkbenchRepository';
 import { MAX_GENERATED_TASK_CANDIDATES } from './taskRepository';
 import type {
@@ -90,7 +91,47 @@ function generatedData(row: GeneratedTaskInput) {
     title: row.title, description: row.description, targetValue: row.targetValue, unit: row.unit,
     evidenceRequired: row.evidenceRequired, dueAt: row.dueAt ? new Date(row.dueAt) : null,
     sourceType: row.sourceType, sourceId: row.sourceId, sourceItemId: row.sourceItemId,
+    taskType: row.taskType || 'ACTION', priority: row.priority || 'NORMAL',
+    businessModule: row.businessModule || 'GENERAL', sourceRoute: row.sourceRoute,
+    sourceLabel: row.sourceLabel,
   };
+}
+
+async function appendManagerInterventionActivity(tx: any, input: GeneratedTaskInput & {
+  assignedById: string;
+  assignedByName: string;
+}, taskId: string): Promise<void> {
+  if (input.sourceType !== 'COCKPIT_INTERVENTION' || !input.sourceId) return;
+  const selector = { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: input.sourceId } };
+  const row = await tx.businessRecord.findUnique({ where: selector });
+  if (!row) throw new Error('客户不存在，无法发起管理介入');
+  const customer = row.data && typeof row.data === 'object' ? row.data : {};
+  const mode = String(input.sourceItemId || 'REMIND_SALES');
+  const canAssign = mode === 'REMIND_SALES'
+    ? String(customer.ownerId || '') === input.employeeId
+    : input.employeeId === input.assignedById;
+  if (!canAssign) throw new Error('管理介入执行人与客户负责范围不匹配');
+  const now = new Date().toISOString();
+  const activityRecords = Array.isArray(customer.activityRecords) ? customer.activityRecords : [];
+  await tx.businessRecord.update({
+    where: selector,
+    data: {
+      data: {
+        ...customer,
+        activityRecords: [...activityRecords, {
+          id: `activity-${randomUUID()}`,
+          type: 'manager_intervene',
+          title: input.sourceLabel || '管理介入',
+          content: input.description || input.title,
+          operator: input.assignedByName,
+          createdAt: now,
+          relatedId: taskId,
+          relatedType: 'task',
+        }],
+        updatedAt: now,
+      },
+    },
+  });
 }
 
 export function createPrismaEnterpriseTaskRepository(prisma: Client): EnterpriseTaskRepository {
@@ -272,6 +313,7 @@ export function createPrismaEnterpriseTaskRepository(prisma: Client): Enterprise
             metadata: { source: 'MANUAL_ASSIGNMENT' },
           },
         });
+        await appendManagerInterventionActivity(tx, input, row.id);
         return mapTask(row);
       }, { isolationLevel: 'Serializable' });
     },

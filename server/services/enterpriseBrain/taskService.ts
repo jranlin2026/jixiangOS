@@ -101,9 +101,11 @@ export function createEnterpriseTaskService(deps: Dependencies) {
       if (!hasPermission(actor, PERMISSION_KEYS.TASK_ASSIGN, 'write')) return failure<never>('无权指派任务', 403);
       const employee = await deps.repository.findEmployee(String(raw?.employeeId || ''));
       if (!employee?.isActive || employee.employmentStatus === 'left') return failure<never>('员工不存在或已离职', 404);
-      if (!actor.departmentId) return failure<never>('当前账号未绑定部门', 409);
-      const allowed = await deps.repository.listDepartmentTree(actor.departmentId);
-      if (!allowed.includes(employee.departmentId || '')) return failure<never>('员工不在授权团队范围内', 403);
+      if (!isSuperAdmin(actor)) {
+        if (!actor.departmentId) return failure<never>('当前账号未绑定部门', 409);
+        const allowed = await deps.repository.listDepartmentTree(actor.departmentId);
+        if (!allowed.includes(employee.departmentId || '')) return failure<never>('员工不在授权团队范围内', 403);
+      }
       const workDate = validDate(raw?.workDate);
       const title = String(raw?.title || '').trim().slice(0, 200);
       if (!workDate || !title) return failure<never>('工作日期和任务名称不能为空', 400);
@@ -119,6 +121,14 @@ export function createEnterpriseTaskService(deps: Dependencies) {
         targetValue, unit: String(raw?.unit || '').trim().slice(0, 40) || null,
         evidenceRequired: Boolean(raw?.evidenceRequired),
         dueAt: dueAtDate ? dueAtDate.toISOString() : null,
+        taskType: raw?.taskType === 'FOLLOW_UP' ? 'FOLLOW_UP' : 'ACTION',
+        priority: ['LOW', 'NORMAL', 'HIGH', 'URGENT'].includes(String(raw?.priority)) ? raw.priority : 'NORMAL',
+        businessModule: String(raw?.businessModule || 'GENERAL').trim().slice(0, 100),
+        sourceRoute: String(raw?.sourceRoute || '').trim().slice(0, 500) || null,
+        sourceLabel: String(raw?.sourceLabel || '').trim().slice(0, 200) || null,
+        sourceType: String(raw?.sourceType || '').trim().slice(0, 100) || null,
+        sourceId: String(raw?.sourceId || '').trim().slice(0, 100) || null,
+        sourceItemId: String(raw?.sourceItemId || '').trim().slice(0, 100) || null,
         assignedById: actor.id, assignedByName: actor.name,
       });
       return success(task);
@@ -181,12 +191,12 @@ export function createEnterpriseTaskService(deps: Dependencies) {
 
     async listTeamTasks(raw: any, actor: AuthenticatedUser) {
       if (!hasPermission(actor, PERMISSION_KEYS.TASK_TEAM)) return failure<never>('无权读取团队任务', 403);
-      if (!actor.departmentId) return failure<never>('当前账号未绑定部门', 409);
       const date = raw?.date ? validDate(raw.date) : null;
       if (raw?.date && !date) return failure<never>('日期格式不正确', 400);
       const pagination = pageInput(raw);
-      const departmentIds = await deps.repository.listDepartmentTree(actor.departmentId);
-      const data = await deps.repository.listTasks({ departmentIds, ...(date ? { date } : {}), status: raw?.status, ...pagination });
+      if (!isSuperAdmin(actor) && !actor.departmentId) return failure<never>('当前账号未绑定部门', 409);
+      const departmentIds = isSuperAdmin(actor) ? undefined : await deps.repository.listDepartmentTree(actor.departmentId!);
+      const data = await deps.repository.listTasks({ ...(departmentIds ? { departmentIds } : {}), ...(date ? { date } : {}), status: raw?.status, ...pagination });
       return success({ ...data, ...pagination });
     },
 

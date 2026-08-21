@@ -16,6 +16,7 @@ import { synchronizeClientInstallation } from './shared/utils/systemInstallation
 const HomeWorkbench = React.lazy(() => import('./pages/Dashboard'));
 const BusinessCockpit = React.lazy(() => import('./pages/Dashboard/BusinessCockpit'));
 const SalesBattlefield = React.lazy(() => import('./pages/SalesManagement/SalesBattlefield'));
+const SalespersonDetail = React.lazy(() => import('./pages/SalesManagement/SalespersonDetail'));
 const Leads = React.lazy(() => import('./pages/Leads'));
 const Customers = React.lazy(() => import('./pages/Customers'));
 const CustomerDuplicateGovernance = React.lazy(() => import('./pages/Customers/CustomerDuplicateGovernance'));
@@ -153,6 +154,14 @@ const App: React.FC = () => {
               element={(
                 <Suspense fallback={<PageLoader />}>
                   <SalesBattlefield />
+                </Suspense>
+              )}
+            />
+            <Route
+              path={ROUTES.SALESPERSON_MANAGEMENT}
+              element={(
+                <Suspense fallback={<PageLoader />}>
+                  <SalespersonDetail />
                 </Suspense>
               )}
             />

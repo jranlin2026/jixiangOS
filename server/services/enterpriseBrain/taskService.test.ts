@@ -80,8 +80,17 @@ const returnedTask = await service.assignOneOff({
   employeeId: employee.id,
   workDate: '2026-07-29',
   title: '需要修订的任务',
+  taskType: 'FOLLOW_UP', priority: 'HIGH', businessModule: 'CUSTOMER_MANAGEMENT',
+  sourceRoute: '/customers?customerId=customer-1', sourceLabel: '提醒销售·客户甲',
+  sourceType: 'COCKPIT_INTERVENTION', sourceId: 'customer-1', sourceItemId: 'REMIND_SALES',
 }, manager);
 assert.equal(returnedTask.code, 0);
+assert.equal(returnedTask.data?.sourceType, 'COCKPIT_INTERVENTION');
+assert.equal(returnedTask.data?.sourceId, 'customer-1');
+assert.equal(returnedTask.data?.taskType, 'FOLLOW_UP');
+assert.equal(returnedTask.data?.priority, 'HIGH');
+assert.equal(returnedTask.data?.businessModule, 'CUSTOMER_MANAGEMENT');
+assert.equal(returnedTask.data?.sourceRoute, '/customers?customerId=customer-1');
 assert.equal((await service.completeTask(returnedTask.data!.id, { result: '已提交', evidence: [] }, employee)).code, 0);
 assert.equal((await service.confirmTask(returnedTask.data!.id, { action: 'RETURN', reason: '请补充说明' }, manager)).code, 0);
 const pendingTask = await service.assignOneOff({
@@ -97,6 +106,23 @@ assert.deepEqual(
   ['PENDING', 'RETURNED'],
   '工作台的待处理筛选必须由 API 同时返回待处理和已退回任务',
 );
+
+const superAdmin: AuthenticatedUser = {
+  ...manager,
+  id: 'super-admin',
+  account: 'super-admin',
+  name: '超级管理员',
+  role: '超级管理员',
+  departmentId: undefined,
+  permissions: [{ module: '全部', actions: ['admin'] }],
+};
+const crossDepartmentTask = await service.assignOneOff({
+  employeeId: outOfScopeEmployee.id,
+  workDate: '2026-07-29',
+  title: '跨部门管理介入',
+}, superAdmin);
+assert.equal(crossDepartmentTask.code, 0, '超级管理员不应因未绑定部门无法下达任务');
+assert.equal((await service.listTeamTasks({ date: '2026-07-29' }, superAdmin)).code, 0);
 
 const invalidTime = await service.saveTemplate({ positionId: 'pos-sales-consultant', name: '非法时间模板', weekdays: [1], dueTime: '99:99' }, manager);
 assert.equal(invalidTime.code, 400, '模板截止时间必须是合法24小时制时间');

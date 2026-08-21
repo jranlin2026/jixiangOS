@@ -53,7 +53,7 @@ import { hasExplicitPermission, PERMISSION_KEYS } from '../../shared/utils/permi
 import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 import CustomerTagDialog from '../../shared/components/CustomerTagDialog';
 import CustomerTodoPanel from '../../shared/components/CustomerTodoPanel';
-import CustomerBattleDecisionBar from './CustomerBattleDecisionBar';
+import CustomerManagementCommandLayer from './components/CustomerManagementCommandLayer';
 import { customerTodoApi } from '../../api/customerTodoApi';
 import type { CustomerTodo } from '../../types/customerTodo';
 import type { CustomerOpportunityStageCode } from '../../types/customer';
@@ -1054,13 +1054,14 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
         dividers
         sx={CRM_DETAIL_CONTENT_SX}
       >
-        <CustomerBattleDecisionBar
+        <CustomerManagementCommandLayer
           customer={currentCustomer}
           todos={battleTodos}
+          currentUser={currentUser}
+          onRefreshCustomer={refreshCurrentCustomer}
           canSetProgress={detailActions.actions.setProgress}
-          canSetTodos={detailActions.actions.setTodos}
-          saving={battleSaving}
-          onSave={saveBattleState}
+          progressSaving={battleSaving}
+          onSaveProgress={saveBattleState}
           onOpenTodos={() => setActiveTab(1)}
         />
         <Box sx={{

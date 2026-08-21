@@ -158,6 +158,7 @@ export interface CockpitSalesBattleProfile {
   monthlyTargetAmount: number | null;
   targetGapAmount: number | null;
   targetCompletionRate: number | null;
+  stageDistribution?: CockpitCustomerBattleStage[];
   priorityCustomers: CockpitCustomerBattleItem[];
 }
 

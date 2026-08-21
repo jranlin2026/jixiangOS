@@ -216,15 +216,17 @@ export function createWorkbenchCommandService(deps: Dependencies) {
         return failure('质量评分必须是0到100之间的整数', 400);
       }
       if (activityComment === undefined) return failure('评论不能超过500个字符', 400);
-      if (!actor.departmentId) return failure('当前账号未绑定部门', 409);
+      if (!isSuperAdmin(actor) && !actor.departmentId) return failure('当前账号未绑定部门', 409);
 
       let notificationActivity: TaskActivity | undefined;
       const response = await deps.repository.transaction(async (repository) => {
         const task = await repository.findTaskForUpdate(taskId);
         if (!task) return failure('任务不存在', 404);
-        const departments = await repository.listDepartmentTree(actor.departmentId!);
-        if (!departments.includes(task.departmentIdSnapshot || '')) {
-          return failure('任务不在授权团队范围内', 403);
+        if (!isSuperAdmin(actor)) {
+          const departments = await repository.listDepartmentTree(actor.departmentId!);
+          if (!departments.includes(task.departmentIdSnapshot || '')) {
+            return failure('任务不在授权团队范围内', 403);
+          }
         }
 
         let status: EmployeeTask['status'];
@@ -259,15 +261,17 @@ export function createWorkbenchCommandService(deps: Dependencies) {
       const reason = comment(input?.reason);
       if (reason === undefined) return failure('退回原因不能超过500个字符', 400);
       if (!reason) return failure('退回任务必须填写原因', 400);
-      if (!actor.departmentId) return failure('当前账号未绑定部门', 409);
+      if (!isSuperAdmin(actor) && !actor.departmentId) return failure('当前账号未绑定部门', 409);
 
       let notificationActivity: TaskActivity | undefined;
       const response = await deps.repository.transaction(async (repository) => {
         const task = await repository.findTaskForUpdate(taskId);
         if (!task) return failure('任务不存在', 404);
-        const departments = await repository.listDepartmentTree(actor.departmentId!);
-        if (!departments.includes(task.departmentIdSnapshot || '')) {
-          return failure('任务不在授权团队范围内', 403);
+        if (!isSuperAdmin(actor)) {
+          const departments = await repository.listDepartmentTree(actor.departmentId!);
+          if (!departments.includes(task.departmentIdSnapshot || '')) {
+            return failure('任务不在授权团队范围内', 403);
+          }
         }
 
         let status: EmployeeTask['status'];

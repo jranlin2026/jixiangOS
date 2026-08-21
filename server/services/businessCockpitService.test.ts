@@ -402,6 +402,11 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
     todayDueTodoCount: 2, todayCompletedTodoCount: 2, todayFollowUpCount: 1, overdueCustomerCount: 1,
     wonCount: 1, lostCount: 1, conversionRate: 50,
     riskCustomerCount: 1, missingNextActionCount: 0,
+    stageDistribution: [
+      { stageCode: 'proposal', stageLabel: '方案报价', customerCount: 1, opportunityAmount: 50000 },
+      { stageCode: 'won', stageLabel: '已成交', customerCount: 1, opportunityAmount: 30000 },
+      { stageCode: 'lost', stageLabel: '已流失', customerCount: 1, opportunityAmount: 20000 },
+    ],
     priorityCustomers: undefined,
   });
   assert.equal(profile.priorityCustomers[0].customerId, 'profile-active');
@@ -434,6 +439,7 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
     overdueCustomerCount: 0, riskCustomerCount: 0, missingNextActionCount: 0,
     wonCount: 0, lostCount: 0, conversionRate: 0,
     monthlyTargetAmount: null, targetGapAmount: null, targetCompletionRate: null,
+    stageDistribution: [],
     priorityCustomers: [],
   });
 }

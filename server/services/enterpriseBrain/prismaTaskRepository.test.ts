@@ -106,6 +106,41 @@ test('generation rejects more than 5000 candidates before opening a transaction'
   assert.equal(database.committed.length, 0);
 });
 
+test('cockpit intervention creates its task and customer activity in one transaction', async () => {
+  const customer = { id: 'customer-1', name: '客户甲', ownerId: 'employee-1', activityRecords: [] as any[] };
+  const createdTasks: any[] = [];
+  const prisma: any = {
+    async $transaction(work: any) {
+      const tx = {
+        employeeTask: {
+          async create({ data }: any) {
+            const row = { ...data, status: 'PENDING', actualValue: null, result: null, returnedReason: null, evidence: [] };
+            createdTasks.push(row);
+            return row;
+          },
+        },
+        taskActivity: { async create() { return {}; } },
+        businessRecord: {
+          async findUnique() { return { data: customer }; },
+          async update({ data }: any) { Object.assign(customer, data.data); return { data: customer }; },
+        },
+      };
+      return work(tx);
+    },
+  };
+  const repository = createPrismaEnterpriseTaskRepository(prisma);
+  const task = await repository.createOneOffTask({
+    ...generated(1), templateId: null, sourceType: 'COCKPIT_INTERVENTION', sourceId: customer.id,
+    sourceItemId: 'REMIND_SALES', sourceLabel: '提醒销售·客户甲', description: '今日18点前确认下一步',
+    assignedById: 'manager-1', assignedByName: '销售经理',
+  });
+  assert.equal(createdTasks.length, 1);
+  assert.equal(customer.activityRecords.length, 1);
+  assert.equal(customer.activityRecords[0].type, 'manager_intervene');
+  assert.equal(customer.activityRecords[0].relatedId, task.id);
+  assert.equal(customer.activityRecords[0].relatedType, 'task');
+});
+
 test('delayed multi-chunk generation exceeds Prisma default 5s but commits within its explicit deadline', async () => {
   const database = transactionalPrisma({ simulatedBatchDurationMs: 3_100 });
   const repository = createPrismaEnterpriseTaskRepository(database.prisma);

@@ -86,8 +86,7 @@ const SalesBattlefield: React.FC = () => {
   const interveneProfiles = profiles.filter((profile) => getSalespersonBattleStatus(profile).code === 'intervene');
 
   const openCustomers = (profile: CockpitSalesBattleProfile) => {
-    const query = new URLSearchParams({ ownerId: profile.userId, owner: profile.name });
-    navigate(`${ROUTES.CUSTOMERS}?${query.toString()}`);
+    navigate(ROUTES.SALESPERSON_MANAGEMENT.replace(':salespersonId', profile.userId));
   };
 
   if (loading && !data) {

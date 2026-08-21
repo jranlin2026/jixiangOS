@@ -138,6 +138,7 @@ export interface BusinessCockpitSnapshot {
     wonCount: number;
     lostCount: number;
     conversionRate: number;
+    stageDistribution: BusinessCockpitData['customerBattleStages'];
     priorityCustomers: BusinessCockpitData['customerBattles'];
   }>;
   leadSources: Array<{ source: string; leadCount: number; followedCount: number; followRate: number; convertedCustomerCount: number; receiptAmount: number }>;
@@ -825,9 +826,22 @@ export function createBusinessCockpitService(
           wonCount: 0,
           lostCount: 0,
           conversionRate: 0,
+          stageDistribution: [],
           priorityCustomers: [],
         };
         current.customerCount += 1;
+        const stage = current.stageDistribution.find((candidate) => candidate.stageCode === item.stageCode);
+        if (stage) {
+          stage.customerCount += 1;
+          stage.opportunityAmount = roundMoney(stage.opportunityAmount + item.opportunityAmount);
+        } else {
+          current.stageDistribution.push({
+            stageCode: item.stageCode,
+            stageLabel: item.stageLabel,
+            customerCount: 1,
+            opportunityAmount: item.opportunityAmount,
+          });
+        }
         if (item.stageCode === 'won') current.wonCount += 1;
         else if (item.stageCode === 'lost') current.lostCount += 1;
         else if (item.stageCode !== 'not_set') {
@@ -864,6 +878,7 @@ export function createBusinessCockpitService(
           wonCount: 0,
           lostCount: 0,
           conversionRate: 0,
+          stageDistribution: [],
           priorityCustomers: [],
         };
         salesBattleProfileMap.set(key, profile);
@@ -911,6 +926,7 @@ export function createBusinessCockpitService(
               wonCount: 0,
               lostCount: 0,
               conversionRate: 0,
+              stageDistribution: [],
               priorityCustomers: [],
             });
           }
@@ -927,6 +943,7 @@ export function createBusinessCockpitService(
             ? roundMoney(profile.wonCount / (profile.wonCount + profile.lostCount) * 100)
             : 0,
           priorityCustomers: profile.priorityCustomers.slice(0, 5),
+          stageDistribution: [...profile.stageDistribution].sort((left, right) => right.customerCount - left.customerCount),
         }))
         .sort((left, right) => (
           right.overdueCustomerCount - left.overdueCustomerCount
@@ -1201,6 +1218,15 @@ export function createBusinessCockpitService(
       const lostCount = (existing?.lostCount || 0) + profile.lostCount;
       const revenueAmount = Math.max(existing?.revenueAmount || 0, ranking?.amount || 0);
       const monthlyTargetAmount = stableUserId ? salesTargetByUserId.get(stableUserId) || null : null;
+      const stageDistributionMap = new Map<string, BusinessCockpitData['customerBattleStages'][number]>();
+      [...(existing?.stageDistribution || []), ...profile.stageDistribution].forEach((item) => {
+        const current = stageDistributionMap.get(item.stageCode);
+        stageDistributionMap.set(item.stageCode, current ? {
+          ...current,
+          customerCount: current.customerCount + item.customerCount,
+          opportunityAmount: roundMoney(current.opportunityAmount + item.opportunityAmount),
+        } : { ...item });
+      });
       salesBattleProfileMap.set(key, {
         userId: key,
         name: user?.name || profile.ownerName,
@@ -1225,6 +1251,7 @@ export function createBusinessCockpitService(
           ? null : Math.max(0, roundMoney(monthlyTargetAmount - revenueAmount)),
         targetCompletionRate: monthlyTargetAmount === null
           ? null : roundMoney(revenueAmount / monthlyTargetAmount * 100),
+        stageDistribution: [...stageDistributionMap.values()].sort((left, right) => right.customerCount - left.customerCount),
         priorityCustomers,
       });
     });
@@ -1267,6 +1294,7 @@ export function createBusinessCockpitService(
           ? null : Math.max(0, roundMoney(monthlyTargetAmount - ranking.amount)),
         targetCompletionRate: monthlyTargetAmount === null
           ? null : roundMoney(ranking.amount / monthlyTargetAmount * 100),
+        stageDistribution: [],
         priorityCustomers: [],
       });
     };

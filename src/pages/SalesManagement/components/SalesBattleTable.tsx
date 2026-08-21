@@ -131,7 +131,7 @@ const SalesBattleTable: React.FC<SalesBattleTableProps> = ({
                   <TableCell><TargetProgress profile={profile} /></TableCell>
                   <TableCell align="right" sx={metricTextSx}>{profile.customerCount}</TableCell>
                   <TableCell align="center" sx={getDataTablePinnedColumnSx('right')}>
-                    <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => onViewCustomers(profile)}>查看客户</Button>
+                    <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => onViewCustomers(profile)}>查看详情</Button>
                   </TableCell>
                 </TableRow>
               ))}
@@ -166,7 +166,7 @@ const SalesBattleTable: React.FC<SalesBattleTableProps> = ({
                 </Box>
                 <Typography variant="caption" sx={{ display: 'block', color: statusTone[status.code].color, mt: 1.25 }}>{status.reason}</Typography>
                 <Button fullWidth size="small" endIcon={<ArrowForwardIcon />} onClick={() => onViewCustomers(profile)} sx={{ mt: 1.25, minHeight: 44 }}>
-                  查看名下客户
+                  查看个人经营
                 </Button>
               </Paper>
             );

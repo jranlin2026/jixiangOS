@@ -45,7 +45,8 @@ export type CustomerActivityType =
   | 'refund'
   | 'ai'
   | 'note'
-  | 'todo';
+  | 'todo'
+  | 'manager_intervene';
 
 export interface CustomerActivityRecord {
   id: ID;
@@ -62,7 +63,7 @@ export interface CustomerActivityRecord {
     newValue?: string | number | boolean | null;
   }>;
   relatedId?: ID;
-  relatedType?: 'order' | 'refund' | 'lead' | 'opportunity' | 'todo';
+  relatedType?: 'order' | 'refund' | 'lead' | 'opportunity' | 'todo' | 'task';
 }
 
 export type CustomerActivityAttachmentCategory = 'image' | 'document' | 'audio' | 'other';
