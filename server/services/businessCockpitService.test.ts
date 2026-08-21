@@ -209,6 +209,41 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
   ...overrides,
 });
 
+// 老板驾驶舱必须直接给出“客户—责任人—下一步动作”，不能只返回聚合数字。
+{
+  const battleCustomer = customer('battle', 'sales-1', {
+    company: '作战客户公司',
+    opportunityStageCode: 'proposal',
+    opportunityAmount: 68000,
+    activityRecords: [{
+      id: 'follow-battle', type: 'follow', title: '确认方案', operator: '销售甲',
+      createdAt: '2026-07-20T08:00:00.000Z',
+    }],
+  });
+  const battleTodo = {
+    id: 'todo-battle', customerId: battleCustomer.id, customerName: battleCustomer.name,
+    title: '确认决策人', status: 'pending', dueAt: '2026-07-21T08:00:00.000Z',
+    executionMethod: 'phone', assigneeId: 'sales-1', assigneeName: '销售甲',
+    createdById: 'sales-1', createdByName: '销售甲', createdAt: '2026-07-20T08:00:00.000Z',
+    updatedAt: '2026-07-20T08:00:00.000Z',
+  } as CustomerTodo;
+  const result = await createBusinessCockpitService(
+    fakePrisma([row(STORAGE_KEYS.CUSTOMERS, battleCustomer)], [battleTodo]) as any,
+    { now: () => new Date('2026-07-22T08:00:00.000Z') },
+  ).getSnapshot({
+    startAt: START_AT,
+    endAt: END_AT,
+    visibility: { unrestricted: true, visibleUserIds: [], visibleUserNames: [] },
+  });
+
+  assert.deepEqual(result.data?.customerBattles[0], {
+    customerId: 'battle', customerName: '客户-battle', company: '作战客户公司',
+    ownerId: 'sales-1', ownerName: '销售甲', stageCode: 'proposal', stageLabel: '方案报价',
+    opportunityAmount: 68000, nextActionTitle: '确认决策人', nextActionDueAt: '2026-07-21T08:00:00.000Z',
+    contactGapDays: 2, riskLevel: 'high', riskReason: '下一步动作已逾期',
+  });
+}
+
 const application = (
   id: string,
   status: OrderApplication['status'],

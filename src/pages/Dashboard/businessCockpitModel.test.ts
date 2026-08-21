@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { alignComparableTrend, buildCockpitDrilldownPath, rankCockpitRisks, resolveDashboardDateRange } from './businessCockpitModel';
+import { alignComparableTrend, buildBossCommandItems, buildCockpitDrilldownPath, rankCockpitRisks, resolveDashboardDateRange } from './businessCockpitModel';
 
 const now = new Date('2026-08-14T04:00:00.000Z');
 
@@ -56,4 +56,18 @@ test('boss priorities are sorted, capped at five, and exclude the featured item'
   const ranked = rankCockpitRisks(risks);
   assert.equal(ranked[0].id, 'a');
   assert.deepEqual(ranked.slice(1, 6).map((item) => item.id), ['b', 'c', 'e', 'd', 'f']);
+});
+
+test('boss command items connect customer, owner, action and verification evidence', () => {
+  const commands = buildBossCommandItems([], [{
+    customerId: 'customer-1', customerName: '张总', company: '测试公司', ownerId: 'sales-1', ownerName: '销售甲',
+    stageCode: 'proposal', stageLabel: '方案报价', opportunityAmount: 68000,
+    nextActionTitle: '确认决策人', nextActionDueAt: '2026-08-21T09:00:00.000Z',
+    contactGapDays: 3, riskLevel: 'high', riskReason: '下一步动作已逾期',
+  }], 5);
+  assert.deepEqual(commands[0], {
+    id: 'customer:customer-1', kind: 'customer', title: '张总 · 方案报价', owner: '销售甲',
+    target: '测试公司 · ¥68,000', action: '确认决策人', verification: '截止 08-21 17:00',
+    path: '/customers?customerId=customer-1&detailTab=todo', tone: 'error',
+  });
 });

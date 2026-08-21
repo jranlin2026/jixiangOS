@@ -1,4 +1,55 @@
-import type { CockpitRiskItem, CockpitTrendPoint, DashboardDateRange, DashboardRangePreset } from '../../types/dashboard';
+import type { CockpitCustomerBattleItem, CockpitRiskItem, CockpitTrendPoint, DashboardDateRange, DashboardRangePreset, HomeTaskItem } from '../../types/dashboard';
+
+export interface BossCommandItem {
+  id: string;
+  kind: 'customer' | 'risk';
+  title: string;
+  owner: string;
+  target: string;
+  action: string;
+  verification: string;
+  path: string;
+  tone: HomeTaskItem['tone'];
+}
+
+const commandDueLabel = (value?: string) => {
+  if (!value) return '今日内补齐动作';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '核对截止时间';
+  return `截止 ${new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(date).replace(/\//g, '-')}`;
+};
+
+export function buildBossCommandItems(
+  risks: CockpitRiskItem[],
+  customerBattles: CockpitCustomerBattleItem[],
+  limit = 6,
+): BossCommandItem[] {
+  const customerCommands: BossCommandItem[] = customerBattles.map((item) => ({
+    id: `customer:${item.customerId}`,
+    kind: 'customer',
+    title: `${item.customerName} · ${item.stageLabel}`,
+    owner: item.ownerName || '未分配',
+    target: `${item.company || '客户'} · ${item.opportunityAmount ? `¥${Math.round(item.opportunityAmount).toLocaleString('zh-CN')}` : '金额待评估'}`,
+    action: item.nextActionTitle || '补充下一步动作',
+    verification: commandDueLabel(item.nextActionDueAt),
+    path: `/customers?customerId=${encodeURIComponent(item.customerId)}&detailTab=todo`,
+    tone: item.riskLevel === 'high' ? 'error' : item.riskLevel === 'medium' ? 'warning' : 'success',
+  }));
+  const riskCommands: BossCommandItem[] = rankCockpitRisks(risks).map((item) => ({
+    id: `risk:${item.id}`,
+    kind: 'risk',
+    title: item.title,
+    owner: '对应业务负责人',
+    target: item.description || `${item.count} 项经营异常`,
+    action: '进入业务明细处理',
+    verification: `${item.count} 项待闭环`,
+    path: item.path,
+    tone: item.tone,
+  }));
+  return [...customerCommands, ...riskCommands].slice(0, Math.max(0, limit));
+}
 
 export function toShanghaiDateString(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-US', {

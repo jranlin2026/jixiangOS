@@ -38,6 +38,7 @@ import {
   createOrderPaymentReconciliationContext,
   reconcileOrderPayments,
 } from './orderPaymentReconciliation';
+import { buildCustomerBattleSnapshot } from '../../src/shared/utils/customerBattleState';
 
 type BusinessCockpitPrisma = Pick<
   PrismaClient,
@@ -114,6 +115,7 @@ export interface BusinessCockpitSnapshot {
     overdueCustomerTodoCount: number;
     completedCustomerTodoCount: number;
   };
+  customerBattles: BusinessCockpitData['customerBattles'];
   leadSources: Array<{ source: string; leadCount: number; followedCount: number; followRate: number; convertedCustomerCount: number; receiptAmount: number }>;
   orderHealth: {
     pendingReviewApplicationCount: number;
@@ -726,6 +728,38 @@ export function createBusinessCockpitService(
         .filter((transaction) => transaction.sourceType === 'order_payment_adjustment' && transaction.direction === 'expense')
         .reduce((sum, transaction) => sum + finiteMoney(transaction.amount), 0));
       const now = options.now?.() || new Date();
+      const todosByCustomerId = new Map<string, CustomerTodo[]>();
+      customerTodos.forEach((todo) => {
+        const current = todosByCustomerId.get(todo.customerId) || [];
+        current.push(todo);
+        todosByCustomerId.set(todo.customerId, current);
+      });
+      const riskRank = { high: 3, medium: 2, low: 1 } as const;
+      const customerBattles: BusinessCockpitSnapshot['customerBattles'] = customers
+        .filter((customer) => normalizeLifecycleStatusCode(customer.lifecycleStatusCode) !== LIFECYCLE_STATUS_CODES.PUBLIC_POOL)
+        .map((customer) => {
+          const battle = buildCustomerBattleSnapshot(customer, todosByCustomerId.get(customer.id) || [], now);
+          return {
+            customerId: customer.id,
+            customerName: customer.name,
+            company: customer.company || '',
+            ...(customer.ownerId ? { ownerId: customer.ownerId } : {}),
+            ownerName: customer.owner || '未分配',
+            stageCode: battle.stage.code,
+            stageLabel: battle.stage.label,
+            opportunityAmount: battle.opportunityAmount || 0,
+            ...(battle.nextAction ? { nextActionTitle: battle.nextAction.title, nextActionDueAt: battle.nextAction.dueAt } : {}),
+            ...(battle.contactGapDays === null ? {} : { contactGapDays: battle.contactGapDays }),
+            riskLevel: battle.risk.level,
+            riskReason: battle.risk.reason,
+          };
+        })
+        .sort((left, right) => (
+          riskRank[right.riskLevel] - riskRank[left.riskLevel]
+          || right.opportunityAmount - left.opportunityAmount
+          || (right.contactGapDays || 0) - (left.contactGapDays || 0)
+        ))
+        .slice(0, 12);
       const followUpHealth: BusinessCockpitSnapshot['followUpHealth'] = {
         newLeadCount: leads.filter((lead) => inRange(lead.createdAt, startAt, endAt)).length,
         followedLeadCount: leads.filter((lead) => (
@@ -833,6 +867,7 @@ export function createBusinessCockpitService(
           reconciliationDifferenceAmount,
           reconciliationOrderIds: reconciliationIssueOrderIds.sort(),
         },
+        customerBattles,
         followUpHealth,
         leadSources,
         orderHealth,
@@ -1028,6 +1063,7 @@ export function createBusinessCockpitService(
         followedCustomerCount: snapshot.followUpHealth.followedCustomerCount,
         overdueTodoCount: snapshot.followUpHealth.overdueCustomerTodoCount,
       },
+      customerBattles: snapshot.customerBattles,
       leadSources: snapshot.leadSources,
       orderHealth: {
         formalOrderCount: snapshot.business.formalOrderCount,

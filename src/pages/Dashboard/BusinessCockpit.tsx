@@ -7,6 +7,8 @@ import {
   LinearProgress,
   Paper,
   Stack,
+  Tab,
+  Tabs,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -45,6 +47,7 @@ import type {
   HomeTaskItem,
 } from '../../types/dashboard';
 import EnterpriseBrainPanel from './EnterpriseBrainPanel';
+import BossCommandCenter, { CustomerBattleBoard } from './BossCommandCenter';
 import { alignComparableTrend, buildCockpitDrilldownPath, rankCockpitRisks, resolveDashboardDateRange, toShanghaiDateString } from './businessCockpitModel';
 
 const palette = {
@@ -772,6 +775,7 @@ const LegacyBusinessCockpit: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [rangeError, setRangeError] = useState('');
+  const [cockpitTab, setCockpitTab] = useState<'command' | 'customers' | 'team' | 'overview' | 'organization'>('command');
   const latestRequestId = useRef(0);
 
   const fetchData = async (nextRange = range) => {
@@ -941,66 +945,60 @@ const LegacyBusinessCockpit: React.FC = () => {
         />
       )}
 
-      <Stack spacing={2}>
-        <ExecutiveOverview data={data} mainRisk={mainRisk} range={range} />
+      <Paper elevation={0} sx={{ border: `1px solid ${palette.line}`, borderRadius: 1.5, mb: 2, overflow: 'hidden' }}>
+        <Tabs value={cockpitTab} onChange={(_, value) => setCockpitTab(value)} variant="scrollable" scrollButtons="auto" sx={{ px: 1, minHeight: 50, '& .MuiTab-root': { minHeight: 50, fontWeight: 850 } }}>
+          <Tab value="command" label="今日指挥" />
+          <Tab value="customers" label={`客户作战 ${data.customerBattles.length}`} />
+          <Tab value="team" label="销售团队" />
+          <Tab value="overview" label="经营总览" />
+          <Tab value="organization" label="组织执行" />
+        </Tabs>
+      </Paper>
 
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 2fr) minmax(320px, 0.9fr)' },
-            gap: 2,
-            alignItems: 'stretch',
-          }}
-        >
-          <Box sx={{ minWidth: 0 }}>
-            <RevenueTrend data={data.trend} comparison={data.comparison} currentStartDate={range.startDate || todayString()} />
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <RiskWorkbench risks={riskTasks} />
-          </Box>
-        </Box>
+      {cockpitTab === 'command' && (
+        <Stack spacing={2}>
+          <BossCommandCenter data={data} risks={riskTasks} organizationData={organizationData} />
+          <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} onData={setOrganizationData} />
+        </Stack>
+      )}
 
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 0.9fr) minmax(0, 1.1fr)' },
-            gap: 2,
-            alignItems: 'stretch',
-          }}
-        >
-          <Box sx={{ minWidth: 0 }}>
-            <CustomerHealthPanel health={data.customerHealth} sources={data.leadSources} summary={data.summary} finance={data.financeHealth} />
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <OrderFinanceHealthPanel order={data.orderHealth} finance={data.financeHealth} />
-          </Box>
-        </Box>
+      {cockpitTab === 'customers' && <CustomerBattleBoard data={data} />}
 
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' },
-            gap: 2,
-          }}
-        >
-          <Box sx={{ minWidth: 0 }}>
+      {cockpitTab === 'team' && (
+        <Stack spacing={2}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 2 }}>
             <PerformanceRanking title="销售业绩排行" eyebrow="期间正式订单实收" rows={data.salesRanking} accent={palette.blue} />
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
             <PerformanceRanking title="挽回业绩排行" eyebrow="期间售后挽回成交" rows={data.recoveryRanking} accent={palette.green} showAssist />
           </Box>
-        </Box>
-
-        <MarketingPublishPanel />
-
-        <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} onData={setOrganizationData} />
-
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ color: palette.muted, px: 0.5 }}>
-          <TrendingUpIcon fontSize="small" />
-          <Typography variant="caption">
-            线索入库 → 客户沉淀 → 订单申请 → 财务入库 → 分账确认，经营数据按真实业务时间持续更新。
-          </Typography>
+          <CustomerHealthPanel health={data.customerHealth} sources={data.leadSources} summary={data.summary} finance={data.financeHealth} />
         </Stack>
+      )}
+
+      {cockpitTab === 'overview' && (
+        <Stack spacing={2}>
+          <ExecutiveOverview data={data} mainRisk={mainRisk} range={range} />
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 2fr) minmax(320px, .9fr)' }, gap: 2 }}>
+            <RevenueTrend data={data.trend} comparison={data.comparison} currentStartDate={range.startDate || todayString()} />
+            <RiskWorkbench risks={riskTasks} />
+          </Box>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, .9fr) minmax(0, 1.1fr)' }, gap: 2 }}>
+            <CustomerHealthPanel health={data.customerHealth} sources={data.leadSources} summary={data.summary} finance={data.financeHealth} />
+            <OrderFinanceHealthPanel order={data.orderHealth} finance={data.financeHealth} />
+          </Box>
+          <MarketingPublishPanel />
+        </Stack>
+      )}
+
+      {cockpitTab === 'organization' && (
+        <Stack spacing={2}>
+          <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} onData={setOrganizationData} />
+          <MarketingPublishPanel />
+        </Stack>
+      )}
+
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ color: palette.muted, px: .5, mt: 2 }}>
+        <TrendingUpIcon fontSize="small" />
+        <Typography variant="caption">经营指挥链：异常识别 → 明确责任人 → 锁定客户或业务对象 → 下达动作 → 结果验收。</Typography>
       </Stack>
     </Box>
   );

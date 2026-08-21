@@ -113,6 +113,22 @@ export interface CockpitCustomerHealth {
   overdueTodoCount: number;
 }
 
+export interface CockpitCustomerBattleItem {
+  customerId: string;
+  customerName: string;
+  company: string;
+  ownerId?: string;
+  ownerName: string;
+  stageCode: string;
+  stageLabel: string;
+  opportunityAmount: number;
+  nextActionTitle?: string;
+  nextActionDueAt?: Timestamp;
+  contactGapDays?: number;
+  riskLevel: 'low' | 'medium' | 'high';
+  riskReason: string;
+}
+
 export interface CockpitLeadSourceItem {
   source: string;
   leadCount: number;
@@ -166,6 +182,7 @@ export interface BusinessCockpitData {
   salesRanking: CockpitPerformanceRankingItem[];
   recoveryRanking: CockpitPerformanceRankingItem[];
   customerHealth: CockpitCustomerHealth;
+  customerBattles: CockpitCustomerBattleItem[];
   leadSources: CockpitLeadSourceItem[];
   orderHealth: CockpitOrderHealth;
   financeHealth: CockpitFinanceHealth;
