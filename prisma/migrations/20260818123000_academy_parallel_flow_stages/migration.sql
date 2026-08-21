@@ -68,4 +68,4 @@ ALTER TABLE `academy_session_tasks`
   MODIFY `stageKey` VARCHAR(64) NOT NULL,
   MODIFY `stageName` VARCHAR(160) NOT NULL,
   MODIFY `stageOrder` INTEGER NOT NULL,
-  ADD INDEX `academy_session_tasks_sessionId_category_stageOrder_isUnlocked_idx` (`sessionId`, `category`, `stageOrder`, `isUnlocked`);
+  ADD INDEX `academy_tasks_session_stage_unlock_idx` (`sessionId`, `category`, `stageOrder`, `isUnlocked`);
