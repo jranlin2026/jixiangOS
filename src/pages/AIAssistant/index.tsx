@@ -31,7 +31,7 @@ const AIAssistant: React.FC = () => {
   };
   const remove = async (id: string) => { const response = await enterpriseBrainApi.deleteConversation(id); if (response.code === 0) { if (current?.id === id) setCurrent(null); await loadConversations(); } };
 
-  return <Box sx={{ height: 'calc(100vh - 56px)', display: 'grid', gridTemplateColumns: { xs: '1fr', md: '280px minmax(0, 1fr) 260px' }, bgcolor: moduleTokens.page, overflow: 'hidden' }}>
+  return <Box sx={{ height: { xs: 'calc(100dvh - 56px)', md: '100%' }, minHeight: 0, display: 'grid', gridTemplateColumns: { xs: '1fr', md: '280px minmax(0, 1fr) 260px' }, bgcolor: moduleTokens.page, overflow: 'hidden' }}>
     <Box sx={{ display: { xs: 'none', md: 'flex' }, flexDirection: 'column', bgcolor: '#fff', borderRight: `1px solid ${moduleTokens.line}`, minHeight: 0 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ p: 2 }}><Box><Typography sx={{ fontWeight: 900 }}>AI岗位助手</Typography><Typography variant="caption" color="text.secondary">只依据当前有效公司知识</Typography></Box><IconButton onClick={() => setCurrent(null)}><AddIcon /></IconButton></Stack><Divider />
       <List sx={{ overflow: 'auto' }}>{conversations.map((item) => <ListItemButton key={item.id} selected={item.id === current?.id} onClick={() => void openConversation(item.id)}><ListItemText primary={item.title} secondary={new Date(item.updatedAt).toLocaleString()} primaryTypographyProps={{ noWrap: true, fontWeight: 700 }} /><IconButton size="small" onClick={(event) => { event.stopPropagation(); void remove(item.id); }}><DeleteIcon fontSize="small" /></IconButton></ListItemButton>)}</List>

@@ -14,7 +14,6 @@ import GlobalTableColumnResizer from '../shared/components/GlobalTableColumnResi
 import ChangePasswordDialog from '../shared/components/ChangePasswordDialog';
 import useAuthStore from '../store/useAuthStore';
 import NotificationBell from '../shared/components/NotificationBell';
-import TopHeader from './TopHeader';
 import { shellSurfaceShadow, shellVisualTokens as shell } from './shellVisualTokens';
 
 const AppLayout: React.FC = () => {
@@ -50,7 +49,6 @@ const AppLayout: React.FC = () => {
         component="main"
         sx={APP_SHELL_MAIN_SX}
       >
-        <TopHeader />
         {shellPresentation.showMobileHeader && <Box
           component="header"
           sx={{

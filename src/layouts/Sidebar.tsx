@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Avatar, Box, Chip, Collapse, Divider, Drawer, IconButton, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Stack, Tooltip, Typography } from '@mui/material';
+import { Avatar, Box, ButtonBase, Chip, Collapse, Divider, Drawer, IconButton, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Menu, MenuItem, Stack, Tooltip, Typography } from '@mui/material';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -10,10 +10,10 @@ import GroupsIcon from '@mui/icons-material/Groups';
 import HomeIcon from '@mui/icons-material/Home';
 import LockResetIcon from '@mui/icons-material/LockReset';
 import LogoutIcon from '@mui/icons-material/Logout';
+import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import PaidIcon from '@mui/icons-material/Paid';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
-import WorkspacePremiumOutlinedIcon from '@mui/icons-material/WorkspacePremiumOutlined';
 import BusinessOutlinedIcon from '@mui/icons-material/BusinessOutlined';
 import { ROUTES } from '../shared/utils/constants';
 import { hasPermission, PERMISSION_KEYS } from '../shared/utils/permissions';
@@ -44,12 +44,14 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
   const location = useLocation();
   const { currentUser, logout } = useAuthStore();
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+  const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null);
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const currentDepartmentName = useMemo(() => {
     if (!currentUser?.departmentId) return '';
     return ensureOrganizationConfigData().departments.find((department) => department.id === currentUser.departmentId)?.name || '';
   }, [currentUser?.departmentId]);
-  const currentUserMeta = currentDepartmentName ? `${currentUser?.role || ''} · ${currentDepartmentName}` : currentUser?.role;
+  const currentUserRole = currentUser?.positionName || currentUser?.role || '员工';
+  const currentUserMeta = currentDepartmentName ? `${currentUserRole} · ${currentDepartmentName}` : currentUserRole;
   const canUseAiAssistant = [PERMISSION_KEYS.AI_ASSISTANT, PERMISSION_KEYS.AI_POSITION_ASSISTANT]
     .some((permissionKey) => hasPermission(currentUser, permissionKey));
   const { fixedItems: visibleFixedItems, groups: visibleGroups } = useMemo(
@@ -63,6 +65,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
   }, [activeGroupId]);
 
   const handleLogout = async () => {
+    setAccountAnchor(null);
     await logout();
     navigate('/login', { replace: true });
   };
@@ -138,27 +141,45 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
           })}
         </List>
 
-        <Box sx={{ px: 1.75, pb: 1 }}>
-          <Box sx={{ px: 1.25, py: 1, borderRadius: 2.25, bgcolor: '#F9F6FF', border: `1px solid ${shell.line}`, boxShadow: '0 8px 22px rgba(86, 48, 201, 0.045)' }}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Box sx={{ width: 30, height: 30, display: 'grid', placeItems: 'center', borderRadius: 1.75, bgcolor: '#EEE7FF', color: shell.violet }}>
-                <WorkspacePremiumOutlinedIcon fontSize="small" />
-              </Box>
-              <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 900 }}>企业版 · 已启用</Typography>
-            </Stack>
-          </Box>
-        </Box>
-
-        {currentUser && variant === 'temporary' && (
-          <Box sx={{ borderTop: `1px solid ${shell.softLine}`, p: 1.5, display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#FFFFFF' }}>
-            <Avatar src={currentUser.avatar} sx={{ width: 34, height: 34, bgcolor: '#EEE7FF', color: shell.violet, fontSize: 14, fontWeight: 900 }}>{currentUser.name.slice(0, 1)}</Avatar>
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography variant="body2" sx={{ fontWeight: 900, color: shell.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentUser.name}</Typography>
-              <Typography variant="caption" sx={{ color: shell.muted, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={currentUserMeta}>{currentUserMeta}</Typography>
+        {currentUser && (
+          <Box data-sidebar-account-dock="true" sx={{ borderTop: `1px solid ${shell.softLine}`, p: 1.25, bgcolor: shell.header }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, border: `1px solid ${shell.line}`, borderRadius: 2.5, bgcolor: '#F9F6FF', boxShadow: '0 8px 22px rgba(86, 48, 201, 0.05)', p: 0.5 }}>
+              <ButtonBase
+                aria-label="打开账号菜单"
+                aria-haspopup="menu"
+                aria-expanded={Boolean(accountAnchor)}
+                onClick={(event) => setAccountAnchor(event.currentTarget)}
+                sx={{ flex: 1, minWidth: 0, justifyContent: 'flex-start', borderRadius: 2, px: 0.75, py: 0.5, '&:hover': { bgcolor: shell.violetHover } }}
+              >
+                <Avatar src={currentUser.avatar} sx={{ width: 36, height: 36, bgcolor: '#EEE7FF', color: shell.violet, fontSize: 14, fontWeight: 900, flexShrink: 0 }}>{currentUser.name.slice(0, 1)}</Avatar>
+                <Box sx={{ ml: 1, flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <Typography variant="body2" sx={{ fontWeight: 900, color: shell.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentUser.name}</Typography>
+                  <Typography variant="caption" sx={{ color: shell.muted, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${currentUserMeta} · 企业版`}>{currentUserMeta} · 企业版</Typography>
+                </Box>
+                <ExpandMoreIcon sx={{ color: shell.muted, fontSize: 18, flexShrink: 0 }} />
+              </ButtonBase>
+              <NotificationBell />
             </Box>
-            <NotificationBell />
-            <Tooltip title="修改密码"><IconButton size="small" onClick={() => setPasswordDialogOpen(true)}><LockResetIcon fontSize="small" /></IconButton></Tooltip>
-            <Tooltip title="退出登录"><IconButton size="small" onClick={handleLogout}><LogoutIcon fontSize="small" /></IconButton></Tooltip>
+            <Menu
+              anchorEl={accountAnchor}
+              open={Boolean(accountAnchor)}
+              onClose={() => setAccountAnchor(null)}
+              anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+              transformOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            >
+              <MenuItem onClick={() => { setAccountAnchor(null); navigateTo(ROUTES.NOTIFICATIONS); }}>
+                <ListItemIcon><NotificationsNoneIcon fontSize="small" /></ListItemIcon>
+                消息中心
+              </MenuItem>
+              <MenuItem onClick={() => { setAccountAnchor(null); setPasswordDialogOpen(true); }}>
+                <ListItemIcon><LockResetIcon fontSize="small" /></ListItemIcon>
+                修改密码
+              </MenuItem>
+              <MenuItem onClick={() => void handleLogout()}>
+                <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
+                退出登录
+              </MenuItem>
+            </Menu>
           </Box>
         )}
         <ChangePasswordDialog open={passwordDialogOpen} onClose={() => setPasswordDialogOpen(false)} onChanged={handleLogout} />
