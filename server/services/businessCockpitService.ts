@@ -20,6 +20,7 @@ import {
   getUserRole,
   isSuperAdmin,
   PERMISSION_KEYS,
+  canReceiveLead,
   roleHasPermission,
 } from '../../src/shared/utils/permissions';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
@@ -122,6 +123,22 @@ export interface BusinessCockpitSnapshot {
   };
   customerBattles: BusinessCockpitData['customerBattles'];
   customerBattleStages: BusinessCockpitData['customerBattleStages'];
+  salesBattleProfiles: Array<{
+    ownerId?: string;
+    ownerName: string;
+    customerCount: number;
+    activeOpportunityCount: number;
+    opportunityAmount: number;
+    todayDueTodoCount: number;
+    todayCompletedTodoCount: number;
+    overdueCustomerCount: number;
+    riskCustomerCount: number;
+    missingNextActionCount: number;
+    wonCount: number;
+    lostCount: number;
+    conversionRate: number;
+    priorityCustomers: BusinessCockpitData['customerBattles'];
+  }>;
   leadSources: Array<{ source: string; leadCount: number; followedCount: number; followRate: number; convertedCustomerCount: number; receiptAmount: number }>;
   orderHealth: {
     pendingReviewApplicationCount: number;
@@ -777,6 +794,88 @@ export function createBusinessCockpitService(
       const customerBattleStages = [...customerBattleStageMap.values()]
         .sort((left, right) => right.opportunityAmount - left.opportunityAmount || right.customerCount - left.customerCount);
       const customerBattles = allCustomerBattles.slice(0, 12);
+      const salesBattleProfileMap = new Map<string, BusinessCockpitSnapshot['salesBattleProfiles'][number]>();
+      allCustomerBattles.forEach((item) => {
+        const key = rankingKey(item.ownerId, item.ownerName);
+        const current = salesBattleProfileMap.get(key) || {
+          ...(item.ownerId ? { ownerId: item.ownerId } : {}),
+          ownerName: item.ownerName,
+          customerCount: 0,
+          activeOpportunityCount: 0,
+          opportunityAmount: 0,
+          todayDueTodoCount: 0,
+          todayCompletedTodoCount: 0,
+          overdueCustomerCount: 0,
+          riskCustomerCount: 0,
+          missingNextActionCount: 0,
+          wonCount: 0,
+          lostCount: 0,
+          conversionRate: 0,
+          priorityCustomers: [],
+        };
+        current.customerCount += 1;
+        if (item.stageCode === 'won') current.wonCount += 1;
+        else if (item.stageCode === 'lost') current.lostCount += 1;
+        else if (item.stageCode !== 'not_set') {
+          current.activeOpportunityCount += 1;
+          current.opportunityAmount = roundMoney(current.opportunityAmount + item.opportunityAmount);
+        }
+        if (!['won', 'lost'].includes(item.stageCode)) {
+          current.priorityCustomers.push(item);
+          if (!item.nextActionTitle) current.missingNextActionCount += 1;
+        }
+        if (item.riskLevel !== 'low') current.riskCustomerCount += 1;
+        if (item.riskLevel === 'high') current.overdueCustomerCount += 1;
+        salesBattleProfileMap.set(key, current);
+      });
+      const salesProfileForTodo = (todo: CustomerTodo) => {
+        const key = rankingKey(todo.assigneeId, todo.assigneeName);
+        const existing = salesBattleProfileMap.get(key);
+        const profile = existing || {
+          ...(todo.assigneeId ? { ownerId: todo.assigneeId } : {}),
+          ownerName: todo.assigneeName || '未分配',
+          customerCount: 0,
+          activeOpportunityCount: 0,
+          opportunityAmount: 0,
+          todayDueTodoCount: 0,
+          todayCompletedTodoCount: 0,
+          overdueCustomerCount: 0,
+          riskCustomerCount: 0,
+          missingNextActionCount: 0,
+          wonCount: 0,
+          lostCount: 0,
+          conversionRate: 0,
+          priorityCustomers: [],
+        };
+        salesBattleProfileMap.set(key, profile);
+        return profile;
+      };
+      customerTodos.filter((todo) => (
+        todo.status !== 'canceled' && shanghaiDateKey(todo.dueAt) === shanghaiDateKey(now)
+      )).forEach((todo) => {
+        salesProfileForTodo(todo).todayDueTodoCount += 1;
+      });
+      customerTodos.filter((todo) => (
+        todo.status === 'completed'
+        && Boolean(todo.completedAt)
+        && shanghaiDateKey(todo.completedAt) === shanghaiDateKey(now)
+      )).forEach((todo) => {
+        salesProfileForTodo(todo).todayCompletedTodoCount += 1;
+      });
+      const salesBattleProfiles = [...salesBattleProfileMap.values()]
+        .map((profile) => ({
+          ...profile,
+          conversionRate: profile.wonCount + profile.lostCount
+            ? roundMoney(profile.wonCount / (profile.wonCount + profile.lostCount) * 100)
+            : 0,
+          priorityCustomers: profile.priorityCustomers.slice(0, 5),
+        }))
+        .sort((left, right) => (
+          right.overdueCustomerCount - left.overdueCustomerCount
+          || right.riskCustomerCount - left.riskCustomerCount
+          || right.opportunityAmount - left.opportunityAmount
+          || right.customerCount - left.customerCount
+        ));
       const followUpHealth: BusinessCockpitSnapshot['followUpHealth'] = {
         newLeadCount: leads.filter((lead) => inRange(lead.createdAt, startAt, endAt)).length,
         followedLeadCount: leads.filter((lead) => (
@@ -886,6 +985,7 @@ export function createBusinessCockpitService(
         },
         customerBattles,
         customerBattleStages,
+        salesBattleProfiles,
         followUpHealth,
         leadSources,
         orderHealth,
@@ -965,13 +1065,14 @@ export function createBusinessCockpitService(
     const previousSnapshot = previousSnapshotResponse.data;
     const userById = new Map(users.map((user) => [user.id, user]));
     const departmentById = new Map(departments.map((department) => [department.id, department.name]));
+    const resolveProfileUser = (userId: string | undefined, name: string) => (
+      userId ? userById.get(userId) : uniqueActiveUserByName.get(clean(name)) || undefined
+    );
     const mapRanking = (item: BusinessCockpitRankingItem) => {
-      const user = (item.userId ? userById.get(item.userId) : undefined)
-        || uniqueActiveUserByName.get(clean(item.name))
-        || undefined;
+      const user = resolveProfileUser(item.userId, item.name);
       const stableUserId = user?.id;
       return {
-        userId: stableUserId || `legacy:${item.name}`,
+        userId: stableUserId || (item.userId ? `unresolved:${item.userId}` : `legacy:${item.name}`),
         name: item.name,
         ...(user?.departmentId ? { department: departmentById.get(user.departmentId) } : {}),
         amount: item.amount,
@@ -981,6 +1082,104 @@ export function createBusinessCockpitService(
         identityStatus: stableUserId ? 'resolved' as const : item.userId ? 'unresolved' as const : 'legacy' as const,
       };
     };
+    const mappedSalesRanking = snapshot.salesRanking.map(mapRanking);
+    const profileRiskRank = { high: 3, medium: 2, low: 1 } as const;
+    const salesBattleProfileMap = new Map<string, BusinessCockpitData['salesBattleProfiles'][number]>();
+    snapshot.salesBattleProfiles.forEach((profile) => {
+      const user = resolveProfileUser(profile.ownerId, profile.ownerName);
+      if (!profile.customerCount && !user) return;
+      if (!profile.customerCount && user && !canReceiveLead(user, roles)) return;
+      const stableUserId = user?.id;
+      const identityStatus = stableUserId ? 'resolved' as const : profile.ownerId ? 'unresolved' as const : 'legacy' as const;
+      const key = stableUserId || (profile.ownerId ? `unresolved:${profile.ownerId}` : `legacy:${profile.ownerName}`);
+      const ranking = mappedSalesRanking.find((item) => (
+        item.userId === key || (!profile.ownerId && !stableUserId && item.name === profile.ownerName)
+      ));
+      const existing = salesBattleProfileMap.get(key);
+      const priorityCustomers = [...(existing?.priorityCustomers || []), ...profile.priorityCustomers]
+        .filter((item, index, items) => items.findIndex((candidate) => candidate.customerId === item.customerId) === index)
+        .sort((left, right) => (
+          profileRiskRank[right.riskLevel] - profileRiskRank[left.riskLevel]
+          || right.opportunityAmount - left.opportunityAmount
+        ))
+        .slice(0, 5);
+      const wonCount = (existing?.wonCount || 0) + profile.wonCount;
+      const lostCount = (existing?.lostCount || 0) + profile.lostCount;
+      salesBattleProfileMap.set(key, {
+        userId: key,
+        name: user?.name || profile.ownerName,
+        ...(user?.departmentId ? { department: departmentById.get(user.departmentId) } : {}),
+        identityStatus,
+        revenueAmount: Math.max(existing?.revenueAmount || 0, ranking?.amount || 0),
+        orderCount: Math.max(existing?.orderCount || 0, ranking?.count || 0),
+        customerCount: (existing?.customerCount || 0) + profile.customerCount,
+        activeOpportunityCount: (existing?.activeOpportunityCount || 0) + profile.activeOpportunityCount,
+        opportunityAmount: roundMoney((existing?.opportunityAmount || 0) + profile.opportunityAmount),
+        todayDueTodoCount: (existing?.todayDueTodoCount || 0) + profile.todayDueTodoCount,
+        todayCompletedTodoCount: (existing?.todayCompletedTodoCount || 0) + profile.todayCompletedTodoCount,
+        overdueCustomerCount: (existing?.overdueCustomerCount || 0) + profile.overdueCustomerCount,
+        riskCustomerCount: (existing?.riskCustomerCount || 0) + profile.riskCustomerCount,
+        missingNextActionCount: (existing?.missingNextActionCount || 0) + profile.missingNextActionCount,
+        wonCount,
+        lostCount,
+        conversionRate: wonCount + lostCount ? roundMoney(wonCount / (wonCount + lostCount) * 100) : 0,
+        priorityCustomers,
+      });
+    });
+    const mappedSalesProfileKeys = new Set(salesBattleProfileMap.keys());
+    const salesBattleProfiles: BusinessCockpitData['salesBattleProfiles'] = [...salesBattleProfileMap.values()];
+    const appendEmptyProfile = (ranking: {
+      userId: string;
+      name: string;
+      department?: string;
+      identityStatus: 'resolved' | 'legacy' | 'unresolved';
+      amount: number;
+      count: number;
+    }) => {
+      if (mappedSalesProfileKeys.has(ranking.userId)) return;
+      mappedSalesProfileKeys.add(ranking.userId);
+      salesBattleProfiles.push({
+        userId: ranking.userId,
+        name: ranking.name,
+        ...(ranking.department ? { department: ranking.department } : {}),
+        identityStatus: ranking.identityStatus || 'legacy',
+        revenueAmount: ranking.amount,
+        orderCount: ranking.count,
+        customerCount: 0,
+        activeOpportunityCount: 0,
+        opportunityAmount: 0,
+        todayDueTodoCount: 0,
+        todayCompletedTodoCount: 0,
+        overdueCustomerCount: 0,
+        riskCustomerCount: 0,
+        missingNextActionCount: 0,
+        wonCount: 0,
+        lostCount: 0,
+        conversionRate: 0,
+        priorityCustomers: [],
+      });
+    };
+    mappedSalesRanking.forEach(appendEmptyProfile);
+    const visibleSalesUserIds = new Set(scopes.customers.visibleUserIds);
+    users.filter((user) => (
+      user.isActive
+      && (user.employmentStatus || 'active') === 'active'
+      && visibleSalesUserIds.has(user.id)
+      && canReceiveLead(user, roles)
+    )).forEach((user) => appendEmptyProfile({
+      userId: user.id,
+      name: user.name,
+      ...(user.departmentId ? { department: departmentById.get(user.departmentId) } : {}),
+      identityStatus: 'resolved',
+      amount: 0,
+      count: 0,
+    }));
+    salesBattleProfiles.sort((left, right) => (
+      right.overdueCustomerCount - left.overdueCustomerCount
+      || right.riskCustomerCount - left.riskCustomerCount
+      || right.opportunityAmount - left.opportunityAmount
+      || right.revenueAmount - left.revenueAmount
+    ));
     const canViewReconciliationEvidence = isSuperAdmin(actor);
     const financeFlowQuery = new URLSearchParams({ tab: 'flow' });
     if (canViewReconciliationEvidence && snapshot.financeHealth.reconciliationOrderIds.length) {
@@ -1070,7 +1269,7 @@ export function createBusinessCockpitService(
         endDate: shanghaiDateKey(previousRange.endAt) || '',
       },
       trend: snapshot.trend,
-      salesRanking: snapshot.salesRanking.map(mapRanking),
+      salesRanking: mappedSalesRanking,
       recoveryRanking: snapshot.recoveryRanking.map(mapRanking),
       customerHealth: {
         newLeadCount,
@@ -1085,6 +1284,7 @@ export function createBusinessCockpitService(
       },
       customerBattles: canViewCustomerBattles ? snapshot.customerBattles : [],
       customerBattleStages: canViewCustomerBattles ? snapshot.customerBattleStages : [],
+      salesBattleProfiles: canViewCustomerBattles ? salesBattleProfiles : [],
       leadSources: snapshot.leadSources,
       orderHealth: {
         formalOrderCount: snapshot.business.formalOrderCount,

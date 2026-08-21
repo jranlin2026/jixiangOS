@@ -47,7 +47,7 @@ import type {
   HomeTaskItem,
 } from '../../types/dashboard';
 import EnterpriseBrainPanel from './EnterpriseBrainPanel';
-import BossCommandCenter, { CustomerBattleBoard } from './BossCommandCenter';
+import BossCommandCenter, { CustomerBattleBoard, SalesTeamBattleBoard } from './BossCommandCenter';
 import { alignComparableTrend, buildCockpitDrilldownPath, rankCockpitRisks, resolveDashboardDateRange, toShanghaiDateString } from './businessCockpitModel';
 
 const palette = {
@@ -788,6 +788,7 @@ const LegacyBusinessCockpit: React.FC = () => {
   const [loadError, setLoadError] = useState('');
   const [rangeError, setRangeError] = useState('');
   const [cockpitTab, setCockpitTab] = useState<'command' | 'customers' | 'team' | 'overview' | 'organization'>('command');
+  const [selectedSalesUserId, setSelectedSalesUserId] = useState<string>();
   const latestRequestId = useRef(0);
 
   const fetchData = async (nextRange = range) => {
@@ -972,7 +973,7 @@ const LegacyBusinessCockpit: React.FC = () => {
 
       {cockpitTab === 'command' && (
         <Stack spacing={2}>
-          <BossCommandCenter data={data} risks={riskTasks} organizationData={organizationData} canViewCustomers={canViewCockpitCustomers} canViewTeamTasks={canViewCockpitTeamTasks} canAssignTasks={canAssignCockpitTasks} canOpenPath={(path) => canAccessCockpitPath(currentUser, path)} />
+          <BossCommandCenter data={data} risks={riskTasks} organizationData={organizationData} canViewCustomers={canViewCockpitCustomers} canViewTeamTasks={canViewCockpitTeamTasks} canAssignTasks={canAssignCockpitTasks} canOpenPath={(path) => canAccessCockpitPath(currentUser, path)} onOpenSalesProfile={(userId) => { setSelectedSalesUserId(userId); setCockpitTab('team'); }} />
           <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} onData={setOrganizationData} />
         </Stack>
       )}
@@ -981,6 +982,7 @@ const LegacyBusinessCockpit: React.FC = () => {
 
       {cockpitTab === 'team' && (
         <Stack spacing={2}>
+          {canViewCockpitCustomers && <SalesTeamBattleBoard data={data} selectedUserId={selectedSalesUserId} onSelectUser={setSelectedSalesUserId} canViewCustomers />}
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 2 }}>
             <PerformanceRanking title="销售业绩排行" eyebrow="期间正式订单实收" rows={data.salesRanking} accent={palette.blue} />
             <PerformanceRanking title="挽回业绩排行" eyebrow="期间售后挽回成交" rows={data.recoveryRanking} accent={palette.green} showAssist />

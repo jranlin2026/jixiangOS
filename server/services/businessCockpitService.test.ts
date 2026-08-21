@@ -217,7 +217,7 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
     ])),
   ]) as any).get({ preset: 'custom', startDate: '2026-07-01', endDate: '2026-07-31' }, admin);
   assert.deepEqual(result.data?.salesRanking[0], {
-    userId: 'legacy:离职销售', name: '离职销售', amount: 899, count: 1, averageAmount: 899,
+    userId: 'unresolved:departed-user', name: '离职销售', amount: 899, count: 1, averageAmount: 899,
     identityStatus: 'unresolved',
   });
 }
@@ -242,6 +242,7 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
   }).get({ preset: 'custom', startDate: '2026-07-01', endDate: '2026-07-31' }, restrictedActor);
   assert.deepEqual(result.data?.customerBattles, []);
   assert.deepEqual(result.data?.customerBattleStages, []);
+  assert.deepEqual(result.data?.salesBattleProfiles, []);
 }
 
 // 老板驾驶舱必须直接给出“客户—责任人—下一步动作”，不能只返回聚合数字。
@@ -280,6 +281,140 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
   assert.deepEqual(result.data?.customerBattleStages, [{
     stageCode: 'proposal', stageLabel: '方案报价', customerCount: 1, opportunityAmount: 68000,
   }]);
+}
+
+// 员工作战档案必须同时回答客户盘、今日动作、逾期风险和成交转化。
+{
+  const activeCustomer = customer('profile-active', 'sales-1', {
+    opportunityStageCode: 'proposal', opportunityAmount: 50000,
+  });
+  const wonCustomer = customer('profile-won', 'sales-1', {
+    opportunityStageCode: 'won', opportunityAmount: 30000,
+  });
+  const lostCustomer = customer('profile-lost', 'sales-1', {
+    opportunityStageCode: 'lost', opportunityAmount: 20000,
+  });
+  const result = await createBusinessCockpitService(fakePrisma([
+    row(STORAGE_KEYS.CUSTOMERS, activeCustomer),
+    row(STORAGE_KEYS.CUSTOMERS, wonCustomer),
+    row(STORAGE_KEYS.CUSTOMERS, lostCustomer),
+  ], [{
+    id: 'profile-overdue', customerId: activeCustomer.id, customerName: activeCustomer.name,
+    title: '确认预算', status: 'pending', dueAt: '2026-07-22T02:00:00.000Z',
+    executionMethod: 'phone', assigneeId: 'sales-1', assigneeName: '销售甲',
+    createdById: 'sales-1', createdByName: '销售甲', createdAt: '2026-07-20T08:00:00.000Z',
+    updatedAt: '2026-07-20T08:00:00.000Z',
+  } as CustomerTodo, {
+    id: 'profile-completed', customerId: activeCustomer.id, customerName: activeCustomer.name,
+    title: '确认需求', status: 'completed', dueAt: '2026-07-22T01:00:00.000Z',
+    executionMethod: 'wechat', assigneeId: 'sales-1', assigneeName: '销售甲',
+    createdById: 'sales-1', createdByName: '销售甲', completedAt: '2026-07-22T03:00:00.000Z',
+    createdAt: '2026-07-20T08:00:00.000Z', updatedAt: '2026-07-22T03:00:00.000Z',
+  } as CustomerTodo, {
+    id: 'profile-completed-late', customerId: activeCustomer.id, customerName: activeCustomer.name,
+    title: '补做昨日动作', status: 'completed', dueAt: '2026-07-21T01:00:00.000Z',
+    executionMethod: 'phone', assigneeId: 'sales-1', assigneeName: '销售甲',
+    createdById: 'sales-1', createdByName: '销售甲', completedAt: '2026-07-22T04:00:00.000Z',
+    createdAt: '2026-07-20T08:00:00.000Z', updatedAt: '2026-07-22T04:00:00.000Z',
+  } as CustomerTodo]) as any, {
+    now: () => new Date('2026-07-22T08:00:00.000Z'),
+  }).getSnapshot({
+    startAt: START_AT, endAt: END_AT,
+    visibility: { unrestricted: true, visibleUserIds: [], visibleUserNames: [] },
+  });
+
+  const profile = (result.data as any)?.salesBattleProfiles[0];
+  assert.deepEqual({ ...profile, priorityCustomers: undefined }, {
+    ownerId: 'sales-1', ownerName: '销售甲', customerCount: 3,
+    activeOpportunityCount: 1, opportunityAmount: 50000,
+    todayDueTodoCount: 2, todayCompletedTodoCount: 2, overdueCustomerCount: 1,
+    wonCount: 1, lostCount: 1, conversionRate: 50,
+    riskCustomerCount: 1, missingNextActionCount: 0,
+    priorityCustomers: undefined,
+  });
+  assert.equal(profile.priorityCustomers[0].customerId, 'profile-active');
+}
+
+// 零客户、零订单的在职销售也必须进入老板的员工盘点范围。
+{
+  const directoryPrisma = fakePrisma([]) as any;
+  const [baseUsers, baseRoles] = await Promise.all([
+    directoryPrisma.user.findMany(), directoryPrisma.role.findMany(),
+  ]);
+  const now = new Date('2026-07-01T00:00:00.000Z');
+  directoryPrisma.user.findMany = async () => [...baseUsers, {
+    ...baseUsers[0], id: 'sales-zero', name: '零动作销售', account: 'sales-zero', role: '销售',
+    roleId: 'role-sales', departmentId: 'department-1',
+  }];
+  directoryPrisma.role.findMany = async () => [...baseRoles, {
+    id: 'role-sales', name: '销售', code: 'sales', description: null, departmentId: null,
+    permissions: [{ module: '线索/线索列表/开始跟进并加入客户', actions: ['read'] }],
+    dataScopes: { customers: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
+  }];
+  const result = await createBusinessCockpitService(directoryPrisma, {
+    now: () => new Date('2026-07-22T08:00:00.000Z'),
+  }).get({ preset: 'custom', startDate: '2026-07-01', endDate: '2026-07-31' }, admin);
+  const zeroProfile = result.data?.salesBattleProfiles.find((item) => item.userId === 'sales-zero');
+  assert.deepEqual(zeroProfile, {
+    userId: 'sales-zero', name: '零动作销售', department: '管理部', identityStatus: 'resolved',
+    revenueAmount: 0, orderCount: 0, customerCount: 0, activeOpportunityCount: 0,
+    opportunityAmount: 0, todayDueTodoCount: 0, todayCompletedTodoCount: 0,
+    overdueCustomerCount: 0, riskCustomerCount: 0, missingNextActionCount: 0,
+    wonCount: 0, lostCount: 0, conversionRate: 0, priorityCustomers: [],
+  });
+}
+
+// 有失效结构化 ID 的历史客户不能因姓名相同而归到新的在职员工名下。
+{
+  const staleOwnerPrisma = fakePrisma([
+    row(STORAGE_KEYS.CUSTOMERS, customer('stale-owner', 'departed-sales', {
+      owner: '同名销售', opportunityStageCode: 'proposal', opportunityAmount: 10000,
+    })),
+  ]) as any;
+  const [baseUsers, baseRoles] = await Promise.all([
+    staleOwnerPrisma.user.findMany(), staleOwnerPrisma.role.findMany(),
+  ]);
+  const now = new Date('2026-07-01T00:00:00.000Z');
+  staleOwnerPrisma.user.findMany = async () => [...baseUsers, {
+    ...baseUsers[0], id: 'current-same-name', name: '同名销售', account: 'current-same-name', role: '销售',
+    roleId: 'role-sales', departmentId: 'department-1',
+  }];
+  staleOwnerPrisma.role.findMany = async () => [...baseRoles, {
+    id: 'role-sales', name: '销售', code: 'sales', description: null, departmentId: null,
+    permissions: [{ module: '线索/线索列表/开始跟进并加入客户', actions: ['read'] }],
+    dataScopes: { customers: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
+  }];
+  const result = await createBusinessCockpitService(staleOwnerPrisma, {
+    now: () => new Date('2026-07-22T08:00:00.000Z'),
+  }).get({ preset: 'custom', startDate: '2026-07-01', endDate: '2026-07-31' }, admin);
+  assert.equal(result.data?.salesBattleProfiles.find((item) => item.userId === 'unresolved:departed-sales')?.customerCount, 1);
+  assert.equal(result.data?.salesBattleProfiles.find((item) => item.userId === 'unresolved:departed-sales')?.identityStatus, 'unresolved');
+  assert.equal(result.data?.salesBattleProfiles.find((item) => item.userId === 'current-same-name')?.customerCount, 0);
+}
+
+// 同一在职销售的旧姓名客户与新 ID 客户必须合并为一份档案。
+{
+  const mergeIdentityPrisma = fakePrisma([
+    row(STORAGE_KEYS.CUSTOMERS, customer('merge-id', 'sales-merge', {
+      owner: '合并销售', opportunityStageCode: 'proposal', opportunityAmount: 10000,
+    })),
+    row(STORAGE_KEYS.CUSTOMERS, customer('merge-name', 'legacy-placeholder', {
+      owner: '合并销售', ownerId: undefined, ownerIdentityStatus: 'unresolved',
+      opportunityStageCode: 'needs_discovery', opportunityAmount: 20000,
+    })),
+  ]) as any;
+  const baseUsers = await mergeIdentityPrisma.user.findMany();
+  mergeIdentityPrisma.user.findMany = async () => [...baseUsers, {
+    ...baseUsers[0], id: 'sales-merge', name: '合并销售', account: 'sales-merge',
+  }];
+  const result = await createBusinessCockpitService(mergeIdentityPrisma, {
+    now: () => new Date('2026-07-22T08:00:00.000Z'),
+  }).get({ preset: 'custom', startDate: '2026-07-01', endDate: '2026-07-31' }, admin);
+  const profiles = result.data?.salesBattleProfiles.filter((item) => item.userId === 'sales-merge') || [];
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0].customerCount, 2);
+  assert.equal(profiles[0].activeOpportunityCount, 2);
+  assert.equal(profiles[0].opportunityAmount, 30000);
 }
 
 const application = (

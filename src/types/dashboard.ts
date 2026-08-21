@@ -136,6 +136,27 @@ export interface CockpitCustomerBattleStage {
   opportunityAmount: number;
 }
 
+export interface CockpitSalesBattleProfile {
+  userId: string;
+  name: string;
+  department?: string;
+  identityStatus: 'resolved' | 'legacy' | 'unresolved';
+  revenueAmount: number;
+  orderCount: number;
+  customerCount: number;
+  activeOpportunityCount: number;
+  opportunityAmount: number;
+  todayDueTodoCount: number;
+  todayCompletedTodoCount: number;
+  overdueCustomerCount: number;
+  riskCustomerCount: number;
+  missingNextActionCount: number;
+  wonCount: number;
+  lostCount: number;
+  conversionRate: number;
+  priorityCustomers: CockpitCustomerBattleItem[];
+}
+
 export interface CockpitLeadSourceItem {
   source: string;
   leadCount: number;
@@ -191,6 +212,7 @@ export interface BusinessCockpitData {
   customerHealth: CockpitCustomerHealth;
   customerBattles: CockpitCustomerBattleItem[];
   customerBattleStages: CockpitCustomerBattleStage[];
+  salesBattleProfiles: CockpitSalesBattleProfile[];
   leadSources: CockpitLeadSourceItem[];
   orderHealth: CockpitOrderHealth;
   financeHealth: CockpitFinanceHealth;

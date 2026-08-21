@@ -5,8 +5,11 @@ import {
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import AssignmentTurnedInOutlinedIcon from '@mui/icons-material/AssignmentTurnedInOutlined';
 import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined';
+import ErrorOutlineOutlinedIcon from '@mui/icons-material/ErrorOutlineOutlined';
 import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined';
+import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined';
+import TodayOutlinedIcon from '@mui/icons-material/TodayOutlined';
 import { useNavigate } from 'react-router-dom';
 import type { BusinessCockpitData, CockpitRiskItem, HomeTaskItem } from '../../types/dashboard';
 import type { EnterpriseCockpit } from '../../types/enterpriseBrain';
@@ -28,6 +31,99 @@ const tone: Record<HomeTaskItem['tone'], { color: string; bg: string }> = {
 };
 
 const chainSteps = ['经营异常', '责任人', '客户 / 业务对象', '下一步动作', '结果验收'];
+
+export const SalesTeamBattleBoard: React.FC<{
+  data: BusinessCockpitData;
+  selectedUserId?: string;
+  onSelectUser: (userId: string) => void;
+  canViewCustomers: boolean;
+}> = ({ data, selectedUserId, onSelectUser, canViewCustomers }) => {
+  const navigate = useNavigate();
+  const selected = data.salesBattleProfiles.find((item) => item.userId === selectedUserId)
+    || data.salesBattleProfiles[0];
+  if (!selected) {
+    return <Paper elevation={0} sx={{ border: `1px solid ${colors.line}`, borderRadius: 2, p: 5, textAlign: 'center' }}><Typography sx={{ color: colors.muted }}>当前范围内暂无销售作战数据</Typography></Paper>;
+  }
+  const pendingActionCount = selected.missingNextActionCount;
+  const status = selected.overdueCustomerCount > 0
+    ? { label: '需要介入', color: colors.red, bg: '#FFF0EE' }
+    : pendingActionCount > 0
+      ? { label: '动作缺失', color: colors.amber, bg: '#FFF6E5' }
+    : selected.todayDueTodoCount > 0
+      ? { label: '今日推进', color: colors.amber, bg: '#FFF6E5' }
+      : { label: '推进正常', color: colors.green, bg: '#EAF8F1' };
+  const judgment = selected.overdueCustomerCount > 0
+    ? `先处理 ${selected.overdueCustomerCount} 个逾期客户；今日应做 ${selected.todayDueTodoCount} 项，已完成 ${selected.todayCompletedTodoCount} 项。`
+    : pendingActionCount > 0
+      ? `当前有 ${pendingActionCount} 位客户缺少明确动作，先补齐阶段和下一步，再判断真实商机。`
+    : selected.todayDueTodoCount > 0
+      ? `客户盘暂无高风险；今日应做 ${selected.todayDueTodoCount} 项，今日实际完成 ${selected.todayCompletedTodoCount} 项，请分别检查。`
+      : '当前没有高风险客户，重点检查活跃商机是否都有明确下一步。';
+  const canDrillDown = canViewCustomers && selected.identityStatus === 'resolved';
+  const metrics = [
+    { label: '客户盘', value: `${selected.customerCount}`, unit: '位', color: colors.ink },
+    { label: '活跃商机', value: `${selected.activeOpportunityCount}`, unit: '个', color: colors.blue },
+    { label: '商机金额', value: formatCurrency(selected.opportunityAmount), unit: '', color: colors.blue },
+    { label: '今日应做', value: `${selected.todayDueTodoCount}`, unit: '项', color: selected.todayDueTodoCount ? colors.amber : colors.green },
+    { label: '今日完成', value: `${selected.todayCompletedTodoCount}`, unit: '项', color: selected.todayCompletedTodoCount ? colors.green : colors.muted },
+    { label: '逾期客户', value: `${selected.overdueCustomerCount}`, unit: '位', color: selected.overdueCustomerCount ? colors.red : colors.green },
+    { label: '待补动作', value: `${pendingActionCount}`, unit: '位', color: pendingActionCount ? colors.amber : colors.green },
+    { label: '赢单率', value: `${selected.conversionRate}%`, unit: '', color: colors.green },
+    { label: '本期实收', value: formatCurrency(selected.revenueAmount), unit: `· ${selected.orderCount}单`, color: colors.ink },
+  ];
+  return (
+    <Stack spacing={2}>
+      <Paper elevation={0} sx={{ border: `1px solid ${colors.line}`, borderRadius: 2, overflow: 'hidden' }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5} sx={{ px: 2.25, py: 1.8, borderBottom: `1px solid ${colors.line}` }}>
+          <Box><Typography variant="h6" sx={{ fontWeight: 950 }}>销售与客户责任人作战台</Typography><Typography variant="body2" sx={{ color: colors.muted }}>选中一名员工，直接检查他的客户、动作、风险和结果</Typography></Box>
+          <Stack direction="row" spacing={1} alignItems="center"><InsightsOutlinedIcon sx={{ color: colors.blue }} /><Typography variant="caption" sx={{ color: colors.muted }}>按风险客户与商机金额排序</Typography></Stack>
+        </Stack>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '330px minmax(0, 1fr)' }, minHeight: 540 }}>
+          <Box sx={{ borderRight: { lg: `1px solid ${colors.line}` }, borderBottom: { xs: `1px solid ${colors.line}`, lg: 0 }, bgcolor: '#F7F9FC', p: 1.25, maxHeight: { xs: 360, lg: 650 }, overflowY: 'auto' }}>
+            <Typography variant="caption" sx={{ display: 'block', px: 1, py: .75, color: colors.muted, fontWeight: 900 }}>客户责任人战位 · {data.salesBattleProfiles.length} 人</Typography>
+            <Stack spacing={.75}>
+              {data.salesBattleProfiles.map((item, index) => {
+                const active = item.userId === selected.userId;
+                const itemPendingActionCount = item.missingNextActionCount;
+                const itemStatus = item.overdueCustomerCount ? { label: `${item.overdueCustomerCount} 逾期`, color: colors.red } : itemPendingActionCount ? { label: `${itemPendingActionCount} 待补`, color: colors.amber } : item.todayDueTodoCount ? { label: `${item.todayDueTodoCount} 今日`, color: colors.amber } : item.riskCustomerCount ? { label: `${item.riskCustomerCount} 待联系`, color: colors.amber } : { label: '正常', color: colors.green };
+                return <Box key={item.userId} role="button" tabIndex={0} onClick={() => onSelectUser(item.userId)} onKeyDown={(event) => { if (event.key === 'Enter') onSelectUser(item.userId); }} sx={{ p: 1.25, bgcolor: active ? '#FFFFFF' : 'transparent', border: `1px solid ${active ? '#AFC9FF' : 'transparent'}`, borderLeft: `4px solid ${active ? colors.blue : 'transparent'}`, cursor: 'pointer', boxShadow: active ? '0 5px 18px rgba(31, 71, 130, .08)' : 'none', '&:hover': { bgcolor: '#FFFFFF' }, '&:focus-visible': { outline: `2px solid ${colors.blue}`, outlineOffset: 1 } }}>
+                  <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="center">
+                    <Stack direction="row" spacing={1} alignItems="center"><Box sx={{ width: 32, height: 32, borderRadius: '50%', bgcolor: active ? colors.navy : '#E4EAF2', color: active ? '#fff' : colors.ink, display: 'grid', placeItems: 'center', fontWeight: 950 }}>{item.name.slice(0, 1)}</Box><Box><Typography variant="body2" sx={{ fontWeight: 900 }}>{item.name}</Typography><Typography variant="caption" sx={{ color: colors.muted }}>战位 {String(index + 1).padStart(2, '0')} · {item.department || '部门未标注'}</Typography></Box></Stack>
+                    <Typography variant="caption" sx={{ color: itemStatus.color, fontWeight: 900 }}>{itemStatus.label}</Typography>
+                  </Stack>
+                  <Stack direction="row" justifyContent="space-between" sx={{ mt: 1, pl: 5 }}><Typography variant="caption" sx={{ color: colors.muted }}>{item.customerCount} 客户 · {item.activeOpportunityCount} 商机</Typography><Typography variant="caption" sx={{ color: colors.blue, fontWeight: 900 }}>{formatCurrency(item.opportunityAmount)}</Typography></Stack>
+                </Box>;
+              })}
+            </Stack>
+          </Box>
+          <Box sx={{ minWidth: 0 }}>
+            <Box sx={{ bgcolor: colors.navy, color: '#fff', px: { xs: 2, md: 2.5 }, py: 2.2 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1.5} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+                <Box><Stack direction="row" spacing={1} alignItems="center"><Typography variant="overline" sx={{ color: '#91B8FF', fontWeight: 900, letterSpacing: '.14em' }}>EMPLOYEE BATTLE POST</Typography><Chip size="small" label={status.label} sx={{ color: status.color, bgcolor: status.bg, fontWeight: 900 }} /></Stack><Typography variant="h5" sx={{ mt: .4, fontWeight: 950 }}>{selected.name} · 销售作战档案</Typography><Typography variant="body2" sx={{ color: '#B9C9DC', mt: .5 }}>{judgment}</Typography></Box>
+                <Button disabled={!canDrillDown} variant="contained" startIcon={<PersonSearchOutlinedIcon />} onClick={() => canDrillDown && navigate(`${ROUTES.CUSTOMERS}?ownerId=${encodeURIComponent(selected.userId)}`)}>查看他的客户</Button>
+              </Stack>
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(3, minmax(0, 1fr))' }, borderBottom: `1px solid ${colors.line}` }}>
+              {metrics.map((metric) => <Box key={metric.label} sx={{ p: 1.6, borderRight: `1px solid ${colors.line}`, borderBottom: { xs: `1px solid ${colors.line}`, md: 0 } }}><Typography variant="caption" sx={{ color: colors.muted, fontWeight: 800 }}>{metric.label}</Typography><Typography variant="h6" sx={{ color: metric.color, fontWeight: 950, mt: .25 }}>{metric.value}<Typography component="span" variant="caption" sx={{ color: colors.muted, ml: .35 }}>{metric.unit}</Typography></Typography></Box>)}
+            </Box>
+            <Box sx={{ p: { xs: 1.5, md: 2 } }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.25 }}><Box><Typography sx={{ fontWeight: 900 }}>优先客户与动作</Typography><Typography variant="caption" sx={{ color: colors.muted }}>只显示仍在推进中的前 5 位客户</Typography></Box><Stack direction="row" spacing={.5} alignItems="center"><TodayOutlinedIcon fontSize="small" sx={{ color: colors.amber }} /><Typography variant="caption" sx={{ color: colors.muted }}>今日应做 {selected.todayDueTodoCount} · 已完成 {selected.todayCompletedTodoCount}</Typography></Stack></Stack>
+              <Stack divider={<Box sx={{ borderTop: `1px solid ${colors.line}` }} />}>
+                {selected.priorityCustomers.map((customer) => {
+                  const riskStyle = customer.riskLevel === 'high' ? tone.error : customer.riskLevel === 'medium' ? tone.warning : tone.success;
+                  return <Box key={customer.customerId} role={canViewCustomers ? 'button' : undefined} tabIndex={canViewCustomers ? 0 : undefined} onClick={() => canViewCustomers && navigate(`${ROUTES.CUSTOMERS}?customerId=${encodeURIComponent(customer.customerId)}&detailTab=todo`)} onKeyDown={(event) => { if (canViewCustomers && event.key === 'Enter') navigate(`${ROUTES.CUSTOMERS}?customerId=${encodeURIComponent(customer.customerId)}&detailTab=todo`); }} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.05fr .65fr .75fr 1.1fr auto' }, gap: 1, alignItems: 'center', py: 1.15, cursor: canViewCustomers ? 'pointer' : 'default', '&:hover': canViewCustomers ? { bgcolor: '#F8FAFC' } : undefined }}>
+                    <Box><Typography variant="body2" sx={{ fontWeight: 900 }}>{customer.customerName}</Typography><Typography variant="caption" sx={{ color: colors.muted }}>{customer.company || '公司未填写'}</Typography></Box><Box><Typography variant="caption" sx={{ color: colors.muted }}>阶段</Typography><Typography variant="body2" sx={{ fontWeight: 800 }}>{customer.stageLabel}</Typography></Box><Box><Typography variant="caption" sx={{ color: colors.muted }}>商机</Typography><Typography variant="body2" sx={{ color: colors.blue, fontWeight: 900 }}>{formatCurrency(customer.opportunityAmount)}</Typography></Box><Box><Typography variant="caption" sx={{ color: colors.muted }}>下一步动作</Typography><Typography variant="body2" sx={{ fontWeight: 800 }}>{customer.nextActionTitle || '补充下一步动作'}</Typography></Box><Chip size="small" icon={customer.riskLevel === 'high' ? <ErrorOutlineOutlinedIcon /> : undefined} label={customer.riskReason} sx={{ color: riskStyle.color, bgcolor: riskStyle.bg, fontWeight: 850 }} />
+                  </Box>;
+                })}
+                {!selected.priorityCustomers.length && <Box sx={{ py: 4, textAlign: 'center' }}><Typography sx={{ color: colors.green, fontWeight: 900 }}>当前没有需要优先介入的客户</Typography><Typography variant="caption" sx={{ color: colors.muted }}>可进入客户列表检查低风险商机的下一步动作</Typography></Box>}
+              </Stack>
+            </Box>
+          </Box>
+        </Box>
+      </Paper>
+    </Stack>
+  );
+};
 
 export const CustomerBattleBoard: React.FC<{ data: BusinessCockpitData; canViewCustomers: boolean }> = ({ data, canViewCustomers }) => {
   const navigate = useNavigate();
@@ -85,7 +181,8 @@ const BossCommandCenter: React.FC<{
   canViewTeamTasks: boolean;
   canAssignTasks: boolean;
   canOpenPath: (path: string) => boolean;
-}> = ({ data, risks, organizationData, canViewCustomers, canViewTeamTasks, canAssignTasks, canOpenPath }) => {
+  onOpenSalesProfile: (userId: string) => void;
+}> = ({ data, risks, organizationData, canViewCustomers, canViewTeamTasks, canAssignTasks, canOpenPath, onOpenSalesProfile }) => {
   const navigate = useNavigate();
   const commands = useMemo(() => buildBossCommandItems(risks, data.customerBattles, 7), [data.customerBattles, risks]);
   const urgentCount = commands.filter((item) => item.tone === 'error').length;
@@ -130,7 +227,7 @@ const BossCommandCenter: React.FC<{
         <Stack spacing={2}>
           <Paper elevation={0} sx={{ border: `1px solid ${colors.line}`, borderRadius: 2, p: 2 }}>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}><GroupsOutlinedIcon sx={{ color: colors.blue }} /><Box><Typography sx={{ fontWeight: 900 }}>销售队伍脉搏</Typography><Typography variant="caption" sx={{ color: colors.muted }}>本期正式订单实收</Typography></Box></Stack>
-            <Stack spacing={1.25}>{data.salesRanking.slice(0, 5).map((item, index) => <Box key={item.userId}><Stack direction="row" justifyContent="space-between" alignItems="center"><Stack direction="row" spacing={1} alignItems="center"><Typography variant="caption" sx={{ color: index < 3 ? colors.blue : colors.muted, fontWeight: 900, width: 16 }}>{index + 1}</Typography><Box><Typography variant="body2" sx={{ fontWeight: 900 }}>{item.name}</Typography><Typography variant="caption" sx={{ color: colors.muted }}>{item.count} 单 · {item.department || '部门未标注'}</Typography></Box></Stack><Button disabled={!canViewCustomers || item.identityStatus !== 'resolved'} size="small" startIcon={<PersonSearchOutlinedIcon />} onClick={() => canViewCustomers && item.identityStatus === 'resolved' && navigate(`${ROUTES.CUSTOMERS}?ownerId=${encodeURIComponent(item.userId)}`)}>客户</Button></Stack><Typography variant="body2" sx={{ color: colors.blue, fontWeight: 900, ml: 3, mt: .35 }}>{formatCurrency(item.amount)}</Typography></Box>)}</Stack>
+            <Stack spacing={1.25}>{data.salesRanking.slice(0, 5).map((item, index) => <Box key={item.userId}><Stack direction="row" justifyContent="space-between" alignItems="center"><Stack direction="row" spacing={1} alignItems="center"><Typography variant="caption" sx={{ color: index < 3 ? colors.blue : colors.muted, fontWeight: 900, width: 16 }}>{index + 1}</Typography><Box><Typography variant="body2" sx={{ fontWeight: 900 }}>{item.name}</Typography><Typography variant="caption" sx={{ color: colors.muted }}>{item.count} 单 · {item.department || '部门未标注'}</Typography></Box></Stack><Button disabled={!canViewCustomers || item.identityStatus !== 'resolved'} size="small" startIcon={<PersonSearchOutlinedIcon />} onClick={() => canViewCustomers && item.identityStatus === 'resolved' && onOpenSalesProfile(item.userId)}>档案</Button></Stack><Typography variant="body2" sx={{ color: colors.blue, fontWeight: 900, ml: 3, mt: .35 }}>{formatCurrency(item.amount)}</Typography></Box>)}</Stack>
           </Paper>
           <Paper elevation={0} sx={{ border: `1px solid ${colors.line}`, borderRadius: 2, p: 2 }}>
             <Typography sx={{ fontWeight: 900 }}>执行验收</Typography>

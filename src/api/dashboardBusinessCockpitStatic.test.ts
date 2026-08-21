@@ -57,6 +57,7 @@ assert.match(page, /pathname\.startsWith\(ROUTES\.DELIVERY\)[\s\S]*PERMISSION_KE
 assert.match(page, /pathname\.startsWith\(ROUTES\.OKR\)[\s\S]*PERMISSION_KEYS\.OKR/, 'OKR 风险下钻必须校验目标管理权限');
 assert.match(page, /return pathname === ROUTES\.HOME \|\| pathname === ROUTES\.DASHBOARD/, '未知驾驶舱路径必须默认拒绝');
 assert.match(page, /canViewCockpitCustomers && <Tab value="customers"/, '无客户权限时不得展示客户作战页签');
+assert.match(page, /<SalesTeamBattleBoard/, '销售团队页必须提供可选人的员工作战档案');
 assert.match(page, /buildCockpitDrilldownPath/, '经营指标下钻必须保留当前已应用日期范围');
 assert.match(page, /secondaryRisks[\s\S]*slice\(0, 4\)/, '老板重点含最高风险后总数应限制为五项');
 assert.match(page, /alignComparableTrend/, '上期趋势必须按周期内相对日对齐，不得用稀疏数组下标硬拼');
