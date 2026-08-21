@@ -973,6 +973,7 @@ app.get('/api/customers', requireCustomerReadAccess, async (req: AuthenticatedRe
     customerLevel: queryParam(req.query.customerLevel) as any,
     lifecycleStatusCode: queryParam(req.query.lifecycleStatusCode) as any,
     owner: queryParam(req.query.owner),
+    ownerId: queryParam(req.query.ownerId),
     followStatus: queryParam(req.query.followStatus) as any,
     sourceType: queryParam(req.query.sourceType),
     leadSource: queryParam(req.query.leadSource),

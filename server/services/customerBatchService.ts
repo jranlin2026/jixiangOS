@@ -257,7 +257,7 @@ function normalizeCustomerIds(value: unknown): string[] {
 }
 
 const FILTER_KEYS = [
-  'search', 'productLevel', 'customerLevel', 'lifecycleStatusCode', 'owner', 'followStatus',
+  'search', 'productLevel', 'customerLevel', 'lifecycleStatusCode', 'owner', 'ownerId', 'followStatus',
   'sourceType', 'leadSource', 'industry', 'city', 'tagIds', 'tagMatch', 'withoutTags',
   'missingTagGroupId', 'tag',
 ] as const;

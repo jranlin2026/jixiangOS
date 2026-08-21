@@ -209,6 +209,28 @@ const customer = (id: string, ownerId: string, overrides: Partial<Customer> = {}
   ...overrides,
 });
 
+// 驾驶舱权限不能成为绕过客户列表权限的数据旁路。
+{
+  const restrictedPrisma = fakePrisma([row(STORAGE_KEYS.CUSTOMERS, customer('restricted', 'admin-1', {
+    company: '不可见公司', opportunityStageCode: 'proposal', opportunityAmount: 68000,
+  }))]) as any;
+  const now = new Date('2026-07-01T00:00:00.000Z');
+  restrictedPrisma.role.findMany = async () => [{
+    id: 'role-cockpit', name: '驾驶舱观察员', code: 'cockpit_viewer', description: null, departmentId: null,
+    permissions: [{ module: '驾驶舱', actions: ['read'] }], dataScopes: { customers: 'all' },
+    memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
+  }];
+  const restrictedActor: AuthenticatedUser = {
+    ...admin, role: '驾驶舱观察员', roleId: 'role-cockpit',
+    permissions: [{ module: '驾驶舱', actions: ['read'] }],
+  };
+  const result = await createBusinessCockpitService(restrictedPrisma, {
+    now: () => new Date('2026-07-22T08:00:00.000Z'),
+  }).get({ preset: 'custom', startDate: '2026-07-01', endDate: '2026-07-31' }, restrictedActor);
+  assert.deepEqual(result.data?.customerBattles, []);
+  assert.deepEqual(result.data?.customerBattleStages, []);
+}
+
 // 老板驾驶舱必须直接给出“客户—责任人—下一步动作”，不能只返回聚合数字。
 {
   const battleCustomer = customer('battle', 'sales-1', {

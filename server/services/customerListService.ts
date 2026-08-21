@@ -254,6 +254,9 @@ export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerT
       conditions.push(Prisma.sql`${jsonText('$.owner')} = ${filters.owner}`);
     }
   }
+  if (filters.ownerId) {
+    conditions.push(Prisma.sql`${jsonText('$.ownerId')} = ${filters.ownerId}`);
+  }
   if (filters.followStatus) {
     const hasFollowActivity = Prisma.sql`JSON_SEARCH(data, 'one', 'follow', NULL, '$.activityRecords[*].type') IS NOT NULL`;
     conditions.push(filters.followStatus === 'has_follow'

@@ -131,7 +131,7 @@ function canAccessCockpitPath(user: AuthenticatedUser | null, path: string): boo
     ].some((permission) => hasPermission(user, permission));
   }
   if (pathname.startsWith(ROUTES.CUSTOMERS)) {
-    return hasPermission(user, PERMISSION_KEYS.CUSTOMERS);
+    return hasPermission(user, PERMISSION_KEYS.CUSTOMER_LIST);
   }
   if (pathname.startsWith(ROUTES.LEADS)) {
     return hasPermission(user, PERMISSION_KEYS.LEADS_LIST);
@@ -153,7 +153,18 @@ function canAccessCockpitPath(user: AuthenticatedUser | null, path: string): boo
       PERMISSION_KEYS.FINANCE_RULES,
     ].some((permission) => hasPermission(user, permission));
   }
-  return true;
+  if (pathname.startsWith(ROUTES.DELIVERY)) {
+    return hasPermission(user, PERMISSION_KEYS.DELIVERY);
+  }
+  if (pathname.startsWith(ROUTES.OKR)) {
+    return hasPermission(user, PERMISSION_KEYS.OKR);
+  }
+  if (pathname.startsWith(ROUTES.TASKS)) {
+    if (tab === 'team') return hasPermission(user, PERMISSION_KEYS.TASK_TEAM);
+    return [PERMISSION_KEYS.TASK_SELF, PERMISSION_KEYS.TASK_TEAM, PERMISSION_KEYS.TASK_ASSIGN]
+      .some((permission) => hasPermission(user, permission));
+  }
+  return pathname === ROUTES.HOME || pathname === ROUTES.DASHBOARD;
 }
 
 function normalizePercent(value: number): number {
@@ -849,8 +860,8 @@ const LegacyBusinessCockpit: React.FC = () => {
   }, [data, organizationData]);
   const mainRisk = useMemo(() => priorityRisk(riskTasks), [riskTasks]);
   const canViewCockpitCustomers = canAccessCockpitPath(currentUser, ROUTES.CUSTOMERS);
-  const canManageCockpitTasks = hasPermission(currentUser, PERMISSION_KEYS.TASK_TEAM)
-    || hasPermission(currentUser, PERMISSION_KEYS.TASK_ASSIGN, 'write');
+  const canViewCockpitTeamTasks = hasPermission(currentUser, PERMISSION_KEYS.TASK_TEAM);
+  const canAssignCockpitTasks = hasPermission(currentUser, PERMISSION_KEYS.TASK_ASSIGN, 'write');
 
   if (loading && !data) {
     return (
@@ -952,7 +963,7 @@ const LegacyBusinessCockpit: React.FC = () => {
       <Paper elevation={0} sx={{ border: `1px solid ${palette.line}`, borderRadius: 1.5, mb: 2, overflow: 'hidden' }}>
         <Tabs value={cockpitTab} onChange={(_, value) => setCockpitTab(value)} variant="scrollable" scrollButtons="auto" sx={{ px: 1, minHeight: 50, '& .MuiTab-root': { minHeight: 50, fontWeight: 850 } }}>
           <Tab value="command" label="今日指挥" />
-          <Tab value="customers" label={`客户作战 ${data.customerBattleStages.reduce((sum, item) => sum + item.customerCount, 0)}`} />
+          {canViewCockpitCustomers && <Tab value="customers" label={`客户作战 ${data.customerBattleStages.reduce((sum, item) => sum + item.customerCount, 0)}`} />}
           <Tab value="team" label="销售团队" />
           <Tab value="overview" label="经营总览" />
           <Tab value="organization" label="组织执行" />
@@ -961,12 +972,12 @@ const LegacyBusinessCockpit: React.FC = () => {
 
       {cockpitTab === 'command' && (
         <Stack spacing={2}>
-          <BossCommandCenter data={data} risks={riskTasks} organizationData={organizationData} canViewCustomers={canViewCockpitCustomers} canManageTasks={canManageCockpitTasks} canOpenPath={(path) => canAccessCockpitPath(currentUser, path)} />
+          <BossCommandCenter data={data} risks={riskTasks} organizationData={organizationData} canViewCustomers={canViewCockpitCustomers} canViewTeamTasks={canViewCockpitTeamTasks} canAssignTasks={canAssignCockpitTasks} canOpenPath={(path) => canAccessCockpitPath(currentUser, path)} />
           <EnterpriseBrainPanel dateFrom={range.startDate || monthStart()} dateTo={range.endDate || todayString()} refreshKey={`${data.rangeLabel}-${range.preset}`} onData={setOrganizationData} />
         </Stack>
       )}
 
-      {cockpitTab === 'customers' && <CustomerBattleBoard data={data} canViewCustomers={canViewCockpitCustomers} />}
+      {cockpitTab === 'customers' && canViewCockpitCustomers && <CustomerBattleBoard data={data} canViewCustomers />}
 
       {cockpitTab === 'team' && (
         <Stack spacing={2}>

@@ -553,6 +553,9 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
         : c.owner === owner
     ));
   }
+  if (filters?.ownerId) {
+    filtered = filtered.filter((c) => c.ownerId === filters.ownerId);
+  }
   if (filters?.followStatus) {
     filtered = filtered.filter((c) => (
       filters.followStatus === 'has_follow'

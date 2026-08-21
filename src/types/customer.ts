@@ -221,6 +221,7 @@ export interface CustomerFilters {
   customerLevel?: CustomerLevel;
   lifecycleStatusCode?: LifecycleStatusCode;
   owner?: string;
+  ownerId?: ID;
   followStatus?: 'has_follow' | 'no_follow';
   sourceType?: string;
   leadSource?: string;

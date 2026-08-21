@@ -82,9 +82,10 @@ const BossCommandCenter: React.FC<{
   risks: CockpitRiskItem[];
   organizationData: EnterpriseCockpit | null;
   canViewCustomers: boolean;
-  canManageTasks: boolean;
+  canViewTeamTasks: boolean;
+  canAssignTasks: boolean;
   canOpenPath: (path: string) => boolean;
-}> = ({ data, risks, organizationData, canViewCustomers, canManageTasks, canOpenPath }) => {
+}> = ({ data, risks, organizationData, canViewCustomers, canViewTeamTasks, canAssignTasks, canOpenPath }) => {
   const navigate = useNavigate();
   const commands = useMemo(() => buildBossCommandItems(risks, data.customerBattles, 7), [data.customerBattles, risks]);
   const urgentCount = commands.filter((item) => item.tone === 'error').length;
@@ -94,12 +95,12 @@ const BossCommandCenter: React.FC<{
         <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" spacing={2} sx={{ p: { xs: 2, md: 2.5 } }}>
           <Box>
             <Stack direction="row" spacing={1} alignItems="center"><BoltOutlinedIcon sx={{ color: '#79A7FF' }} /><Typography variant="overline" sx={{ color: '#9BBEFF', fontWeight: 900, letterSpacing: '.14em' }}>TODAY COMMAND</Typography></Stack>
-            <Typography variant="h4" sx={{ fontWeight: 950, letterSpacing: '-.035em', mt: .5 }}>今天先解决 {urgentCount || commands.length} 个经营问题</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 950, letterSpacing: '-.035em', mt: .5 }}>{urgentCount ? `今天有 ${urgentCount} 个紧急问题` : `今天有 ${commands.length} 项待推进`}</Typography>
             <Typography variant="body2" sx={{ color: '#B9C9DC', mt: .75 }}>每条指令必须落到责任人、业务对象、动作和验收结果。</Typography>
           </Box>
           <Stack direction="row" spacing={1} alignItems="center">
-            <Button disabled={!canManageTasks} variant="outlined" startIcon={<GroupsOutlinedIcon />} onClick={() => canManageTasks && navigate(`${ROUTES.TASKS}?tab=team`)} sx={{ color: '#DCE8F8', borderColor: '#52739A' }}>团队任务</Button>
-            <Button disabled={!canManageTasks} variant="contained" startIcon={<AssignmentTurnedInOutlinedIcon />} onClick={() => canManageTasks && navigate(ROUTES.TASKS)} sx={{ bgcolor: '#2C72F0' }}>下达与验收</Button>
+            <Button disabled={!canViewTeamTasks} variant="outlined" startIcon={<GroupsOutlinedIcon />} onClick={() => canViewTeamTasks && navigate(`${ROUTES.TASKS}?tab=team`)} sx={{ color: '#DCE8F8', borderColor: '#52739A' }}>团队任务</Button>
+            <Button disabled={!canAssignTasks} variant="contained" startIcon={<AssignmentTurnedInOutlinedIcon />} onClick={() => canAssignTasks && navigate(ROUTES.TASKS)} sx={{ bgcolor: '#2C72F0' }}>下达与验收</Button>
           </Stack>
         </Stack>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(5, 1fr)' }, borderTop: '1px solid rgba(255,255,255,.12)' }}>
@@ -118,7 +119,7 @@ const BossCommandCenter: React.FC<{
                 <Box><Typography variant="body2" sx={{ color: colors.ink, fontWeight: 900 }}>{item.title}</Typography><Typography variant="caption" sx={{ color: colors.muted }}>{item.target}</Typography></Box>
                 <Box><Typography variant="caption" sx={{ color: colors.muted }}>责任人</Typography><Typography variant="body2" sx={{ fontWeight: 850 }}>{item.owner}</Typography></Box>
                 <Box><Typography variant="caption" sx={{ color: colors.muted }}>下一步动作</Typography><Typography variant="body2" sx={{ fontWeight: 850 }}>{item.action}</Typography></Box>
-                <Box><Typography variant="caption" sx={{ color: colors.muted }}>截止时间</Typography><Typography variant="body2" sx={{ fontWeight: 850 }}>{item.verification}</Typography></Box>
+                <Box><Typography variant="caption" sx={{ color: colors.muted }}>{item.verificationLabel}</Typography><Typography variant="body2" sx={{ fontWeight: 850 }}>{item.verification}</Typography></Box>
                 <Chip size="small" label={item.tone === 'error' ? '立即处理' : item.tone === 'warning' ? '今日推进' : '持续跟进'} sx={{ color: itemTone.color, bgcolor: itemTone.bg, fontWeight: 850 }} />
               </Box>;
             })}
@@ -129,7 +130,7 @@ const BossCommandCenter: React.FC<{
         <Stack spacing={2}>
           <Paper elevation={0} sx={{ border: `1px solid ${colors.line}`, borderRadius: 2, p: 2 }}>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}><GroupsOutlinedIcon sx={{ color: colors.blue }} /><Box><Typography sx={{ fontWeight: 900 }}>销售队伍脉搏</Typography><Typography variant="caption" sx={{ color: colors.muted }}>本期正式订单实收</Typography></Box></Stack>
-            <Stack spacing={1.25}>{data.salesRanking.slice(0, 5).map((item, index) => <Box key={item.userId}><Stack direction="row" justifyContent="space-between" alignItems="center"><Stack direction="row" spacing={1} alignItems="center"><Typography variant="caption" sx={{ color: index < 3 ? colors.blue : colors.muted, fontWeight: 900, width: 16 }}>{index + 1}</Typography><Box><Typography variant="body2" sx={{ fontWeight: 900 }}>{item.name}</Typography><Typography variant="caption" sx={{ color: colors.muted }}>{item.count} 单 · {item.department || '部门未标注'}</Typography></Box></Stack><Button disabled={!canViewCustomers} size="small" startIcon={<PersonSearchOutlinedIcon />} onClick={() => canViewCustomers && navigate(`${ROUTES.CUSTOMERS}?owner=${encodeURIComponent(item.name)}`)}>客户</Button></Stack><Typography variant="body2" sx={{ color: colors.blue, fontWeight: 900, ml: 3, mt: .35 }}>{formatCurrency(item.amount)}</Typography></Box>)}</Stack>
+            <Stack spacing={1.25}>{data.salesRanking.slice(0, 5).map((item, index) => <Box key={item.userId}><Stack direction="row" justifyContent="space-between" alignItems="center"><Stack direction="row" spacing={1} alignItems="center"><Typography variant="caption" sx={{ color: index < 3 ? colors.blue : colors.muted, fontWeight: 900, width: 16 }}>{index + 1}</Typography><Box><Typography variant="body2" sx={{ fontWeight: 900 }}>{item.name}</Typography><Typography variant="caption" sx={{ color: colors.muted }}>{item.count} 单 · {item.department || '部门未标注'}</Typography></Box></Stack><Button disabled={!canViewCustomers || item.identityStatus !== 'resolved'} size="small" startIcon={<PersonSearchOutlinedIcon />} onClick={() => canViewCustomers && item.identityStatus === 'resolved' && navigate(`${ROUTES.CUSTOMERS}?ownerId=${encodeURIComponent(item.userId)}`)}>客户</Button></Stack><Typography variant="body2" sx={{ color: colors.blue, fontWeight: 900, ml: 3, mt: .35 }}>{formatCurrency(item.amount)}</Typography></Box>)}</Stack>
           </Paper>
           <Paper elevation={0} sx={{ border: `1px solid ${colors.line}`, borderRadius: 2, p: 2 }}>
             <Typography sx={{ fontWeight: 900 }}>执行验收</Typography>

@@ -67,9 +67,30 @@ test('boss command items connect customer, owner, action and verification eviden
   }], 5);
   assert.deepEqual(commands[0], {
     id: 'customer:customer-1', kind: 'customer', title: '张总 · 方案报价', owner: '销售甲',
-    target: '测试公司 · ¥68,000', action: '确认决策人', verification: '截止 08-21 17:00',
+    target: '测试公司 · ¥68,000', action: '确认决策人', verificationLabel: '截止时间', verification: '截止 08-21 17:00',
     path: '/customers?customerId=customer-1&detailTab=todo', tone: 'error',
   });
+});
+
+test('closed customer opportunities stay in funnel data but do not become boss commands', () => {
+  const commands = buildBossCommandItems([], [{
+    customerId: 'customer-won', customerName: '已成交客户', company: '测试公司', ownerName: '销售甲',
+    stageCode: 'won', stageLabel: '已成交', opportunityAmount: 68000,
+    riskLevel: 'low', riskReason: '销售机会已结束',
+  }, {
+    customerId: 'customer-lost', customerName: '已流失客户', company: '测试公司', ownerName: '销售甲',
+    stageCode: 'lost', stageLabel: '已流失', opportunityAmount: 30000,
+    riskLevel: 'low', riskReason: '销售机会已结束',
+  }], 5);
+  assert.deepEqual(commands, []);
+});
+
+test('operating risk commands label their closure evidence instead of a deadline', () => {
+  const commands = buildBossCommandItems([
+    { id: 'delivery', title: '交付阻塞', count: 2, path: '/delivery', tone: 'warning' },
+  ], [], 5);
+  assert.equal(commands[0]?.verificationLabel, '验收口径');
+  assert.equal(commands[0]?.verification, '2 项待闭环');
 });
 
 test('operating errors are not displaced by a full customer command queue', () => {

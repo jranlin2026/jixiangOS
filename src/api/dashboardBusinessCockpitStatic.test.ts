@@ -41,8 +41,8 @@ assert.match(page, /setRange\(nextRange\);\s*fetchData\(nextRange\);/, '应用�
 assert.match(page, /value=\{draftRange\.startDate/, '自定义日期输入必须使用独立草稿，不能提前改变已应用周期');
 assert.match(page, /<EnterpriseBrainPanel dateFrom=\{range\.startDate/, '组织执行必须只读取已应用周期');
 assert.ok(
-  page.indexOf('<ExecutiveOverview') < page.indexOf('<EnterpriseBrainPanel'),
-  '老板应先看经营结果，再看组织执行',
+  page.indexOf('<BossCommandCenter') < page.indexOf('<EnterpriseBrainPanel'),
+  '老板默认入口应先给出今日指挥，再补充组织执行证据',
 );
 assert.match(page, /if \(loading && !data\)/, '非首次切换周期时应保留已有驾驶舱，不能整页闪成加载器');
 assert.match(page, /latestRequestId = useRef\(0\)/, '周期查询必须记录最新请求，避免慢响应覆盖新筛选结果');
@@ -53,6 +53,10 @@ assert.match(page, /ROUTES\.ORDERS/, '正式订单经营指标必须支持下钻
 assert.match(page, /ROUTES\.AFTER_SALES/, '售后挽回经营指标必须支持下钻');
 assert.match(page, /ROUTES\.CUSTOMERS/, '客户健康指标必须支持下钻');
 assert.match(page, /canAccessCockpitPath/, '驾驶舱下钻必须先判断目标页面权限');
+assert.match(page, /pathname\.startsWith\(ROUTES\.DELIVERY\)[\s\S]*PERMISSION_KEYS\.DELIVERY/, '交付风险下钻必须校验交付权限');
+assert.match(page, /pathname\.startsWith\(ROUTES\.OKR\)[\s\S]*PERMISSION_KEYS\.OKR/, 'OKR 风险下钻必须校验目标管理权限');
+assert.match(page, /return pathname === ROUTES\.HOME \|\| pathname === ROUTES\.DASHBOARD/, '未知驾驶舱路径必须默认拒绝');
+assert.match(page, /canViewCockpitCustomers && <Tab value="customers"/, '无客户权限时不得展示客户作战页签');
 assert.match(page, /buildCockpitDrilldownPath/, '经营指标下钻必须保留当前已应用日期范围');
 assert.match(page, /secondaryRisks[\s\S]*slice\(0, 4\)/, '老板重点含最高风险后总数应限制为五项');
 assert.match(page, /alignComparableTrend/, '上期趋势必须按周期内相对日对齐，不得用稀疏数组下标硬拼');

@@ -7,6 +7,7 @@ export interface BossCommandItem {
   owner: string;
   target: string;
   action: string;
+  verificationLabel: string;
   verification: string;
   path: string;
   tone: HomeTaskItem['tone'];
@@ -27,13 +28,16 @@ export function buildBossCommandItems(
   limit = 6,
 ): BossCommandItem[] {
   const toneScore: Record<HomeTaskItem['tone'], number> = { error: 400, warning: 300, info: 200, primary: 150, success: 100 };
-  const customerCommands = customerBattles.map((item) => ({ command: {
+  const customerCommands = customerBattles
+    .filter((item) => !['won', 'lost'].includes(item.stageCode))
+    .map((item) => ({ command: {
     id: `customer:${item.customerId}`,
     kind: 'customer',
     title: `${item.customerName} · ${item.stageLabel}`,
     owner: item.ownerName || '未分配',
     target: `${item.company || '客户'} · ${item.opportunityAmount ? `¥${Math.round(item.opportunityAmount).toLocaleString('zh-CN')}` : '金额待评估'}`,
     action: item.nextActionTitle || '补充下一步动作',
+    verificationLabel: '截止时间',
     verification: commandDueLabel(item.nextActionDueAt),
     path: `/customers?customerId=${encodeURIComponent(item.customerId)}&detailTab=todo`,
     tone: item.riskLevel === 'high' ? 'error' : item.riskLevel === 'medium' ? 'warning' : 'success',
@@ -45,6 +49,7 @@ export function buildBossCommandItems(
     owner: '对应业务负责人',
     target: item.description || `${item.count} 项经营异常`,
     action: '进入业务明细处理',
+    verificationLabel: '验收口径',
     verification: `${item.count} 项待闭环`,
     path: item.path,
     tone: item.tone,

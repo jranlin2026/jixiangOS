@@ -16,7 +16,12 @@ import {
   buildDataVisibilityScopeForUser,
   type DataVisibilityScope,
 } from '../../src/shared/utils/dataVisibility';
-import { isSuperAdmin } from '../../src/shared/utils/permissions';
+import {
+  getUserRole,
+  isSuperAdmin,
+  PERMISSION_KEYS,
+  roleHasPermission,
+} from '../../src/shared/utils/permissions';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Commission } from '../../src/types/commission';
@@ -917,6 +922,8 @@ export function createBusinessCockpitService(
     const users = userRows.map(mapPrismaUser);
     const roles = roleRows.map(mapPrismaRole);
     const departments = departmentRows.map(mapPrismaDepartment);
+    const actorRole = getUserRole(actor, roles);
+    const canViewCustomerBattles = roleHasPermission(actorRole, PERMISSION_KEYS.CUSTOMER_LIST);
     const uniqueActiveUserByName = new Map<string, typeof users[number] | null>();
     users
       .filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active')
@@ -1076,8 +1083,8 @@ export function createBusinessCockpitService(
         followedCustomerCount: snapshot.followUpHealth.followedCustomerCount,
         overdueTodoCount: snapshot.followUpHealth.overdueCustomerTodoCount,
       },
-      customerBattles: snapshot.customerBattles,
-      customerBattleStages: snapshot.customerBattleStages,
+      customerBattles: canViewCustomerBattles ? snapshot.customerBattles : [],
+      customerBattleStages: canViewCustomerBattles ? snapshot.customerBattleStages : [],
       leadSources: snapshot.leadSources,
       orderHealth: {
         formalOrderCount: snapshot.business.formalOrderCount,

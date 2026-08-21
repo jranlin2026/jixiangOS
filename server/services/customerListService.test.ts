@@ -648,6 +648,12 @@ for (const [filters, joiner] of filterCases) {
 }
 
 capturedQueries.length = 0;
+executingFilters = { ownerId: 'sales-stable-id' };
+await listService.list(executingFilters, salesActor);
+assert.match(capturedQueries[0], /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.ownerId'\)\) =/,
+  '从员工下钻客户时必须使用稳定 ownerId，不能按可能重名的销售姓名筛选');
+
+capturedQueries.length = 0;
 const leadSourceFacets = await listService.listLeadSourceFacets('active', salesActor);
 assert.deepEqual(leadSourceFacets.data, [{ leadSource: '直播', sourceName: '抖音', count: 2 }]);
 assert.match(capturedQueries[0], /GROUP BY/);

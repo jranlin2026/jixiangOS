@@ -407,7 +407,14 @@ const Customers: React.FC = () => {
   useEffect(() => {
     const tagState = readCustomerTagFilterParams(searchParams);
     const requestedOwner = searchParams.get('owner') || undefined;
-    const nextFilters = normalizeCustomerToolbarFilters({ ...filters, ...tagState, ...(requestedOwner ? { owner: requestedOwner } : {}), page: 1 }, customerScope);
+    const requestedOwnerId = searchParams.get('ownerId') || undefined;
+    const nextFilters = normalizeCustomerToolbarFilters({
+      ...filters,
+      ...tagState,
+      ...(requestedOwner ? { owner: requestedOwner } : {}),
+      ...(requestedOwnerId ? { ownerId: requestedOwnerId } : {}),
+      page: 1,
+    }, customerScope);
     setFilters(nextFilters);
     fetchItems(nextFilters);
   }, [searchParams.toString(), customerScope, currentUser?.id, fetchItems]);
