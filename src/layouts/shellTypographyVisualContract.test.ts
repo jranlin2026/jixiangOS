@@ -16,6 +16,7 @@ assert.match(moduleShellSource, /variant="h5"[\s\S]*?fontSize:\s*\{\s*xs:\s*'1\.
 assert.equal((sidebarSource.match(/primaryTypographyProps=\{\{\s*fontSize:\s*'0\.9375rem'/g) || []).length, 2, '两类一级导航都应使用 15px');
 assert.equal((sidebarSource.match(/primaryTypographyProps=\{\{\s*fontSize:\s*'0\.875rem'/g) || []).length, 1, '二级导航应使用 14px');
 assert.match(sidebarSource, /height:\s*64/, '侧栏品牌区应与桌面顶栏保持 64px 对齐');
+assert.match(sidebarSource, />AI企业运营系统<\/Typography>/, '侧栏品牌副标题应说明系统定位');
 
 assert.doesNotMatch(topHeaderSource, /全局搜索|帮助中心/, '未接通的全局搜索和帮助中心不应占用顶栏');
 assert.doesNotMatch(topHeaderSource, /SearchIcon|HelpOutlineIcon|KeyboardCommandKeyIcon/, '顶栏不应保留无效入口的图标代码');

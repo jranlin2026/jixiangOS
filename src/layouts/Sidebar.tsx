@@ -81,7 +81,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
           <Box component="img" src="/jixiang-os-logo.png" alt="极享OS" sx={{ width: 42, height: 42, borderRadius: 2, objectFit: 'contain', flexShrink: 0 }} />
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 900, color: shell.ink, fontSize: '1.125rem', lineHeight: 1.15 }}>极享OS 2.0</Typography>
-            <Typography variant="caption" sx={{ color: '#8A849A', fontSize: '0.8125rem', lineHeight: 1.3 }}>员工工作台</Typography>
+            <Typography variant="caption" sx={{ color: '#8A849A', fontSize: '0.8125rem', lineHeight: 1.3 }}>AI企业运营系统</Typography>
           </Box>
           {canUseAiAssistant && (
             <Tooltip title="AI岗位助手 · 试运行">
