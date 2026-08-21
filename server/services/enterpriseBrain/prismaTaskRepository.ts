@@ -28,6 +28,7 @@ type Client = {
   department: any;
   leadRecord: any;
   businessRecord: any;
+  customerTodo: any;
 };
 
 const GENERATION_TRANSACTION_MAX_WAIT_MS = 10_000;

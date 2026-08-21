@@ -90,6 +90,14 @@ export type EmployeeTask = {
   activities?: TaskActivity[];
 };
 
+export type CustomerInterventionOutcome = {
+  followUpSummary: string;
+  nextActionTitle: string;
+  nextActionDueAt: string;
+  opportunityStageCode?: 'not_set' | 'needs_discovery' | 'solution_demo' | 'proposal' | 'objection' | 'payment_pending' | 'won' | 'lost';
+  opportunityAmount?: number | null;
+};
+
 export type TaskActivity = {
   id: string;
   /** Database-monotonic ordering used by durable lifecycle publication. */

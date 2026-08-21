@@ -46,6 +46,7 @@ type Client = {
   department: any;
   leadRecord: any;
   businessRecord: any;
+  customerTodo: any;
 };
 
 const iso = (value: unknown): string | null => value ? new Date(value as string).toISOString() : null;
@@ -774,6 +775,79 @@ function createTransactionRepository(client: Client): WorkbenchTransactionReposi
 
     async authorizeEvidenceReferences(input) {
       return authorizeEvidenceReferenceBatch(client, input);
+    },
+
+    async applyCustomerInterventionOutcome({ task, outcome, actor, now }) {
+      if (!task.sourceId) throw new Error('客户介入任务缺少客户标识');
+      const selector = { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: task.sourceId } };
+      if (client.$queryRawUnsafe) {
+        await client.$queryRawUnsafe(
+          'SELECT `id` FROM `business_records` WHERE `domain` = ? AND `recordId` = ? FOR UPDATE',
+          STORAGE_KEYS.CUSTOMERS,
+          task.sourceId,
+        );
+      }
+      const row = await client.businessRecord.findUnique({ where: selector });
+      if (!row) throw new Error('客户不存在，无法完成介入闭环');
+      const customer = object<Record<string, any>>(row.data);
+      if (!customer || customer.deletedAt || customer.mergedIntoId) throw new Error('客户已删除或已合并，无法完成介入闭环');
+
+      await client.customerTodo.updateMany({
+        where: { customerId: task.sourceId, status: 'PENDING', dueAt: { lte: now } },
+        data: {
+          status: 'COMPLETED', completedAt: now,
+          completedById: task.employeeId, completedByName: task.employeeName,
+        },
+      });
+      const assigneeId = String(customer.ownerId || task.employeeId);
+      const assigneeName = String(customer.owner || task.employeeName);
+      await client.customerTodo.create({
+        data: {
+          id: `customer-todo-${randomUUID()}`,
+          customerId: task.sourceId,
+          customerName: String(customer.name || task.sourceLabel || '客户'),
+          title: outcome.nextActionTitle,
+          content: `由客户介入任务验收生成：${outcome.followUpSummary}`,
+          status: 'PENDING',
+          dueAt: new Date(outcome.nextActionDueAt),
+          executionMethod: 'none',
+          assigneeId, assigneeName,
+          createdById: actor.id, createdByName: actor.name,
+        },
+      });
+
+      const nowIso = now.toISOString();
+      const currentRevision = Number(customer.recordRevision || row.recordRevision || 0);
+      const nextRevision = currentRevision + 1;
+      const activityRecords = Array.isArray(customer.activityRecords) ? customer.activityRecords : [];
+      const updatedCustomer = {
+        ...customer,
+        ...(outcome.opportunityStageCode ? {
+          opportunityStageCode: outcome.opportunityStageCode,
+          opportunityStageUpdatedAt: nowIso,
+        } : {}),
+        ...(outcome.opportunityAmount !== undefined ? { opportunityAmount: outcome.opportunityAmount } : {}),
+        nextActionTitle: outcome.nextActionTitle,
+        nextActionDueAt: outcome.nextActionDueAt,
+        nextActionAssigneeName: assigneeName,
+        activityRecords: [{
+          id: `activity-${randomUUID()}`,
+          type: 'follow',
+          title: '完成管理介入跟进',
+          content: outcome.followUpSummary,
+          operator: task.employeeName,
+          createdAt: nowIso,
+          relatedId: task.id,
+          relatedType: 'task',
+        }, ...activityRecords],
+        updatedAt: nowIso,
+        recordRevision: nextRevision,
+      };
+      const changed = await client.businessRecord.updateMany({
+        where: { domain: STORAGE_KEYS.CUSTOMERS, recordId: task.sourceId, recordRevision: row.recordRevision },
+        data: { data: updatedCustomer, recordRevision: nextRevision },
+      });
+      if (changed.count !== 1) throw new Error('客户数据已变化，请刷新后重新验收');
     },
   };
 }

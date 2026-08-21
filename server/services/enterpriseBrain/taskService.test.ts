@@ -105,7 +105,13 @@ const supervisorTask = await service.assignOneOff({
   sourceType: 'COCKPIT_INTERVENTION', sourceId: 'customer-1', sourceItemId: 'SUPERVISOR_ASSIST',
 }, manager);
 assert.equal(supervisorTask.code, 0, '已配置的部门负责人可承接主管协同任务');
-assert.equal((await service.completeTask(returnedTask.data!.id, { result: '已提交', evidence: [] }, employee)).code, 0);
+assert.equal((await service.completeTask(returnedTask.data!.id, {
+  result: '已提交', evidence: [],
+  customerOutcome: {
+    followUpSummary: '已与客户确认需求', nextActionTitle: '发送报价单',
+    nextActionDueAt: '2030-08-22T08:00:00.000Z', opportunityStageCode: 'proposal', opportunityAmount: 68000,
+  },
+}, employee)).code, 0);
 assert.equal((await service.confirmTask(returnedTask.data!.id, { action: 'RETURN', reason: '请补充说明' }, manager)).code, 0);
 const pendingTask = await service.assignOneOff({
   employeeId: employee.id,

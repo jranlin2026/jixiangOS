@@ -33,6 +33,42 @@ const task = (overrides: Partial<EmployeeTask> = {}): EmployeeTask => ({
 });
 const last = <T>(items: T[]): T | undefined => items[items.length - 1];
 
+const customerOutcome = {
+  followUpSummary: '已与客户确认预算和决策人',
+  nextActionTitle: '发送正式报价单',
+  nextActionDueAt: '2026-08-22T03:00:00.000Z',
+  opportunityStageCode: 'proposal' as const,
+  opportunityAmount: 68000,
+};
+
+{
+  const applied: unknown[] = [];
+  const memory = createMemoryWorkbenchRepository({
+    tasks: [task({ sourceType: 'COCKPIT_INTERVENTION', sourceId: 'customer-1' })],
+    departments: [
+      { id: 'dept-sales', parentId: null },
+      { id: 'dept-sales-child', parentId: 'dept-sales' },
+    ],
+    applyCustomerInterventionOutcome: async (input) => { applied.push(input); },
+  });
+  const service = createWorkbenchCommandService({ repository: memory.repository });
+
+  const incomplete = await service.completeTask('task-1', { result: '已处理' }, employee);
+  assert.equal(incomplete.code, 400, '客户介入任务必须提交结构化处理结果');
+
+  const completed = await service.completeTask('task-1', {
+    result: customerOutcome.followUpSummary,
+    customerOutcome,
+  }, employee);
+  assert.equal(completed.code, 0);
+  assert.equal(completed.data?.evidence.some((item) => item.type === 'CUSTOMER_OUTCOME'), true);
+  assert.equal(applied.length, 0, '员工提交时不得提前回写客户');
+
+  const confirmed = await service.confirmTask('task-1', { comment: '结果合格' }, manager);
+  assert.equal(confirmed.code, 0);
+  assert.equal(applied.length, 1, '老板验收后必须回写客户并触发风险重算');
+}
+
 {
   const memory = createMemoryWorkbenchRepository({ tasks: [task()] });
   const service = createWorkbenchCommandService({

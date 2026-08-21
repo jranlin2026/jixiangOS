@@ -1,5 +1,5 @@
 import type { AuthenticatedUser } from '../../../src/types/auth';
-import type { EmployeeTask, TaskActivity } from '../../../src/types/enterpriseBrain';
+import type { CustomerInterventionOutcome, EmployeeTask, TaskActivity } from '../../../src/types/enterpriseBrain';
 import { transitionTaskStatus, TaskLifecycleDomainError } from '../../../src/domain/workbench/taskLifecycle';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../../src/shared/utils/permissions';
 import { failure as apiFailure, success, type ApiResponse } from '../../api/response';
@@ -10,6 +10,7 @@ export type CompleteTaskInput = {
   actualValue?: number | null;
   evidence?: WorkbenchEvidenceInput[];
   comment?: string;
+  customerOutcome?: CustomerInterventionOutcome;
 };
 
 export type ConfirmTaskInput = {
@@ -23,6 +24,10 @@ const EVIDENCE_TYPES = new Set([
 const URL_EVIDENCE_TYPES = new Set(['URL', 'PUBLISH_URL', 'SCREENSHOT_URL']);
 const REFERENCE_EVIDENCE_TYPES = new Set(['ATTACHMENT', 'BUSINESS_RECORD']);
 const MAX_EVIDENCE_ITEMS = 20;
+const CUSTOMER_OUTCOME_EVIDENCE_TYPE = 'CUSTOMER_OUTCOME';
+const CUSTOMER_OPPORTUNITY_STAGES = new Set([
+  'not_set', 'needs_discovery', 'solution_demo', 'proposal', 'objection', 'payment_pending', 'won', 'lost',
+]);
 
 type Dependencies = {
   repository: WorkbenchRepository;
@@ -108,6 +113,32 @@ export function createWorkbenchCommandService(deps: Dependencies) {
     return evidence;
   };
 
+  const normalizeCustomerOutcome = (value: unknown, requireFutureDueAt = true): CustomerInterventionOutcome | null => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const raw = value as Record<string, unknown>;
+    const followUpSummary = String(raw.followUpSummary || '').trim();
+    const nextActionTitle = String(raw.nextActionTitle || '').trim();
+    const nextActionDueAt = String(raw.nextActionDueAt || '').trim();
+    const dueAt = new Date(nextActionDueAt);
+    const opportunityStageCode = String(raw.opportunityStageCode || '').trim();
+    const rawAmount = raw.opportunityAmount;
+    const opportunityAmount = rawAmount === undefined || rawAmount === null || rawAmount === '' ? null : Number(rawAmount);
+    if (!followUpSummary || followUpSummary.length > 2_000 || !nextActionTitle || nextActionTitle.length > 120) return null;
+    if (!nextActionDueAt || !Number.isFinite(dueAt.getTime()) || (requireFutureDueAt && dueAt.getTime() <= clock().getTime())) return null;
+    if (opportunityStageCode && !CUSTOMER_OPPORTUNITY_STAGES.has(opportunityStageCode)) return null;
+    if (opportunityAmount !== null && (!Number.isFinite(opportunityAmount) || opportunityAmount < 0)) return null;
+    return {
+      followUpSummary,
+      nextActionTitle,
+      nextActionDueAt: dueAt.toISOString(),
+      ...(opportunityStageCode ? { opportunityStageCode: opportunityStageCode as CustomerInterventionOutcome['opportunityStageCode'] } : {}),
+      opportunityAmount,
+    };
+  };
+  const parseCustomerOutcome = (value: string | null | undefined): unknown => {
+    try { return value ? JSON.parse(value) : null; } catch { return null; }
+  };
+
   return {
     async startTask(taskId: string, actor: AuthenticatedUser): Promise<ApiResponse<EmployeeTask>> {
       if (!hasPermission(actor, PERMISSION_KEYS.TASK_SELF, 'write')) {
@@ -165,6 +196,15 @@ export function createWorkbenchCommandService(deps: Dependencies) {
         if (!task || task.employeeId !== actor.id) {
           return failure('任务不存在或不属于当前员工', 404);
         }
+        const customerOutcome = task.sourceType === 'COCKPIT_INTERVENTION'
+          ? normalizeCustomerOutcome(input?.customerOutcome)
+          : null;
+        if (task.sourceType === 'COCKPIT_INTERVENTION' && !customerOutcome) {
+          return failure('请填写本次跟进结果、下一步动作和有效截止时间', 400);
+        }
+        const persistedEvidence = customerOutcome
+          ? [...evidence, { type: CUSTOMER_OUTCOME_EVIDENCE_TYPE, content: JSON.stringify(customerOutcome) }]
+          : evidence;
         const references = [...new Map(evidence
           .filter((candidate) => REFERENCE_EVIDENCE_TYPES.has(candidate.type))
           .map((candidate) => [`${candidate.type}:${candidate.referenceId}`, candidate])).values()];
@@ -172,7 +212,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
           return failure('无权引用该附件或业务记录', 403);
         }
         if (task.targetValue !== null && actualValue === null) return failure('请填写实际值', 400);
-        if (task.evidenceRequired && evidence.length === 0) return failure('该任务必须提交证据', 400);
+        if (task.evidenceRequired && persistedEvidence.length === 0) return failure('该任务必须提交证据', 400);
         if (
           ['MARKETING_PUBLISH', 'ASSET_MATRIX_PUBLISH'].includes(task.sourceType || '')
           && !evidence.some((item) => ['PUBLISH_URL', 'SCREENSHOT_URL'].includes(item.type))
@@ -191,7 +231,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
         const now = clock();
         const fromStatus = task.status;
         const updated = await repository.updateTask(task.id, {
-          status, actualValue, result, evidence, evidenceActorId: actor.id,
+          status, actualValue, result, evidence: persistedEvidence, evidenceActorId: actor.id,
           completedAt: now.toISOString(), returnedReason: null,
         });
         if (!updated) return failure('任务状态已变化，请刷新后重试', 409);
@@ -244,6 +284,12 @@ export function createWorkbenchCommandService(deps: Dependencies) {
           returnedReason: null, qualityScore, qualityComment: activityComment,
         });
         if (!updated) return failure('任务状态已变化，请刷新后重试', 409);
+        if (task.sourceType === 'COCKPIT_INTERVENTION') {
+          const encoded = task.evidence.find((item) => item.type === CUSTOMER_OUTCOME_EVIDENCE_TYPE)?.content;
+          const outcome = normalizeCustomerOutcome(parseCustomerOutcome(encoded), false);
+          if (!outcome) return failure('客户处理结果缺失或已失效，请退回员工重新提交', 409);
+          await repository.applyCustomerInterventionOutcome({ task: updated, outcome, actor, now });
+        }
         notificationActivity = await repository.appendActivity({
           taskId: task.id, action: 'CONFIRM', actorId: actor.id, actorName: actor.name,
           fromStatus, toStatus: status, comment: activityComment,

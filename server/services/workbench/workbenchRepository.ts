@@ -1,4 +1,4 @@
-import type { EmployeeTask, TaskActivity } from '../../../src/types/enterpriseBrain';
+import type { CustomerInterventionOutcome, EmployeeTask, TaskActivity } from '../../../src/types/enterpriseBrain';
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import type { WorkbenchTaskListItem } from '../../../src/types/workbench';
 import { compareWorkbenchTasks } from '../../../src/domain/workbench/taskPriority';
@@ -91,6 +91,12 @@ export interface WorkbenchTransactionRepository {
   findEmployee(employeeId: string): Promise<WorkbenchEmployee | null>;
   listDepartmentTree(rootId: string): Promise<string[]>;
   authorizeEvidenceReferences(input: EvidenceReferencesAuthorizationInput): Promise<boolean>;
+  applyCustomerInterventionOutcome(input: {
+    task: EmployeeTask;
+    outcome: CustomerInterventionOutcome;
+    actor: AuthenticatedUser;
+    now: Date;
+  }): Promise<void>;
 }
 
 export interface WorkbenchRepository extends WorkbenchTransactionRepository {
@@ -109,6 +115,12 @@ type MemoryWorkbenchInput = {
   employees?: WorkbenchEmployee[];
   departments?: Array<{ id: string; parentId: string | null; isActive?: boolean }>;
   authorizeEvidenceReferences?: (input: EvidenceReferencesAuthorizationInput) => Promise<boolean>;
+  applyCustomerInterventionOutcome?: (input: {
+    task: EmployeeTask;
+    outcome: CustomerInterventionOutcome;
+    actor: AuthenticatedUser;
+    now: Date;
+  }) => Promise<void>;
 };
 
 export const SOURCE_OWNED_FIELDS = [
@@ -258,6 +270,9 @@ export function createMemoryWorkbenchRepository(input: MemoryWorkbenchInput = {}
       return input.authorizeEvidenceReferences
         ? input.authorizeEvidenceReferences(authorization)
         : false;
+    },
+    async applyCustomerInterventionOutcome(outcome) {
+      await input.applyCustomerInterventionOutcome?.(outcome);
     },
   });
 

@@ -84,6 +84,10 @@ const CustomerManagementCommandLayer: React.FC<{
   const [dueAt, setDueAt] = useState(defaultDueAt);
   const [resultTask, setResultTask] = useState<EmployeeTask | null>(null);
   const [result, setResult] = useState('');
+  const [resultNextAction, setResultNextAction] = useState('');
+  const [resultNextDueAt, setResultNextDueAt] = useState(defaultDueAt);
+  const [resultStage, setResultStage] = useState<CustomerOpportunityStageCode>(customer.opportunityStageCode || 'not_set');
+  const [resultAmount, setResultAmount] = useState(customer.opportunityAmount == null ? '' : String(customer.opportunityAmount));
   const [returnTask, setReturnTask] = useState<EmployeeTask | null>(null);
   const [returnReason, setReturnReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -190,13 +194,22 @@ const CustomerManagementCommandLayer: React.FC<{
   };
 
   const complete = async () => {
-    if (!resultTask || !result.trim()) return;
+    if (!resultTask || !result.trim() || !resultNextAction.trim() || !resultNextDueAt) return;
+    const amount = resultAmount.trim() === '' ? null : Number(resultAmount);
+    if (amount !== null && (!Number.isFinite(amount) || amount < 0)) return;
     setSubmitting(true);
-    const response = await enterpriseBrainApi.completeTask(resultTask.id, { result: result.trim(), evidence: [] });
+    const response = await enterpriseBrainApi.completeTask(resultTask.id, {
+      result: result.trim(), evidence: [],
+      customerOutcome: {
+        followUpSummary: result.trim(), nextActionTitle: resultNextAction.trim(),
+        nextActionDueAt: new Date(resultNextDueAt).toISOString(),
+        opportunityStageCode: resultStage, opportunityAmount: amount,
+      },
+    });
     setSubmitting(false);
     if (response.code !== 0) return setMessage({ severity: 'error', text: response.message || '结果提交失败' });
-    setResultTask(null); setResult(''); setMessage({ severity: 'success', text: '处理结果已提交，等待管理者验收。' });
-    await loadTasks();
+    setResultTask(null); setResult(''); setResultNextAction(''); setMessage({ severity: 'success', text: '处理结果已提交，等待管理者验收。' });
+    await reloadAll();
   };
 
   const confirm = async (task: EmployeeTask) => {
@@ -205,7 +218,7 @@ const CustomerManagementCommandLayer: React.FC<{
     setSubmitting(false);
     if (response.code !== 0) return setMessage({ severity: 'error', text: response.message || '任务验收失败' });
     setMessage({ severity: 'success', text: '介入任务已验收闭环。' });
-    await loadTasks();
+    await reloadAll();
   };
 
   const returnForRevision = async () => {
@@ -263,7 +276,7 @@ const CustomerManagementCommandLayer: React.FC<{
           {latestTask?.result && <Typography variant="body2" sx={{ mt: 1, p: 1, bgcolor: '#F7F5FB', borderRadius: 1 }}>处理结果：{latestTask.result}</Typography>}
         </Box>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ flexShrink: 0, alignSelf: { md: 'center' } }}>
-          {latestTask && currentUser?.id === latestTask.employeeId && ['PENDING', 'RETURNED'].includes(latestTask.status) && <Button variant="outlined" onClick={() => setResultTask(latestTask)}>提交处理结果</Button>}
+          {latestTask && currentUser?.id === latestTask.employeeId && ['PENDING', 'RETURNED'].includes(latestTask.status) && <Button variant="outlined" onClick={() => { setResultTask(latestTask); setResultNextDueAt(defaultDueAt()); setResultStage(customer.opportunityStageCode || 'not_set'); setResultAmount(customer.opportunityAmount == null ? '' : String(customer.opportunityAmount)); }}>提交处理结果</Button>}
           {latestTask?.status === 'COMPLETED' && canConfirm && <><Button variant="outlined" color="error" onClick={() => setReturnTask(latestTask)}>退回</Button><Button variant="contained" color="success" onClick={() => void confirm(latestTask)}>验收通过</Button></>}
           <Button variant="outlined" onClick={onOpenTodos}>下一步动作</Button>
           {canSetProgress && <Button variant="outlined" onClick={() => { setProgressStage(customer.opportunityStageCode || 'not_set'); setProgressAmount(customer.opportunityAmount == null ? '' : String(customer.opportunityAmount)); setProgressOpen(true); }}>更新阶段</Button>}
@@ -285,7 +298,7 @@ const CustomerManagementCommandLayer: React.FC<{
       <DialogActions><Button onClick={() => setInterventionOpen(false)}>取消</Button><Button variant="contained" disabled={submitting} onClick={() => void assign()}>下达任务</Button></DialogActions>
     </Dialog>
 
-    <Dialog open={Boolean(resultTask)} onClose={() => setResultTask(null)} maxWidth="sm" fullWidth><DialogCloseTitle onClose={() => setResultTask(null)}>提交处理结果</DialogCloseTitle><DialogContent dividers><TextField autoFocus fullWidth multiline minRows={4} label="处理结果" value={result} onChange={(event) => setResult(event.target.value)} /></DialogContent><DialogActions><Button onClick={() => setResultTask(null)}>取消</Button><Button variant="contained" disabled={submitting || !result.trim()} onClick={() => void complete()}>提交</Button></DialogActions></Dialog>
+    <Dialog open={Boolean(resultTask)} onClose={() => setResultTask(null)} maxWidth="sm" fullWidth><DialogCloseTitle onClose={() => setResultTask(null)}>提交客户处理结果</DialogCloseTitle><DialogContent dividers><Stack spacing={2}><Alert severity="info">老板验收后，本次跟进会写入客户动态，并生成新的下一步待办。</Alert><TextField autoFocus fullWidth multiline minRows={3} label="本次跟进结果" value={result} onChange={(event) => setResult(event.target.value)} /><TextField fullWidth label="下一步动作" value={resultNextAction} onChange={(event) => setResultNextAction(event.target.value)} placeholder="例如：发送正式报价单" /><TextField fullWidth type="datetime-local" label="下一步截止时间" value={resultNextDueAt} onChange={(event) => setResultNextDueAt(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField select label="销售阶段" value={resultStage} onChange={(event) => setResultStage(event.target.value as CustomerOpportunityStageCode)}>{CUSTOMER_OPPORTUNITY_STAGES.map((item) => <MenuItem key={item.code} value={item.code}>{item.label}</MenuItem>)}</TextField><TextField label="预计成交金额" type="number" value={resultAmount} onChange={(event) => setResultAmount(event.target.value)} inputProps={{ min: 0, step: 100 }} /></Stack></DialogContent><DialogActions><Button onClick={() => setResultTask(null)}>取消</Button><Button variant="contained" disabled={submitting || !result.trim() || !resultNextAction.trim() || !resultNextDueAt} onClick={() => void complete()}>提交验收</Button></DialogActions></Dialog>
     <Dialog open={Boolean(returnTask)} onClose={() => setReturnTask(null)} maxWidth="sm" fullWidth><DialogCloseTitle onClose={() => setReturnTask(null)}>退回重新处理</DialogCloseTitle><DialogContent dividers><TextField autoFocus fullWidth multiline minRows={3} label="退回原因" value={returnReason} onChange={(event) => setReturnReason(event.target.value)} /></DialogContent><DialogActions><Button onClick={() => setReturnTask(null)}>取消</Button><Button color="error" variant="contained" disabled={submitting || !returnReason.trim()} onClick={() => void returnForRevision()}>确认退回</Button></DialogActions></Dialog>
     <Dialog open={progressOpen} onClose={() => !progressSaving && setProgressOpen(false)} maxWidth="xs" fullWidth><DialogCloseTitle onClose={() => !progressSaving && setProgressOpen(false)}>更新销售阶段</DialogCloseTitle><DialogContent dividers><Stack spacing={2}><TextField select label="销售阶段" value={progressStage} onChange={(event) => setProgressStage(event.target.value as CustomerOpportunityStageCode)}>{CUSTOMER_OPPORTUNITY_STAGES.map((item) => <MenuItem key={item.code} value={item.code}>{item.label}</MenuItem>)}</TextField><TextField label="预计成交金额" type="number" value={progressAmount} onChange={(event) => setProgressAmount(event.target.value)} inputProps={{ min: 0, step: 100 }} /></Stack></DialogContent><DialogActions><Button onClick={() => setProgressOpen(false)}>取消</Button><Button variant="contained" disabled={progressSaving} onClick={() => void saveProgress()}>{progressSaving ? '保存中…' : '保存'}</Button></DialogActions></Dialog>
   </Stack>;

@@ -80,7 +80,11 @@ const isMarketingPublishTask = (task: Pick<EmployeeTask, "sourceType"> | null | 
   task?.sourceType === "MARKETING_PUBLISH" || task?.sourceType === "ASSET_MATRIX_PUBLISH";
 
 const taskSource = (task: EmployeeTask) =>
-  isMarketingPublishTask(task) ? (
+  task.sourceType === "COCKPIT_INTERVENTION" && task.sourceRoute ? (
+    <Button size="small" href={task.sourceRoute} sx={{ px: 0, minWidth: 0, fontSize: 12, fontWeight: 800 }}>
+      去处理客户
+    </Button>
+  ) : isMarketingPublishTask(task) ? (
     <Button
       size="small"
       href="/marketing?tab=plans"
@@ -190,6 +194,10 @@ const TaskCenter: React.FC = () => {
     publishUrl: "",
     screenshotUrl: "",
     evidence: "",
+    nextActionTitle: "",
+    nextActionDueAt: "",
+    opportunityStageCode: "not_set",
+    opportunityAmount: "",
   });
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
@@ -272,6 +280,13 @@ const TaskCenter: React.FC = () => {
 
   const submitComplete = async () => {
     if (!complete) return;
+    if (complete.sourceType === "COCKPIT_INTERVENTION" && (
+      !completeForm.result.trim() || !completeForm.nextActionTitle.trim()
+      || !completeForm.nextActionDueAt || new Date(completeForm.nextActionDueAt).getTime() <= Date.now()
+    )) {
+      setMessage({ tone: "error", text: "请填写处理结果、下一步动作和未来的截止时间。" });
+      return;
+    }
     if (
       isMarketingPublishTask(complete) &&
       !completeForm.publishUrl.trim() &&
@@ -298,6 +313,15 @@ const TaskCenter: React.FC = () => {
       actualValue: completeForm.actualValue,
       result: completeForm.result,
       evidence,
+      ...(complete.sourceType === "COCKPIT_INTERVENTION" ? {
+        customerOutcome: {
+          followUpSummary: completeForm.result,
+          nextActionTitle: completeForm.nextActionTitle,
+          nextActionDueAt: new Date(completeForm.nextActionDueAt).toISOString(),
+          opportunityStageCode: completeForm.opportunityStageCode,
+          opportunityAmount: completeForm.opportunityAmount === "" ? null : Number(completeForm.opportunityAmount),
+        },
+      } : {}),
     });
     if (response.code === 0) {
       setComplete(null);
@@ -381,6 +405,10 @@ const TaskCenter: React.FC = () => {
               publishUrl: "",
               screenshotUrl: "",
               evidence: "",
+              nextActionTitle: "",
+              nextActionDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+              opportunityStageCode: "not_set",
+              opportunityAmount: "",
             });
           }}
         >
@@ -863,6 +891,15 @@ const TaskCenter: React.FC = () => {
                 setCompleteForm({ ...completeForm, result: e.target.value })
               }
             />
+            {complete?.sourceType === "COCKPIT_INTERVENTION" && <>
+              <Alert severity="info">提交后等待老板验收；验收通过才会写入客户动态并生成下一步待办。</Alert>
+              <TextField label="下一步动作" value={completeForm.nextActionTitle} onChange={(e) => setCompleteForm({ ...completeForm, nextActionTitle: e.target.value })} />
+              <TextField type="datetime-local" label="下一步截止时间" value={completeForm.nextActionDueAt} onChange={(e) => setCompleteForm({ ...completeForm, nextActionDueAt: e.target.value })} InputLabelProps={{ shrink: true }} />
+              <TextField select label="销售阶段" value={completeForm.opportunityStageCode} onChange={(e) => setCompleteForm({ ...completeForm, opportunityStageCode: e.target.value })}>
+                {[['not_set', '待判断'], ['needs_discovery', '需求挖掘'], ['solution_demo', '方案演示'], ['proposal', '报价'], ['objection', '异议处理'], ['payment_pending', '待付款'], ['won', '已成交'], ['lost', '已流失']].map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+              </TextField>
+              <TextField type="number" label="预计成交金额" value={completeForm.opportunityAmount} onChange={(e) => setCompleteForm({ ...completeForm, opportunityAmount: e.target.value })} inputProps={{ min: 0, step: 100 }} />
+            </>}
             {isMarketingPublishTask(complete) ? (
               <>
                 <TextField
