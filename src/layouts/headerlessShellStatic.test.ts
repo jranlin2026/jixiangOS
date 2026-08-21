@@ -8,6 +8,8 @@ const aiAssistantSource = readFileSync(new URL('../pages/AIAssistant/index.tsx',
 assert.doesNotMatch(appLayoutSource, /TopHeader/, '桌面应用框架不应再渲染全局顶部栏');
 assert.match(appLayoutSource, /showMobileHeader/, '移动端必须保留打开导航的顶部区域');
 assert.match(sidebarSource, /data-sidebar-account-dock="true"/, '侧栏底部必须提供统一账号中心');
+assert.match(sidebarSource, /onUnreadCountChange=\{setUnreadNotificationCount\}/, '账号菜单必须复用消息铃铛的未读数');
+assert.match(sidebarSource, /label=\{`\$\{unreadNotificationCount\} 未读`\}/, '消息中心菜单应直接显示未读数');
 assert.match(sidebarSource, /修改密码/);
 assert.match(sidebarSource, /退出登录/);
 assert.match(

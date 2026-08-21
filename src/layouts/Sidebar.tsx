@@ -45,6 +45,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
   const { currentUser, logout } = useAuthStore();
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
   const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const currentDepartmentName = useMemo(() => {
     if (!currentUser?.departmentId) return '';
@@ -156,9 +157,9 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
                   <Typography variant="body2" sx={{ fontWeight: 900, color: shell.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentUser.name}</Typography>
                   <Typography variant="caption" sx={{ color: shell.muted, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${currentUserMeta} · 企业版`}>{currentUserMeta} · 企业版</Typography>
                 </Box>
-                <ExpandMoreIcon sx={{ color: shell.muted, fontSize: 18, flexShrink: 0 }} />
+                <ExpandMoreIcon sx={{ color: shell.muted, fontSize: 18, flexShrink: 0, transform: accountAnchor ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease' }} />
               </ButtonBase>
-              <NotificationBell />
+              <NotificationBell onUnreadCountChange={setUnreadNotificationCount} />
             </Box>
             <Menu
               anchorEl={accountAnchor}
@@ -170,6 +171,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
               <MenuItem onClick={() => { setAccountAnchor(null); navigateTo(ROUTES.NOTIFICATIONS); }}>
                 <ListItemIcon><NotificationsNoneIcon fontSize="small" /></ListItemIcon>
                 消息中心
+                <Chip size="small" label={`${unreadNotificationCount} 未读`} sx={{ ml: 2, height: 22, fontSize: '0.6875rem', fontWeight: 800 }} />
               </MenuItem>
               <MenuItem onClick={() => { setAccountAnchor(null); setPasswordDialogOpen(true); }}>
                 <ListItemIcon><LockResetIcon fontSize="small" /></ListItemIcon>

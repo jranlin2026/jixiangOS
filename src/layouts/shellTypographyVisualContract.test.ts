@@ -17,6 +17,6 @@ assert.equal((sidebarSource.match(/primaryTypographyProps=\{\{\s*fontSize:\s*'0\
 assert.match(sidebarSource, /height:\s*64/, '侧栏品牌区应保持 64px 稳定高度');
 assert.match(sidebarSource, />AI企业运营系统<\/Typography>/, '侧栏品牌副标题应说明系统定位');
 assert.match(sidebarSource, /data-sidebar-account-dock="true"/, '登录用户管理应收口到侧栏左下角');
-assert.match(sidebarSource, /<NotificationBell \/>/, '消息入口应与账号中心保持在同一底部区域');
+assert.match(sidebarSource, /<NotificationBell\b/, '消息入口应与账号中心保持在同一底部区域');
 
 console.log('shell typography visual contract tests passed');

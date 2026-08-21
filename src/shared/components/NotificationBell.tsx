@@ -9,15 +9,22 @@ import { buildNotificationPreviews } from '../utils/notificationPresentation';
 
 const severityLabels: Record<string, string> = { S0: '紧急', S1: '重要', S2: '提醒', S3: '信息' };
 
-export default function NotificationBell() {
+type NotificationBellProps = {
+  onUnreadCountChange?: (count: number) => void;
+};
+
+export default function NotificationBell({ onUnreadCountChange }: NotificationBellProps = {}) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [count, setCount] = useState(0);
   const [items, setItems] = useState<NotificationItem[]>([]);
   const loadCount = useCallback(async () => {
     const response = await notificationApi.unreadCount();
-    if (response.code === 0) setCount(response.data.count);
-  }, []);
+    if (response.code === 0) {
+      setCount(response.data.count);
+      onUnreadCountChange?.(response.data.count);
+    }
+  }, [onUnreadCountChange]);
   useEffect(() => {
     void loadCount();
     const timer = window.setInterval(() => void loadCount(), 30_000);
