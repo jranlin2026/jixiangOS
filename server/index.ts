@@ -416,7 +416,7 @@ academyService = createAcademyService(createPrismaAcademyRepository(prisma as an
 const positionStandardService = createPositionStandardService({
   repository: createPrismaPositionStandardRepository(prisma as any),
 });
-const enterpriseTaskRepository = createPrismaEnterpriseTaskRepository(prisma as any);
+const enterpriseTaskRepository = createPrismaEnterpriseTaskRepository(prisma as any, { notificationWorkflow });
 const enterpriseTaskService = createEnterpriseTaskService({
   repository: enterpriseTaskRepository,
   commandService: createWorkbenchCommandService({

@@ -21,6 +21,9 @@ import {
 import { hasPermission, PERMISSION_KEYS } from '../../../src/shared/utils/permissions';
 import { mapPrismaRole, mapPrismaUser } from '../../db/prismaMappers';
 import { createCustomerBusinessRecordRepository, mapCustomerBusinessRecord } from '../customerBusinessRecordRepository';
+import { lockCustomerAssociationScope } from '../customerAssociationRegistry';
+import { appendCustomerAuditEvent } from '../customerAuditService';
+import type { NotificationWorkflow } from '../notificationWorkflow';
 import { BUSINESS_ATTACHMENT_DOMAIN, type BusinessAttachmentRecord } from '../businessAttachmentService';
 import type {
   EvidenceReferencesAuthorizationInput,
@@ -39,6 +42,7 @@ import { TaskSyncInvariantError } from './sourceAdapter';
 type Client = {
   $transaction<T>(callback: (tx: any) => Promise<T>, options?: { isolationLevel: 'Serializable' | 'RepeatableRead' }): Promise<T>;
   $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
+  $queryRaw?<T = unknown>(query: unknown): Promise<T>;
   employeeTask: any;
   taskActivity: any;
   taskEvidence: any;
@@ -48,7 +52,11 @@ type Client = {
   leadRecord: any;
   businessRecord: any;
   customerTodo: any;
+  customerAuditEvent: any;
+  appStorage: any;
 };
+
+type PrismaWorkbenchOptions = { notificationWorkflow?: NotificationWorkflow };
 
 const iso = (value: unknown): string | null => value ? new Date(value as string).toISOString() : null;
 const dateText = (value: unknown): string => new Date(value as string).toISOString().slice(0, 10);
@@ -695,7 +703,7 @@ function taskUpdateData(update: WorkbenchTaskUpdate) {
   return data;
 }
 
-function createTransactionRepository(client: Client): WorkbenchTransactionRepository {
+function createTransactionRepository(client: Client, options: PrismaWorkbenchOptions = {}): WorkbenchTransactionRepository {
   return {
     async findTaskForUpdate(taskId) {
       if (client.$queryRawUnsafe) {
@@ -780,6 +788,7 @@ function createTransactionRepository(client: Client): WorkbenchTransactionReposi
 
     async applyCustomerInterventionOutcome({ task, outcome, actor, now }) {
       if (!task.sourceId) throw new Error('客户介入任务缺少客户标识');
+      await lockCustomerAssociationScope(client as any, [task.sourceId]);
       const selector = { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: task.sourceId } };
       if (client.$queryRawUnsafe) {
         await client.$queryRawUnsafe(
@@ -793,9 +802,24 @@ function createTransactionRepository(client: Client): WorkbenchTransactionReposi
       const snapshot = mapCustomerBusinessRecord(row);
       const customer = snapshot.customer;
       if (customer.deletedAt || customer.mergedIntoId) throw new Error('客户已删除或已合并，无法完成介入闭环');
-      const assigneeId = String(customer.ownerId || task.employeeId);
-      const assigneeName = String(customer.owner || task.employeeName);
-      await client.customerTodo.create({
+      const requestedAssigneeId = String(customer.ownerId || task.employeeId);
+      const assignee = await client.user.findUnique({ where: { id: requestedAssigneeId } });
+      if (!assignee?.isActive || assignee.employmentStatus !== 'active') throw new Error('客户负责人不存在或已离职，无法生成下一步动作');
+      const assigneeId = String(assignee.id);
+      const assigneeName = String(assignee.name);
+      if (task.sourceVersion) {
+        const linkedTodo = await client.customerTodo.findFirst({
+          where: { id: task.sourceVersion, customerId: task.sourceId, status: 'PENDING' },
+        });
+        if (linkedTodo) {
+          await client.customerTodo.update({
+            where: { id: linkedTodo.id },
+            data: { status: 'COMPLETED', completedAt: now, completedById: task.employeeId, completedByName: task.employeeName },
+          });
+          await options.notificationWorkflow?.resolveTodo(client as any, linkedTodo.id, '管理介入任务已验收');
+        }
+      }
+      const createdTodo = await client.customerTodo.create({
         data: {
           id: `customer-todo-${randomUUID()}`,
           customerId: task.sourceId,
@@ -807,6 +831,7 @@ function createTransactionRepository(client: Client): WorkbenchTransactionReposi
           executionMethod: 'none',
           assigneeId, assigneeName,
           createdById: actor.id, createdByName: actor.name,
+          createdAt: now, updatedAt: now,
         },
       });
 
@@ -831,21 +856,54 @@ function createTransactionRepository(client: Client): WorkbenchTransactionReposi
           createdAt: nowIso,
           relatedId: task.id,
           relatedType: 'task',
+        }, {
+          id: `activity-${randomUUID()}`,
+          type: 'todo',
+          title: '新建了客户待办',
+          content: `${outcome.nextActionTitle} · 执行人：${assigneeName}`,
+          operator: actor.name,
+          createdAt: nowIso,
+          relatedId: createdTodo.id,
+          relatedType: 'todo',
         }, ...activityRecords],
         updatedAt: nowIso,
       };
       await createCustomerBusinessRecordRepository(client as any).compareAndSave(snapshot, updatedCustomer, now);
+      await appendCustomerAuditEvent(client as any, {
+        operation: 'complete_intervention', customerId: task.sourceId,
+        actor: { id: actor.id, name: actor.name }, reason: '管理介入任务验收',
+        beforeSnapshot: customer, afterSnapshot: updatedCustomer,
+        canonicalInput: {
+          operation: 'complete_intervention', taskId: task.id,
+          resolvedTodoId: task.sourceVersion || null, nextTodoId: createdTodo.id,
+        },
+      });
+      const department = assignee.departmentId
+        ? await client.department.findUnique({ where: { id: assignee.departmentId } })
+        : null;
+      const manager = department?.managerId
+        ? await client.user.findUnique({ where: { id: department.managerId } })
+        : null;
+      await options.notificationWorkflow?.scheduleTodo(client as any, {
+        todoId: createdTodo.id, customerId: task.sourceId,
+        customerName: String(customer.name || '客户'), title: createdTodo.title,
+        dueAt: createdTodo.dueAt, createdAt: createdTodo.updatedAt,
+        assignee: { id: assigneeId, name: assigneeName },
+        manager: manager?.isActive && manager.employmentStatus === 'active'
+          ? { id: manager.id, name: manager.name }
+          : null,
+      });
     },
   };
 }
 
-export function createPrismaWorkbenchRepository(prisma: Client): WorkbenchRepository {
-  const direct = createTransactionRepository(prisma);
+export function createPrismaWorkbenchRepository(prisma: Client, options: PrismaWorkbenchOptions = {}): WorkbenchRepository {
+  const direct = createTransactionRepository(prisma, options);
   return {
     ...direct,
     transaction(work) {
       return prisma.$transaction(
-        (transaction) => work(createTransactionRepository(transaction)),
+        (transaction) => work(createTransactionRepository(transaction, options)),
         { isolationLevel: 'Serializable' },
       );
     },

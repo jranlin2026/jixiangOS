@@ -104,6 +104,7 @@ export function createEnterpriseTaskService(deps: Dependencies) {
       const sourceType = String(raw?.sourceType || '').trim().slice(0, 100) || null;
       const sourceId = String(raw?.sourceId || '').trim().slice(0, 100) || null;
       const sourceItemId = String(raw?.sourceItemId || '').trim().slice(0, 100) || null;
+      const sourceVersion = String(raw?.sourceVersion || '').trim().slice(0, 80) || null;
       let customerOwnerIdSnapshot: string | undefined;
       if (!isSuperAdmin(actor)) {
         if (!actor.departmentId) return failure<never>('当前账号未绑定部门', 409);
@@ -157,7 +158,7 @@ export function createEnterpriseTaskService(deps: Dependencies) {
         businessModule: String(raw?.businessModule || 'GENERAL').trim().slice(0, 100),
         sourceRoute: String(raw?.sourceRoute || '').trim().slice(0, 500) || null,
         sourceLabel: String(raw?.sourceLabel || '').trim().slice(0, 200) || null,
-        sourceType, sourceId, sourceItemId,
+        sourceType, sourceId, sourceItemId, sourceVersion,
         ...(sourceType === 'COCKPIT_INTERVENTION' ? { authorizationActor: actor, customerOwnerIdSnapshot } : {}),
         assignedById: actor.id, assignedByName: actor.name,
       });

@@ -110,6 +110,7 @@ export type CustomerAuditOperation = CustomerAtomicCommand['action']
   | 'create_todo'
   | 'update_todo'
   | 'complete_todo'
+  | 'complete_intervention'
   | 'reopen_todo'
   | 'cancel_todo'
   | 'merge_customer_main'

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../../../src/types/auth';
+import type { NotificationWorkflow } from '../notificationWorkflow';
 import { STORAGE_KEYS } from '../../../src/shared/utils/constants';
 import { canReadCustomer, loadCustomerAccessContext } from '../customerAccessPolicy';
 import { createPrismaWorkbenchRepository } from '../workbench/prismaWorkbenchRepository';
@@ -17,6 +18,7 @@ type Client = {
     isolationLevel: 'Serializable'; maxWait?: number; timeout?: number;
   }): Promise<T>;
   $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
+  $queryRaw?<T = unknown>(query: unknown): Promise<T>;
   taskTemplate: any;
   position: any;
   employeeTask: any;
@@ -29,6 +31,8 @@ type Client = {
   leadRecord: any;
   businessRecord: any;
   customerTodo: any;
+  customerAuditEvent: any;
+  appStorage: any;
 };
 
 const GENERATION_TRANSACTION_MAX_WAIT_MS = 10_000;
@@ -64,6 +68,7 @@ function mapTask(row: any): EmployeeTaskRecord {
     unit: row.unit || null, evidenceRequired: Boolean(row.evidenceRequired), status: row.status, result: row.result || null,
     dueAt: iso(row.dueAt), returnedReason: row.returnedReason || null,
     sourceType: row.sourceType || null, sourceId: row.sourceId || null, sourceItemId: row.sourceItemId || null,
+    sourceVersion: row.sourceVersion || null,
     evidence: (row.evidence || []).map((item: any) => ({ id: item.id, type: item.type, referenceId: item.referenceId || null, content: item.content || null })),
   };
 }
@@ -93,7 +98,7 @@ function generatedData(row: GeneratedTaskInput) {
     standardVersionIdSnapshot: row.standardVersionIdSnapshot, workDate: new Date(`${row.workDate}T00:00:00Z`),
     title: row.title, description: row.description, targetValue: row.targetValue, unit: row.unit,
     evidenceRequired: row.evidenceRequired, dueAt: row.dueAt ? new Date(row.dueAt) : null,
-    sourceType: row.sourceType, sourceId: row.sourceId, sourceItemId: row.sourceItemId,
+    sourceType: row.sourceType, sourceId: row.sourceId, sourceItemId: row.sourceItemId, sourceVersion: row.sourceVersion,
     taskType: row.taskType || 'ACTION', priority: row.priority || 'NORMAL',
     businessModule: row.businessModule || 'GENERAL', sourceRoute: row.sourceRoute,
     sourceLabel: row.sourceLabel,
@@ -152,9 +157,9 @@ async function appendManagerInterventionActivity(tx: any, input: GeneratedTaskIn
   });
 }
 
-export function createPrismaEnterpriseTaskRepository(prisma: Client): EnterpriseTaskRepository {
+export function createPrismaEnterpriseTaskRepository(prisma: Client, options: { notificationWorkflow?: NotificationWorkflow } = {}): EnterpriseTaskRepository {
   return {
-    ...createPrismaWorkbenchRepository(prisma),
+    ...createPrismaWorkbenchRepository(prisma, options),
     async listTemplates(positionId) {
       const rows = await prisma.taskTemplate.findMany({ where: positionId ? { positionId } : {}, orderBy: [{ positionId: 'asc' }, { createdAt: 'asc' }] });
       return rows.map(mapTemplate);
