@@ -1158,19 +1158,19 @@ test('reminder cursor lookup includes an expired owners still-RUNNING checkpoint
 });
 
 test('Prisma schema and additive migration persist leases, run history, and per-module cursors', async () => {
-  const [schema, migration, oldMigration, brief] = await Promise.all([
+  const [schema, migration, oldMigration, plan] = await Promise.all([
     readFile(new URL('../../../prisma/schema.prisma', import.meta.url), 'utf8'),
     readFile(new URL('../../../prisma/migrations/20260820210000_workbench_scheduler/migration.sql', import.meta.url), 'utf8'),
     readFile(new URL('../../../prisma/migrations/20260820133000_unified_employee_workbench_phase3/migration.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../../../.superpowers/sdd/2026-08-20-unified-employee-workbench-phase3/task-6-brief.md', import.meta.url), 'utf8'),
+    readFile(new URL('../../../docs/superpowers/plans/2026-08-20-unified-employee-workbench-phase3.md', import.meta.url), 'utf8'),
   ]);
   assert.match(schema, /model WorkbenchSchedulerLease \{[\s\S]*leaseEpoch\s+Int[\s\S]*ownerToken\s+String\?[\s\S]*expiresAt\s+DateTime/s);
   assert.match(schema, /model WorkbenchSchedulerRun \{[\s\S]*jobType\s+String[\s\S]*status\s+String[\s\S]*cursors\s+Json\?/s);
   assert.match(migration, /CREATE TABLE `workbench_scheduler_leases`/);
   assert.match(migration, /CREATE TABLE `workbench_scheduler_runs`/);
   assert.doesNotMatch(oldMigration, /workbench_scheduler_(?:leases|runs)/, 'Task 1 migration history must stay immutable');
-  assert.match(brief, /Create: `prisma\/migrations\/20260820210000_workbench_scheduler\/migration\.sql`/);
-  assert.doesNotMatch(brief, /Modify: `prisma\/migrations\/20260820133000_unified_employee_workbench_phase3\/migration\.sql`/);
+  assert.match(plan, /Create: `prisma\/migrations\/20260820210000_workbench_scheduler\/migration\.sql`/);
+  assert.doesNotMatch(plan, /Modify: `prisma\/migrations\/20260820133000_unified_employee_workbench_phase3\/migration\.sql`/);
 });
 
 test('server lifecycle starts and gracefully stops the workbench scheduler', async () => {
