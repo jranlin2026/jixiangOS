@@ -53,6 +53,10 @@ import { hasExplicitPermission, PERMISSION_KEYS } from '../../shared/utils/permi
 import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 import CustomerTagDialog from '../../shared/components/CustomerTagDialog';
 import CustomerTodoPanel from '../../shared/components/CustomerTodoPanel';
+import CustomerBattleDecisionBar from './CustomerBattleDecisionBar';
+import { customerTodoApi } from '../../api/customerTodoApi';
+import type { CustomerTodo } from '../../types/customerTodo';
+import type { CustomerOpportunityStageCode } from '../../types/customer';
 import {
   buildCustomerWriteActionPolicy,
   buildCustomerDetailPatch,
@@ -162,6 +166,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
   const [releaseReason, setReleaseReason] = useState('');
+  const [battleTodos, setBattleTodos] = useState<CustomerTodo[]>([]);
+  const [battleSaving, setBattleSaving] = useState(false);
   const [sectionState, setSectionState] = useState(() => {
     try {
       return normalizeCustomerDetailSectionState(JSON.parse(localStorage.getItem(sectionStorageKey) || 'null'));
@@ -214,6 +220,13 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   }, [customer, initialTab]);
 
   useEffect(() => {
+    if (!open) return;
+    customerTodoApi.list(customer.id).then((response) => {
+      if (response.code === 0) setBattleTodos(response.data || []);
+    });
+  }, [customer.id, open]);
+
+  useEffect(() => {
     if (readOnly) setEditing(false);
   }, [readOnly]);
 
@@ -253,6 +266,26 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     if (response.code !== 0 || !response.data) return;
     setCurrentCustomer(response.data);
     setDraft(response.data);
+  };
+
+  const saveBattleState = async (stage: CustomerOpportunityStageCode, amount: number | null) => {
+    if (!detailActions.actions.setProgress || battleSaving) return;
+    setBattleSaving(true);
+    try {
+      const response = await customerApi.updateCustomer(currentCustomer.id, {
+        opportunityStageCode: stage,
+        opportunityAmount: amount,
+      });
+      if (response.code !== 0 || !response.data) {
+        await alert(response.message || '客户作战状态保存失败', '保存失败');
+        return;
+      }
+      setCurrentCustomer(response.data);
+      setDraft(response.data);
+      onUpdated?.(response.data);
+    } finally {
+      setBattleSaving(false);
+    }
   };
 
   const sourceOptions = useMemo(() => {
@@ -1017,6 +1050,15 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
         dividers
         sx={CRM_DETAIL_CONTENT_SX}
       >
+        <CustomerBattleDecisionBar
+          customer={currentCustomer}
+          todos={battleTodos}
+          canSetProgress={detailActions.actions.setProgress}
+          canSetTodos={detailActions.actions.setTodos}
+          saving={battleSaving}
+          onSave={saveBattleState}
+          onOpenTodos={() => setActiveTab(1)}
+        />
         <Box sx={{
           display: 'grid',
           gridTemplateColumns: CRM_DETAIL_GRID_COLUMNS,
@@ -1164,6 +1206,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                   canManageTodos={detailActions.actions.setTodos}
                   readOnly={readOnly}
                   onActivityChanged={refreshCurrentCustomer}
+                  onTodosChanged={setBattleTodos}
                 />
               )}
               {activeTab === 2 && renderOrdersTab()}

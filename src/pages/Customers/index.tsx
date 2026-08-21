@@ -108,6 +108,7 @@ import {
   DataTableWorkspace,
   DataTableWorkspaceFooter,
 } from '../../shared/components/DataTableWorkspace';
+import { getLastEffectiveCustomerContact, getOpportunityStage } from '../../shared/utils/customerBattleState';
 
 type CustomerColumn = {
   id: string;
@@ -124,9 +125,9 @@ type CustomerViewConfig = {
   schemaVersion: number;
 };
 
-const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v10';
-const CUSTOMER_VIEW_SCHEMA_VERSION = 10;
-const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v5';
+const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v11';
+const CUSTOMER_VIEW_SCHEMA_VERSION = 11;
+const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v6';
 const CUSTOMER_ACTION_COLUMN_WIDTH = 190;
 const CUSTOMER_SELECTION_COLUMN_WIDTH = 52;
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
@@ -178,6 +179,29 @@ export const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], 
     render: (customer) => <CustomerLevelBadge level={customer.customerLevel} />,
   },
   {
+    id: 'opportunityStage',
+    label: '销售阶段',
+    render: (customer) => <Chip size="small" variant="outlined" color={customer.opportunityStageCode ? 'primary' : 'default'} label={getOpportunityStage(customer.opportunityStageCode).label} />,
+  },
+  { id: 'opportunityAmount', label: '预计金额', render: (customer) => customer.opportunityAmount == null ? '-' : formatCurrency(customer.opportunityAmount) },
+  {
+    id: 'lastEffectiveContact',
+    label: '最近有效联系',
+    render: (customer) => {
+      const contact = getLastEffectiveCustomerContact(customer);
+      return contact ? formatDate(contact.createdAt, 'yyyy-MM-dd HH:mm') : '-';
+    },
+  },
+  {
+    id: 'contactGap',
+    label: '联系间隔',
+    render: (customer) => {
+      const contact = getLastEffectiveCustomerContact(customer);
+      if (!contact) return '-';
+      return `${Math.max(0, Math.floor((Date.now() - new Date(contact.createdAt).getTime()) / 86_400_000))}天`;
+    },
+  },
+  {
     id: 'tags',
     label: '标签',
     render: (customer) => <ManualTagDisplay ids={customer.manualTagIds} legacyNames={customer.tags} />,
@@ -209,10 +233,11 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'company',
   'phone',
   'lifecycleStatus',
-  'customerLevel',
-  'tags',
-  'leadSource',
-  'sourceProductName',
+  'opportunityStage',
+  'opportunityAmount',
+  'lastEffectiveContact',
+  'contactGap',
+  'owner',
 ];
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
@@ -222,6 +247,10 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   wechat: 150,
   lifecycleStatus: 105,
   customerLevel: 105,
+  opportunityStage: 110,
+  opportunityAmount: 120,
+  lastEffectiveContact: 145,
+  contactGap: 95,
   tags: 90,
   leadSource: 155,
   sourceProductName: 150,

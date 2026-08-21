@@ -739,6 +739,8 @@ const CUSTOMER_EDIT_FIELDS: Array<{ field: keyof Customer; label: string }> = [
   { field: 'douyinNickname', label: '抖音昵称' },
   { field: 'customerLevel', label: '客户等级' },
   { field: 'lifecycleStatusCode', label: '客户进展' },
+  { field: 'opportunityStageCode', label: '销售阶段' },
+  { field: 'opportunityAmount', label: '预计成交金额' },
   { field: 'leadContributorId', label: '线索贡献人' },
   { field: 'leadContributorName', label: '线索贡献人' },
   { field: 'leadSource', label: '线索来源' },
@@ -1708,6 +1710,23 @@ export function createCustomerCommandService(
             lifecycleStatusCode: submittedLifecycleCode as Customer['lifecycleStatusCode'],
           };
         }
+        const hasOpportunityStage = Object.prototype.hasOwnProperty.call(patch, 'opportunityStageCode');
+        const allowedOpportunityStages = new Set([
+          'not_set', 'needs_discovery', 'solution_demo', 'proposal', 'objection',
+          'payment_pending', 'won', 'lost',
+        ]);
+        if (hasOpportunityStage && !allowedOpportunityStages.has(cleanText(patch.opportunityStageCode))) {
+          return failure<Customer>('销售阶段无效', 400);
+        }
+        if (Object.prototype.hasOwnProperty.call(patch, 'opportunityAmount')) {
+          const amount = patch.opportunityAmount;
+          if (amount !== null && (!Number.isFinite(Number(amount)) || Number(amount) < 0)) {
+            return failure<Customer>('预计成交金额必须是大于等于 0 的数字', 400);
+          }
+          patch.opportunityAmount = amount === null ? null : Number(amount);
+        }
+        const opportunityStageChanged = hasOpportunityStage
+          && patch.opportunityStageCode !== customer.opportunityStageCode;
         let tagNameById: Map<string, string> | null = null;
         if (Object.prototype.hasOwnProperty.call(input, 'manualTagIds')) {
           const catalog = await loadCustomerTagCatalog(tx, true);
@@ -1773,6 +1792,7 @@ export function createCustomerCommandService(
         const updated: Customer = {
           ...merged,
           ...(lifecycleChanged ? { lifecycleStatusUpdatedAt: atIso } : {}),
+          ...(opportunityStageChanged ? { opportunityStageUpdatedAt: atIso } : {}),
           activityRecords: [{
             id: newId('act'),
             type: 'update',

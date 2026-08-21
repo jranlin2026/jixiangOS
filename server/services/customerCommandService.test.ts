@@ -3218,6 +3218,23 @@ for (const targetType of ['customer', 'lead'] as const) {
   assert.match(result.message, /客户记录已更新/);
 }
 
+// 销售机会阶段和预计金额属于“设置客户进展”，服务端必须持久化并记录更新时间。
+{
+  const value = customer('cust-battle-state');
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions).updateCustomer(
+    value.id,
+    { opportunityStageCode: 'proposal', opportunityAmount: 68000 },
+    customerEditor,
+  );
+
+  assert.equal(result.code, 0, result.message);
+  assert.equal(result.data?.opportunityStageCode, 'proposal');
+  assert.equal(result.data?.opportunityAmount, 68000);
+  assert.equal(result.data?.opportunityStageUpdatedAt, FIXED_NOW.toISOString());
+  assert.equal(fake.getState().businessRecords[0].data.activityRecords[0].changes[0].field, 'opportunityStageCode');
+}
+
 // RED: 批量工作者冻结的顶层 BusinessRecord.updatedAt 必须在原子写入事务内再次校验。
 {
   const value = customer('cust-batch-version-conflict');

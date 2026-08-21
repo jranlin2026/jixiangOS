@@ -66,6 +66,12 @@ const PROFILE_FIELDS = new Set([
   'score',
 ]);
 
+const PROGRESS_FIELDS = new Set([
+  'lifecycleStatusCode',
+  'opportunityStageCode',
+  'opportunityAmount',
+]);
+
 const ATTRIBUTION_FIELDS = new Set([
   'leadInputBy',
   'leadContributorId',
@@ -281,7 +287,7 @@ export function assertCustomerFieldPermissions(
   const groups = new Set<CustomerFieldGroup>();
   const keys = Object.keys(patch);
   if (keys.some((key) => PROFILE_FIELDS.has(key))) groups.add('profile');
-  if ('lifecycleStatusCode' in patch) groups.add('progress');
+  if (keys.some((key) => PROGRESS_FIELDS.has(key))) groups.add('progress');
   if ('manualTagIds' in patch) groups.add('tags');
   if (keys.some((key) => ATTRIBUTION_FIELDS.has(key))) groups.add('attribution');
   for (const group of groups) assertPermission(context, FIELD_GROUP_PERMISSION[group]);

@@ -24,6 +24,7 @@ interface CustomerTodoPanelProps {
   canManageTodos?: boolean;
   readOnly?: boolean;
   onActivityChanged?: () => void | Promise<void>;
+  onTodosChanged?: (todos: CustomerTodo[]) => void;
 }
 
 const methodOptions: Array<{ value: CustomerTodoExecutionMethod; label: string }> = [
@@ -50,7 +51,7 @@ const displayTime = (value: string) => new Intl.DateTimeFormat('zh-CN', {
 }).format(new Date(value));
 
 const CustomerTodoPanel: React.FC<CustomerTodoPanelProps> = ({
-  customerId, customerName, ownerId, users, currentUserId, canManageTodos = false, readOnly = false, onActivityChanged,
+  customerId, customerName, ownerId, users, currentUserId, canManageTodos = false, readOnly = false, onActivityChanged, onTodosChanged,
 }) => {
   const [todos, setTodos] = useState<CustomerTodo[]>([]);
   const [statusTab, setStatusTab] = useState<'pending' | 'completed'>('pending');
@@ -69,13 +70,15 @@ const CustomerTodoPanel: React.FC<CustomerTodoPanelProps> = ({
     setLoading(true);
     const response = await customerTodoApi.list(customerId);
     if (response.code === 0) {
-      setTodos(response.data || []);
+      const nextTodos = response.data || [];
+      setTodos(nextTodos);
+      onTodosChanged?.(nextTodos);
       setError('');
     } else {
       setError(response.message || '待办加载失败');
     }
     setLoading(false);
-  }, [customerId]);
+  }, [customerId, onTodosChanged]);
 
   useEffect(() => { void loadTodos(); }, [loadTodos]);
 

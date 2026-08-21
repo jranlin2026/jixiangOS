@@ -10,6 +10,8 @@ const customer = {
     { id: 'release', type: 'transfer', title: '释放到公海', operator: '管理员', createdAt: '2026-07-22T12:00:00.000Z' },
     { id: 'follow', type: 'follow', title: '发表了跟进记录', operator: '销售丙', createdAt: '2026-07-22T11:00:00.000Z' },
   ],
+  opportunityStageCode: 'proposal',
+  opportunityAmount: 68000,
 } as Customer;
 
 const columns = buildCustomerColumns([], 'public_pool');
@@ -20,5 +22,9 @@ assert.equal(byId('previousOwner').label, '上一个销售负责人');
 assert.equal(byId('previousOwner').render(customer), '销售甲');
 assert.equal(byId('owner').label, '最后跟进人');
 assert.equal(byId('owner').render(customer), '销售丙');
+assert.equal(byId('opportunityStage').label, '销售阶段');
+assert.equal(byId('opportunityAmount').label, '预计金额');
+assert.equal(byId('lastEffectiveContact').label, '最近有效联系');
+assert.notEqual(byId('contactGap').render(customer), '-');
 
 console.log('customer list columns: ok');

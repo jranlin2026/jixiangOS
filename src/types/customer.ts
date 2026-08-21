@@ -3,6 +3,16 @@ import type { LifecycleStatusCode, LifecycleStatusConfig } from './settings';
 import type { CustomerTagFilterMode } from './tag';
 import type { ContactPhone } from './contact';
 
+export type CustomerOpportunityStageCode =
+  | 'not_set'
+  | 'needs_discovery'
+  | 'solution_demo'
+  | 'proposal'
+  | 'objection'
+  | 'payment_pending'
+  | 'won'
+  | 'lost';
+
 /** 成长里程碑 */
 export interface GrowthMilestone {
   id: ID;
@@ -97,6 +107,11 @@ export interface Customer {
   customerLevel: CustomerLevel;
   lifecycleStatusCode?: LifecycleStatusCode;
   lifecycleStatusUpdatedAt?: Timestamp;
+  /** 销售机会阶段；与客户生命周期分离，用于描述本轮成交推进。 */
+  opportunityStageCode?: CustomerOpportunityStageCode;
+  opportunityStageUpdatedAt?: Timestamp;
+  /** 当前机会预计成交金额，单位为元。 */
+  opportunityAmount?: number | null;
   publicPoolAt?: Timestamp;
   releasedBy?: string;
   releaseReason?: string;
