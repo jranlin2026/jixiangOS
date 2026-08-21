@@ -11,7 +11,7 @@ import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined';
 import type { AuthenticatedUser } from '../../../types/auth';
 import type { Customer, CustomerActivityRecord, CustomerCommunicationNodeType, CustomerOpportunityStageCode } from '../../../types/customer';
 import type { CustomerTodo } from '../../../types/customerTodo';
-import type { EmployeeTask } from '../../../types/enterpriseBrain';
+import type { CustomerInterventionOutcome, EmployeeTask } from '../../../types/enterpriseBrain';
 import { enterpriseBrainApi } from '../../../api/enterpriseBrainApi';
 import { buildCustomerBattleSnapshot, CUSTOMER_OPPORTUNITY_STAGES } from '../../../shared/utils/customerBattleState';
 import { formatCurrency, formatDate } from '../../../shared/utils/formatters';
@@ -29,6 +29,12 @@ const modeConfig: Record<InterventionMode, { label: string; taskTitle: string; d
 const statusLabel: Record<EmployeeTask['status'], string> = {
   PENDING: '待执行', IN_PROGRESS: '执行中', COMPLETED: '待验收', CONFIRMED: '已验收', RETURNED: '已退回', CANCELED: '已取消',
 };
+
+function customerOutcomeOf(task: EmployeeTask | undefined): CustomerInterventionOutcome | null {
+  const content = task?.evidence.find((item) => item.type === 'CUSTOMER_OUTCOME')?.content;
+  if (!content) return null;
+  try { return JSON.parse(content) as CustomerInterventionOutcome; } catch { return null; }
+}
 
 const communicationNodeLabel: Record<CustomerCommunicationNodeType, string> = {
   LEAD_CREATED: '初次建联', WECHAT_ADDED: '添加微信', PHONE_CALL: '销售通话',
@@ -131,6 +137,7 @@ const CustomerManagementCommandLayer: React.FC<{
   }, [canAssign, customer.id]);
 
   const latestTask = tasks[0];
+  const latestOutcome = customerOutcomeOf(latestTask);
   const activityNodes = useMemo(() => (customer.activityRecords || [])
     .map((record) => ({ record, nodeType: communicationNodeType(record) }))
     .filter((item): item is { record: CustomerActivityRecord; nodeType: CustomerCommunicationNodeType } => item.nodeType !== null)
@@ -274,9 +281,10 @@ const CustomerManagementCommandLayer: React.FC<{
           <Typography variant="body2" sx={{ mt: 0.75, color: '#6D28D9', fontWeight: 800 }}>{recommendation}</Typography>
           {latestTask && <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1.25, flexWrap: 'wrap' }}><Chip size="small" label={`介入任务：${statusLabel[latestTask.status]}`} color={latestTask.status === 'COMPLETED' ? 'warning' : latestTask.status === 'CONFIRMED' ? 'success' : latestTask.status === 'RETURNED' ? 'error' : 'primary'} /><Typography variant="caption" color="text.secondary">{latestTask.employeeName} · {latestTask.title}</Typography></Stack>}
           {latestTask?.result && <Typography variant="body2" sx={{ mt: 1, p: 1, bgcolor: '#F7F5FB', borderRadius: 1 }}>处理结果：{latestTask.result}</Typography>}
+          {latestTask?.status === 'COMPLETED' && latestOutcome && <Box sx={{ mt: 1, p: 1.25, borderRadius: 1.5, bgcolor: '#F4FAFF', border: '1px solid #D6EAFF' }}><Typography variant="caption" sx={{ color: '#2463A5', fontWeight: 900 }}>待验收写入内容</Typography><Typography variant="body2" sx={{ mt: 0.5 }}>下一步：{latestOutcome.nextActionTitle} · {formatDate(latestOutcome.nextActionDueAt, 'MM-dd HH:mm')}</Typography><Typography variant="body2">销售阶段：{CUSTOMER_OPPORTUNITY_STAGES.find((item) => item.code === latestOutcome.opportunityStageCode)?.label || '保持不变'}{latestOutcome.opportunityAmount === undefined ? '' : ` · 预计金额 ${formatCurrency(latestOutcome.opportunityAmount || 0)}`}</Typography></Box>}
         </Box>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ flexShrink: 0, alignSelf: { md: 'center' } }}>
-          {latestTask && currentUser?.id === latestTask.employeeId && ['PENDING', 'RETURNED'].includes(latestTask.status) && <Button variant="outlined" onClick={() => { setResultTask(latestTask); setResultNextDueAt(defaultDueAt()); setResultStage(customer.opportunityStageCode || 'not_set'); setResultAmount(customer.opportunityAmount == null ? '' : String(customer.opportunityAmount)); }}>提交处理结果</Button>}
+          {latestTask && currentUser?.id === latestTask.employeeId && ['PENDING', 'IN_PROGRESS', 'RETURNED'].includes(latestTask.status) && <Button variant="outlined" onClick={() => { setResultTask(latestTask); setResultNextDueAt(defaultDueAt()); setResultStage(customer.opportunityStageCode || 'not_set'); setResultAmount(customer.opportunityAmount == null ? '' : String(customer.opportunityAmount)); }}>提交处理结果</Button>}
           {latestTask?.status === 'COMPLETED' && canConfirm && <><Button variant="outlined" color="error" onClick={() => setReturnTask(latestTask)}>退回</Button><Button variant="contained" color="success" onClick={() => void confirm(latestTask)}>验收通过</Button></>}
           <Button variant="outlined" onClick={onOpenTodos}>下一步动作</Button>
           {canSetProgress && <Button variant="outlined" onClick={() => { setProgressStage(customer.opportunityStageCode || 'not_set'); setProgressAmount(customer.opportunityAmount == null ? '' : String(customer.opportunityAmount)); setProgressOpen(true); }}>更新阶段</Button>}

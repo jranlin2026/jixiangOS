@@ -70,6 +70,20 @@ const customerOutcome = {
 }
 
 {
+  const memory = createMemoryWorkbenchRepository({
+    tasks: [task({ status: 'COMPLETED', sourceType: 'COCKPIT_INTERVENTION', sourceId: 'customer-1', evidence: [] })],
+    departments: [
+      { id: 'dept-sales', parentId: null },
+      { id: 'dept-sales-child', parentId: 'dept-sales' },
+    ],
+  });
+  const service = createWorkbenchCommandService({ repository: memory.repository });
+  const rejected = await service.confirmTask('task-1', {}, manager);
+  assert.equal(rejected.code, 409);
+  assert.equal(memory.tasks[0]?.status, 'COMPLETED', '结构化结果无效时不得提前确认任务');
+}
+
+{
   const memory = createMemoryWorkbenchRepository({ tasks: [task()] });
   const service = createWorkbenchCommandService({
     repository: memory.repository,

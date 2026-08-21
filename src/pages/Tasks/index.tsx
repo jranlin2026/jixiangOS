@@ -196,7 +196,7 @@ const TaskCenter: React.FC = () => {
     evidence: "",
     nextActionTitle: "",
     nextActionDueAt: "",
-    opportunityStageCode: "not_set",
+    opportunityStageCode: "",
     opportunityAmount: "",
   });
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
@@ -318,8 +318,8 @@ const TaskCenter: React.FC = () => {
           followUpSummary: completeForm.result,
           nextActionTitle: completeForm.nextActionTitle,
           nextActionDueAt: new Date(completeForm.nextActionDueAt).toISOString(),
-          opportunityStageCode: completeForm.opportunityStageCode,
-          opportunityAmount: completeForm.opportunityAmount === "" ? null : Number(completeForm.opportunityAmount),
+          ...(completeForm.opportunityStageCode ? { opportunityStageCode: completeForm.opportunityStageCode } : {}),
+          ...(completeForm.opportunityAmount === "" ? {} : { opportunityAmount: Number(completeForm.opportunityAmount) }),
         },
       } : {}),
     });
@@ -407,7 +407,7 @@ const TaskCenter: React.FC = () => {
               evidence: "",
               nextActionTitle: "",
               nextActionDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
-              opportunityStageCode: "not_set",
+              opportunityStageCode: "",
               opportunityAmount: "",
             });
           }}
@@ -896,7 +896,7 @@ const TaskCenter: React.FC = () => {
               <TextField label="下一步动作" value={completeForm.nextActionTitle} onChange={(e) => setCompleteForm({ ...completeForm, nextActionTitle: e.target.value })} />
               <TextField type="datetime-local" label="下一步截止时间" value={completeForm.nextActionDueAt} onChange={(e) => setCompleteForm({ ...completeForm, nextActionDueAt: e.target.value })} InputLabelProps={{ shrink: true }} />
               <TextField select label="销售阶段" value={completeForm.opportunityStageCode} onChange={(e) => setCompleteForm({ ...completeForm, opportunityStageCode: e.target.value })}>
-                {[['not_set', '待判断'], ['needs_discovery', '需求挖掘'], ['solution_demo', '方案演示'], ['proposal', '报价'], ['objection', '异议处理'], ['payment_pending', '待付款'], ['won', '已成交'], ['lost', '已流失']].map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                {[['', '保持客户当前阶段'], ['not_set', '待判断'], ['needs_discovery', '需求挖掘'], ['solution_demo', '方案演示'], ['proposal', '报价'], ['objection', '异议处理'], ['payment_pending', '待付款'], ['won', '已成交'], ['lost', '已流失']].map(([value, label]) => <MenuItem key={value || 'keep'} value={value}>{label}</MenuItem>)}
               </TextField>
               <TextField type="number" label="预计成交金额" value={completeForm.opportunityAmount} onChange={(e) => setCompleteForm({ ...completeForm, opportunityAmount: e.target.value })} inputProps={{ min: 0, step: 100 }} />
             </>}

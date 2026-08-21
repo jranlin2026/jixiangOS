@@ -20,6 +20,7 @@ import {
 } from '../../../src/shared/utils/dataVisibility';
 import { hasPermission, PERMISSION_KEYS } from '../../../src/shared/utils/permissions';
 import { mapPrismaRole, mapPrismaUser } from '../../db/prismaMappers';
+import { createCustomerBusinessRecordRepository, mapCustomerBusinessRecord } from '../customerBusinessRecordRepository';
 import { BUSINESS_ATTACHMENT_DOMAIN, type BusinessAttachmentRecord } from '../businessAttachmentService';
 import type {
   EvidenceReferencesAuthorizationInput,
@@ -789,16 +790,9 @@ function createTransactionRepository(client: Client): WorkbenchTransactionReposi
       }
       const row = await client.businessRecord.findUnique({ where: selector });
       if (!row) throw new Error('客户不存在，无法完成介入闭环');
-      const customer = object<Record<string, any>>(row.data);
-      if (!customer || customer.deletedAt || customer.mergedIntoId) throw new Error('客户已删除或已合并，无法完成介入闭环');
-
-      await client.customerTodo.updateMany({
-        where: { customerId: task.sourceId, status: 'PENDING', dueAt: { lte: now } },
-        data: {
-          status: 'COMPLETED', completedAt: now,
-          completedById: task.employeeId, completedByName: task.employeeName,
-        },
-      });
+      const snapshot = mapCustomerBusinessRecord(row);
+      const customer = snapshot.customer;
+      if (customer.deletedAt || customer.mergedIntoId) throw new Error('客户已删除或已合并，无法完成介入闭环');
       const assigneeId = String(customer.ownerId || task.employeeId);
       const assigneeName = String(customer.owner || task.employeeName);
       await client.customerTodo.create({
@@ -817,10 +811,8 @@ function createTransactionRepository(client: Client): WorkbenchTransactionReposi
       });
 
       const nowIso = now.toISOString();
-      const currentRevision = Number(customer.recordRevision || row.recordRevision || 0);
-      const nextRevision = currentRevision + 1;
       const activityRecords = Array.isArray(customer.activityRecords) ? customer.activityRecords : [];
-      const updatedCustomer = {
+      const updatedCustomer: Customer = {
         ...customer,
         ...(outcome.opportunityStageCode ? {
           opportunityStageCode: outcome.opportunityStageCode,
@@ -841,13 +833,8 @@ function createTransactionRepository(client: Client): WorkbenchTransactionReposi
           relatedType: 'task',
         }, ...activityRecords],
         updatedAt: nowIso,
-        recordRevision: nextRevision,
       };
-      const changed = await client.businessRecord.updateMany({
-        where: { domain: STORAGE_KEYS.CUSTOMERS, recordId: task.sourceId, recordRevision: row.recordRevision },
-        data: { data: updatedCustomer, recordRevision: nextRevision },
-      });
-      if (changed.count !== 1) throw new Error('客户数据已变化，请刷新后重新验收');
+      await createCustomerBusinessRecordRepository(client as any).compareAndSave(snapshot, updatedCustomer, now);
     },
   };
 }

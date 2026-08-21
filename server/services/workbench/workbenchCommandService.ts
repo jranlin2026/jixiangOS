@@ -122,7 +122,8 @@ export function createWorkbenchCommandService(deps: Dependencies) {
     const dueAt = new Date(nextActionDueAt);
     const opportunityStageCode = String(raw.opportunityStageCode || '').trim();
     const rawAmount = raw.opportunityAmount;
-    const opportunityAmount = rawAmount === undefined || rawAmount === null || rawAmount === '' ? null : Number(rawAmount);
+    const hasOpportunityAmount = rawAmount !== undefined && rawAmount !== null && rawAmount !== '';
+    const opportunityAmount = hasOpportunityAmount ? Number(rawAmount) : null;
     if (!followUpSummary || followUpSummary.length > 2_000 || !nextActionTitle || nextActionTitle.length > 120) return null;
     if (!nextActionDueAt || !Number.isFinite(dueAt.getTime()) || (requireFutureDueAt && dueAt.getTime() <= clock().getTime())) return null;
     if (opportunityStageCode && !CUSTOMER_OPPORTUNITY_STAGES.has(opportunityStageCode)) return null;
@@ -132,7 +133,7 @@ export function createWorkbenchCommandService(deps: Dependencies) {
       nextActionTitle,
       nextActionDueAt: dueAt.toISOString(),
       ...(opportunityStageCode ? { opportunityStageCode: opportunityStageCode as CustomerInterventionOutcome['opportunityStageCode'] } : {}),
-      opportunityAmount,
+      ...(hasOpportunityAmount ? { opportunityAmount } : {}),
     };
   };
   const parseCustomerOutcome = (value: string | null | undefined): unknown => {
@@ -268,6 +269,14 @@ export function createWorkbenchCommandService(deps: Dependencies) {
             return failure('任务不在授权团队范围内', 403);
           }
         }
+        const customerOutcome = task.sourceType === 'COCKPIT_INTERVENTION'
+          ? normalizeCustomerOutcome(parseCustomerOutcome(
+            task.evidence.find((item) => item.type === CUSTOMER_OUTCOME_EVIDENCE_TYPE)?.content,
+          ), false)
+          : null;
+        if (task.sourceType === 'COCKPIT_INTERVENTION' && !customerOutcome) {
+          return failure('客户处理结果缺失或已失效，请退回员工重新提交', 409);
+        }
 
         let status: EmployeeTask['status'];
         try {
@@ -284,11 +293,8 @@ export function createWorkbenchCommandService(deps: Dependencies) {
           returnedReason: null, qualityScore, qualityComment: activityComment,
         });
         if (!updated) return failure('任务状态已变化，请刷新后重试', 409);
-        if (task.sourceType === 'COCKPIT_INTERVENTION') {
-          const encoded = task.evidence.find((item) => item.type === CUSTOMER_OUTCOME_EVIDENCE_TYPE)?.content;
-          const outcome = normalizeCustomerOutcome(parseCustomerOutcome(encoded), false);
-          if (!outcome) return failure('客户处理结果缺失或已失效，请退回员工重新提交', 409);
-          await repository.applyCustomerInterventionOutcome({ task: updated, outcome, actor, now });
+        if (customerOutcome) {
+          await repository.applyCustomerInterventionOutcome({ task: updated, outcome: customerOutcome, actor, now });
         }
         notificationActivity = await repository.appendActivity({
           taskId: task.id, action: 'CONFIRM', actorId: actor.id, actorName: actor.name,
